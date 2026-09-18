@@ -9,11 +9,22 @@ File-scoped code review using TypeSafe Jev. Three classifications:
 ## Use
 
 ```sh
+# Install the CLI
 cargo install jevgate --locked
+
+# Save your TypeSafe API key
 jevgate auth login
+
+# Review a file and open the results in your browser
 jevgate check src/example.ts --report
+
+# Recheck the file after edits and refresh the report
 jevgate check src/example.ts --watch --report
+
+# Include a related file to help interpret the selected file
 jevgate check src/example.ts --context src/peer.ts
+
+# Review files changed since the latest commit and output JSON
 jevgate check --base HEAD --format json
 ```
 
