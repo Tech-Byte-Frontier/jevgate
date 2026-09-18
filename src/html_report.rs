@@ -19,6 +19,20 @@ fn dimension(rule: &str, scope: &str, d: &Dimension) -> Value {
         "probability":d.concern_probability,"probabilities":d.probabilities,"location_probabilities":assessment.filter(|a|a.selected_fragment.is_none() && a.selected_operation.is_none()).map(|a| &a.location["probabilities"]),"fragment_source":fragment.map(|f|&f["evidence"]["source"]),"overview_probabilities":assessment.filter(|a|a.selected_fragment.is_some() || a.selected_operation.is_some()).map(|a|&a.outcome["probabilities"])})
 }
 
+// Published Jev rate, checked 2026-09-18:
+// https://typesafe.ai/blog/introducing-system-one-models-and-jev
+fn batch_cost(report: &Report) -> Option<Value> {
+    if report.requested_model != "jev-1.13.0" {
+        return None;
+    }
+    Some(json!({
+        "estimated_usd": report.paid_input_tokens as f64 * 0.042 / 1_000_000.0,
+        "input_per_million": 0.042,
+        "output_per_million": 0.0,
+        "checked_at": "2026-09-18"
+    }))
+}
+
 pub fn render(report: &Report) -> Result<String> {
     let files: Vec<_> = report
         .files
@@ -42,6 +56,7 @@ pub fn render(report: &Report) -> Result<String> {
         "status":report.status,"complete":report.complete,"settled":report.settled,
         "refresh":report.watcher_pid.is_some(),"model":report.requested_model,"quick":report.quick,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
+        "cost":batch_cost(report),
         "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules});
     // Even a filename or analyzer message may contain </script>. Never let data
     // terminate the JSON element, and insert all displayed strings with textContent.
@@ -125,6 +140,15 @@ mod tests {
             report.files[0].error.as_deref().unwrap()
         );
         assert!(decoded.get("initial_requests").is_none());
+        assert!(!html.contains("id=\"root\""));
+        report.paid_input_tokens = 1_000_000;
+        report.paid_output_tokens = 12_345;
+        let cost = batch_cost(&report).unwrap();
+        assert!((cost["estimated_usd"].as_f64().unwrap() - 0.042).abs() < 1e-12);
+        report.paid_input_tokens = 0;
+        assert_eq!(batch_cost(&report).unwrap()["estimated_usd"], 0.0);
+        report.requested_model = "unknown-model".into();
+        assert!(batch_cost(&report).is_none());
         assert!(!html.contains("def value()"));
     }
 }
