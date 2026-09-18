@@ -1,27 +1,30 @@
 # Possible classification cascade
 
-Status: first experiment available with `--classification-cascade --format json`.
-One shared-evidence request includes overlapping test/production signals and a
-conditional test specialist for up to 12 repeated fragments (at most 37 extra
-questions). JSON retains raw answers, locations, model, composition version,
-selected branches, omissions and conflicts under the shared-logic assessment's
-`cascade` field. The shadow comparison leaves baseline findings unchanged;
-uncertain routes retain the general assessment and conflicting applicable
-judgments remain unresolved. Default behavior and review thresholds are unchanged.
-Broader purpose/operation specialization and sequential requests remain proposals.
-Improvement must be measured: an incorrect early route can hide a useful finding.
+Status: opt-in comparison available with `--classification-cascade --format json`.
+One shared-evidence request includes four overlapping semantic roles for up to 32
+deduplicated regions containing repeated occurrences (160 role/evidence questions)
+and a conditional test specialist
+for up to 12 repeated fragments. JSON retains raw answers, locations, model,
+composition version, occurrence relationships, omissions and conflicts. Region
+roles are under `files[].role_assessment`; routing and specialist comparisons are
+under the shared-logic assessment's `cascade` field.
 
 `--roles-only` evaluates the foundation independently: test scenarios, scenario
-support, framework/tool implementations and application/library implementations
-are separate overlapping Noul questions. Evidence sufficiency is independent of
-role probability. Regions come from parser locations; repeated occurrences in the
-same region share answers, and each occurrence pair retains all supported
-test/test, test/implementation or implementation/implementation relationships.
-Unknown or omitted regions leave relationships unresolved. The 32-region bound
-and parser limits are reported explicitly. These roles remain disconnected from
-specialist routing until human-reviewed role evaluation and a downstream
-comparison establish benefit. Specialist prompts and maintainability thresholds
-remain fixed during foundation evaluation.
+support, framework/tool implementations and application/library implementations.
+Evidence sufficiency is independent of role probability. A parameterized template
+that owns the tested operation and its expected-result checks defines scenarios;
+generic runners and assertion APIs accept arbitrary supplied tests or values.
+Parsers supply locations, not semantic verdicts. Repeated occurrences in the same
+region share answers. Each occurrence pair retains every supported test/test,
+test/implementation or implementation/implementation relationship.
+
+Only fully resolved test–test groups select the specialist. Mixed groups,
+unsupported evidence, omitted occurrences and uncertain roles retain the general
+assessment. Conflicts in an applicable test branch remain unresolved. The
+comparison leaves baseline findings unchanged and remains opt-in until measured
+role reliability and downstream benefit justify adoption. Default behavior,
+specialist prompts and maintainability thresholds remain unchanged. Broader
+specialization and sequential requests remain proposals.
 
 ## From basic evidence to specialized judgments
 

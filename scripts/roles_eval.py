@@ -176,7 +176,7 @@ def summarize(root, outputs, destination):
              'metrics':grouped,'path_checks':path_checks,'coverage':coverage,'evidence_sufficiency':evidence,'rows':rows,
              'metric_scope':'Canonical source cases only; byte-identical path variants are measured separately and do not inflate accuracy or calibration denominators. Regions within one source are correlated.',
              'batch':{'attempts':sum(b['api_requests'] for b in usage),'input_tokens':sum(b['paid_input_tokens'] for b in usage),'output_tokens':sum(b['paid_output_tokens'] for b in usage),'estimated_usd':sum(b['estimated_usd'] for b in usage)},
-             'adoption':'Specialists remain disconnected from these roles pending human-reviewed evaluation and downstream comparison.'}
+             'adoption':'Role-only evaluation does not establish downstream benefit; evaluate the connected opt-in cascade separately before default adoption.'}
     save(destination,summary)
     print(json.dumps({k:summary[k] for k in ('label_review_status','cases_evaluated','cases_missing','batch')},indent=2))
 

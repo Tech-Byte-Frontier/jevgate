@@ -45,9 +45,14 @@ and `--refresh` for fresh inference. `jevgate check --help` lists all options.
 `--classification-cascade --format json` enables an experimental test-role
 comparison for shared logic in the same request. Inspect
 `dimensions.shared_logic.refactoring_assessment.cascade` for raw overlapping
-roles, specialist judgments, selected branches and unresolved conflicts. This
-shadow comparison does not change findings or establish measured accuracy.
-It adds at most 37 questions per file; the default classifier remains unchanged.
+occurrence relationships, specialist judgments, selected branches and unresolved
+conflicts; `files[].role_assessment` retains the four overlapping region roles.
+Only resolved test–test groups select the test specialist. Mixed, omitted or
+ambiguous relationships retain the general assessment. This shadow comparison
+does not change findings or establish measured accuracy. It adds at most 160
+role/evidence questions and 12 specialist questions per file in the same request.
+Only regions containing repeated occurrences receive role questions in this mode;
+the default classifier remains unchanged.
 
 Use `jevgate check src/example.rs --roles-only` to evaluate semantic roles without
 maintainability judgments. It defaults to JSON and reports overlapping test
@@ -58,6 +63,8 @@ reference their region and retain ambiguous or overlapping relationships.
 Complete region excerpts share a 16 KiB budget; omitted excerpts are reported
 and the complete selected source remains available. Test support means a fixture
 or helper provider; arranging inputs inside a scenario remains scenario behavior.
+Parameterized templates that own the tested operation and expected-result checks
+are scenarios even when reused.
 Omissions and unsupported parsers stay visible; `classified` means roles were
 resolved, not that code quality passed. `--roles-only` cannot be combined with
 `--classification-cascade`, `--rule`, or `--report`.
@@ -67,7 +74,8 @@ For frozen role evaluations, `scripts/roles_eval.py` provides `freeze`, `run`, a
 labels and results in ignored `.jevgate/evaluation/`; labels never enter requests.
 The report separates false positives, missed roles, abstentions, calibration,
 language/repository groups and identical-source path comparisons. Reserve whole
-repositories for holdout evaluation. Role results do not yet control specialists.
+repositories for holdout evaluation. The opt-in cascade uses these roles; adoption as the default requires measured
+improvement in findings as well as role reliability.
 
 ## Configuration and CI
 

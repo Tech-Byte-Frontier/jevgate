@@ -116,25 +116,28 @@ fn cascade_preview_is_opt_in_bounded_and_shares_one_request() {
     let experiment = preview(true);
     assert_eq!(experiment["initial_requests"].as_array().unwrap().len(), 1);
     assert_eq!(
-        baseline["initial_requests"][0]["state"],
-        experiment["initial_requests"][0]["state"]
+        baseline["initial_requests"][0]["state"]["file"],
+        experiment["initial_requests"][0]["state"]["file"]
     );
     let questions = experiment["initial_requests"][0]["questions"]
         .as_object()
         .unwrap();
     assert!(questions.contains_key("cascade_specialist_0"));
+    assert!(questions.contains_key("role_0_test_scenario"));
+    assert!(questions.keys().filter(|k| k.starts_with("role_")).count() <= 160);
+    assert!(!questions.contains_key("cascade_tests_0"));
     assert!(
         questions
             .keys()
             .filter(|k| k.starts_with("cascade_"))
             .count()
-            <= 37
+            <= 12
     );
     assert!(
         !baseline["initial_requests"][0]["questions"]
             .as_object()
             .unwrap()
-            .contains_key("cascade_file_tests")
+            .contains_key("role_0_test_scenario")
     );
     assert!(!project.0.join(".jevgate").exists());
 }

@@ -222,16 +222,18 @@ pub fn request(input: &Input, args: &CheckArgs) -> Result<Value> {
                     "context":"The surrounding evidence does not establish whether the locations implement a common responsibility."}}));
         }
     }
-    if args.classification_cascade && questions.contains_key("shared_logic") {
-        crate::cascade::questions(&mut questions, &repetition["observations"]);
-    }
-    Ok(json!({"model":args.model,"state":{
+    let cascade_enabled = args.classification_cascade && questions.contains_key("shared_logic");
+    let mut request = json!({"model":args.model,"state":{
         "maintainability_version":5,
         "file":{"path":input.result.path,"role":input.result.role,"source":source,"source_hash":input.result.source_hash},
         "context":input.context.iter().map(|c| json!({"path":c.file.path,"source":c.source,"source_hash":c.file.source_hash})).collect::<Vec<_>>(),
         "operations":operations,"pairs":pairs,"repeated_fragments":repetition["observations"],
         "limitations":{"fragment_excerpts_omitted":excerpts_omitted,"operations_omitted":total.saturating_sub(64),"pairs_omitted":pair_count.saturating_sub(240),"scope":"Selected file and explicit context only. Nested tasks and non-callable declarations may lack separate candidates. Full source remains visible; use context for an unrepresentable important opportunity."}
-    },"questions":questions}))
+    },"questions":questions});
+    if cascade_enabled {
+        crate::cascade::attach(&mut request, crate::roles::occurrence_request(input, args)?)?;
+    }
+    Ok(request)
 }
 
 // Optional location hints, not verdicts or substitutes for the complete source.
@@ -278,6 +280,10 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
     file.findings.clear();
     file.context_requests.clear();
     file.model = body["model"].as_str().map(str::to_owned);
+    file.role_assessment = request["state"]["cascade_role_version"]
+        .is_string()
+        .then(|| crate::roles::assess(&request["state"], body))
+        .transpose()?;
     let limits = &request["state"]["limitations"];
     let scope = format!(
         "Maintainability scope: selected file and explicit context only; {} operations and {} pairs omitted. Nested tasks and non-callable declarations may lack candidates; shared logic is not a repository-wide clone scan. Up to 12 repeated token fragments are judged, with at most 20 locations each; absence of a fragment is not proof of no duplication.",
@@ -432,7 +438,7 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
         let dimension = Dimension {
             refactoring_assessment: Some(Assessment {
                 cascade: (key == "shared_logic")
-                    .then(|| crate::cascade::compare(request, body))
+                    .then(|| crate::cascade::compare(request, body, file.role_assessment.as_ref()))
                     .flatten(),
                 selected_operation: None,
                 operations: body["answers"].as_object().unwrap().iter()
