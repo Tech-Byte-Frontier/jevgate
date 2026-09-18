@@ -91,11 +91,22 @@ fn load(
         .strip_prefix(&context.root)
         .context("Source outside root")?;
     let mut result = FileResult {
+        role_assessment: None,
         path: relative.into(),
         contains_tests: role == "test",
         role: role.clone(),
         source_hash: String::new(),
-        catalog_hash: String::new(),
+        catalog_hash: hash(
+            &serde_json::to_vec(&(
+                crate::schema::RUBRIC,
+                crate::roles::VERSION,
+                args.roles_only,
+                args.classification_cascade,
+                &args.model,
+                &args.rules,
+            ))
+            .unwrap(),
+        ),
         context_complete: true,
         context_expanded: false,
 

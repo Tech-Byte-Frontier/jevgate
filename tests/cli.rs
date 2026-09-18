@@ -38,6 +38,108 @@ impl Drop for Project {
 }
 
 #[test]
+fn roles_only_preview_excludes_verdicts_and_conflicting_modes() {
+    let project = Project::new();
+    std::fs::write(
+        project.0.join("example.py"),
+        "def test_connection(address):\n    return address.strip().lower()\n",
+    )
+    .unwrap();
+    let output = project
+        .command()
+        .args([
+            "check",
+            "example.py",
+            "--roles-only",
+            "--dry-run",
+            "--show-requests",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["command"], "classify-roles");
+    assert_eq!(report["stages"]["roles"]["planned_requests"], 1);
+    let request = &report["initial_requests"][0];
+    assert!(
+        request["questions"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| key.starts_with("role_"))
+    );
+    assert!(request["state"]["file"].get("role").is_none());
+    for flag in ["--classification-cascade", "--report"] {
+        assert!(
+            !project
+                .command()
+                .args(["check", "example.py", "--roles-only", flag])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+    assert!(!project.0.join(".jevgate").exists());
+}
+
+#[test]
+fn cascade_preview_is_opt_in_bounded_and_shares_one_request() {
+    let project = Project::new();
+    std::fs::write(project.0.join("mixed.py"), "def a(value):\n    name = value.strip().lower()\n    record = dict(name=name, enabled=True)\n    return save(record)\n\ndef b(value):\n    name = value.strip().lower()\n    record = dict(name=name, enabled=True)\n    return save(record)\n").unwrap();
+    let preview = |enabled: bool| {
+        let mut command = project.command();
+        command.args([
+            "check",
+            "mixed.py",
+            "--rule",
+            "shared_logic",
+            "--dry-run",
+            "--show-requests",
+        ]);
+        if enabled {
+            command.arg("--classification-cascade");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let baseline = preview(false);
+    let experiment = preview(true);
+    assert_eq!(experiment["initial_requests"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        baseline["initial_requests"][0]["state"],
+        experiment["initial_requests"][0]["state"]
+    );
+    let questions = experiment["initial_requests"][0]["questions"]
+        .as_object()
+        .unwrap();
+    assert!(questions.contains_key("cascade_specialist_0"));
+    assert!(
+        questions
+            .keys()
+            .filter(|k| k.starts_with("cascade_"))
+            .count()
+            <= 37
+    );
+    assert!(
+        !baseline["initial_requests"][0]["questions"]
+            .as_object()
+            .unwrap()
+            .contains_key("cascade_file_tests")
+    );
+    assert!(!project.0.join(".jevgate").exists());
+}
+
+#[test]
 fn default_preview_batches_maintainability_without_automatic_context_or_state() {
     let project = Project::new();
     std::fs::write(

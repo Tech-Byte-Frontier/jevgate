@@ -23,8 +23,12 @@ pub(super) struct Receipt {
     pub metrics: schema::StageMetrics,
 }
 
-pub(super) fn stage(_: &Value) -> &'static str {
-    "maintainability"
+pub(super) fn stage(request: &Value) -> &'static str {
+    if request["state"]["role_version"].is_string() {
+        "roles"
+    } else {
+        "maintainability"
+    }
 }
 fn groups(request: &Value) -> BTreeMap<String, Value> {
     let mut groups = BTreeMap::new();

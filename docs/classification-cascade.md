@@ -1,8 +1,27 @@
 # Possible classification cascade
 
-Status: design proposal; no runtime changes. Cascades could improve relevance and
-make mistakes easier to diagnose, but improvement must be measured. An incorrect
-early route can hide a useful finding from every later stage.
+Status: first experiment available with `--classification-cascade --format json`.
+One shared-evidence request includes overlapping test/production signals and a
+conditional test specialist for up to 12 repeated fragments (at most 37 extra
+questions). JSON retains raw answers, locations, model, composition version,
+selected branches, omissions and conflicts under the shared-logic assessment's
+`cascade` field. The shadow comparison leaves baseline findings unchanged;
+uncertain routes retain the general assessment and conflicting applicable
+judgments remain unresolved. Default behavior and review thresholds are unchanged.
+Broader purpose/operation specialization and sequential requests remain proposals.
+Improvement must be measured: an incorrect early route can hide a useful finding.
+
+`--roles-only` evaluates the foundation independently: test scenarios, scenario
+support, framework/tool implementations and application/library implementations
+are separate overlapping Noul questions. Evidence sufficiency is independent of
+role probability. Regions come from parser locations; repeated occurrences in the
+same region share answers, and each occurrence pair retains all supported
+test/test, test/implementation or implementation/implementation relationships.
+Unknown or omitted regions leave relationships unresolved. The 32-region bound
+and parser limits are reported explicitly. These roles remain disconnected from
+specialist routing until human-reviewed role evaluation and a downstream
+comparison establish benefit. Specialist prompts and maintainability thresholds
+remain fixed during foundation evaluation.
 
 ## From basic evidence to specialized judgments
 

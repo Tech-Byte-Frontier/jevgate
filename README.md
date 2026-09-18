@@ -42,6 +42,33 @@ Use `--dry-run --show-requests` to inspect uploads, `--cache-only` for offline r
 and `--refresh` for fresh inference. `jevgate check --help` lists all options.
 `jevgate rules` describes the three checks. Use `--rule` to select a subset.
 
+`--classification-cascade --format json` enables an experimental test-role
+comparison for shared logic in the same request. Inspect
+`dimensions.shared_logic.refactoring_assessment.cascade` for raw overlapping
+roles, specialist judgments, selected branches and unresolved conflicts. This
+shadow comparison does not change findings or establish measured accuracy.
+It adds at most 37 questions per file; the default classifier remains unchanged.
+
+Use `jevgate check src/example.rs --roles-only` to evaluate semantic roles without
+maintainability judgments. It defaults to JSON and reports overlapping test
+scenario, test support, framework/tool, and application/library roles under
+`files[].role_assessment`. Each of up to 32 deduplicated regions has raw yes/no
+probabilities and a separate evidence-sufficiency answer. Repeated occurrences
+reference their region and retain ambiguous or overlapping relationships.
+Complete region excerpts share a 16 KiB budget; omitted excerpts are reported
+and the complete selected source remains available. Test support means a fixture
+or helper provider; arranging inputs inside a scenario remains scenario behavior.
+Omissions and unsupported parsers stay visible; `classified` means roles were
+resolved, not that code quality passed. `--roles-only` cannot be combined with
+`--classification-cascade`, `--rule`, or `--report`.
+
+For frozen role evaluations, `scripts/roles_eval.py` provides `freeze`, `run`, and
+`summarize` commands (`--help`). Keep source copies, manifests, human-reviewed
+labels and results in ignored `.jevgate/evaluation/`; labels never enter requests.
+The report separates false positives, missed roles, abstentions, calibration,
+language/repository groups and identical-source path comparisons. Reserve whole
+repositories for holdout evaluation. Role results do not yet control specialists.
+
 ## Configuration and CI
 
 The nearest `jevgate.toml` or Git root defines the project boundary. For example:
