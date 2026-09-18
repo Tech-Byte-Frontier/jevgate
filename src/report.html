@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>JevGate · Review report</title>
+<style>
+:root{color-scheme:light;--ink:#233448;--muted:#53647a;--line:#dbe3ec;--paper:#fff;--back:#f1f5f9;--blue:#235b9b;--red:#a52d35;--amber:#805509;--green:#246345}
+*{box-sizing:border-box}body{margin:0;background:var(--back);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,sans-serif}main{max-width:1180px;margin:auto;padding:32px 28px 60px}header{display:flex;gap:24px;justify-content:space-between;align-items:start}h1{font-size:27px;letter-spacing:-.7px;line-height:1.2;margin:0 0 8px}h1 span{font-weight:400;color:var(--muted)}p{margin:8px 0}#root{font-size:13px;overflow-wrap:anywhere;color:var(--muted)}.meta{text-align:right;font-size:13px;color:var(--muted)}.notice{padding:12px 16px;border-left:3px solid var(--blue);background:#e7eff9;margin:22px 0 16px}.stats{display:flex;gap:24px;flex-wrap:wrap;padding:15px 0;margin-bottom:16px;border-bottom:1px solid var(--line)}.stats strong{font-size:21px;margin-right:6px}.stats span{color:var(--muted);font-size:13px}.toolbar{display:flex;gap:12px;align-items:end;margin:18px 0}label{display:grid;gap:5px;font-size:13px;color:var(--muted)}label:first-child{flex:1}input,select,button{font:inherit;color:var(--ink);border:1px solid #bac8d7;border-radius:5px;background:white;padding:9px 12px}input{width:100%}button{cursor:pointer}button:hover{background:#e7eff9}:focus-visible{outline:3px solid #729fda;outline-offset:3px}.file{background:var(--paper);border:1px solid var(--line);border-radius:6px;margin:9px 0;overflow:hidden}.file>summary{display:flex;gap:14px;align-items:center;padding:15px 18px;cursor:pointer;list-style:none}.file>summary:before{content:'›';color:var(--muted);font-size:21px}.file[open]>summary:before{content:'⌄'}.file[open]>summary{border-bottom:1px solid var(--line)}.path{flex:1;overflow-wrap:anywhere;font:14px/1.5 ui-monospace,"Cascadia Code",monospace}.count{font-size:12px;color:var(--muted);white-space:nowrap}.badge{display:inline-block;border-radius:4px;padding:3px 8px;background:#edf1f6;color:#53647a;font-size:12px;white-space:nowrap;font-weight:600}.review{background:#fae9ea;color:var(--red)}.uncertain,.needs-context{background:#fff2d7;color:var(--amber)}.clear{background:#e6f3eb;color:var(--green)}.error{background:#fae9ea;color:var(--red)}.pending{background:#e7eff9;color:var(--blue)}.detail{padding:18px 22px}.finding{border-left:3px solid var(--red);padding:2px 14px;margin:0 0 20px}.finding p{max-width:90ch}.small{font-size:13px;color:var(--muted)}h2{font-size:15px;margin:20px 0 9px}h3{font-size:14px;margin:0}.check{border-top:1px solid var(--line);padding:12px 0;display:grid;grid-template-columns:minmax(190px,1fr) 125px 2fr;gap:16px;align-items:start}.check p{margin:3px 0}.check details{font-size:12px;color:var(--muted)}.check summary{cursor:pointer}.check pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.warning{color:var(--red);white-space:pre-wrap;overflow-wrap:anywhere}.explain{font-size:13px;color:var(--muted);max-width:90ch}.legend{margin:26px 0 0;border-top:1px solid var(--line);padding-top:16px;color:var(--muted);font-size:13px}.legend summary{cursor:pointer}.legend dl{display:grid;grid-template-columns:180px 1fr;gap:8px 16px}.legend dt{font-weight:600}.legend dd{margin:0}#empty{padding:30px;text-align:center;color:var(--muted)}#shown{font-size:13px;color:var(--muted)}[hidden]{display:none!important}
+@media(max-width:650px){main{padding:22px 14px}header{display:block}.meta{text-align:left;margin-top:12px}.toolbar{flex-wrap:wrap}label:first-child{flex-basis:100%}.file>summary{padding:12px;gap:8px;flex-wrap:wrap}.path{min-width:65%}.count{margin-left:22px}.detail{padding:14px}.check{grid-template-columns:1fr auto;gap:8px}.check>div:last-child{grid-column:1/-1}.legend dl{grid-template-columns:1fr}.stats{gap:12px}}
+</style>
+</head>
+<body><main>
+<header><div><h1>JevGate <span>/ Review report</span></h1><div id="root"></div></div><div class="meta" id="meta"></div></header>
+<div class="notice" id="notice"></div>
+<div class="stats" id="stats"></div>
+<div id="errors" class="warning" role="status"></div>
+<div class="toolbar"><label>Find a file<input id="search" type="search" placeholder="Filter by path…"></label><label>Classification<select id="filter"><option value="all">All files</option><option value="review">Needs review</option><option value="uncertain">Uncertain</option><option value="needs-context">Needs context</option><option value="clear">Clear</option><option value="not-applicable">Not applicable</option><option value="error">Error</option><option value="pending">Pending</option><option value="skipped">Skipped</option></select></label><button id="reload" type="button">Reload</button></div>
+<p id="shown"></p><section id="files" aria-label="Reviewed files"></section><p id="empty" hidden>No files match this filter.</p>
+<details class="legend"><summary>What do the classifications mean?</summary><dl>
+<dt>Needs review</dt><dd>A concern reached the review threshold. Inspect its evidence.</dd>
+<dt>Clear</dt><dd>The selected checks support acceptable behavior. This is not proof of safety.</dd>
+<dt>Uncertain</dt><dd>The evidence did not support a confident decision.</dd>
+<dt>Needs context</dt><dd>A material contract, caller or other fact is missing.</dd>
+<dt>Not applicable</dt><dd>The rule is outside this scope or no applicable candidate was selected. This does not mean the file is safe.</dd>
+<dt>Error / pending / skipped</dt><dd>These are execution or scope states, not code-quality judgments.</dd>
+</dl></details>
+<p class="explain">Saved judgments only. Advisory review; acceptance is not evaluated. Model probabilities are not calibrated guarantees. No new source is loaded by this page.</p>
+<noscript>Enable JavaScript to view this local report.</noscript>
+</main>
+<script id="data" type="application/json">__JEVGATE_DATA__</script>
+<script>
+'use strict';
+const data=JSON.parse(document.getElementById('data').textContent);
+const $=id=>document.getElementById(id);
+const labels={review:'Needs review',clear:'Clear',uncertain:'Uncertain','needs-context':'Needs context','not-applicable':'Not applicable',error:'Error',pending:'Pending',skipped:'Skipped'};
+const names={file_organization:'File organization',function_simplification:'Function simplification',shared_logic:'Shared logic',difficulty:'Hidden dependencies',cohesion:'Mixed responsibilities',state_risk:'Stale async results',test_weakness:'Weak test assertions',failure_handling:'Partial updates on failure',contracts:'Caller contracts',error_success:'Failures hidden as success',cleanup_state:'Cleanup & state restoration',policy_drift:'Inconsistent business rules',test_effectiveness:'Surviving mutations',change_regression:'Behavior regressions'};
+const rules=new Map();for(const r of data.rules){rules.set(r.key,r);rules.set(r.id,r)}
+function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n}
+function badge(status){return el('span',labels[status]||status,'badge '+(Object.hasOwn(labels,status)?status:''))}
+function name(rule){const r=rules.get(rule);return names[r?.key]||rule}
+function pct(value){return Number.isFinite(value)?Math.round(value*100)+'%':'—'}
+function p(parent,text,cls){if(text)parent.append(el('p',text,cls))}
+$('root').textContent=data.root;
+p($('meta'),new Date(data.generated_at*1000).toLocaleString());
+p($('meta'),'Generation '+data.generation+' / '+data.model);
+p($('meta'),data.refresh?'Auto-refresh every 4 seconds':'Saved snapshot');
+$('notice').textContent=(data.complete?'Review execution complete.':'Review execution incomplete.')+' '+(data.settled?'':'Results may still be pending. ')+'Advisory classifications for the selected files.';
+const statItems=[['files',data.files.length],['need review',data.files.filter(f=>f.status==='review').length],['unresolved',data.files.filter(f=>['uncertain','needs-context'].includes(f.status)).length],['API requests',data.requests],['input tokens',data.tokens]];
+for(const [label,value] of statItems){const item=el('div');item.append(el('strong',value.toLocaleString()),el('span',label));$('stats').append(item)}
+for(const error of data.errors)p($('errors'),error);
+if(data.deleted.length)p($('errors'),'Deleted files (no current code reviewed): '+data.deleted.join(', '),'small');
+let saved={};try{saved=JSON.parse(sessionStorage.getItem('jevgate:'+data.root)||'{}')}catch{}
+$('search').value=typeof saved.query==='string'?saved.query:'';
+$('filter').value=Object.hasOwn(labels,saved.filter)?saved.filter:'all';
+const openPaths=new Set(Array.isArray(saved.open)?saved.open:[]);
+function save(){try{sessionStorage.setItem('jevgate:'+data.root,JSON.stringify({query:$('search').value,filter:$('filter').value,open:[...openPaths],scroll:window.scrollY}))}catch{}}
+const order=['review','error','needs-context','uncertain','pending','clear','not-applicable','skipped'];
+const entries=[];
+for(const f of [...data.files].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status)||a.path.localeCompare(b.path))){
+ const card=el('details',null,'file');card.open=openPaths.has(f.path)||(!saved.open&&data.files.length===1);
+ const summary=el('summary');summary.append(el('span',f.path,'path'),el('span',f.findings.length+(f.findings.length===1?' finding':' findings')+(f.cached?' / cached':''),'count'),badge(f.status));card.append(summary);
+ const body=el('div',null,'detail');card.append(body);
+ if(f.error)p(body,f.error,'warning');
+ for(const finding of f.findings){const item=el('div',null,'finding');item.append(el('h3',name(finding.rule)+' / line '+finding.line));p(item,finding.message);p(item,finding.action,'small');body.append(item)}
+ if(f.limitations.length){body.append(el('h2','Evidence gaps'));for(const limit of f.limitations)p(body,limit,'small')}
+ if(f.checks.length){body.append(el('h2','Classifications'));const inactive=el('details');inactive.append(el('summary',f.checks.filter(c=>c.status==='not-applicable').length+' checks not applicable in this scope'));for(const c of [...f.checks].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status))){
+  const row=el('div',null,'check'),title=el('div'),info=el('div');title.append(el('strong',name(c.rule)));p(title,c.scope,'small');row.append(title,badge(c.status),info);
+  const rule=rules.get(c.rule);p(info,rule?.description,'small');
+  if(c.consequence)p(info,(c.status==='review'?'Concern: ':'Possible consequence: ')+c.consequence);
+  p(info,c.detail,'small');if(c.change&&c.change!=='not-compared')p(info,'Change: '+c.change,'small');
+  if(c.before)p(info,'Before: '+(labels[c.before.status]||c.before.status),'small');
+  if(c.probability!==undefined&&c.status!=='not-applicable')p(info,'Model concern: '+pct(c.probability),'small');
+  for(const [label,probabilities] of [['Model probabilities',c.probabilities],['Location probabilities',c.location_probabilities],['File overview probabilities',c.overview_probabilities]]){if(probabilities&&Object.keys(probabilities).length){const raw=el('details');raw.append(el('summary',label),el('pre',Object.entries(probabilities).map(([key,value])=>key+': '+pct(value)).join('\n')));info.append(raw)}}
+  if(c.fragment_source){const source=el('details');source.append(el('summary','Repeated source fragment'),el('pre',c.fragment_source));info.append(source)}
+  (c.status==='not-applicable'?inactive:body).append(row);
+ }if(inactive.children.length>1)body.append(inactive);}else{p(body,f.status==='not-applicable'?'No applicable candidate was selected for this file.':'No classifications are available for this snapshot.','small')}
+ card.addEventListener('toggle',()=>{if(card.open)openPaths.add(f.path);else openPaths.delete(f.path);save()});
+ $('files').append(card);entries.push({card,file:f});
+}
+function filter(){const query=$('search').value.toLowerCase(),status=$('filter').value;let visible=0;for(const {card,file} of entries){card.hidden=!(file.path.toLowerCase().includes(query)&&(status==='all'||file.status===status));if(!card.hidden)visible++}$('shown').textContent=visible+' of '+entries.length+' files';$('empty').hidden=visible!==0;save()}
+$('search').addEventListener('input',filter);$('filter').addEventListener('change',filter);$('reload').addEventListener('click',()=>{save();location.reload()});filter();
+if(Number.isFinite(saved.scroll))window.scrollTo(0,saved.scroll);
+window.addEventListener('pagehide',save);
+if(data.refresh)setTimeout(()=>{save();location.reload()},4000);
+</script></body></html>
