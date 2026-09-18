@@ -188,7 +188,7 @@ impl Report {
             });
         self.judgments_complete = self.complete
             && selected.iter().all(|f| {
-                if f.role_assessment.is_some() {
+                if self.command == "classify-roles" {
                     return f.status == Status::Clear;
                 }
                 f.dimensions.values().all(|d| {

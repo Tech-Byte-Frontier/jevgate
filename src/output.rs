@@ -43,7 +43,15 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
         writeln!(out, "  {error}")?;
     }
     if let Some(roles) = &file.role_assessment {
-        writeln!(out, "  Semantic roles only; no maintainability assessment")?;
+        writeln!(
+            out,
+            "  {}",
+            if file.dimensions.is_empty() {
+                "Semantic roles only; no maintainability assessment"
+            } else {
+                "Semantic roles for the experimental cascade; maintainability remains below"
+            }
+        )?;
         for region in &roles.regions {
             writeln!(
                 out,

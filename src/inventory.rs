@@ -100,6 +100,7 @@ fn load(
             &serde_json::to_vec(&(
                 crate::schema::RUBRIC,
                 crate::roles::VERSION,
+                crate::cascade::VERSION,
                 args.roles_only,
                 args.classification_cascade,
                 &args.model,

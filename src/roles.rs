@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const VERSION: &str = "region-roles-v3";
+pub const VERSION: &str = "region-roles-v5";
 const LIMIT: usize = 32;
 const PRESENT: f64 = 0.8;
 const ABSENT: f64 = 0.2;
@@ -26,15 +26,15 @@ pub fn policy() -> BTreeMap<&'static str, f64> {
 pub const ROLES: [(&str, &str); 4] = [
     (
         "test_scenario",
-        "Executes a concrete scenario and checks an expected behavior, using assertions, expected results or an explicit pass/fail comparison. Includes custom and UI tests. Merely running arbitrary tests or implementing an assertion API is not a test scenario.",
+        "Defines or runs concrete behavior checks for a particular subject under test. Includes ordinary test bodies, custom/UI tests, calls to visible concrete scenarios, and reusable parameterized test templates that contain the operation under test and expected-result checks. A template can accept example inputs and expected outputs while still owning the tested operation. A generic runner executing arbitrary supplied tests or an assertion API comparing arbitrary values does not own that tested operation.",
     ),
     (
         "test_support",
-        "Implements a fixture provider, mock implementation, test-data factory, helper, or setup/cleanup hook that supplies support to concrete test scenarios. The region owns that support responsibility rather than performing its own behavior-checking scenario. Inline arrangement, mock configuration and cleanup inside a test scenario are part of that scenario, not an additional support-provider role. A general testing framework, runner or assertion library is framework_tool instead. Ordinary application factories do not become test support merely because tests invoke them.",
+        "Implements a fixture provider, mock implementation, test-data factory, helper, or setup/cleanup hook that supplies support to concrete test scenarios. The region owns that support responsibility rather than performing its own behavior-checking scenario. Inline arrangement, mock configuration and cleanup inside a test scenario are part of that scenario, not an additional support-provider role. A template defining the operation under test and its expected-result checks is test_scenario, even if reusable. A general testing framework, runner or assertion library is framework_tool instead. Ordinary application factories do not become test support merely because tests invoke them.",
     ),
     (
         "framework_tool",
-        "Implements general infrastructure such as test runners, assertion libraries, build tools or reusable development tooling. Calling this infrastructure in a test is not implementing it. Framework behavior remains implementation even when its purpose is testing.",
+        "Implements general infrastructure such as test runners, assertion libraries, build tools or reusable development tooling. The infrastructure executes arbitrary supplied tests or compares arbitrary values; it does not own the particular operation under test. Templates that encode a particular tested operation and its checks are scenarios, not framework implementation. Calling this infrastructure in a test is not implementing it. Framework behavior remains implementation even when its purpose is testing.",
     ),
     (
         "application_library",
@@ -52,6 +52,14 @@ pub struct Assessment {
 }
 
 pub fn request(input: &Input, args: &CheckArgs) -> Result<Value> {
+    build_request(input, args, true)
+}
+
+pub fn occurrence_request(input: &Input, args: &CheckArgs) -> Result<Value> {
+    build_request(input, args, false)
+}
+
+fn build_request(input: &Input, args: &CheckArgs, include_other_regions: bool) -> Result<Value> {
     let source = input.source.as_deref().context("Missing selected source")?;
     let sources: Vec<_> = std::iter::once((input.result.path.as_path(), source))
         .chain(
@@ -110,8 +118,10 @@ pub fn request(input: &Input, args: &CheckArgs) -> Result<Value> {
         }
         fragments.push(json!({"occurrences":occurrences,"locations_omitted":fragment["locations_omitted"].as_u64().unwrap_or(0)}));
     }
-    for unit in units {
-        add(unit);
+    if include_other_regions {
+        for unit in units {
+            add(unit);
+        }
     }
     let mut excerpt_budget = 16384usize;
     let mut excerpts_omitted = 0;
@@ -148,7 +158,7 @@ pub fn request(input: &Input, args: &CheckArgs) -> Result<Value> {
         for (role, definition) in ROLES {
             let question = match role {
                 "test_scenario" => {
-                    "Does this region execute a specific behavior-checking test scenario?"
+                    "Does this region define or run behavior checks for a particular operation under test, directly or through a test template?"
                 }
                 "test_support" => {
                     "Is this region a support provider used by concrete test scenarios, such as a fixture, test helper or setup hook?"
@@ -162,7 +172,7 @@ pub fn request(input: &Input, args: &CheckArgs) -> Result<Value> {
             };
             questions.insert(format!("role_{index}_{role}"), json!({"type":"noul","instructions":{
                 "version":VERSION,"task":format!("{target} {question} Roles may overlap when the region itself implements several responsibilities. Paths and names alone do not establish any role." )},
-                "criteria":{"true":definition,"false":if role == "test_scenario" { "The region does not execute a concrete behavior-checking scenario. Generic infrastructure that invokes arbitrary test objects is a runner, not itself a scenario. Non-executable declarations are not scenarios." } else { "This region does not implement the specified responsibility. Merely invoking code with that role does not implement it. Non-executable declarations alone do not implement a role." }}}));
+                "criteria":{"true":definition,"false":if role == "test_scenario" { "No concrete tested operation and expected behavior are established here or in a visible scenario invoked here. Generic infrastructure invokes arbitrary supplied test objects or compares arbitrary values. Plain type declarations without behavior checks are not scenarios; templates containing test bodies are not plain type declarations." } else { "This region does not implement the specified responsibility. Merely invoking code with that role does not implement it. Non-executable declarations alone do not implement a role." }}}));
         }
         questions.insert(format!("role_{index}_evidence"), json!({"type":"noul","instructions":{
             "version":VERSION,"task":format!("{target} Is there enough evidence to identify this region's purpose as a test scenario, scenario-specific fixture/support, general framework/tool implementation, ordinary application/library implementation, or a non-executable declaration? This asks whether its purpose is visible, not whether all dependencies are supplied or whether a refactor is justified.")},
@@ -228,9 +238,9 @@ fn relationships(fragments: &Value, regions: &[Value]) -> Vec<Value> {
     }).collect()
 }
 
-pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()> {
+pub fn assess(state: &Value, body: &Value) -> Result<Assessment> {
     let mut regions = Vec::new();
-    for (index, region) in request["state"]["regions"]
+    for (index, region) in state["regions"]
         .as_array()
         .context("Missing regions")?
         .iter()
@@ -260,7 +270,22 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
         };
         regions.push(json!({"index":index,"evidence":region,"evidence_sufficiency":evidence,"roles":roles,"status":status}));
     }
-    let limits = request["state"]["limitations"].clone();
+    Ok(Assessment {
+        version: VERSION.into(),
+        model: body["model"].as_str().unwrap_or_default().into(),
+        relationships: relationships(&state["fragments"], &regions),
+        regions,
+        limitations: state
+            .get("role_limitations")
+            .unwrap_or(&state["limitations"])
+            .clone(),
+    })
+}
+
+pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()> {
+    let assessment = assess(&request["state"], body)?;
+    let regions = &assessment.regions;
+    let limits = &assessment.limitations;
     file.status = if regions.iter().any(|r| r["status"] == "needs-context") {
         Status::NeedsContext
     } else if regions.iter().any(|r| r["status"] == "uncertain")
@@ -275,13 +300,7 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
         Status::Clear
     };
     file.model = body["model"].as_str().map(str::to_owned);
-    file.role_assessment = Some(Assessment {
-        version: VERSION.into(),
-        model: file.model.clone().unwrap_or_default(),
-        relationships: relationships(&request["state"]["fragments"], &regions),
-        regions,
-        limitations: limits,
-    });
+    file.role_assessment = Some(assessment);
     file.dimensions.clear();
     file.file_dimensions.clear();
     file.findings.clear();
