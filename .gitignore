@@ -24,5 +24,6 @@ GEMINI.md
 /.github/copilot-instructions.md
 /evaluation/
 /scripts/
-/docs/
+/docs/*
+!/docs/classification-cascade.md
 *.log
