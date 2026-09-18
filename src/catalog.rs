@@ -21,7 +21,7 @@ pub fn rule_version(key: &str) -> &'static str {
     match key {
         "file_organization" => "8",
         "function_simplification" => "7",
-        "shared_logic" => "14",
+        "shared_logic" => "15",
         _ => "7",
     }
 }
