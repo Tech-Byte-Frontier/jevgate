@@ -60,7 +60,12 @@ pub fn snapshot(
         base_revision: args.base.clone(),
         deleted_files: Vec::new(),
         schema_version: 1,
-        command: "check".into(),
+        command: if args.roles_only {
+            "classify-roles"
+        } else {
+            "check"
+        }
+        .into(),
         rubric_version: schema::RUBRIC.into(),
         root: current.root.into(),
         generation: current.generation,
@@ -82,10 +87,14 @@ pub fn snapshot(
         settled: false,
         files,
         changes: Vec::new(),
-        decision_policy: crate::maintainability::policy()
-            .into_iter()
-            .map(|(k, v)| (k.into(), v))
-            .collect(),
+        decision_policy: (if args.roles_only {
+            crate::roles::policy()
+        } else {
+            crate::maintainability::policy()
+        })
+        .into_iter()
+        .map(|(k, v)| (k.into(), v))
+        .collect(),
     };
     if let Some(base) = &args.base {
         match crate::revision::Changes::load(current.root, base) {
@@ -99,9 +108,12 @@ pub fn snapshot(
     report.update_status();
     if args.dry_run {
         for input in inputs.iter().filter(|i| i.result.status == Status::Pending) {
-            match crate::maintainability::request(input, args) {
+            match request(input, args) {
                 Ok(request) => {
-                    let stage = report.stages.entry("maintainability".into()).or_default();
+                    let stage = report
+                        .stages
+                        .entry(crate::requests::stage(&request).into())
+                        .or_default();
                     stage.planned_requests += 1;
                     stage.planned_evidence_bytes += crate::requests::evidence_bytes(&request);
                     if args.show_requests {
@@ -128,7 +140,7 @@ impl Session<'_> {
         let mut tasks = Vec::new();
         for &owner in &selected {
             report.files[owner].cached = true;
-            match crate::maintainability::request(&inputs[owner], self.args) {
+            match request(&inputs[owner], self.args) {
                 Ok(request) => tasks.push(Task {
                     owner,
                     payload: request.clone(),
@@ -138,7 +150,11 @@ impl Session<'_> {
             }
         }
         self.dispatch(report, tasks, |file, request, body| {
-            crate::maintainability::apply(file, &request, body)
+            if request["state"]["role_version"].is_string() {
+                crate::roles::apply(file, &request, body)
+            } else {
+                crate::maintainability::apply(file, &request, body)
+            }
         })?;
         self.progress(report)
     }
@@ -269,6 +285,14 @@ impl Session<'_> {
             super::output::emit(report, super::options::Format::Jsonl)?;
         }
         Ok(())
+    }
+}
+
+fn request(input: &Input, args: &CheckArgs) -> Result<serde_json::Value> {
+    if args.roles_only {
+        crate::roles::request(input, args)
+    } else {
+        crate::maintainability::request(input, args)
     }
 }
 

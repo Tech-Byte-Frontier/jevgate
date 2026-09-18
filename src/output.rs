@@ -42,6 +42,28 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
     if let Some(error) = &file.error {
         writeln!(out, "  {error}")?;
     }
+    if let Some(roles) = &file.role_assessment {
+        writeln!(out, "  Semantic roles only; no maintainability assessment")?;
+        for region in &roles.regions {
+            writeln!(
+                out,
+                "  {}:{}–{} ({})",
+                region["evidence"]["path"].as_str().unwrap_or(""),
+                region["evidence"]["start_line"],
+                region["evidence"]["end_line"],
+                region["status"].as_str().unwrap_or("unknown")
+            )?;
+            for (role, _) in crate::roles::ROLES {
+                let signal = &region["roles"][role];
+                writeln!(
+                    out,
+                    "    {role}: {} · {:.0}%",
+                    signal["status"].as_str().unwrap_or("unknown"),
+                    signal["answer"]["noul"].as_f64().unwrap_or(0.0) * 100.0
+                )?;
+            }
+        }
+    }
     for (name, d) in &file.dimensions {
         writeln!(
             out,

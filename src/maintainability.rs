@@ -39,6 +39,8 @@ const ACCEPTABLE: [&str; 3] = [
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Assessment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cascade: Option<crate::cascade::Comparison>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_operation: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub operations: BTreeMap<String, Value>,
@@ -219,6 +221,9 @@ pub fn request(input: &Input, args: &CheckArgs) -> Result<Value> {
                     "data":"The fragment is static declarative data, markup attributes or type/schema declarations, not implementation of a common runtime operation.",
                     "context":"The surrounding evidence does not establish whether the locations implement a common responsibility."}}));
         }
+    }
+    if args.classification_cascade && questions.contains_key("shared_logic") {
+        crate::cascade::questions(&mut questions, &repetition["observations"]);
     }
     Ok(json!({"model":args.model,"state":{
         "maintainability_version":5,
@@ -426,6 +431,9 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
         }
         let dimension = Dimension {
             refactoring_assessment: Some(Assessment {
+                cascade: (key == "shared_logic")
+                    .then(|| crate::cascade::compare(request, body))
+                    .flatten(),
                 selected_operation: None,
                 operations: body["answers"].as_object().unwrap().iter()
                     .filter(|(name, _)| key == "function_simplification" && name.starts_with("operation_probe_"))

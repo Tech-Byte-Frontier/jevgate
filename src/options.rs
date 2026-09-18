@@ -36,6 +36,12 @@ pub struct CheckArgs {
     /// Compatibility flag; default maintainability already uses one batch per file
     #[arg(long)]
     pub quick: bool,
+    /// Compare test-role specialization in JSON without changing baseline findings
+    #[arg(long)]
+    pub classification_cascade: bool,
+    /// Evaluate semantic roles only; no maintainability judgments (defaults to JSON)
+    #[arg(long, conflicts_with_all = ["classification_cascade", "rules", "report"])]
+    pub roles_only: bool,
     /// Additional file extension to review as text (repeatable, without a dot)
     #[arg(long, value_parser = source_extension)]
     pub source_extension: Vec<String>,
@@ -104,12 +110,13 @@ fn source_extension(value: &str) -> Result<String, String> {
 
 impl CheckArgs {
     pub fn output_format(&self) -> Format {
-        self.format.unwrap_or(if self.show_requests {
-            Format::Json
-        } else if self.watch {
-            Format::Jsonl
-        } else {
-            Format::Agent
-        })
+        self.format
+            .unwrap_or(if self.show_requests || (self.roles_only && !self.watch) {
+                Format::Json
+            } else if self.watch {
+                Format::Jsonl
+            } else {
+                Format::Agent
+            })
     }
 }

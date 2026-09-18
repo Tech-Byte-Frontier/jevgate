@@ -78,6 +78,8 @@ pub struct Finding {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_assessment: Option<crate::roles::Assessment>,
     pub path: PathBuf,
     pub role: String,
     pub contains_tests: bool,
@@ -186,6 +188,9 @@ impl Report {
             });
         self.judgments_complete = self.complete
             && selected.iter().all(|f| {
+                if f.role_assessment.is_some() {
+                    return f.status == Status::Clear;
+                }
                 f.dimensions.values().all(|d| {
                     matches!(
                         d.status,
@@ -209,6 +214,9 @@ impl Report {
             "clear"
         }
         .into();
+        if self.command == "classify-roles" && self.status == "clear" {
+            self.status = "classified".into();
+        }
     }
 }
 
