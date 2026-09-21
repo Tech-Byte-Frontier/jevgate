@@ -130,12 +130,7 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs) -> Result<Plan> {
             };
             Ok(Plan::Judge(
                 prepared.classification,
-                crate::maintainability::request_with(
-                    input,
-                    args,
-                    &view,
-                    args.classification_cascade,
-                )?,
+                crate::maintainability::request_with(input, args, &view)?,
             ))
         }
     }
@@ -295,10 +290,7 @@ pub fn decide_after_purpose(
             source: gate_source,
         };
         return Ok(Some(crate::maintainability::request_with(
-            input,
-            args,
-            &view,
-            args.classification_cascade,
+            input, args, &view,
         )?));
     }
 
@@ -314,10 +306,7 @@ pub fn decide_after_purpose(
             source: original.to_string(),
         };
         return Ok(Some(crate::maintainability::request_with(
-            input,
-            args,
-            &view,
-            args.classification_cascade,
+            input, args, &view,
         )?));
     }
     if !has_implementation(&input.result.path, &gate_source) {
@@ -353,10 +342,7 @@ pub fn decide_after_purpose(
         source: gate_source,
     };
     Ok(Some(crate::maintainability::request_with(
-        input,
-        args,
-        &view,
-        args.classification_cascade,
+        input, args, &view,
     )?))
 }
 
@@ -383,7 +369,7 @@ pub fn test_portion_request(
         classification: class,
     };
     Ok(Some(crate::maintainability::request_with(
-        input, args, &view, false,
+        input, args, &view,
     )?))
 }
 
@@ -411,10 +397,7 @@ fn finish_tests(
         source: original.to_string(),
     };
     Ok(Some(crate::maintainability::request_with(
-        input,
-        args,
-        &view,
-        args.classification_cascade,
+        input, args, &view,
     )?))
 }
 
@@ -1191,9 +1174,7 @@ mod tests {
                 .contains_key("file_purpose")
         );
         crate::locations::parse(&input.result.path, source).unwrap();
-        let mut options = args();
-        options.classification_cascade = true;
-        crate::maintainability::request(&input, &options).unwrap();
+        assert!(request["state"]["cascade_version"].is_string());
     }
 
     #[test]

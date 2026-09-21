@@ -53,7 +53,7 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
             if file.dimensions.is_empty() {
                 "Semantic roles only; no maintainability assessment"
             } else {
-                "Semantic roles for the experimental cascade; maintainability remains below"
+                "Semantic roles used by the shared-logic cascade; maintainability remains below"
             }
         )?;
         for region in &roles.regions {
