@@ -156,6 +156,35 @@ impl Session<'_> {
                 crate::maintainability::apply(file, &request, body)
             }
         })?;
+        if self.args.classification_cascade {
+            let mut followups = Vec::new();
+            for (owner, input) in inputs.iter().enumerate() {
+                if report.files[owner].status == Status::Error {
+                    continue;
+                }
+                match crate::maintainability::focused_requests(
+                    input,
+                    &report.files[owner],
+                    self.args,
+                ) {
+                    Ok(requests) => {
+                        for request in requests {
+                            followups.push(Task {
+                                owner,
+                                payload: request.clone(),
+                                request,
+                            });
+                        }
+                    }
+                    Err(error) => report.errors.push(error.to_string()),
+                }
+            }
+            if !followups.is_empty() {
+                self.dispatch(report, followups, |file, request, body| {
+                    crate::maintainability::apply_focused(file, &request, body)
+                })?;
+            }
+        }
         self.progress(report)
     }
 

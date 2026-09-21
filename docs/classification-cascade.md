@@ -6,7 +6,12 @@ deduplicated regions containing repeated occurrences (160 role/evidence question
 and a conditional test specialist
 for up to 12 repeated fragments. If that body would exceed the provider context
 limit, trailing occurrence regions are omitted and counted in `regions_omitted`;
-the general maintainability questions stay in the same request. JSON retains raw answers, locations, model,
+the general maintainability questions stay in the same request.
+An uncertain file-organization, function-simplification, or shared-logic result
+can trigger one follow-up whose state is only the undecided operation, the
+repeated lines, or the file without the other evidence. The same question is
+asked again. A follow-up replaces the uncertain status only when review or
+clear reaches the existing 0.80 threshold. JSON retains raw answers, locations, model,
 composition version, occurrence relationships, omissions and conflicts. Region
 roles are under `files[].role_assessment`; routing and specialist comparisons are
 under the shared-logic assessment's `cascade` field.

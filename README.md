@@ -53,7 +53,9 @@ does not change findings or establish measured accuracy. It adds at most 160
 role/evidence questions and 12 specialist questions per file in the same request.
 Only regions containing repeated occurrences receive role questions in this mode.
 Trailing regions are omitted when the combined request would exceed the provider
-context limit, and that omission stays visible. The default classifier remains unchanged.
+context limit, and that omission stays visible. An uncertain result can trigger
+one follow-up on only the undecided operation or repeated lines; it replaces
+that status only at the existing 0.80 threshold. The default classifier remains unchanged.
 
 Use `jevgate check src/example.rs --roles-only` to evaluate semantic roles without
 maintainability judgments. It defaults to JSON and reports overlapping test
