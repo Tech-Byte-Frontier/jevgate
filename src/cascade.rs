@@ -47,7 +47,97 @@ pub fn attach(request: &mut Value, roles: Value) -> Result<()> {
     let questions = request["questions"].as_object_mut().unwrap();
     questions.extend(roles["questions"].as_object().unwrap().clone());
     specialist_questions(questions, &fragments);
+    // TypeSafe rejected compact cascade bodies at 258376 bytes while a larger
+    // file succeeded, so stay under the smaller rejection with room for
+    // tokenizer differences. Trailing occurrence regions are omitted first.
+    shrink_to_provider_budget(request);
     Ok(())
+}
+
+/// Compact JSON bytes. Below the smallest observed `max_tokens_exceeded` body.
+const PROVIDER_REQUEST_BUDGET: usize = 220_000;
+
+fn request_bytes(request: &Value) -> usize {
+    serde_json::to_vec(request)
+        .map(|bytes| bytes.len())
+        .unwrap_or(0)
+}
+
+fn shrink_to_provider_budget(request: &mut Value) {
+    loop {
+        let before = request_bytes(request);
+        if before <= PROVIDER_REQUEST_BUDGET {
+            return;
+        }
+        if !drop_last_role_region(request) && !drop_last_specialist(request) {
+            return;
+        }
+        if request_bytes(request) >= before {
+            return;
+        }
+    }
+}
+
+fn role_question(name: &str, index: usize) -> bool {
+    let Some(rest) = name.strip_prefix("role_") else {
+        return false;
+    };
+    let Some((got, _)) = rest.split_once('_') else {
+        return false;
+    };
+    got == index.to_string()
+}
+
+fn drop_last_role_region(request: &mut Value) -> bool {
+    let Some(regions) = request["state"]["regions"].as_array() else {
+        return false;
+    };
+    if regions.is_empty() {
+        return false;
+    }
+    let index = regions.len() - 1;
+    request["state"]["regions"].as_array_mut().unwrap().pop();
+    if let Some(sources) = request["state"]["region_sources"].as_array_mut() {
+        sources.pop();
+    }
+    request["questions"]
+        .as_object_mut()
+        .unwrap()
+        .retain(|name, _| !role_question(name, index));
+    if let Some(fragments) = request["state"]["fragments"].as_array_mut() {
+        for fragment in fragments {
+            let Some(occurrences) = fragment["occurrences"].as_array_mut() else {
+                continue;
+            };
+            for occurrence in occurrences {
+                if occurrence["region_index"].as_u64() == Some(index as u64) {
+                    occurrence["region_index"] = Value::Null;
+                }
+            }
+        }
+    }
+    let omitted = request["state"]["role_limitations"]["regions_omitted"]
+        .as_u64()
+        .unwrap_or(0);
+    request["state"]["role_limitations"]["regions_omitted"] = json!(omitted + 1);
+    true
+}
+
+fn drop_last_specialist(request: &mut Value) -> bool {
+    let questions = request["questions"].as_object_mut().unwrap();
+    let Some(index) = questions
+        .keys()
+        .filter_map(|name| {
+            name.strip_prefix("cascade_specialist_")?
+                .parse::<usize>()
+                .ok()
+        })
+        .max()
+    else {
+        return false;
+    };
+    questions.remove(&format!("cascade_specialist_{index}"));
+    true
 }
 
 fn specialist_questions(questions: &mut Map<String, Value>, fragments: &Value) {
@@ -425,5 +515,60 @@ mod tests {
         project.write("mixed.py", "def changed():\n    return 42\n");
         options.cache_only = true;
         assert!(!run(&project, &options, &mut Judge).complete);
+    }
+
+    #[test]
+    fn wide_cascade_requests_omit_trailing_regions_to_stay_within_provider_budget() {
+        let project = Project::new();
+        let mut source = String::new();
+        for index in 0..48 {
+            source.push_str(&format!(
+                "fn operation_{index}(value: &str) -> String {{\n    let name = value.trim().to_lowercase();\n    let enabled = !name.is_empty();\n    format!(\"{{name}}-{{enabled}}\")\n}}\n\n"
+            ));
+        }
+        project.write("wide.rs", &source);
+        let mut options = args();
+        options.classification_cascade = true;
+        let inputs = crate::inventory::collect(&options, &project.context(), &[]).unwrap();
+        let request = crate::maintainability::request(&inputs[0], &options).unwrap();
+        let questions = request["questions"].as_object().unwrap();
+        assert!(questions.contains_key("file_organization"));
+        assert!(questions.contains_key("function_simplification"));
+        assert!(
+            questions
+                .keys()
+                .any(|name| name.starts_with("shared_logic"))
+        );
+        assert!(request_bytes(&request) <= PROVIDER_REQUEST_BUDGET);
+        let regions = request["state"]["regions"].as_array().unwrap().len();
+        let omitted = request["state"]["role_limitations"]["regions_omitted"]
+            .as_u64()
+            .unwrap();
+        assert!(omitted > 0);
+        assert!(regions < 48);
+        for fragment in request["state"]["fragments"].as_array().unwrap() {
+            for occurrence in fragment["occurrences"].as_array().unwrap() {
+                if let Some(index) = occurrence["region_index"].as_u64() {
+                    assert!(index < regions as u64);
+                }
+            }
+        }
+        for name in questions.keys() {
+            if let Some(rest) = name.strip_prefix("role_")
+                && let Some((index, _)) = rest.split_once('_')
+            {
+                let index: usize = index.parse().unwrap();
+                assert!(index < regions);
+            }
+        }
+        project.write("small.rs", "fn only() -> i32 { 1 }\n");
+        std::fs::remove_file(project.0.join("wide.rs")).unwrap();
+        let inputs = crate::inventory::collect(&options, &project.context(), &[]).unwrap();
+        let small = crate::maintainability::request(&inputs[0], &options).unwrap();
+        assert_eq!(
+            small["state"]["role_limitations"]["regions_omitted"].as_u64(),
+            Some(0)
+        );
+        assert!(request_bytes(&small) <= PROVIDER_REQUEST_BUDGET);
     }
 }
