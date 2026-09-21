@@ -8,6 +8,7 @@ mod context;
 mod context_units;
 mod discovery;
 mod evaluate;
+mod file_kind;
 mod html_report;
 mod inventory;
 mod locations;

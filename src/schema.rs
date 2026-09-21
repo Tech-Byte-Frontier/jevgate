@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-pub const RUBRIC: &str = "jevgate-quality-v31";
+pub const RUBRIC: &str = "jevgate-quality-v32";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -109,6 +109,9 @@ pub struct FileResult {
     pub file_dimensions: BTreeMap<String, Dimension>,
     pub findings: Vec<Finding>,
     pub error: Option<String>,
+    /// Base file classification used to choose what the gates judge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<crate::file_kind::Classification>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

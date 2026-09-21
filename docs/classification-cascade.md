@@ -29,8 +29,9 @@ Only fully resolved test–test groups select the specialist. Mixed groups,
 unsupported evidence, omitted occurrences and uncertain roles retain the general
 assessment. Conflicts in an applicable test branch remain unresolved. The
 comparison leaves baseline findings unchanged and remains opt-in until measured
-role reliability and downstream benefit justify adoption. Default behavior,
-specialist prompts and maintainability thresholds remain unchanged. Broader
+role reliability and downstream benefit justify adoption. Specialist prompts
+and maintainability thresholds remain unchanged. File eligibility, including
+which test code reaches those gates, is applied on every check. Broader
 specialization and sequential requests remain proposals.
 
 ## From basic evidence to specialized judgments
@@ -40,16 +41,28 @@ The proposed stages are logical dependencies, not necessarily separate API calls
 
 | Layer | Evidence or question | How it helps |
 | --- | --- | --- |
-| Eligibility | Is this selected file supported source, generated output, data, or an unsupported format? | Use configuration, extensions and parser support to establish scope. Unsupported or skipped does not mean clear. |
+| Eligibility | Is this selected file supported source, generated output, data, or an unsupported format? | Shell scripts and `.d.ts` declarations are skipped before any model call. Skipped is not clear. |
 | Language | Python, Rust, JavaScript, TypeScript, another language, or mixed/unknown? | Select parsers and language context in code. Avoid paying Jev to rediscover an unambiguous extension. Preserve parser failures and embedded-language limits. |
 | Purpose | Does this region implement tests, UI behavior, service behavior, shared library logic, or tooling? | Use source semantics to choose relevant maintainability questions. Paths and imports provide evidence, not a maintainability verdict. |
 | Operation role | Setup, action under test, assertion, rendering, transformation, resource lifecycle, or policy decision? | Distinguish the responsibilities inside a file before judging complexity or repetition. |
 | Relationship | Are these locations implementing common mechanics, invoking an existing helper, repeating an intentional action, or expressing independent policies? | Focus shared-logic judgments on what should be maintained together. |
 | Maintainability | Would a specific split, simplification, or extraction reduce maintenance while preserving the relevant responsibilities? | Produce localized findings, acceptable outcomes, uncertainty, or missing-context outcomes. |
 
-JevGate already discovers source files by extension/configuration, assigns file
-roles from paths/configuration, and chooses supported parsers by extension. The
-proposed semantic layers would extend that evidence, rather than replace discovery.
+JevGate discovers source files by extension and configuration, then applies
+eligibility before the gates. Shell scripts and TypeScript declaration files are
+outside the three gates. Structural test markers — Rust `#[cfg(test)]`, `#[test]`,
+and the `not(test)` exception, plus JavaScript `describe` / `it` — are removed
+from the source the gates read, while line numbers stay aligned. The gate request
+includes that base classification.
+
+A path that already means tests is not judged unless `--include-tests` is set.
+When that file still contains other code, one purpose question classifies it as
+tests, application, or mixed before any gate request. Portion questions are used
+only when the file is confidently mixed. An uncertain purpose does not drop the
+file: the gates still judge it, and only confident test regions are removed.
+A confident test result skips the gates unless `--include-tests` is set. Mixed
+files always judge the application portion; the flag also judges the test portion
+as its own request.
 
 Language, application area and test role are separate axes. A Python file can
 contain backend tests; a Rust module can contain production functions and tests;

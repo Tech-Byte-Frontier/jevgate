@@ -26,6 +26,8 @@ pub(super) struct Receipt {
 pub(super) fn stage(request: &Value) -> &'static str {
     if request["state"]["role_version"].is_string() {
         "roles"
+    } else if request["state"]["purpose_version"].is_number() {
+        "file-purpose"
     } else {
         "maintainability"
     }

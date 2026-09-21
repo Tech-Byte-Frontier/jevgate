@@ -41,6 +41,10 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
     )?;
     if let Some(error) = &file.error {
         writeln!(out, "  {error}")?;
+    } else if let Some(classification) = &file.classification
+        && !classification.reason.is_empty()
+    {
+        writeln!(out, "  {}", classification.reason)?;
     }
     if let Some(roles) = &file.role_assessment {
         writeln!(
