@@ -148,6 +148,9 @@ fn load(
             context: Vec::new(),
         });
     }
+    if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
+        return over_read_cap(result, relative, &path, args.max_file_bytes);
+    }
     let source = read_source(&path, args.max_file_bytes);
     match source {
         Ok(source) => {
@@ -180,6 +183,55 @@ fn load(
             })
         }
     }
+}
+
+const LOCAL_PARSE_MAX: u64 = 1_048_576;
+
+fn over_read_cap(
+    mut result: FileResult,
+    relative: &std::path::Path,
+    path: &std::path::Path,
+    cap: u64,
+) -> Result<Input> {
+    let parsed = match read_source(path, LOCAL_PARSE_MAX) {
+        Ok(source) => Some(source),
+        Err(error) => {
+            let message = error.to_string();
+            if !message.contains("exceeds") && !message.contains("grew beyond") {
+                result.status = Status::Error;
+                result.error = Some(message);
+                return Ok(Input {
+                    result,
+                    source: None,
+                    context: Vec::new(),
+                });
+            }
+            None
+        }
+    };
+    let len = parsed.as_ref().map(String::len).unwrap_or_else(|| {
+        std::fs::symlink_metadata(path)
+            .map(|metadata| metadata.len() as usize)
+            .unwrap_or(0)
+    });
+    if let Some(source) = &parsed {
+        result.source_hash = hash(source.as_bytes());
+        result.content_identity = super::locations::identity(relative, source);
+        result.semantic_size = super::locations::semantic_size(relative, source);
+    }
+    result.status = Status::NeedsContext;
+    result.classification = Some(super::file_kind::unsent(
+        relative,
+        parsed.as_deref().unwrap_or(""),
+        &format!(
+            "{len} bytes exceeds the {cap}-byte read cap, so the complete source was not sent."
+        ),
+    ));
+    Ok(Input {
+        result,
+        source: None,
+        context: Vec::new(),
+    })
 }
 
 pub(super) fn read_source(path: &std::path::Path, limit: u64) -> Result<String> {

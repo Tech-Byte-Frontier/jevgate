@@ -65,7 +65,7 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
                 region["evidence"]["end_line"],
                 region["status"].as_str().unwrap_or("unknown")
             )?;
-            for (role, _) in crate::roles::ROLES {
+            for role in crate::roles::ROLES {
                 let signal = &region["roles"][role];
                 writeln!(
                     out,
