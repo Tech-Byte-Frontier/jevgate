@@ -28,8 +28,9 @@ test/implementation or implementation/implementation relationship.
 Only fully resolved test–test groups select the specialist. Mixed groups,
 unsupported evidence, omitted occurrences and uncertain roles retain the general
 assessment. Conflicts in an applicable test branch remain unresolved. The
-specialist comparison does not replace the general verdict. Specialist prompts
-and maintainability thresholds are unchanged. File eligibility, including which
+specialist comparison does not replace the general verdict. Specialist criteria
+use the same structured review boundary as the other judgments, and the
+maintainability thresholds are unchanged. File eligibility, including which
 test code reaches those gates, is applied on every check. Broader specialization
 remains a proposal.
 

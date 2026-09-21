@@ -78,8 +78,9 @@ pub struct CheckArgs {
     /// Maximum simultaneous independent TypeSafe requests (questions within each call are parallel)
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u32).range(1..=16))]
     pub concurrency: u32,
-    /// Per-file source limit; oversized files are incomplete, never truncated
-    #[arg(long, default_value_t = 65536, value_parser = clap::value_parser!(u64).range(1..=1048576))]
+    /// Per-file source limit. A larger file is not sent; its size and parsed
+    /// operation names are reported as needs-context. Source is never truncated.
+    #[arg(long, default_value_t = DEFAULT_MAX_FILE_BYTES, value_parser = clap::value_parser!(u64).range(1..=1048576))]
     pub max_file_bytes: u64,
     /// Cache lifetime; unchanged watch snapshots are not automatically reevaluated
     #[arg(long, default_value_t = 3600)]
@@ -100,6 +101,11 @@ pub struct CheckArgs {
     #[arg(long = "rule")]
     pub rules: Vec<String>,
 }
+
+/// Largest default source that still fits in one provider request beside the
+/// three maintainability verdicts. Configuration and `--max-file-bytes` can
+/// only narrow this. The absolute read used to list operations is 1 MiB.
+pub const DEFAULT_MAX_FILE_BYTES: u64 = 131_072;
 
 fn source_extension(value: &str) -> Result<String, String> {
     if value.is_empty() || !value.bytes().all(|c| c.is_ascii_alphanumeric()) {

@@ -118,6 +118,82 @@ pub(super) fn run(
 }
 
 #[test]
+fn unchanged_files_are_reused_from_the_last_report_without_api_calls() {
+    let project = Project::new();
+    project.write("a.rs", "fn a() -> i32 { 1 }\n");
+    project.write("b.rs", "fn b() -> i32 { 2 }\n");
+    let options = args();
+    let mut mock = Mock::default();
+    let first = run(&project, &options, &mut mock);
+    assert_eq!(mock.calls, 2);
+    assert!(
+        first
+            .files
+            .iter()
+            .all(|file| !file.context_limitations.is_empty())
+    );
+    let previous = evaluate::previous_judgments(Some(&first), false);
+    let inputs = inventory::collect(&options, &project.context(), &[]).unwrap();
+    let mut second = evaluate::snapshot(
+        &inputs,
+        &previous,
+        &options,
+        evaluate::SnapshotContext {
+            root: &project.0,
+            generation: 2,
+            requests: 0,
+        },
+    );
+    assert!(second.files.iter().all(|file| file.cached));
+    assert!(
+        second
+            .files
+            .iter()
+            .all(|file| file.status == schema::Status::Clear)
+    );
+    let store = storage::Store::open(&project.0).unwrap();
+    let mut session = evaluate::Session {
+        args: &options,
+        context: &project.context(),
+        store: &store,
+        evaluator: &mut mock,
+        requests: 0,
+        paid_input_tokens: 0,
+        paid_output_tokens: 0,
+    };
+    session.evaluate(&inputs, &mut second).unwrap();
+    assert_eq!(mock.calls, 2);
+    assert_eq!(second.api_requests, 0);
+    assert_eq!(second.paid_input_tokens, 0);
+    project.write("b.rs", "fn b() -> i32 { 3 }\n");
+    let inputs = inventory::collect(&options, &project.context(), &[]).unwrap();
+    let kept = evaluate::previous_judgments(Some(&second), false);
+    let partial = evaluate::snapshot(
+        &inputs,
+        &kept,
+        &options,
+        evaluate::SnapshotContext {
+            root: &project.0,
+            generation: 3,
+            requests: 0,
+        },
+    );
+    let changed = partial
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("b.rs"))
+        .unwrap();
+    let kept_file = partial
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("a.rs"))
+        .unwrap();
+    assert_eq!(changed.status, schema::Status::Pending);
+    assert!(kept_file.cached);
+    assert!(evaluate::previous_judgments(Some(&first), true).is_empty());
+}
+
+#[test]
 fn model_and_refresh_invalidate_cache() {
     let project = Project::new();
     project.write("lib.rs", "fn f() {}");
@@ -227,6 +303,88 @@ fn oversized_and_invalid_source_never_reach_api() {
     let report = run(&project, &options, &mut mock);
     assert_eq!(mock.calls, 0);
     assert!(!report.complete);
+    let large = report
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("large.rs"))
+        .unwrap();
+    assert_eq!(large.status, schema::Status::NeedsContext);
+    assert!(large.error.is_none());
+    assert!(large.dimensions.is_empty());
+    let reason = &large.classification.as_ref().unwrap().reason;
+    assert!(reason.contains("too_large"), "{reason}");
+    assert!(reason.contains("15-byte read cap"), "{reason}");
+    assert_eq!(
+        report
+            .files
+            .iter()
+            .find(|file| file.path.ends_with("invalid.rs"))
+            .unwrap()
+            .status,
+        schema::Status::Error
+    );
+}
+
+#[test]
+fn an_oversized_file_does_not_block_judgment_of_the_others() {
+    let project = Project::new();
+    project.write("large.rs", "fn too_large() -> i32 { 1 }\n");
+    project.write("small.rs", "fn a(){}\n");
+    let mut options = args();
+    options.max_file_bytes = 20;
+    let mut mock = Mock::default();
+    let report = run(&project, &options, &mut mock);
+    assert_eq!(mock.calls, 1);
+    assert!(report.complete);
+    assert_eq!(report.status, "needs-context");
+    let large = report
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("large.rs"))
+        .unwrap();
+    assert_eq!(large.status, schema::Status::NeedsContext);
+    assert_eq!(large.classification.as_ref().unwrap().kind, "oversized");
+    assert!(large.findings.is_empty());
+    assert_eq!(
+        report
+            .files
+            .iter()
+            .find(|file| file.path.ends_with("small.rs"))
+            .unwrap()
+            .status,
+        schema::Status::Clear
+    );
+}
+
+#[test]
+fn source_that_cannot_fit_one_request_is_not_sent() {
+    let project = Project::new();
+    let mut source = String::new();
+    let mut index = 0usize;
+    while source.len() < 200_000 {
+        source.push_str(&format!("fn kept_{index}() -> i32 {{ {index} }}\n"));
+        index += 1;
+    }
+    project.write("huge.rs", &source);
+    project.write("small.rs", "fn ready() -> i32 { 1 }\n");
+    let mut options = args();
+    options.max_file_bytes = 1_048_576;
+    let mut mock = Mock::default();
+    let report = run(&project, &options, &mut mock);
+    assert_eq!(mock.calls, 1);
+    assert!(report.complete);
+    let huge = report
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("huge.rs"))
+        .unwrap();
+    assert_eq!(huge.status, schema::Status::NeedsContext);
+    assert_eq!(huge.classification.as_ref().unwrap().kind, "oversized");
+    let reason = &huge.classification.as_ref().unwrap().reason;
+    assert!(reason.contains("does not fit one request"), "{reason}");
+    assert!(reason.contains("kept_0"), "{reason}");
+    assert!(huge.dimensions.is_empty());
+    assert!(huge.findings.is_empty());
 }
 
 #[test]

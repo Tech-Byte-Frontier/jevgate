@@ -26,6 +26,38 @@ pub struct SnapshotContext<'a> {
     pub requests: u32,
 }
 
+pub fn previous_judgments(report: Option<&Report>, refresh: bool) -> BTreeMap<PathBuf, FileResult> {
+    if refresh {
+        return BTreeMap::new();
+    }
+    report
+        .map(|report| {
+            report
+                .files
+                .iter()
+                .map(|file| (file.path.clone(), file.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn reusable(file: &FileResult) -> bool {
+    !file.source_hash.is_empty()
+        && file.error.is_none()
+        && file
+            .classification
+            .as_ref()
+            .is_none_or(|class| class.kind != "oversized")
+        && matches!(
+            file.status,
+            Status::Clear
+                | Status::Review
+                | Status::Uncertain
+                | Status::NeedsContext
+                | Status::NotApplicable
+        )
+}
+
 pub fn snapshot(
     inputs: &[Input],
     previous: &BTreeMap<PathBuf, FileResult>,
@@ -38,13 +70,12 @@ pub fn snapshot(
             previous
                 .get(&input.result.path)
                 .filter(|old| {
-                    !old.source_hash.is_empty()
+                    reusable(old)
                         && old.source_hash == input.result.source_hash
                         && old.catalog_hash == input.result.catalog_hash
                         && old.role == input.result.role
                         && old.context_files == input.result.context_files
                         && old.context_complete == input.result.context_complete
-                        && old.context_limitations == input.result.context_limitations
                         && input.result.status == Status::Pending
                 })
                 .map(|old| {
@@ -206,8 +237,11 @@ impl Session<'_> {
         if self.args.include_tests {
             let mut portions = Vec::new();
             for (owner, input) in inputs.iter().enumerate() {
-                match crate::file_kind::test_portion_request(input, self.args, &report.files[owner])
-                {
+                match crate::file_kind::test_portion_request(
+                    input,
+                    self.args,
+                    &mut report.files[owner],
+                ) {
                     Ok(Some(request)) => portions.push(Task {
                         owner,
                         payload: request.clone(),
@@ -346,6 +380,14 @@ impl Session<'_> {
                 == Some(expected)
         };
         for file in &mut report.files {
+            // A source that was deliberately not uploaded has no judgment hash to recheck.
+            if file
+                .classification
+                .as_ref()
+                .is_some_and(|class| class.kind == "oversized")
+            {
+                continue;
+            }
             if matches!(
                 file.status,
                 Status::Clear | Status::Review | Status::NeedsContext | Status::Uncertain
@@ -389,13 +431,30 @@ fn schedule(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Result<Sc
         return Ok(Scheduled::None);
     }
     if args.roles_only {
-        return Ok(Scheduled::Judge(crate::roles::request(input, args)?));
+        let request = crate::roles::request(input, args)?;
+        if !crate::cascade::within_budget(&request) {
+            let source = input.source.as_deref().unwrap_or("");
+            file.classification = Some(crate::file_kind::unsent(
+                &input.result.path,
+                source,
+                &crate::file_kind::budget_detail(source.len()),
+            ));
+            file.status = Status::NeedsContext;
+            return Ok(Scheduled::None);
+        }
+        return Ok(Scheduled::Judge(request));
     }
     match crate::file_kind::plan(input, args)? {
         crate::file_kind::Plan::Skip(class) => {
             file.contains_tests = class.kind == "tests" || !class.separated_tests.is_empty();
             file.classification = Some(class);
             file.status = Status::NotApplicable;
+            Ok(Scheduled::None)
+        }
+        crate::file_kind::Plan::Unsent(class) => {
+            file.contains_tests = class.kind == "tests" || !class.separated_tests.is_empty();
+            file.classification = Some(class);
+            file.status = Status::NeedsContext;
             Ok(Scheduled::None)
         }
         crate::file_kind::Plan::Purpose(class, request) => {

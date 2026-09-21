@@ -93,13 +93,15 @@ The nearest `jevgate.toml` or Git root defines the project boundary. For example
 upload_allow = ["src/**", "tests/**"]
 upload_deny = ["src/private/**"]
 generated = ["**/*.generated.*"]
-max_file_bytes = 65536
+max_file_bytes = 131072
 ```
 
 Unknown configuration keys are errors. Upload boundaries and configured ceilings
 also apply to explicit context. For CI, check changed files with `--base origin/main` and restore/save
-`.jevgate/cache`. Set `--cache-ttl-secs` for the desired cache lifetime (default:
-one hour). Inject `TYPESAFE_API_KEY`; local credentials
+`.jevgate/latest.json` together with `.jevgate/cache`. An unchanged file is
+reused from the last report, so a repeat check does not call the API.
+`--refresh` judges those files again. The cache still answers a repeated
+request for one hour (`--cache-ttl-secs`). Inject `TYPESAFE_API_KEY`; local credentials
 can use `jevgate auth` or an explicit `--env-file`. Never commit credentials.
 
 Findings currently remain advisory; operational or incomplete runs exit 2.
@@ -112,6 +114,12 @@ Results are `review`, `clear`, `uncertain`, `needs-context`, or `not-applicable`
 Probabilities are model judgments, not measured accuracy. A conditional location
 does not establish a concern. Syntax supplies candidates, never semantic verdicts.
 Candidates are capped at 64 operations and 240 pairs; omissions are reported.
+
+The default read cap is 128 KiB. A file above it, or whose complete source does
+not fit one request beside the maintainability questions, is `needs-context`.
+The report includes its byte size and the operation names the parser found. That
+result is not a file-organization finding, the source is not truncated, and the
+other files are still judged. A lower `max_file_bytes` only narrows the cap.
 
 Shared logic can miss repeated sections inside larger files. Run linting,
 formatting, tests and type checks separately.

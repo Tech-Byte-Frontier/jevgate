@@ -15,6 +15,7 @@ mod locations;
 mod maintainability;
 mod options;
 mod output;
+mod questions;
 mod repetition;
 mod requests;
 mod response;
@@ -98,9 +99,10 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         Some(storage::Store::open(&context.root)?)
     };
     let baseline = storage::read_latest(&context.root).ok();
+    let previous = evaluate::previous_judgments(baseline.as_ref(), args.refresh);
     let mut report = evaluate::snapshot(
         &inputs,
-        &Default::default(),
+        &previous,
         args,
         evaluate::SnapshotContext {
             root: &context.root,
