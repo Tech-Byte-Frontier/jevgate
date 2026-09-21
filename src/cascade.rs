@@ -218,6 +218,107 @@ mod tests {
         assert_eq!(missing["comparison_status"], "needs-context");
     }
 
+    fn composed(
+        relationship: Value,
+        limitations: Value,
+        general: Value,
+        specialist: Value,
+    ) -> Value {
+        let request = json!({"state":{"cascade_role_version":crate::roles::VERSION,"repeated_fragments":[
+            {"locations":[{"path":"sample.rs","start_line":1,"end_line":3},{"path":"sample.rs","start_line":8,"end_line":10}]}
+        ]}});
+        let roles = crate::roles::Assessment {
+            version: crate::roles::VERSION.into(),
+            model: "jev-1.13.0".into(),
+            regions: vec![],
+            limitations,
+            relationships: vec![relationship],
+        };
+        let body = json!({"model":"jev-1.13.0","answers":{
+            "shared_logic_fragment_0":{"probabilities":general},
+            "cascade_specialist_0":{"probabilities":specialist}}});
+        serde_json::to_value(compare(&request, &body, Some(&roles)).unwrap()).unwrap()["fragments"]
+            [0]
+        .clone()
+    }
+
+    #[test]
+    fn composition_applies_the_specialist_only_to_a_resolved_test_group() {
+        let clear = json!({"idiom":1.0});
+        let specialist_review = json!({"review":0.95,"clear":0.05});
+        let limits = json!({"unsupported_parser_paths":[]});
+        let resolved = json!({"locations_omitted":0,"pairs":[
+            {"unresolved":false,"kinds":["test-test"]},
+            {"unresolved":false,"kinds":["test-test"]}
+        ]});
+        let selected = composed(
+            resolved.clone(),
+            limits.clone(),
+            json!({"shared_setup":0.4,"idiom":0.4,"context":0.2}),
+            specialist_review.clone(),
+        );
+        assert_eq!(selected["route"], "tests");
+        assert_eq!(selected["selected_branches"], json!(["general", "tests"]));
+        assert_eq!(selected["comparison_status"], "review");
+        assert_eq!(selected["general"]["probabilities"]["shared_setup"], 0.4);
+        assert_eq!(selected["specialist"]["probabilities"]["review"], 0.95);
+
+        let mixed = composed(
+            json!({"locations_omitted":0,"pairs":[
+                {"unresolved":false,"kinds":["test-test"]},
+                {"unresolved":false,"kinds":["implementation-implementation"]}
+            ]}),
+            limits.clone(),
+            clear.clone(),
+            specialist_review.clone(),
+        );
+        assert_eq!(mixed["route"], "mixed");
+        assert_eq!(mixed["selected_branches"], json!(["general"]));
+        assert_eq!(mixed["comparison_status"], "clear");
+
+        let missing = composed(
+            json!({"locations_omitted":0,"pairs":[{"unresolved":true,"kinds":["test-test"]}]}),
+            limits.clone(),
+            clear.clone(),
+            specialist_review.clone(),
+        );
+        assert_eq!(missing["route"], "ambiguous");
+        assert_eq!(missing["selected_branches"], json!(["general"]));
+        assert_eq!(missing["comparison_status"], "clear");
+
+        let truncated = composed(
+            json!({"locations_omitted":1,"pairs":[{"unresolved":false,"kinds":["test-test"]}]}),
+            limits.clone(),
+            clear.clone(),
+            specialist_review.clone(),
+        );
+        assert_eq!(truncated["route"], "ambiguous");
+        assert_eq!(truncated["selected_branches"], json!(["general"]));
+        assert_eq!(truncated["comparison_status"], "clear");
+
+        let unsupported = composed(
+            resolved,
+            json!({"unsupported_parser_paths":["support.zig"]}),
+            clear.clone(),
+            specialist_review.clone(),
+        );
+        assert_eq!(unsupported["route"], "ambiguous");
+        assert_eq!(unsupported["comparison_status"], "clear");
+
+        let conflict = composed(
+            json!({"locations_omitted":0,"pairs":[{"unresolved":false,"kinds":["test-test"]}]}),
+            limits,
+            json!({"shared_setup":0.9,"idiom":0.1}),
+            json!({"clear":1.0}),
+        );
+        assert_eq!(conflict["route"], "tests");
+        assert_eq!(conflict["conflict"], true);
+        assert_eq!(conflict["comparison_status"], "uncertain");
+        assert_ne!(conflict["comparison_status"], "clear");
+        assert_eq!(conflict["general"]["probabilities"]["shared_setup"], 0.9);
+        assert_eq!(conflict["specialist"]["probabilities"]["clear"], 1.0);
+    }
+
     #[test]
     fn mixed_missing_and_truncated_roles_never_select_the_test_specialist() {
         let mut roles = crate::roles::Assessment {
