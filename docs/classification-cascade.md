@@ -1,6 +1,6 @@
-# Possible classification cascade
+# Classification cascade
 
-Status: opt-in comparison available with `--classification-cascade --format json`.
+Every shared-logic check includes this in the same request.
 One shared-evidence request includes four overlapping semantic roles for up to 32
 deduplicated regions containing repeated occurrences (160 role/evidence questions)
 and a conditional test specialist
@@ -8,7 +8,7 @@ for up to 12 repeated fragments. If that body would exceed the provider context
 limit, trailing occurrence regions are omitted and counted in `regions_omitted`;
 the general maintainability questions stay in the same request.
 An uncertain file-organization, function-simplification, or shared-logic result
-can trigger one follow-up whose state is only the undecided operation, the
+triggers one follow-up whose state is only the undecided operation, the
 repeated lines, or the file without the other evidence. The same question is
 asked again. A follow-up replaces the uncertain status only when review or
 clear reaches the existing 0.80 threshold. JSON retains raw answers, locations, model,
@@ -28,11 +28,10 @@ test/implementation or implementation/implementation relationship.
 Only fully resolved test–test groups select the specialist. Mixed groups,
 unsupported evidence, omitted occurrences and uncertain roles retain the general
 assessment. Conflicts in an applicable test branch remain unresolved. The
-comparison leaves baseline findings unchanged and remains opt-in until measured
-role reliability and downstream benefit justify adoption. Specialist prompts
-and maintainability thresholds remain unchanged. File eligibility, including
-which test code reaches those gates, is applied on every check. Broader
-specialization and sequential requests remain proposals.
+specialist comparison does not replace the general verdict. Specialist prompts
+and maintainability thresholds are unchanged. File eligibility, including which
+test code reaches those gates, is applied on every check. Broader specialization
+remains a proposal.
 
 ## From basic evidence to specialized judgments
 

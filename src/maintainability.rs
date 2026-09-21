@@ -83,14 +83,13 @@ pub fn is_rule(s: &str) -> bool {
 #[cfg(test)]
 pub fn request(input: &Input, args: &CheckArgs) -> Result<Value> {
     let view = crate::file_kind::gate_view(input, args)?;
-    request_with(input, args, &view, args.classification_cascade)
+    request_with(input, args, &view)
 }
 
 pub(crate) fn request_with(
     input: &Input,
     args: &CheckArgs,
     view: &crate::file_kind::View,
-    cascade: bool,
 ) -> Result<Value> {
     let source = view.source.as_str();
     let scope = crate::file_kind::scope_sentence(&view.classification);
@@ -239,7 +238,7 @@ pub(crate) fn request_with(
                     "context":"The surrounding evidence does not establish whether the locations implement a common responsibility."}}));
         }
     }
-    let cascade_enabled = cascade && questions.contains_key("shared_logic");
+    let cascade_enabled = questions.contains_key("shared_logic");
     let mut request = json!({"model":args.model,"state":{
         "maintainability_version":6,
         "file":{"path":input.result.path,"role":input.result.role,"language":view.classification.language,"classification":crate::file_kind::model_value(&view.classification),"source":source,"source_hash":input.result.source_hash},
@@ -513,9 +512,6 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
 /// operation or repeated lines, or the file alone when the uncertain question
 /// is file organization. The question text matches the first pass.
 pub fn focused_requests(input: &Input, file: &FileResult, args: &CheckArgs) -> Result<Vec<Value>> {
-    if !args.classification_cascade {
-        return Ok(Vec::new());
-    }
     let Some(original) = input.source.as_deref() else {
         return Ok(Vec::new());
     };
@@ -1000,8 +996,13 @@ mod tests {
     impl crate::transport::Evaluator for Judge {
         fn evaluate(&mut self, request: &Value) -> Result<Value> {
             self.calls += 1;
-            assert!(request["state"]["maintainability_version"].is_number());
+            if request["state"].get("focused").is_none() {
+                assert!(request["state"]["maintainability_version"].is_number());
+            }
             let answers = request["questions"].as_object().unwrap().iter().map(|(key,q)| {
+                if q["type"] == "noul" {
+                    return (key.clone(), json!({"type":"noul","noul":0.02}));
+                }
                 let location = key.ends_with("_location");
                 let candidate_mass: f64 = self.weights.iter().filter(|(k,_)| k.starts_with('p') || k.starts_with('o')).map(|(_,p)|p).sum();
                 let weights = q["criteria"].as_object().unwrap().keys().map(|k| {
@@ -1184,7 +1185,16 @@ mod tests {
         }
         options.rules = vec!["file_organization".into()];
         let selected = request(&input, &options).unwrap();
-        assert_eq!(selected["state"], full["state"]);
+        for key in [
+            "file",
+            "context",
+            "operations",
+            "pairs",
+            "repeated_fragments",
+            "limitations",
+        ] {
+            assert_eq!(selected["state"][key], full["state"][key]);
+        }
     }
 
     #[test]
@@ -1388,6 +1398,9 @@ mod tests {
         assert_eq!(r["state"]["limitations"]["operations_omitted"], 6);
         assert!(r["state"]["limitations"]["pairs_omitted"].as_u64().unwrap() > 0);
         for (key, q) in r["questions"].as_object().unwrap() {
+            if key.starts_with("role_") || key.starts_with("cascade_") {
+                continue;
+            }
             assert!(q["criteria"].as_object().unwrap().len() <= 255);
             assert!(
                 q["criteria"][if key.ends_with("_location") {
@@ -1408,8 +1421,6 @@ mod tests {
             "def keep_ready(value):\n    return value\n\ndef load_inputs(value):\n    name = value.strip().lower()\n    return {\"name\": name}\n",
         );
         let mut options = args();
-        options.classification_cascade = true;
-        options.refresh = true;
         options.refresh = true;
         struct Focus {
             calls: usize,
@@ -1525,17 +1536,5 @@ mod tests {
             Status::Uncertain
         );
         assert!(unresolved.files[0].findings.is_empty());
-        options.classification_cascade = false;
-        let mut once = Focus {
-            calls: 0,
-            source: String::new(),
-            decisive: true,
-        };
-        let baseline = run(&project, &options, &mut once);
-        assert_eq!(once.calls, 1);
-        assert_eq!(
-            baseline.files[0].dimensions["function_simplification"].status,
-            Status::Uncertain
-        );
     }
 }

@@ -103,7 +103,6 @@ fn load(
                 crate::cascade::VERSION,
                 crate::file_kind::VERSION,
                 args.roles_only,
-                args.classification_cascade,
                 args.include_tests,
                 &args.model,
                 &args.rules,

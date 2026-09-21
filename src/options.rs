@@ -39,11 +39,8 @@ pub struct CheckArgs {
     /// Compatibility flag; default maintainability already uses one batch per file
     #[arg(long)]
     pub quick: bool,
-    /// Compare test-role specialization in JSON without changing baseline findings
-    #[arg(long)]
-    pub classification_cascade: bool,
     /// Evaluate semantic roles only; no maintainability judgments (defaults to JSON)
-    #[arg(long, conflicts_with_all = ["classification_cascade", "rules", "report"])]
+    #[arg(long, conflicts_with_all = ["rules", "report"])]
     pub roles_only: bool,
     /// Additional file extension to review as text (repeatable, without a dot)
     #[arg(long, value_parser = source_extension)]

@@ -462,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn opt_in_isolates_cache_and_keeps_findings_and_region_evidence() {
+    fn shared_logic_routes_occurrences_and_isolates_cache() {
         let project = Project::new();
         project.write("mixed.py", "def a(value):\n    name = value.strip().lower()\n    record = dict(name=name, enabled=True)\n    return save(record)\n\ndef b(value):\n    name = value.strip().lower()\n    record = dict(name=name, enabled=True)\n    return save(record)\n");
         let mut source = std::fs::read_to_string(project.0.join("mixed.py")).unwrap();
@@ -472,18 +472,10 @@ mod tests {
         project.write("mixed.py", &source);
         let mut options = args();
         options.rules = vec!["shared_logic".into()];
-        let baseline = run(&project, &options, &mut Judge);
-        assert!(baseline.complete);
-        options.classification_cascade = true;
         let experiment = run(&project, &options, &mut Judge);
         assert!(experiment.complete);
         assert_eq!(experiment.api_requests, 1);
         assert_eq!(experiment.stages["maintainability"].cached_judgments, 0);
-        assert_eq!(baseline.files[0].status, experiment.files[0].status);
-        assert_eq!(
-            baseline.files[0].findings.len(),
-            experiment.files[0].findings.len()
-        );
         let comparison = experiment.files[0].dimensions["shared_logic"]
             .refactoring_assessment
             .as_ref()
@@ -527,8 +519,7 @@ mod tests {
             ));
         }
         project.write("wide.rs", &source);
-        let mut options = args();
-        options.classification_cascade = true;
+        let options = args();
         let inputs = crate::inventory::collect(&options, &project.context(), &[]).unwrap();
         let request = crate::maintainability::request(&inputs[0], &options).unwrap();
         let questions = request["questions"].as_object().unwrap();

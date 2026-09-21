@@ -49,6 +49,30 @@ fn groups(request: &Value) -> BTreeMap<String, Value> {
         });
         entry["questions"][name] = question.clone();
     }
+    // Role-routing fields belong to the shared-logic cascade. Leaving them on
+    // the other gates would make a later single-rule check miss an identical judgment.
+    for (group, part) in &mut groups {
+        if group == "shared_logic"
+            || group.starts_with("role_")
+            || group.starts_with("cascade_")
+            || group.starts_with("shared_logic_fragment_")
+        {
+            continue;
+        }
+        let Some(state) = part["state"].as_object_mut() else {
+            continue;
+        };
+        for key in [
+            "regions",
+            "region_sources",
+            "fragments",
+            "role_limitations",
+            "cascade_role_version",
+            "cascade_version",
+        ] {
+            state.remove(key);
+        }
+    }
     groups
 }
 pub(super) fn judgment_key(request: &Value, group: &str) -> String {
