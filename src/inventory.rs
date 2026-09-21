@@ -101,8 +101,10 @@ fn load(
                 crate::schema::RUBRIC,
                 crate::roles::VERSION,
                 crate::cascade::VERSION,
+                crate::file_kind::VERSION,
                 args.roles_only,
                 args.classification_cascade,
+                args.include_tests,
                 &args.model,
                 &args.rules,
             ))
@@ -134,10 +136,12 @@ fn load(
 
         findings: Vec::new(),
         error: None,
+        classification: None,
     };
     if !matches!(role.as_str(), "source" | "test") {
         result.status = Status::Skipped;
-        result.error = Some("Outside source/test semantic scope".into());
+        result.error = Some(crate::file_kind::excluded_reason(&role).into());
+        result.classification = Some(crate::file_kind::excluded(&role, relative));
         return Ok(Input {
             result,
             source: None,

@@ -107,9 +107,13 @@ pub fn snapshot(
     }
     report.update_status();
     if args.dry_run {
-        for input in inputs.iter().filter(|i| i.result.status == Status::Pending) {
-            match request(input, args) {
-                Ok(request) => {
+        for (index, input) in inputs.iter().enumerate() {
+            if report.files[index].status != Status::Pending {
+                continue;
+            }
+            match schedule(input, args, &mut report.files[index]) {
+                Ok(Scheduled::None) => {}
+                Ok(Scheduled::Purpose(request) | Scheduled::Judge(request)) => {
                     let stage = report
                         .stages
                         .entry(crate::requests::stage(&request).into())
@@ -123,6 +127,7 @@ pub fn snapshot(
                 Err(error) => report.errors.push(error.to_string()),
             }
         }
+        report.update_status();
     }
     report
 }
@@ -137,25 +142,87 @@ impl Session<'_> {
             .enumerate()
             .filter_map(|(i, f)| (f.status == Status::Pending).then_some(i))
             .collect();
-        let mut tasks = Vec::new();
+        let mut purpose = Vec::new();
+        let mut gates = Vec::new();
         for &owner in &selected {
-            report.files[owner].cached = true;
-            match request(&inputs[owner], self.args) {
-                Ok(request) => tasks.push(Task {
-                    owner,
-                    payload: request.clone(),
-                    request,
-                }),
+            match schedule(&inputs[owner], self.args, &mut report.files[owner]) {
+                Ok(Scheduled::None) => report.files[owner].cached = false,
+                Ok(Scheduled::Purpose(request)) => {
+                    report.files[owner].cached = true;
+                    purpose.push(Task {
+                        owner,
+                        payload: request.clone(),
+                        request,
+                    });
+                }
+                Ok(Scheduled::Judge(request)) => {
+                    report.files[owner].cached = true;
+                    gates.push(Task {
+                        owner,
+                        payload: request.clone(),
+                        request,
+                    });
+                }
                 Err(error) => fail(&mut report.files[owner], error),
             }
         }
-        self.dispatch(report, tasks, |file, request, body| {
-            if request["state"]["role_version"].is_string() {
-                crate::roles::apply(file, &request, body)
-            } else {
-                crate::maintainability::apply(file, &request, body)
+        if !purpose.is_empty() {
+            self.dispatch(report, purpose, |file, request, body| {
+                crate::file_kind::record_purpose(file, &request, body)
+            })?;
+            for &owner in &selected {
+                if report.files[owner].status == Status::Error
+                    || report.files[owner]
+                        .classification
+                        .as_ref()
+                        .is_none_or(|class| class.stage != "answered")
+                {
+                    continue;
+                }
+                match crate::file_kind::decide_after_purpose(
+                    &inputs[owner],
+                    self.args,
+                    &mut report.files[owner],
+                ) {
+                    Ok(Some(request)) => gates.push(Task {
+                        owner,
+                        payload: request.clone(),
+                        request,
+                    }),
+                    Ok(None) => {}
+                    Err(error) => fail(&mut report.files[owner], error),
+                }
             }
-        })?;
+        }
+        if !gates.is_empty() {
+            self.dispatch(report, gates, |file, request, body| {
+                if request["state"]["role_version"].is_string() {
+                    crate::roles::apply(file, &request, body)
+                } else {
+                    crate::maintainability::apply(file, &request, body)
+                }
+            })?;
+        }
+        if self.args.include_tests {
+            let mut portions = Vec::new();
+            for (owner, input) in inputs.iter().enumerate() {
+                match crate::file_kind::test_portion_request(input, self.args, &report.files[owner])
+                {
+                    Ok(Some(request)) => portions.push(Task {
+                        owner,
+                        payload: request.clone(),
+                        request,
+                    }),
+                    Ok(None) => {}
+                    Err(error) => report.errors.push(error.to_string()),
+                }
+            }
+            if !portions.is_empty() {
+                self.dispatch(report, portions, |file, request, body| {
+                    crate::maintainability::apply_test_portion(file, &request, body)
+                })?;
+            }
+        }
         if self.args.classification_cascade {
             let mut followups = Vec::new();
             for (owner, input) in inputs.iter().enumerate() {
@@ -317,11 +384,37 @@ impl Session<'_> {
     }
 }
 
-fn request(input: &Input, args: &CheckArgs) -> Result<serde_json::Value> {
+enum Scheduled {
+    None,
+    Purpose(serde_json::Value),
+    Judge(serde_json::Value),
+}
+
+fn schedule(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Result<Scheduled> {
+    if file.status != Status::Pending {
+        return Ok(Scheduled::None);
+    }
     if args.roles_only {
-        crate::roles::request(input, args)
-    } else {
-        crate::maintainability::request(input, args)
+        return Ok(Scheduled::Judge(crate::roles::request(input, args)?));
+    }
+    match crate::file_kind::plan(input, args)? {
+        crate::file_kind::Plan::Skip(class) => {
+            file.contains_tests = class.kind == "tests" || !class.separated_tests.is_empty();
+            file.classification = Some(class);
+            file.status = Status::NotApplicable;
+            Ok(Scheduled::None)
+        }
+        crate::file_kind::Plan::Purpose(class, request) => {
+            file.contains_tests = true;
+            file.classification = Some(class);
+            Ok(Scheduled::Purpose(request))
+        }
+        crate::file_kind::Plan::Judge(class, request) => {
+            file.contains_tests =
+                file.contains_tests || class.kind == "tests" || !class.separated_tests.is_empty();
+            file.classification = Some(class);
+            Ok(Scheduled::Judge(request))
+        }
     }
 }
 

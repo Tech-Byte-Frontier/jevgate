@@ -31,9 +31,16 @@ jevgate check --base HEAD --format json
 `--report` opens a local HTML dashboard with classifications, locations and raw
 probabilities. Watch refreshes it after edits. Opening the report makes no API calls.
 
-Each selected file uses one request containing the three verdicts and their
+Each application file uses one request containing the three verdicts and their
 conditional locations, plus focused function judgments and judgments of repeated
 fragments when found. Direct function concerns retain the separate file-wide judgment.
+Operational scripts and TypeScript declaration files are reported and not judged.
+Test files are not judged unless you pass `--include-tests`. A file that mixes
+application code and tests is judged on the application portion; with that flag,
+the test portion is judged separately. A test path that still contains other
+code is classified before the gates, and that classification is part of the
+gate request.
+
 Only that file and explicit context are uploaded; no automatic
 repository retrieval. Directory arguments select files recursively. `--base` selects
 changed files and reviews their current organization, not behavioral regressions.
@@ -55,7 +62,10 @@ Only regions containing repeated occurrences receive role questions in this mode
 Trailing regions are omitted when the combined request would exceed the provider
 context limit, and that omission stays visible. An uncertain result can trigger
 one follow-up on only the undecided operation or repeated lines; it replaces
-that status only at the existing 0.80 threshold. The default classifier remains unchanged.
+that status only at the existing 0.80 threshold. The cascade comparison does not
+replace a maintainability verdict. File eligibility is separate and always on:
+scripts and declaration files are skipped, and test code is separated before
+the gates run.
 
 Use `jevgate check src/example.rs --roles-only` to evaluate semantic roles without
 maintainability judgments. It defaults to JSON and reports overlapping test

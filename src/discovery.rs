@@ -34,13 +34,17 @@ impl Classifier {
             .iter()
             .map(|s| s.to_string_lossy().to_lowercase())
             .collect();
-        if self.generated.is_match(path)
+        if script_extension(path) {
+            "script"
+        } else if self.generated.is_match(path)
             || name.contains(".generated.")
             || name.contains(".gen.")
             || name.ends_with(".min.js")
             || name == "database.types.ts"
         {
             "generated"
+        } else if name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts") {
+            "declarations"
         } else if components.iter().any(|c| {
             ["fixtures", "__fixtures__", "__snapshots__", "testdata"].contains(&c.as_str())
         }) {
@@ -63,6 +67,18 @@ impl Classifier {
             "source"
         }
     }
+}
+
+fn script_extension(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        extension.as_str(),
+        "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd"
+    )
 }
 
 pub fn source(path: &Path, extra: &[String]) -> bool {

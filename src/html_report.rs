@@ -45,7 +45,10 @@ pub fn render(report: &Report) -> Result<String> {
                 .collect();
             json!({"path":file.path,"status":file.status,"cached":file.cached,"checks":checks,
             "findings":file.findings,"limitations":file.context_limitations,
-            "error":file.error})
+            "error":file.error,
+            "classification":file.classification.as_ref().and_then(|class| {
+                (class.reason.as_str() != file.error.as_deref().unwrap_or("")).then_some(class.reason.clone())
+            })})
         })
         .collect();
     let rules: Vec<_> = crate::catalog::rules()

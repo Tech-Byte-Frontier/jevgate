@@ -36,7 +36,7 @@
 const data=JSON.parse(document.getElementById('data').textContent);
 const $=id=>document.getElementById(id);
 const labels={review:'Needs review',clear:'Clear',uncertain:'Uncertain','needs-context':'Needs context','not-applicable':'Not applicable',error:'Error',pending:'Pending',skipped:'Skipped'};
-const names={file_organization:'File organization',function_simplification:'Function simplification',shared_logic:'Shared logic',difficulty:'Hidden dependencies',cohesion:'Mixed responsibilities',state_risk:'Stale async results',test_weakness:'Weak test assertions',failure_handling:'Partial updates on failure',contracts:'Caller contracts',error_success:'Failures hidden as success',cleanup_state:'Cleanup & state restoration',policy_drift:'Inconsistent business rules',test_effectiveness:'Surviving mutations',change_regression:'Behavior regressions'};
+const names={file_organization:'File organization',function_simplification:'Function simplification',shared_logic:'Shared logic',test_file_organization:'File organization (tests)',test_function_simplification:'Function simplification (tests)',test_shared_logic:'Shared logic (tests)',difficulty:'Hidden dependencies',cohesion:'Mixed responsibilities',state_risk:'Stale async results',test_weakness:'Weak test assertions',failure_handling:'Partial updates on failure',contracts:'Caller contracts',error_success:'Failures hidden as success',cleanup_state:'Cleanup & state restoration',policy_drift:'Inconsistent business rules',test_effectiveness:'Surviving mutations',change_regression:'Behavior regressions'};
 const rules=new Map();for(const r of data.rules){rules.set(r.key,r);rules.set(r.id,r)}
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n}
 function badge(status){return el('span',labels[status]||status,'badge '+(Object.hasOwn(labels,status)?status:''))}
@@ -67,6 +67,7 @@ function fileCard(f){
  const summary=el('summary');summary.append(el('span',f.path,'path'),el('span',f.findings.length+(f.findings.length===1?' finding':' findings')+(f.cached?' / cached':''),'count'),badge(f.status));card.append(summary);
  const body=el('div',null,'detail');card.append(body);
  if(f.error)p(body,f.error,'warning');
+ if(f.classification)p(body,f.classification,'small');
  for(const finding of f.findings){const item=el('div',null,'finding');item.append(el('h3',name(finding.rule)+' / line '+finding.line));p(item,finding.message);p(item,finding.action,'small');body.append(item)}
  if(f.limitations.length){body.append(el('h2','Evidence gaps'));for(const limit of f.limitations)p(body,limit,'small')}
  if(f.checks.length){body.append(el('h2','Classifications'));const inactive=el('details');inactive.append(el('summary',f.checks.filter(c=>c.status==='not-applicable').length+' checks not applicable in this scope'));for(const c of [...f.checks].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status))){

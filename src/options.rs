@@ -28,8 +28,11 @@ pub enum Format {
 
 #[derive(Args, Debug)]
 pub struct CheckArgs {
-    /// Files/directories relative to the invocation; default: discovered source and tests
+    /// Files or directories to review; default is discovered application source
     pub paths: Vec<PathBuf>,
+    /// Also judge test files. Mixed files still keep their test portion separate
+    #[arg(long)]
+    pub include_tests: bool,
     /// Review working-tree changes against this Git revision (includes staged and untracked files)
     #[arg(long)]
     pub base: Option<String>,
