@@ -4,7 +4,9 @@ Status: opt-in comparison available with `--classification-cascade --format json
 One shared-evidence request includes four overlapping semantic roles for up to 32
 deduplicated regions containing repeated occurrences (160 role/evidence questions)
 and a conditional test specialist
-for up to 12 repeated fragments. JSON retains raw answers, locations, model,
+for up to 12 repeated fragments. If that body would exceed the provider context
+limit, trailing occurrence regions are omitted and counted in `regions_omitted`;
+the general maintainability questions stay in the same request. JSON retains raw answers, locations, model,
 composition version, occurrence relationships, omissions and conflicts. Region
 roles are under `files[].role_assessment`; routing and specialist comparisons are
 under the shared-logic assessment's `cascade` field.

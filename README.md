@@ -51,8 +51,9 @@ Only resolved test–test groups select the test specialist. Mixed, omitted or
 ambiguous relationships retain the general assessment. This shadow comparison
 does not change findings or establish measured accuracy. It adds at most 160
 role/evidence questions and 12 specialist questions per file in the same request.
-Only regions containing repeated occurrences receive role questions in this mode;
-the default classifier remains unchanged.
+Only regions containing repeated occurrences receive role questions in this mode.
+Trailing regions are omitted when the combined request would exceed the provider
+context limit, and that omission stays visible. The default classifier remains unchanged.
 
 Use `jevgate check src/example.rs --roles-only` to evaluate semantic roles without
 maintainability judgments. It defaults to JSON and reports overlapping test
