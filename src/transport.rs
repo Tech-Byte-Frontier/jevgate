@@ -42,20 +42,14 @@ pub trait Evaluator {
                 completed(
                     index,
                     match check {
-                        Ok(()) => Outcome {
-                            result: bodies.next().unwrap_or_else(|| {
+                        Ok(()) => Outcome::attempted(
+                            bodies.next().unwrap_or_else(|| {
                                 Err(anyhow::anyhow!("Missing provider receipt"))
                             }),
-                            elapsed_ms: start.elapsed().as_millis() as u64,
+                            start,
                             started_ms,
-                            attempted: true,
-                        },
-                        Err(e) => Outcome {
-                            result: Err(e),
-                            elapsed_ms: 0,
-                            started_ms: 0,
-                            attempted: false,
-                        },
+                        ),
+                        Err(e) => Outcome::skipped(e),
                     },
                 );
                 index += 1;
@@ -245,12 +239,7 @@ impl ProviderAccess {
                     .and_then(|()| before(request))
                     .and_then(|()| self.check())
                 {
-                    return Outcome {
-                        result: Err(error),
-                        elapsed_ms: 0,
-                        started_ms: 0,
-                        attempted: false,
-                    };
+                    return Outcome::skipped(error);
                 }
                 let started_ms = queue_start.elapsed().as_millis() as u64;
                 let start = std::time::Instant::now();
@@ -258,15 +247,30 @@ impl ProviderAccess {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| send(request)))
                         .unwrap_or_else(|_| Err(anyhow::anyhow!("TypeSafe request worker failed")));
                 self.observe(&result);
-                Outcome {
-                    result,
-                    elapsed_ms: start.elapsed().as_millis() as u64,
-                    started_ms,
-                    attempted: true,
-                }
+                Outcome::attempted(result, start, started_ms)
             },
             completed,
         );
+    }
+}
+
+impl Outcome {
+    fn attempted(result: Result<Value>, start: std::time::Instant, started_ms: u64) -> Self {
+        Self {
+            result,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            started_ms,
+            attempted: true,
+        }
+    }
+
+    fn skipped(error: anyhow::Error) -> Self {
+        Self {
+            result: Err(error),
+            elapsed_ms: 0,
+            started_ms: 0,
+            attempted: false,
+        }
     }
 }
 
