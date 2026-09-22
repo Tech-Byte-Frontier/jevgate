@@ -8,8 +8,10 @@ pub enum JevCommand {
         #[command(subcommand)]
         command: crate::auth::AuthCommand,
     },
-    /// Evaluate code quality with TypeSafe (uploads selected source); review exits 1, incomplete exits 2
+    /// Evaluate code quality with TypeSafe (uploads selected units); a failed gate exits 1, incomplete exits 2
     Check(Box<CheckArgs>),
+    /// Accept the findings of the last complete check in jevgate-baseline.json (no API calls)
+    Baseline,
     /// Print the versioned rule catalog as JSON
     Rules,
     /// Serve read-only snapshots on localhost (run alongside check --watch)
@@ -26,26 +28,49 @@ pub enum Format {
     Jsonl,
 }
 
+/// Results that fail the check. Consider also fails on review findings.
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum FailOn {
+    Review,
+    Consider,
+    Uncertain,
+    None,
+}
+
+impl FailOn {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::Consider => "consider",
+            Self::Uncertain => "uncertain",
+            Self::None => "none",
+        }
+    }
+}
+
 #[derive(Args, Debug)]
 pub struct CheckArgs {
     /// Files or directories to review; default is discovered application source
     pub paths: Vec<PathBuf>,
-    /// Also judge test files. Mixed files still keep their test portion separate
+    /// Also judge tests: test value, redundancy, shared logic and support functions
     #[arg(long)]
     pub include_tests: bool,
+    /// Fail on these results (repeatable): review, consider, uncertain or none [default: review]
+    #[arg(long = "fail-on", value_enum)]
+    pub fail_on: Vec<FailOn>,
+    /// Show per-file detail in agent output
+    #[arg(long)]
+    pub verbose: bool,
     /// Review working-tree changes against this Git revision (includes staged and untracked files)
     #[arg(long)]
     pub base: Option<String>,
-    /// Compatibility flag; default maintainability already uses one batch per file
-    #[arg(long)]
+    /// Compatibility flag; has no effect
+    #[arg(long, hide = true)]
     pub quick: bool,
-    /// Evaluate semantic roles only; no maintainability judgments (defaults to JSON)
-    #[arg(long, conflicts_with_all = ["rules", "report"])]
-    pub roles_only: bool,
     /// Additional file extension to review as text (repeatable, without a dot)
     #[arg(long, value_parser = source_extension)]
     pub source_extension: Vec<String>,
-    /// Related file or contract to include in every request (repeatable, inside root)
+    /// Related file for shared-logic, caller and subject evidence (repeatable, inside root)
     #[arg(long)]
     pub context: Vec<PathBuf>,
     /// Total context bytes per request, of explicitly supplied files; never truncated
@@ -76,18 +101,14 @@ pub struct CheckArgs {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=1000000))]
     pub max_requests: Option<u32>,
     /// Maximum simultaneous independent TypeSafe requests (questions within each call are parallel)
-    #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u32).range(1..=16))]
+    #[arg(long, default_value_t = 6, value_parser = clap::value_parser!(u32).range(1..=MAX_CONCURRENCY as i64))]
     pub concurrency: u32,
-    /// Per-file source limit. A larger file is not sent; its size and parsed
+    /// Per-file read limit. A larger file is not judged; its size and parsed
     /// operation names are reported as needs-context. Source is never truncated.
     #[arg(long, default_value_t = DEFAULT_MAX_FILE_BYTES, value_parser = clap::value_parser!(u64).range(1..=1048576))]
     pub max_file_bytes: u64,
-    /// Soft line budget supplied as file-organization evidence. Exceeding it
-    /// never decides a verdict; it only tells the model to weigh size when
-    /// judging responsibility boundaries.
-    #[arg(long, default_value_t = DEFAULT_LINE_BUDGET, value_parser = clap::value_parser!(u64).range(1..=1_000_000))]
-    pub line_budget: u64,
-    /// Cache lifetime; unchanged watch snapshots are not automatically reevaluated
+    /// Cache lifetime for the jev-latest and jev-preview aliases. Answers from a
+    /// pinned model version do not expire.
     #[arg(long, default_value_t = 3600)]
     pub cache_ttl_secs: u64,
     /// Ignore disk cache for this invocation (unchanged watch files still reuse results)
@@ -102,19 +123,18 @@ pub struct CheckArgs {
     /// Poll interval for watch mode
     #[arg(long, default_value_t = 250, value_parser = clap::value_parser!(u64).range(50..=60000))]
     pub poll_ms: u64,
-    /// Enable a rule ID or catalog key (repeatable); defaults to file organization, function simplification and shared logic
+    /// Enable a rule ID or catalog key (repeatable); defaults to every rule. Test rules need --include-tests
     #[arg(long = "rule")]
     pub rules: Vec<String>,
 }
 
-/// Largest default source that still fits in one provider request beside the
-/// three maintainability verdicts. Configuration and `--max-file-bytes` can
-/// only narrow this. The absolute read used to list operations is 1 MiB.
-pub const DEFAULT_MAX_FILE_BYTES: u64 = 131_072;
+/// Upper bound on simultaneous requests; rate-limit retries share one cooldown.
+pub const MAX_CONCURRENCY: u32 = 8;
 
-/// Soft file-size expectation passed to file organization as evidence. A file
-/// over this budget is not a review by itself.
-pub const DEFAULT_LINE_BUDGET: u64 = 500;
+/// Default read limit per file. Units are sent separately, so this bounds
+/// local reading rather than one request. Configuration and
+/// `--max-file-bytes` can only narrow it.
+pub const DEFAULT_MAX_FILE_BYTES: u64 = 262_144;
 
 fn source_extension(value: &str) -> Result<String, String> {
     if value.is_empty() || !value.bytes().all(|c| c.is_ascii_alphanumeric()) {
@@ -124,14 +144,17 @@ fn source_extension(value: &str) -> Result<String, String> {
 }
 
 impl CheckArgs {
+    pub fn fail_on_names(&self) -> Vec<String> {
+        self.fail_on.iter().map(|f| f.name().to_string()).collect()
+    }
+
     pub fn output_format(&self) -> Format {
-        self.format
-            .unwrap_or(if self.show_requests || (self.roles_only && !self.watch) {
-                Format::Json
-            } else if self.watch {
-                Format::Jsonl
-            } else {
-                Format::Agent
-            })
+        self.format.unwrap_or(if self.show_requests {
+            Format::Json
+        } else if self.watch {
+            Format::Jsonl
+        } else {
+            Format::Agent
+        })
     }
 }

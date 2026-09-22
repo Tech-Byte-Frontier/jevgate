@@ -42,24 +42,54 @@ struct TestCli {
     args: CheckArgs,
 }
 pub(super) fn args() -> CheckArgs {
-    {
-        let mut a = TestCli::parse_from(["test"]).args;
-        a.rules = crate::maintainability::KEYS
-            .iter()
-            .map(|k| (*k).into())
-            .collect();
-        a
-    }
+    let mut a = TestCli::parse_from(["test"]).args;
+    a.rules = crate::catalog::keys().into_iter().map(Into::into).collect();
+    a.fail_on = vec![options::FailOn::Review];
+    a
 }
 
-pub(super) fn answer(request: &Value, level: usize, missing: f64) -> Value {
-    let answers=request["questions"].as_object().unwrap().iter().map(|(name,q)| {
-        let keys=q["criteria"].as_object().unwrap();
-        let preferred=if name.ends_with("_location") {"none"} else if missing>=0.5 {"context"} else if level>=2 {"review"} else {"clear"};
-        let chosen=if keys.contains_key(preferred) {preferred} else if keys.contains_key("idiom") {"idiom"} else {keys.keys().next().unwrap()};
-        let probabilities: serde_json::Map<_,_>=keys.keys().map(|k|(k.clone(),json!(if k==chosen {1.0} else {0.0}))).collect();
-        (name.clone(),json!({"type":"choice","choice":chosen,"confidence":1.0,"probabilities":probabilities}))
-    }).collect::<serde_json::Map<_,_>>();
+/// A function large enough to judge (five body lines).
+pub(super) fn function(name: &str) -> String {
+    format!(
+        "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let doubled = total * 2;\n    doubled + 1\n}}\n"
+    )
+}
+
+/// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider),
+/// 2 the top (review), 3 spreads probability (uncertain).
+pub(super) fn answer(request: &Value, level: usize) -> Value {
+    let answers = request["questions"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, q)| {
+            let answer = match q["type"].as_str().unwrap() {
+                "noul" => {
+                    let noul = [0.05, 0.5, 0.95, 0.5][level];
+                    json!({"type":"noul","noul":noul})
+                }
+                "score" => {
+                    let p = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.4, 0.2, 0.4]][level];
+                    json!({"type":"score","score":p[1] + 2.0 * p[2],"confidence":1.0,
+                        "probabilities":{"0":p[0],"1":p[1],"2":p[2]}})
+                }
+                _ => {
+                    let keys = q["criteria"].as_object().unwrap();
+                    let chosen = if keys.contains_key("none") {
+                        "none"
+                    } else {
+                        keys.keys().next().unwrap()
+                    };
+                    let probabilities: serde_json::Map<_, _> = keys
+                        .keys()
+                        .map(|k| (k.clone(), json!(if k == chosen { 1.0 } else { 0.0 })))
+                        .collect();
+                    json!({"type":"choice","choice":chosen,"confidence":1.0,"probabilities":probabilities})
+                }
+            };
+            (name.clone(), answer)
+        })
+        .collect::<serde_json::Map<_, _>>();
     json!({"model":request["model"],"answers":answers,"usage":{"input_tokens":10,"output_tokens":0}})
 }
 
@@ -67,23 +97,41 @@ pub(super) fn answer(request: &Value, level: usize, missing: f64) -> Value {
 pub(super) struct Mock {
     pub(super) calls: usize,
     pub(super) level: usize,
-    pub(super) missing: f64,
     pub(super) malformed: bool,
     pub(super) edit: Option<PathBuf>,
+    pub(super) requests: Vec<Value>,
 }
 impl transport::Evaluator for Mock {
     fn evaluate(&mut self, request: &Value) -> anyhow::Result<Value> {
         self.calls += 1;
-        if request["state"]["extraction_version"].is_null() {
-            assert!(request["state"]["file"]["source"].is_string());
-        }
+        self.requests
+            .push(requests::provider_request(request).into_owned());
         if let Some(path) = &self.edit {
             std::fs::write(path, "fn changed() {}")?;
         }
         if self.malformed {
             return Ok(json!({"answers":{}}));
         }
-        Ok(answer(request, self.level, self.missing))
+        Ok(answer(request, self.level))
+    }
+}
+
+pub(super) fn session<'a>(
+    options: &'a CheckArgs,
+    context: &'a ConfigContext,
+    store: &'a storage::Store,
+    evaluator: &'a mut dyn transport::Evaluator,
+) -> evaluate::Session<'a> {
+    evaluate::Session {
+        args: options,
+        context,
+        store,
+        evaluator,
+        requests: 0,
+        paid_input_tokens: 0,
+        paid_output_tokens: 0,
+        budget: requests::TokenBudget::default(),
+        observed: (0, 0),
     }
 }
 
@@ -106,65 +154,24 @@ pub(super) fn run(
         },
     );
     let store = storage::Store::open(&project.0).unwrap();
-    let mut session = evaluate::Session {
-        args: options,
-        context: &context,
-        store: &store,
-        evaluator: mock,
-        requests: 0,
-        paid_input_tokens: 0,
-        paid_output_tokens: 0,
-    };
-    session.evaluate(&inputs, &mut report).unwrap();
+    session(options, &context, &store, mock)
+        .evaluate(&inputs, &mut report)
+        .unwrap();
+    gate::settle(&project.0, &mut report, &options.fail_on).unwrap();
     report
 }
 
 #[test]
-fn unchanged_files_are_reused_from_the_last_report_without_api_calls() {
+fn unchanged_files_are_answered_from_cache_without_api_calls() {
     let project = Project::new();
-    project.write("a.rs", "fn a() -> i32 { 1 }\n");
-    project.write("b.rs", "fn b() -> i32 { 2 }\n");
+    project.write("a.rs", &function("a"));
+    project.write("b.rs", &function("b"));
     let options = args();
     let mut mock = Mock::default();
     let first = run(&project, &options, &mut mock);
     assert_eq!(mock.calls, 2);
-    assert!(
-        first
-            .files
-            .iter()
-            .all(|file| !file.context_limitations.is_empty())
-    );
-    let previous = evaluate::previous_judgments(Some(&first), false);
-    let inputs = inventory::collect(&options, &project.context(), &[]).unwrap();
-    let mut second = evaluate::snapshot(
-        &inputs,
-        &previous,
-        &options,
-        evaluate::SnapshotContext {
-            root: &project.0,
-            generation: 2,
-            requests: 0,
-        },
-    );
-    // Composition always reruns from cached judgments. Snapshot does not
-    // skip apply(), so a composition change cannot hide behind a reused report.
-    assert!(
-        second
-            .files
-            .iter()
-            .all(|file| file.status == schema::Status::Pending)
-    );
-    let store = storage::Store::open(&project.0).unwrap();
-    let mut session = evaluate::Session {
-        args: &options,
-        context: &project.context(),
-        store: &store,
-        evaluator: &mut mock,
-        requests: 0,
-        paid_input_tokens: 0,
-        paid_output_tokens: 0,
-    };
-    session.evaluate(&inputs, &mut second).unwrap();
+    assert_eq!(first.stages["functions"].successful_requests, 2);
+    let second = run(&project, &options, &mut mock);
     assert_eq!(mock.calls, 2);
     assert_eq!(second.api_requests, 0);
     assert_eq!(second.paid_input_tokens, 0);
@@ -173,40 +180,17 @@ fn unchanged_files_are_reused_from_the_last_report_without_api_calls() {
         second
             .files
             .iter()
-            .all(|file| file.status == schema::Status::Clear)
+            .all(|f| f.status == schema::Status::Clear)
     );
-    project.write("b.rs", "fn b() -> i32 { 3 }\n");
-    let inputs = inventory::collect(&options, &project.context(), &[]).unwrap();
-    let kept = evaluate::previous_judgments(Some(&second), false);
-    let partial = evaluate::snapshot(
-        &inputs,
-        &kept,
-        &options,
-        evaluate::SnapshotContext {
-            root: &project.0,
-            generation: 3,
-            requests: 0,
-        },
-    );
-    let changed = partial
-        .files
-        .iter()
-        .find(|file| file.path.ends_with("b.rs"))
-        .unwrap();
-    let kept_file = partial
-        .files
-        .iter()
-        .find(|file| file.path.ends_with("a.rs"))
-        .unwrap();
-    assert_eq!(changed.status, schema::Status::Pending);
-    assert_eq!(kept_file.status, schema::Status::Pending);
-    assert!(evaluate::previous_judgments(Some(&first), true).is_empty());
+    project.write("b.rs", &function("b_changed"));
+    run(&project, &options, &mut mock);
+    assert_eq!(mock.calls, 3, "only the changed unit is sent again");
 }
 
 #[test]
 fn model_and_refresh_invalidate_cache() {
     let project = Project::new();
-    project.write("lib.rs", "fn f() {}");
+    project.write("lib.rs", &function("f"));
     let mut options = args();
     let mut mock = Mock::default();
     run(&project, &options, &mut mock);
@@ -218,30 +202,82 @@ fn model_and_refresh_invalidate_cache() {
 }
 
 #[test]
-fn advisory_reviews_and_abstentions_do_not_claim_acceptance() {
+fn gate_fails_only_on_the_configured_results() {
     let project = Project::new();
-    project.write("lib.rs", "fn f() {}");
+    project.write("lib.rs", &function("f"));
     let mut options = args();
-    options.refresh = true;
-    let mut mock = Mock {
+    let mut review = Mock {
         level: 2,
         ..Default::default()
     };
-    let report = run(&project, &options, &mut mock);
+    let report = run(&project, &options, &mut review);
     assert_eq!(report.status, "review");
-    assert_eq!(outcome(&report), 1);
+    assert_eq!(report.files[0].findings.len(), 1);
+    assert_eq!(gate::exit_code(&report), 1);
     assert!(!report.acceptance_evaluated);
-    mock.missing = 0.8;
-    let report = run(&project, &options, &mut mock);
-    assert_eq!(report.files[0].status, schema::Status::NeedsContext);
-    assert_eq!(outcome(&report), 2);
+    options.fail_on = vec![options::FailOn::None];
+    assert_eq!(gate::exit_code(&run(&project, &options, &mut review)), 0);
+    options.refresh = true;
+    options.fail_on = vec![options::FailOn::Review];
+    let mut consider = Mock {
+        level: 1,
+        ..Default::default()
+    };
+    let report = run(&project, &options, &mut consider);
+    assert_eq!(report.status, "consider");
+    assert_eq!(
+        gate::exit_code(&report),
+        0,
+        "consider does not fail by default"
+    );
+    options.fail_on = vec![options::FailOn::Consider];
+    assert_eq!(gate::exit_code(&run(&project, &options, &mut consider)), 1);
+    let mut uncertain = Mock {
+        level: 3,
+        ..Default::default()
+    };
+    options.fail_on = vec![options::FailOn::Review];
+    let report = run(&project, &options, &mut uncertain);
+    assert_eq!(report.status, "uncertain");
+    assert_eq!(
+        gate::exit_code(&report),
+        0,
+        "uncertain does not fail by default"
+    );
+    options.fail_on = vec![options::FailOn::Uncertain];
+    assert_eq!(gate::exit_code(&run(&project, &options, &mut uncertain)), 1);
+}
+
+#[test]
+fn baselined_findings_do_not_fail_the_gate_but_new_ones_do() {
+    let project = Project::new();
+    project.write("lib.rs", &function("f"));
+    let options = args();
+    let mut review = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    let report = run(&project, &options, &mut review);
+    storage::Store::open(&project.0)
+        .unwrap()
+        .publish(&report)
+        .unwrap();
+    let (path, count) = gate::write_baseline(&project.0).unwrap();
+    assert_eq!((path, count), (project.0.join(gate::BASELINE_FILE), 1));
+    let report = run(&project, &options, &mut review);
+    assert!(report.files[0].findings[0].baselined);
+    assert_eq!(gate::exit_code(&report), 0);
+    assert_eq!(report.gate.as_ref().unwrap().baselined_findings, 1);
+    project.write("other.rs", &function("g"));
+    let report = run(&project, &options, &mut review);
+    assert_eq!(gate::exit_code(&report), 1, "a new finding still fails");
 }
 
 #[test]
 fn malformed_response_and_exhausted_budget_never_pass() {
     let project = Project::new();
-    project.write("a.rs", "fn a() {}");
-    project.write("b.rs", "fn b() {}");
+    project.write("a.rs", &function("a"));
+    project.write("b.rs", &function("b"));
     let mut options = args();
     options.max_requests = Some(1);
     let mut mock = Mock {
@@ -251,6 +287,7 @@ fn malformed_response_and_exhausted_budget_never_pass() {
     let report = run(&project, &options, &mut mock);
     assert_eq!(mock.calls, 1);
     assert!(!report.complete);
+    assert_eq!(gate::exit_code(&report), 2);
     assert!(
         report
             .files
@@ -262,7 +299,7 @@ fn malformed_response_and_exhausted_budget_never_pass() {
 #[test]
 fn edit_during_request_is_reported_stale() {
     let project = Project::new();
-    project.write("lib.rs", "fn initial() {}");
+    project.write("lib.rs", &function("initial"));
     let mut mock = Mock {
         edit: Some(project.0.join("lib.rs")),
         ..Default::default()
@@ -275,8 +312,8 @@ fn edit_during_request_is_reported_stale() {
 #[test]
 fn changed_and_deleted_files_invalidate_snapshot_before_evaluation() {
     let project = Project::new();
-    project.write("a.rs", "fn a() {}");
-    project.write("b.rs", "fn b() {}");
+    project.write("a.rs", &function("a"));
+    project.write("b.rs", &function("b"));
     let options = args();
     let report = run(&project, &options, &mut Mock::default());
     let old = report
@@ -284,7 +321,7 @@ fn changed_and_deleted_files_invalidate_snapshot_before_evaluation() {
         .into_iter()
         .map(|f| (f.path.clone(), f))
         .collect();
-    project.write("a.rs", "fn a_changed() {}");
+    project.write("a.rs", &function("a_changed"));
     std::fs::remove_file(project.0.join("b.rs")).unwrap();
     let inputs = inventory::collect(&options, &project.context(), &[]).unwrap();
     let next = evaluate::snapshot(
@@ -303,98 +340,74 @@ fn changed_and_deleted_files_invalidate_snapshot_before_evaluation() {
 }
 
 #[test]
-fn oversized_and_invalid_source_never_reach_api() {
+fn unparseable_binary_and_unsupported_files_are_skipped_without_blocking_the_run() {
     let project = Project::new();
-    project.write("large.rs", "fn too_large() {}");
+    project.write("large.rs", &function("too_large"));
     project.write("invalid.rs", "fn broken( {");
+    project.write("main.go", "package main\n\nfunc main() {}\n");
+    project.write("ok.rs", &function("ok"));
+    std::fs::write(project.0.join("latin1.rs"), b"fn caf\xe9() {}\n").unwrap();
     let mut options = args();
-    options.max_file_bytes = 15;
-    let mut mock = Mock::default();
-    let report = run(&project, &options, &mut mock);
-    assert_eq!(mock.calls, 0);
-    assert!(!report.complete);
-    let large = report
-        .files
-        .iter()
-        .find(|file| file.path.ends_with("large.rs"))
-        .unwrap();
-    assert_eq!(large.status, schema::Status::NeedsContext);
-    assert!(large.error.is_none());
-    assert!(large.dimensions.is_empty());
-    let reason = &large.classification.as_ref().unwrap().reason;
-    assert!(reason.contains("too_large"), "{reason}");
-    assert!(reason.contains("15-byte read cap"), "{reason}");
-    assert_eq!(
-        report
-            .files
-            .iter()
-            .find(|file| file.path.ends_with("invalid.rs"))
-            .unwrap()
-            .status,
-        schema::Status::Error
-    );
-}
-
-#[test]
-fn an_oversized_file_does_not_block_judgment_of_the_others() {
-    let project = Project::new();
-    project.write("large.rs", "fn too_large() -> i32 { 1 }\n");
-    project.write("small.rs", "fn a(){}\n");
-    let mut options = args();
-    options.max_file_bytes = 20;
+    options.max_file_bytes = 160;
+    assert!(function("ok").len() <= 160 && function("too_large").len() > 160);
     let mut mock = Mock::default();
     let report = run(&project, &options, &mut mock);
     assert_eq!(mock.calls, 1);
-    assert!(report.complete);
-    assert_eq!(report.status, "needs-context");
-    let large = report
-        .files
-        .iter()
-        .find(|file| file.path.ends_with("large.rs"))
-        .unwrap();
-    assert_eq!(large.status, schema::Status::NeedsContext);
-    assert_eq!(large.classification.as_ref().unwrap().kind, "oversized");
-    assert!(large.findings.is_empty());
-    assert_eq!(
+    assert!(report.complete, "{:?}", report.files);
+    let file = |name: &str| {
         report
             .files
             .iter()
-            .find(|file| file.path.ends_with("small.rs"))
+            .find(|f| f.path.ends_with(name))
             .unwrap()
-            .status,
-        schema::Status::Clear
+    };
+    assert_eq!(file("ok.rs").status, schema::Status::Clear);
+    for name in ["invalid.rs", "main.go", "latin1.rs"] {
+        assert_eq!(file(name).status, schema::Status::Skipped, "{name}");
+        assert!(
+            file(name).error.as_ref().unwrap().contains("not judged"),
+            "{name}"
+        );
+    }
+    let large = file("large.rs");
+    assert_eq!(large.status, schema::Status::NeedsContext);
+    assert!(large.dimensions.is_empty() && large.findings.is_empty());
+    let reason = &large.classification.as_ref().unwrap().reason;
+    assert!(
+        reason.contains("too_large") && reason.contains("160-byte read cap"),
+        "{reason}"
     );
+    assert_eq!(report.status, "needs-context");
+    assert_eq!(gate::exit_code(&report), 0);
 }
 
 #[test]
-fn source_that_cannot_fit_one_request_is_not_sent() {
+fn a_function_too_large_for_one_request_is_needs_context_and_not_sent() {
     let project = Project::new();
-    let mut source = String::new();
+    let mut body = String::from("fn huge() -> usize {\n    let mut total = 0;\n");
     let mut index = 0usize;
-    while source.len() < 200_000 {
-        source.push_str(&format!("fn kept_{index}() -> i32 {{ {index} }}\n"));
+    while body.len() < 200_000 {
+        body.push_str(&format!("    total += {index} * {index};\n"));
         index += 1;
     }
-    project.write("huge.rs", &source);
-    project.write("small.rs", "fn ready() -> i32 { 1 }\n");
+    body.push_str("    total\n}\n");
+    project.write("huge.rs", &format!("{body}\n{}", function("small")));
     let mut options = args();
     options.max_file_bytes = 1_048_576;
     let mut mock = Mock::default();
     let report = run(&project, &options, &mut mock);
-    assert_eq!(mock.calls, 1);
     assert!(report.complete);
-    let huge = report
-        .files
-        .iter()
-        .find(|file| file.path.ends_with("huge.rs"))
-        .unwrap();
+    let huge = &report.files[0];
+    let dimension = &huge.dimensions["function_simplification"];
+    assert_eq!(dimension.units.needs_context, 1);
+    assert_eq!(dimension.units.judged, 1);
+    assert_eq!(dimension.status, schema::Status::NeedsContext);
+    assert!(
+        mock.requests
+            .iter()
+            .all(|r| !r["state"]["functions"].to_string().contains("fn huge"))
+    );
     assert_eq!(huge.status, schema::Status::NeedsContext);
-    assert_eq!(huge.classification.as_ref().unwrap().kind, "oversized");
-    let reason = &huge.classification.as_ref().unwrap().reason;
-    assert!(reason.contains("does not fit one request"), "{reason}");
-    assert!(reason.contains("kept_0"), "{reason}");
-    assert!(huge.dimensions.is_empty());
-    assert!(huge.findings.is_empty());
 }
 
 #[test]

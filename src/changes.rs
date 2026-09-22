@@ -1,34 +1,24 @@
-use crate::schema::{Change, FileResult, Report, Status};
+//! Finding lineage between snapshots, by fingerprint: introduced, persistent or resolved.
+use crate::schema::{Change, Report, Status};
+use std::collections::{BTreeMap, BTreeSet};
 
-fn equivalent(old: &FileResult, new: &FileResult, previous: &Report, current: &Report) -> bool {
-    previous.rubric_version == current.rubric_version
-        && previous.requested_model == current.requested_model
-        && old.model == new.model
-        && old.role == new.role
-        && old.context_files == new.context_files
-        && old.context_complete
-        && new.context_complete
-        && !matches!(old.status, Status::Error | Status::Pending)
-        && !matches!(new.status, Status::Error | Status::Pending)
-}
-
-fn record(
-    changes: &mut Vec<Change>,
+fn change(
     rule: &str,
     path: &std::path::Path,
-    previous_path: Option<&std::path::Path>,
+    fingerprint: &str,
     previous_generation: Option<u64>,
     state: &str,
     reason: &str,
-) {
-    changes.push(Change {
+) -> Change {
+    Change {
         rule: rule.into(),
         path: path.into(),
-        previous_path: previous_path.map(std::path::Path::to_path_buf),
+        previous_path: None,
         previous_generation,
         state: state.into(),
         reason: reason.into(),
-    });
+        fingerprint: fingerprint.into(),
+    }
 }
 
 pub fn compare(previous: Option<&Report>, report: &mut Report) {
@@ -36,107 +26,143 @@ pub fn compare(previous: Option<&Report>, report: &mut Report) {
     let Some(previous) = previous else {
         for file in &report.files {
             for finding in &file.findings {
-                record(
-                    &mut report.changes,
+                report.changes.push(change(
                     &finding.rule,
                     &file.path,
-                    None,
+                    &finding.fingerprint,
                     None,
                     "baseline",
                     "First observed assessment; introduction time is unknown",
-                );
+                ));
             }
         }
         return;
     };
-    let mut matched = std::collections::BTreeSet::new();
+    // Different questions or models can change findings without any code change.
+    let comparable = previous.rubric_version == report.rubric_version
+        && previous.requested_model == report.requested_model;
+    let generation = Some(previous.generation);
+    let before: BTreeMap<&str, (&std::path::Path, &str)> = previous
+        .files
+        .iter()
+        .flat_map(|f| {
+            f.findings
+                .iter()
+                .map(move |x| (x.fingerprint.as_str(), (f.path.as_path(), x.rule.as_str())))
+        })
+        .collect();
+    let judged: BTreeSet<&std::path::Path> = report
+        .files
+        .iter()
+        .filter(|f| !matches!(f.status, Status::Error | Status::Pending | Status::Skipped))
+        .map(|f| f.path.as_path())
+        .collect();
+    let mut changes = Vec::new();
+    let mut current = BTreeSet::new();
     for file in &report.files {
-        let exact = previous.files.iter().find(|old| old.path == file.path);
-        let candidates: Vec<_> = previous
-            .files
-            .iter()
-            .filter(|old| {
-                !old.content_identity.is_empty()
-                    && old.content_identity == file.content_identity
-                    && !report.files.iter().any(|f| f.path == old.path)
-            })
-            .collect();
-        let old = exact.or_else(|| {
-            (candidates.len() == 1
-                && report
-                    .files
-                    .iter()
-                    .filter(|f| f.content_identity == file.content_identity)
-                    .count()
-                    == 1)
-                .then(|| candidates[0])
-        });
-        if let Some(old) = old {
-            matched.insert(old.path.clone());
-        }
-        for rule in crate::catalog::rules() {
-            let before = old.and_then(|f| f.dimensions.get(rule.key));
-            let after = file.dimensions.get(rule.key);
-            if before.is_none_or(|d| d.status != Status::Review)
-                && after.is_none_or(|d| d.status != Status::Review)
-            {
-                continue;
-            }
-            let comparable = old.is_some_and(|old| equivalent(old, file, previous, report));
-            let before_review = before.is_some_and(|d| d.status == Status::Review);
-            let after_review = after.is_some_and(|d| d.status == Status::Review);
-            let (state, reason) = if !comparable || before.is_none() || after.is_none() {
+        for finding in &file.findings {
+            current.insert(finding.fingerprint.as_str());
+            let (state, reason) = if before.contains_key(finding.fingerprint.as_str()) {
+                ("persistent", "The same finding remains")
+            } else if comparable {
+                ("introduced", "New since the previous snapshot")
+            } else {
                 (
                     "non-comparable",
-                    "Scope, context, rule/model identity or execution changed",
+                    "Rubric or model changed since the previous snapshot",
                 )
-            } else if before_review && after_review {
-                ("persistent", "Concern remains under comparable evidence")
-            } else if before_review && after.is_some_and(|d| d.status == Status::Clear) {
-                // Changed source can remove or move behavior; do not credit it as a fix without unit lineage.
-                if old.unwrap().content_identity == file.content_identity
-                    || (old.unwrap().syntax_checked
-                        && file.syntax_checked
-                        && !file.symbols.is_empty()
-                        && old.unwrap().symbols == file.symbols
-                        && file.semantic_size >= old.unwrap().semantic_size)
-                {
-                    (
-                        "resolved",
-                        "Assessment no longer triggers with preserved symbols and comparable evidence; correctness is not certified",
-                    )
-                } else {
-                    (
-                        "non-comparable",
-                        "Behavior changed; file-level review cannot prove scope was preserved or follow helper extraction",
-                    )
-                }
-            } else if after_review && before.is_some_and(|d| d.status == Status::Clear) {
-                ("introduced", "Previously clear scope now triggers a review")
-            } else {
-                ("uncertain", "One assessment abstains")
             };
-            report.changes.push(Change {
-                rule: rule.id.into(),
-                path: file.path.clone(),
-                previous_path: old.map(|f| f.path.clone()),
-                previous_generation: Some(previous.generation),
-                state: state.into(),
-                reason: reason.into(),
-            });
+            changes.push(change(
+                &finding.rule,
+                &file.path,
+                &finding.fingerprint,
+                generation,
+                state,
+                reason,
+            ));
         }
     }
-    for old in previous.files.iter().filter(|f| !matched.contains(&f.path)) {
-        for finding in &old.findings {
-            record(
-                &mut report.changes,
-                &finding.rule,
-                &old.path,
-                Some(&old.path),
-                Some(previous.generation),
-                "non-comparable",
-                "Deleted, moved ambiguously or excluded scope is not a verified resolution",
-            );
+    for (fingerprint, (path, rule)) in before {
+        if current.contains(fingerprint) {
+            continue;
         }
+        let (state, reason) = if comparable && judged.contains(path) {
+            (
+                "resolved",
+                "The finding no longer triggers; correctness is not certified",
+            )
+        } else {
+            (
+                "non-comparable",
+                "The file was not judged in this snapshot, or rubric or model changed",
+            )
+        };
+        changes.push(change(rule, path, fingerprint, generation, state, reason));
+    }
+    report.changes = changes;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{Finding, Strength};
+
+    fn finding(fingerprint: &str) -> Finding {
+        Finding {
+            rule: "maintainability/shared-logic".into(),
+            strength: Strength::Review,
+            line: 1,
+            message: String::new(),
+            action: String::new(),
+            symbol: None,
+            rule_version: "17".into(),
+            concern_probability: 0.9,
+            locations: Vec::new(),
+            quote: None,
+            fingerprint: fingerprint.into(),
+            rank: 1.0,
+            baselined: false,
+        }
+    }
+
+    #[test]
+    fn fingerprints_track_introduced_persistent_and_resolved_findings() {
+        let project = crate::tests::Project::new();
+        project.write("a.rs", "fn a() {}\n");
+        let options = crate::tests::args();
+        let inputs = crate::inventory::collect(&options, &project.context(), &[]).unwrap();
+        let mut old = crate::evaluate::snapshot(
+            &inputs,
+            &Default::default(),
+            &options,
+            crate::evaluate::SnapshotContext {
+                root: &project.0,
+                generation: 1,
+                requests: 0,
+            },
+        );
+        old.files[0].status = Status::Review;
+        old.files[0].findings = vec![finding("kept"), finding("fixed")];
+        let mut new = old.clone();
+        new.generation = 2;
+        new.files[0].findings = vec![finding("kept"), finding("added")];
+        compare(Some(&old), &mut new);
+        let states: BTreeMap<_, _> = new
+            .changes
+            .iter()
+            .map(|c| (c.fingerprint.as_str(), c.state.as_str()))
+            .collect();
+        assert_eq!(states["kept"], "persistent");
+        assert_eq!(states["added"], "introduced");
+        assert_eq!(states["fixed"], "resolved");
+        new.files[0].status = Status::Error;
+        compare(Some(&old), &mut new);
+        assert!(
+            new.changes
+                .iter()
+                .any(|c| c.fingerprint == "fixed" && c.state == "non-comparable")
+        );
+        compare(None, &mut new);
+        assert!(new.changes.iter().all(|c| c.state == "baseline"));
     }
 }

@@ -37,67 +37,28 @@ impl Drop for Project {
     }
 }
 
+/// A function large enough to judge: five body lines.
+const JUDGED_RS: &str = "fn f(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values {\n        total += value;\n    }\n    let doubled = total * 2;\n    doubled + 1\n}\n";
+
 #[test]
-fn roles_only_preview_excludes_verdicts_and_conflicting_modes() {
+fn removed_role_modes_are_rejected_without_state() {
     let project = Project::new();
-    std::fs::write(
-        project.0.join("example.py"),
-        "def test_connection(address):\n    return address.strip().lower()\n",
-    )
-    .unwrap();
-    let output = project
-        .command()
-        .args([
-            "check",
-            "example.py",
-            "--roles-only",
-            "--dry-run",
-            "--show-requests",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["command"], "classify-roles");
-    assert_eq!(report["stages"]["roles"]["planned_requests"], 1);
-    let request = &report["initial_requests"][0];
-    assert!(
-        request["questions"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .all(|key| key.starts_with("role_"))
-    );
-    assert!(request["state"]["file"].get("role").is_none());
-    assert!(
-        !project
+    std::fs::write(project.0.join("example.py"), "def run():\n    return 1\n").unwrap();
+    for flag in ["--roles-only", "--classification-cascade"] {
+        let output = project
             .command()
-            .args(["check", "example.py", "--classification-cascade"])
+            .args(["check", "example.py", flag, "--dry-run"])
             .output()
-            .unwrap()
-            .status
-            .success()
-    );
-    assert!(
-        !project
-            .command()
-            .args(["check", "example.py", "--roles-only", "--report"])
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{flag}");
+    }
     assert!(!project.0.join(".jevgate").exists());
 }
 
 #[test]
-fn check_shares_one_request_with_bounded_role_routing() {
+fn preview_sends_one_request_per_candidate_pair_without_local_metadata() {
     let project = Project::new();
-    std::fs::write(project.0.join("mixed.py"), "def a(value):\n    name = value.strip().lower()\n    record = dict(name=name, enabled=True)\n    return save(record)\n\ndef b(value):\n    name = value.strip().lower()\n    record = dict(name=name, enabled=True)\n    return save(record)\n").unwrap();
+    std::fs::write(project.0.join("mixed.py"), "def a(value):\n    name = value.strip().lower().replace(' ', '-')\n    record = dict(name=name, enabled=True, source='scheduled-import', owner=current_owner())\n    return save(record)\n\ndef b(value):\n    name = value.strip().lower().replace(' ', '-')\n    record = dict(name=name, enabled=True, source='scheduled-import', owner=current_owner())\n    return save(record)\n").unwrap();
     let output = project
         .command()
         .args([
@@ -116,30 +77,29 @@ fn check_shares_one_request_with_bounded_role_routing() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["initial_requests"].as_array().unwrap().len(), 1);
-    let questions = report["initial_requests"][0]["questions"]
-        .as_object()
-        .unwrap();
-    assert!(questions.contains_key("cascade_specialist_0"));
-    assert!(questions.contains_key("role_0_test_scenario"));
-    assert!(questions.keys().filter(|k| k.starts_with("role_")).count() <= 160);
-    assert!(!questions.contains_key("cascade_tests_0"));
-    assert!(
-        questions
-            .keys()
-            .filter(|k| k.starts_with("cascade_"))
-            .count()
-            <= 12
-    );
+    assert_eq!(report["schema_version"], 2);
+    let requests = report["initial_requests"].as_array().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].get("jevgate").is_none());
+    let state = &requests[0]["state"];
+    assert_eq!(state["site_a"]["function"], "a");
+    assert_eq!(state["site_b"]["function"], "b");
+    assert!(requests[0]["questions"]["same"]["type"] == "score");
+    let stage = &report["stages"]["duplicate-pair"];
+    assert_eq!(stage["planned_requests"], 1);
+    assert!(stage["planned_tokens"].as_u64().unwrap() > 0);
     assert!(!project.0.join(".jevgate").exists());
 }
 
 #[test]
-fn default_preview_batches_maintainability_without_automatic_context_or_state() {
+fn default_preview_sends_units_without_automatic_context_or_state() {
     let project = Project::new();
     std::fs::write(
         project.0.join("lib.rs"),
-        "mod storage; fn f() { storage::save(); }",
+        format!(
+            "mod storage;\n{JUDGED_RS}{}",
+            JUDGED_RS.replace("fn f(", "fn g(")
+        ),
     )
     .unwrap();
     std::fs::write(project.0.join("storage.rs"), "pub fn save() {}").unwrap();
@@ -167,17 +127,12 @@ fn default_preview_batches_maintainability_without_automatic_context_or_state() 
     assert_eq!(body["api_requests"], 0);
     assert_eq!(body["files"].as_array().unwrap().len(), 1);
     assert_eq!(body["files"][0]["context_files"], serde_json::json!([]));
-    assert_eq!(body["initial_requests"].as_array().unwrap().len(), 1);
-    let questions = body["initial_requests"][0]["questions"]
-        .as_object()
-        .unwrap();
-    assert_eq!(questions.len(), 7);
-    assert!(
-        questions.contains_key("operation_probe_1") || questions.contains_key("operation_probe_0")
-    );
-    assert!(questions.contains_key("file_organization"));
-    assert!(questions.contains_key("function_simplification"));
-    assert!(questions.contains_key("shared_logic"));
+    let stages = body["stages"].as_object().unwrap();
+    assert_eq!(stages["functions"]["planned_requests"], 1);
+    assert_eq!(stages["outline"]["planned_requests"], 1);
+    let functions = &body["initial_requests"][0];
+    assert_eq!(functions["state"]["functions"].as_array().unwrap().len(), 2);
+    assert!(functions["questions"]["f1_tasks"].is_object());
     assert!(!project.0.join(".jevgate").exists());
 }
 
@@ -186,7 +141,7 @@ fn default_preview_batches_maintainability_without_automatic_context_or_state() 
 fn browser_report_is_local_and_does_not_change_json_or_failure_status() {
     use std::os::unix::fs::PermissionsExt;
     let project = Project::new();
-    std::fs::write(project.0.join("api.py"), "def value():\n    return 1\n").unwrap();
+    std::fs::write(project.0.join("api.py"), "def value(rows):\n    total = 0\n    for row in rows:\n        total += row\n    total *= 2\n    return total\n").unwrap();
     let bin = project.0.join("bin");
     std::fs::create_dir(&bin).unwrap();
     let opener = bin.join("xdg-open");
@@ -238,7 +193,7 @@ fn browser_report_is_local_and_does_not_change_json_or_failure_status() {
 #[test]
 fn initial_request_preview_is_explicit_offline_and_contains_selected_evidence() {
     let project = Project::new();
-    let source = "def save(write):\n    try:\n        write()\n    except OSError:\n        return True\n\ndef submit(write):\n    return 'saved' if save(write) else 'failed'\n";
+    let source = "def save(write):\n    try:\n        write()\n    except OSError:\n        log('retry')\n        return True\n\ndef submit(write):\n    return 'saved' if save(write) else 'failed'\n";
     std::fs::write(project.0.join("save.py"), source).unwrap();
     std::fs::write(project.0.join(".env"), "TYPESAFE_API_KEY=do-not-expose").unwrap();
     let invalid = project
@@ -271,21 +226,15 @@ fn initial_request_preview_is_explicit_offline_and_contains_selected_evidence() 
     assert_eq!(report["api_requests"], 0);
     let requests = report["initial_requests"].as_array().unwrap();
     assert_eq!(requests.len(), 1);
+    let functions = requests[0]["state"]["functions"].as_array().unwrap();
+    assert_eq!(functions.len(), 1, "submit is too small to judge");
     assert!(
-        requests[0]["state"]["file"]["source"]
+        functions[0]["source"]
             .as_str()
             .unwrap()
             .contains("return True")
     );
-    assert!(
-        requests[0]["state"]["file"]["source"]
-            .to_string()
-            .contains("saved")
-    );
-    assert_eq!(
-        requests[0]["questions"]["function_simplification"]["type"],
-        "choice"
-    );
+    assert_eq!(requests[0]["questions"]["f0_tasks"]["type"], "score");
     assert!(!project.0.join(".jevgate").exists());
     let normal = project
         .command()
@@ -358,7 +307,7 @@ fn base_errors_and_empty_changes_are_distinct_cli_outcomes() {
 #[test]
 fn absent_credentials_produce_operational_failure_with_atomic_report() {
     let project = Project::new();
-    std::fs::write(project.0.join("lib.rs"), "fn f() {}").unwrap();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
     let output = project
         .command()
         .args(["check", ".", "--format", "json"])
@@ -565,7 +514,7 @@ fn missing_saved_credential_has_machine_readable_actionable_status() {
 fn watcher_debounces_updates_and_releases_lock_after_credential_failure() {
     let project = Project::new();
     let source = project.0.join("lib.rs");
-    std::fs::write(&source, "fn initial() {}").unwrap();
+    std::fs::write(&source, JUDGED_RS).unwrap();
     let mut child = project
         .command()
         .args([
@@ -602,7 +551,7 @@ fn watcher_debounces_updates_and_releases_lock_after_credential_failure() {
     let second = project.command().args(["check", "."]).output().unwrap();
     assert_eq!(second.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&second.stderr).contains("Another JevGate session"));
-    std::fs::write(&source, "fn changed() {}").unwrap();
+    std::fs::write(&source, JUDGED_RS.replace("fn f(", "fn changed(")).unwrap();
     let updated = wait_for(&|r| r["generation"].as_u64().unwrap_or(0) > 1 && r["settled"] == true);
     assert_eq!(updated["api_requests"], 0);
     assert!(
@@ -650,7 +599,9 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
         [
             "file_organization",
             "function_simplification",
-            "shared_logic"
+            "shared_logic",
+            "test_value",
+            "test_redundancy"
         ]
     );
     for arguments in [

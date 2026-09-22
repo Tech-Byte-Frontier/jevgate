@@ -7,30 +7,20 @@ use std::{
     process::{Command, Stdio},
 };
 
-fn dimension(rule: &str, scope: &str, d: &Dimension) -> Value {
-    let assessment = d.refactoring_assessment.as_ref();
-    let fragment = assessment.and_then(|a| {
-        a.selected_fragment
-            .as_ref()
-            .and_then(|key| a.fragments.get(key))
-    });
-    json!({"rule":rule,"scope":scope,"status":d.status,
-        "detail":if d.status == crate::schema::Status::NotApplicable { &d.applicability } else { &d.decision_basis },
-        "probability":d.concern_probability,"probabilities":d.probabilities,"location_probabilities":assessment.filter(|a|a.selected_fragment.is_none() && a.selected_operation.is_none()).map(|a| &a.location["probabilities"]),"fragment_source":fragment.map(|f|&f["evidence"]["source"]),"overview_probabilities":assessment.filter(|a|a.selected_fragment.is_some() || a.selected_operation.is_some()).map(|a|&a.outcome["probabilities"])})
+fn dimension(rule: &str, d: &Dimension) -> Value {
+    json!({"rule":rule,"status":d.status,"detail":d.decision_basis,
+        "probability":d.concern_probability,"units":d.units})
 }
 
-// Published Jev rate, checked 2026-09-18:
-// https://typesafe.ai/blog/introducing-system-one-models-and-jev
 fn batch_cost(report: &Report) -> Option<Value> {
-    if report.requested_model != "jev-1.13.0" {
-        return None;
-    }
-    Some(json!({
-        "estimated_usd": report.paid_input_tokens as f64 * 0.042 / 1_000_000.0,
-        "input_per_million": 0.042,
-        "output_per_million": 0.0,
-        "checked_at": "2026-09-18"
-    }))
+    crate::output::estimated_usd(report).map(|usd| {
+        json!({
+            "estimated_usd": usd,
+            "input_per_million": crate::output::INPUT_USD_PER_MILLION,
+            "output_per_million": 0.0,
+            "checked_at": crate::output::PRICE_CHECKED
+        })
+    })
 }
 
 pub fn render(report: &Report) -> Result<String> {
@@ -41,7 +31,7 @@ pub fn render(report: &Report) -> Result<String> {
             let checks: Vec<_> = file
                 .dimensions
                 .iter()
-                .map(|(rule, d)| dimension(rule, "File summary", d))
+                .map(|(rule, d)| dimension(rule, d))
                 .collect();
             json!({"path":file.path,"status":file.status,"cached":file.cached,"checks":checks,
             "findings":file.findings,"limitations":file.context_limitations,
@@ -51,16 +41,30 @@ pub fn render(report: &Report) -> Result<String> {
             })})
         })
         .collect();
+    let mut ranked: Vec<_> = report
+        .files
+        .iter()
+        .flat_map(|file| file.findings.iter().map(move |f| (file, f)))
+        .collect();
+    ranked.sort_by(|a, b| b.1.rank.total_cmp(&a.1.rank));
+    let ranked: Vec<_> = ranked
+        .into_iter()
+        .map(|(file, finding)| {
+            let mut value = json!(finding);
+            value["path"] = json!(file.path);
+            value
+        })
+        .collect();
     let rules: Vec<_> = crate::catalog::rules()
         .into_iter()
         .map(|r| json!({"key":r.key,"id":r.id,"description":r.inspection}))
         .collect();
     let data = json!({"root":report.root,"generation":report.generation,"generated_at":report.generated_at,
         "status":report.status,"complete":report.complete,"settled":report.settled,
-        "refresh":report.watcher_pid.is_some(),"model":report.requested_model,"quick":report.quick,
+        "refresh":report.watcher_pid.is_some(),"model":report.requested_model,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
-        "cost":batch_cost(report),
-        "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules});
+        "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
+        "errors":report.errors,"deleted":report.deleted_files,"files":files,"findings":ranked,"rules":rules});
     // Even a filename or analyzer message may contain </script>. Never let data
     // terminate the JSON element, and insert all displayed strings with textContent.
     let data = serde_json::to_string(&data)?
@@ -143,6 +147,8 @@ mod tests {
             report.files[0].error.as_deref().unwrap()
         );
         assert!(decoded.get("initial_requests").is_none());
+        assert!(decoded["findings"].as_array().unwrap().is_empty());
+        assert_eq!(decoded["fail_on"], serde_json::json!(["review"]));
         assert!(!html.contains("id=\"root\""));
         report.paid_input_tokens = 1_000_000;
         report.paid_output_tokens = 12_345;

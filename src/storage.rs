@@ -78,7 +78,8 @@ impl Store {
         Ok(store)
     }
 
-    pub fn load(&self, hash: &str, ttl: u64) -> Option<(Value, u64)> {
+    /// `ttl` is `None` for answers that never expire (a pinned model version).
+    pub fn load(&self, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
         let path = self.directory.join("cache").join(format!("{hash}.json"));
         if path.is_symlink() {
             return None;
@@ -86,7 +87,7 @@ impl Store {
         let entry: Cache =
             serde_json::from_str(&crate::inventory::read_source(&path, 1_048_576).ok()?).ok()?;
         let age = now().checked_sub(entry.created_at)?;
-        (ttl > 0 && entry.request_hash == hash && age < ttl)
+        (entry.request_hash == hash && ttl.is_none_or(|ttl| age < ttl))
             .then_some((entry.response, entry.created_at))
     }
 
@@ -100,6 +101,11 @@ impl Store {
             &self.directory.join("cache").join(format!("{hash}.json")),
             &serde_json::to_vec(&entry)?,
         )
+    }
+
+    /// Atomically replace a small state file directly under `.jevgate/`.
+    pub fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        atomic(&self.directory.join(name), bytes)
     }
 
     pub fn publish_html(&self, report: &Report) -> Result<()> {
@@ -163,7 +169,7 @@ pub fn read_latest(root: &Path) -> Result<Report> {
     );
     let report = read_report(&path)?;
     ensure!(
-        report.schema_version == 1 && report.root == root,
+        report.schema_version == crate::schema::SCHEMA_VERSION && report.root == root,
         "Incompatible report"
     );
     Ok(report)

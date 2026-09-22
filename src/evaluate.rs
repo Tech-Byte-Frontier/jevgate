@@ -1,6 +1,7 @@
 use super::{
     inventory::Input,
     options::CheckArgs,
+    requests::TokenBudget,
     schema::{self, FileResult, Report, Status},
     storage::Store,
     transport::Evaluator,
@@ -18,6 +19,9 @@ pub struct Session<'a> {
     pub requests: u32,
     pub paid_input_tokens: u64,
     pub paid_output_tokens: u64,
+    pub budget: TokenBudget,
+    /// Uploaded bytes and billed input tokens of fresh requests, for calibration.
+    pub observed: (u64, u64),
 }
 
 pub struct SnapshotContext<'a> {
@@ -47,20 +51,15 @@ pub fn snapshot(
     args: &CheckArgs,
     current: SnapshotContext<'_>,
 ) -> Report {
-    // Always recompose from cached answers. Skipping apply() on reused
-    // FileResults hid composition changes until COMPOSITION was bumped.
+    // Always recompose from cached answers, so a composition change is never
+    // hidden behind a reused report.
     let files = inputs.iter().map(|input| input.result.clone()).collect();
     let mut report = Report {
         quick: args.quick,
         base_revision: args.base.clone(),
         deleted_files: Vec::new(),
-        schema_version: 1,
-        command: if args.roles_only {
-            "classify-roles"
-        } else {
-            "check"
-        }
-        .into(),
+        schema_version: schema::SCHEMA_VERSION,
+        command: "check".into(),
         rubric_version: schema::RUBRIC.into(),
         root: current.root.into(),
         generation: current.generation,
@@ -82,14 +81,9 @@ pub fn snapshot(
         settled: false,
         files,
         changes: Vec::new(),
-        decision_policy: (if args.roles_only {
-            crate::roles::policy()
-        } else {
-            crate::maintainability::policy()
-        })
-        .into_iter()
-        .map(|(k, v)| (k.into(), v))
-        .collect(),
+        decision_policy: crate::catalog::policy(),
+        fail_on: args.fail_on_names(),
+        gate: None,
     };
     if let Some(base) = &args.base {
         match crate::revision::Changes::load(current.root, base) {
@@ -102,29 +96,49 @@ pub fn snapshot(
     }
     report.update_status();
     if args.dry_run {
-        for (index, input) in inputs.iter().enumerate() {
-            if report.files[index].status != Status::Pending {
-                continue;
-            }
-            match schedule(input, args, &mut report.files[index]) {
-                Ok(Scheduled::None) => {}
-                Ok(Scheduled::Purpose(request) | Scheduled::Judge(request)) => {
-                    let stage = report
-                        .stages
-                        .entry(crate::requests::stage(&request).into())
-                        .or_default();
-                    stage.planned_requests += 1;
-                    stage.planned_evidence_bytes += crate::requests::evidence_bytes(&request);
-                    if args.show_requests {
-                        report.initial_requests.push(request);
-                    }
-                }
-                Err(error) => report.errors.push(error.to_string()),
-            }
-        }
+        preview(inputs, args, &TokenBudget::load(current.root), &mut report);
         report.update_status();
     }
     report
+}
+
+/// Planned first-pass requests, without credentials, network or state.
+/// Requests that depend on answers (after file purpose, rechecks) are not known yet.
+fn preview(inputs: &[Input], args: &CheckArgs, budget: &TokenBudget, report: &mut Report) {
+    let mut planned = Vec::new();
+    let mut views = BTreeMap::new();
+    for (owner, input) in inputs.iter().enumerate() {
+        if report.files[owner].status != Status::Pending {
+            continue;
+        }
+        match schedule(input, args, budget, &mut report.files[owner]) {
+            Ok(Scheduled::None) => {}
+            Ok(Scheduled::Purpose(request)) => planned.push(request),
+            Ok(Scheduled::Ready(view)) => {
+                views.insert(owner, *view);
+            }
+            Err(error) => report.errors.push(error.to_string()),
+        }
+    }
+    let plan = crate::units::plan(inputs, &views, args, budget);
+    for (owner, reason) in &plan.skipped {
+        skip(&mut report.files[*owner], reason);
+    }
+    planned.extend(plan.requests.into_iter().map(|p| p.request));
+    for request in planned {
+        let stage = report
+            .stages
+            .entry(crate::requests::stage(&request).into())
+            .or_default();
+        stage.planned_requests += 1;
+        stage.planned_evidence_bytes += crate::requests::evidence_bytes(&request);
+        stage.planned_tokens += budget.request_tokens(&request) as u64;
+        if args.show_requests {
+            report
+                .initial_requests
+                .push(crate::requests::provider_request(&request).into_owned());
+        }
+    }
 }
 
 impl Session<'_> {
@@ -138,112 +152,84 @@ impl Session<'_> {
             .filter_map(|(i, f)| (f.status == Status::Pending).then_some(i))
             .collect();
         let mut purpose = Vec::new();
-        let mut gates = Vec::new();
+        let mut views = BTreeMap::new();
         for &owner in &selected {
-            match schedule(&inputs[owner], self.args, &mut report.files[owner]) {
-                Ok(Scheduled::None) => report.files[owner].cached = false,
+            let file = &mut report.files[owner];
+            file.judgments.clear();
+            match schedule(&inputs[owner], self.args, &self.budget, file) {
+                Ok(Scheduled::None) => file.cached = false,
                 Ok(Scheduled::Purpose(request)) => {
-                    enqueue(&mut report.files[owner], &mut purpose, owner, request);
+                    file.cached = true;
+                    purpose.push(Task {
+                        owner,
+                        payload: request.clone(),
+                        request,
+                    });
                 }
-                Ok(Scheduled::Judge(request)) => {
-                    enqueue(&mut report.files[owner], &mut gates, owner, request);
+                Ok(Scheduled::Ready(view)) => {
+                    views.insert(owner, *view);
                 }
-                Err(error) => fail(&mut report.files[owner], error),
+                Err(error) => fail(file, error),
             }
         }
         if !purpose.is_empty() {
+            let owners: Vec<usize> = purpose.iter().map(|t| t.owner).collect();
             self.dispatch(report, purpose, |file, request, body| {
                 crate::file_kind::record_purpose(file, &request, body)
             })?;
-            for &owner in &selected {
-                if report.files[owner].status == Status::Error
-                    || report.files[owner]
+            for owner in owners {
+                let file = &mut report.files[owner];
+                if file.status == Status::Error
+                    || file
                         .classification
                         .as_ref()
                         .is_none_or(|class| class.stage != "answered")
                 {
                     continue;
                 }
-                match crate::file_kind::decide_after_purpose(
-                    &inputs[owner],
-                    self.args,
-                    &mut report.files[owner],
-                ) {
-                    Ok(Some(request)) => gates.push(queued(owner, request)),
-                    Ok(None) => {}
-                    Err(error) => fail(&mut report.files[owner], error),
+                match crate::file_kind::decide_after_purpose(&inputs[owner], self.args, file) {
+                    Ok(Some(view)) => {
+                        views.insert(owner, view);
+                    }
+                    Ok(None) => file.cached = false,
+                    Err(error) => fail(file, error),
                 }
             }
         }
-        if !gates.is_empty() {
-            self.dispatch(report, gates, |file, request, body| {
-                if request["state"]["role_version"].is_string() {
-                    crate::roles::apply(file, &request, body)
-                } else {
-                    crate::maintainability::apply(file, &request, body)
-                }
+        let plan = crate::units::plan(inputs, &views, self.args, &self.budget);
+        for (owner, reason) in &plan.skipped {
+            skip(&mut report.files[*owner], reason);
+        }
+        for &owner in plan.files.keys() {
+            report.files[owner].cached = true;
+        }
+        let first: Vec<_> = plan.requests.iter().map(Task::unit).collect();
+        self.dispatch(report, first, |file, asked, body| {
+            crate::units::record(file, &asked, body)
+        })?;
+        let rechecks: Vec<_> = crate::units::rechecks(&plan, &report.files)
+            .iter()
+            .map(Task::unit)
+            .collect();
+        if !rechecks.is_empty() {
+            self.dispatch(report, rechecks, |file, asked, body| {
+                crate::units::record(file, &asked, body)
             })?;
         }
-        if self.args.include_tests {
-            let mut portions = Vec::new();
-            for (owner, input) in inputs.iter().enumerate() {
-                match crate::file_kind::test_portion_request(
-                    input,
-                    self.args,
-                    &mut report.files[owner],
-                ) {
-                    Ok(Some(request)) => portions.push(queued(owner, request)),
-                    Ok(None) => {}
-                    Err(error) => report.errors.push(error.to_string()),
-                }
-            }
-            if !portions.is_empty() {
-                self.dispatch(report, portions, |file, request, body| {
-                    crate::maintainability::apply_test_portion(file, &request, body)
-                })?;
-            }
-        }
-        let mut followups = Vec::new();
-        for (owner, input) in inputs.iter().enumerate() {
-            if report.files[owner].status == Status::Error {
+        for (&owner, file_plan) in &plan.files {
+            let file = &mut report.files[owner];
+            if file.status == Status::Error {
                 continue;
             }
-            match crate::maintainability::focused_requests(input, &report.files[owner], self.args) {
-                Ok(requests) => {
-                    for request in requests {
-                        followups.push(queued(owner, request));
-                    }
-                }
-                Err(error) => report.errors.push(error.to_string()),
-            }
+            let composed = crate::units::compose::compose(file_plan, &file.judgments);
+            file.syntax_checked = true;
+            file.dimensions = composed.dimensions;
+            file.findings = composed.findings;
+            file.status = composed.status;
         }
-        if !followups.is_empty() {
-            self.dispatch(report, followups, |file, request, body| {
-                crate::maintainability::apply_focused(file, &request, body)
-            })?;
-        }
-        let mut extractions = Vec::new();
-        for (owner, input) in inputs.iter().enumerate() {
-            if report.files[owner].status == Status::Error {
-                continue;
-            }
-            match crate::maintainability::extraction_requests(
-                input,
-                &report.files[owner],
-                self.args,
-            ) {
-                Ok(requests) => {
-                    for request in requests {
-                        extractions.push(queued(owner, request));
-                    }
-                }
-                Err(error) => report.errors.push(error.to_string()),
-            }
-        }
-        if !extractions.is_empty() {
-            self.dispatch(report, extractions, |file, request, body| {
-                crate::maintainability::apply_extraction(file, &request, body)
-            })?;
+        if self.observed.1 > 0 {
+            self.budget.observe(self.observed.0, self.observed.1);
+            self.budget.save(self.store)?;
         }
         self.progress(report)
     }
@@ -285,6 +271,7 @@ impl Session<'_> {
             }
             stage.successful_requests += m.successful_requests;
             stage.failed_attempts += m.failed_attempts;
+            stage.retries += m.retries;
             stage.cache_hits += m.cache_hits;
             stage.cached_judgments += m.cached_judgments;
             stage.evaluated_judgments += m.evaluated_judgments;
@@ -379,7 +366,7 @@ impl Session<'_> {
             self.store.publish_html(report)?;
         }
         if self.args.output_format() == super::options::Format::Jsonl {
-            super::output::emit(report, super::options::Format::Jsonl)?;
+            super::output::emit(report, super::options::Format::Jsonl, false)?;
         }
         Ok(())
     }
@@ -388,25 +375,7 @@ impl Session<'_> {
 enum Scheduled {
     None,
     Purpose(serde_json::Value),
-    Judge(serde_json::Value),
-}
-
-fn queued(owner: usize, request: serde_json::Value) -> Task<serde_json::Value> {
-    Task {
-        owner,
-        payload: request.clone(),
-        request,
-    }
-}
-
-fn enqueue(
-    file: &mut FileResult,
-    tasks: &mut Vec<Task<serde_json::Value>>,
-    owner: usize,
-    request: serde_json::Value,
-) {
-    file.cached = true;
-    tasks.push(queued(owner, request));
+    Ready(Box<crate::file_kind::View>),
 }
 
 fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {
@@ -414,25 +383,24 @@ fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classifi
     file.classification = Some(class);
 }
 
-fn schedule(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Result<Scheduled> {
+fn schedule(
+    input: &Input,
+    args: &CheckArgs,
+    budget: &TokenBudget,
+    file: &mut FileResult,
+) -> Result<Scheduled> {
     if file.status != Status::Pending {
         return Ok(Scheduled::None);
     }
-    if args.roles_only {
-        let request = crate::roles::request(input, args)?;
-        if !crate::cascade::within_budget(&request) {
-            let source = input.source.as_deref().unwrap_or("");
-            file.classification = Some(crate::file_kind::unsent(
-                &input.result.path,
-                source,
-                &crate::file_kind::budget_detail(source.len()),
-            ));
-            file.status = Status::NeedsContext;
+    let plan = match crate::file_kind::plan(input, args, budget) {
+        Ok(plan) => plan,
+        Err(_) => {
+            // Invalid syntax cannot be located; it is reported, not judged.
+            skip(file, "Syntax errors; this file was not judged.");
             return Ok(Scheduled::None);
         }
-        return Ok(Scheduled::Judge(request));
-    }
-    match crate::file_kind::plan(input, args)? {
+    };
+    match plan {
         crate::file_kind::Plan::Skip(class) => {
             apply_classification(file, class);
             file.status = Status::NotApplicable;
@@ -448,11 +416,12 @@ fn schedule(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Result<Sc
             file.classification = Some(class);
             Ok(Scheduled::Purpose(request))
         }
-        crate::file_kind::Plan::Judge(class, request) => {
-            file.contains_tests =
-                file.contains_tests || class.kind == "tests" || !class.separated_tests.is_empty();
-            file.classification = Some(class);
-            Ok(Scheduled::Judge(request))
+        crate::file_kind::Plan::Ready(view) => {
+            file.contains_tests = file.contains_tests
+                || view.classification.kind == "tests"
+                || !view.classification.separated_tests.is_empty();
+            file.classification = Some(view.classification.clone());
+            Ok(Scheduled::Ready(Box::new(view)))
         }
     }
 }
@@ -463,8 +432,30 @@ struct Task<T> {
     payload: T,
 }
 
+impl Task<crate::units::Asked> {
+    fn unit(planned: &crate::units::Planned) -> Self {
+        Self {
+            owner: planned.owner,
+            request: planned.request.clone(),
+            payload: planned.asked.clone(),
+        }
+    }
+}
+
 fn fail(file: &mut FileResult, error: anyhow::Error) {
     file.status = Status::Error;
     file.cached = false;
     file.error = Some(error.to_string());
+}
+
+/// Unsupported or unparseable files are reported with a reason and never make a run incomplete.
+fn skip(file: &mut FileResult, reason: &str) {
+    file.status = Status::Skipped;
+    file.cached = false;
+    file.dimensions.clear();
+    file.findings.clear();
+    if let Some(class) = file.classification.as_mut() {
+        class.reason = reason.into();
+    }
+    file.error = Some(reason.into());
 }

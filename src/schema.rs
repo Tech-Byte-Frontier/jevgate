@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-pub const RUBRIC: &str = "jevgate-quality-v34";
+pub const RUBRIC: &str = "jevgate-units-v1";
 /// Changes how saved answers become a status. Included in the report identity
 /// and not in the judgment cache, so unchanged questions are not sent again.
-pub const COMPOSITION: &str = "file-wide-status-v6";
+pub const COMPOSITION: &str = "unit-composition-v2";
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -13,6 +14,7 @@ pub enum Status {
     Pending,
     NotApplicable,
     Clear,
+    Consider,
     Review,
     Uncertain,
     NeedsContext,
@@ -20,30 +22,82 @@ pub enum Status {
     Skipped,
 }
 
+/// One rule's composed result for a file, over every unit it judged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dimension {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refactoring_assessment: Option<crate::maintainability::Assessment>,
-    pub score: f64,
-    pub confidence: f64,
-    pub probabilities: BTreeMap<String, f64>,
-    pub concern_probability: f64,
-    #[serde(default)]
-    pub concern_basis: String,
-    pub missing_context: f64,
-    #[serde(default)]
-    pub evidence_sufficiency: Option<f64>,
-    #[serde(default)]
-    pub protection_probability: Option<f64>,
-    #[serde(default)]
-    pub protection_checks: BTreeMap<String, f64>,
-    #[serde(default)]
-    pub decision_basis: String,
     pub status: Status,
+    /// Highest concern among the judged units.
+    pub concern_probability: f64,
+    pub decision_basis: String,
     pub rule_version: String,
-    pub applicability: String,
-    #[serde(default)]
-    pub applicability_probability: Option<f64>,
+    pub units: UnitCounts,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct UnitCounts {
+    pub judged: usize,
+    pub review: usize,
+    pub consider: usize,
+    pub clear: usize,
+    pub uncertain: usize,
+    pub needs_context: usize,
+    /// Bodies below the minimum size; never counted as clear.
+    pub too_small: usize,
+    /// Candidates beyond the per-file or per-run caps.
+    pub omitted: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum Pass {
+    First,
+    Recheck,
+}
+
+/// A raw typed answer, kept exactly as the provider returned it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum Answer {
+    Noul {
+        noul: f64,
+    },
+    Choice {
+        choice: String,
+        confidence: f64,
+        probabilities: BTreeMap<String, f64>,
+    },
+    Score {
+        score: f64,
+        confidence: f64,
+        probabilities: BTreeMap<String, f64>,
+    },
+}
+
+/// One answer about one unit. First-pass and recheck answers are both kept.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Judgment {
+    pub rule: String,
+    pub unit: String,
+    pub question: String,
+    pub version: String,
+    pub pass: Pass,
+    pub answer: Answer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Location {
+    pub path: PathBuf,
+    pub start_line: usize,
+    pub end_line: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum Strength {
+    Consider,
+    Review,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -70,19 +124,27 @@ pub struct SourceRange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule: String,
+    pub strength: Strength,
     pub line: usize,
     pub message: String,
     pub action: String,
     pub symbol: Option<String>,
     pub rule_version: String,
     pub concern_probability: f64,
-    pub evidence_complete: bool,
+    pub locations: Vec<Location>,
+    /// Whole statements from the first location, when the evidence is a quote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<String>,
+    /// Rule, path, unit and normalized evidence; stable across unrelated edits.
+    pub fingerprint: String,
+    /// Probability times the log of the lines involved; orders findings.
+    pub rank: f64,
+    #[serde(default)]
+    pub baselined: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role_assessment: Option<crate::roles::Assessment>,
     pub path: PathBuf,
     pub role: String,
     pub contains_tests: bool,
@@ -107,9 +169,9 @@ pub struct FileResult {
     pub model: Option<String>,
     pub elapsed_ms: u64,
     pub dimensions: BTreeMap<String, Dimension>,
-    /// Original file-level judgments before focused follow-up; never discarded.
-    #[serde(default)]
-    pub file_dimensions: BTreeMap<String, Dimension>,
+    /// Raw answers for every judged unit, first pass and recheck.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
     pub findings: Vec<Finding>,
     pub error: Option<String>,
     /// Base file classification used to choose what the gates judge.
@@ -124,8 +186,13 @@ pub struct StageMetrics {
     pub elapsed_ms: u64,
     pub service_ms: u64,
     pub queue_wait_ms: u64,
+    #[serde(default)]
+    pub planned_tokens: u64,
     pub successful_requests: u64,
     pub failed_attempts: u64,
+    /// Extra sends after rate limits, overload or connection failures.
+    #[serde(default)]
+    pub retries: u64,
     pub cache_hits: u64,
     pub cached_judgments: u64,
     pub evaluated_judgments: u64,
@@ -160,6 +227,11 @@ pub struct Report {
     pub initial_requests: Vec<serde_json::Value>,
     pub requested_model: String,
     pub decision_policy: BTreeMap<String, f64>,
+    /// The configured gate policy; classification does not depend on it.
+    #[serde(default)]
+    pub fail_on: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<crate::gate::Gate>,
     pub api_requests: u32,
     #[serde(default)]
     pub concurrency: u32,
@@ -179,13 +251,15 @@ impl Report {
             .iter()
             .filter(|f| f.status != Status::Skipped)
             .collect();
+        // Skipped files (unsupported, unparseable or excluded) never make a run incomplete.
         self.complete = self.errors.is_empty()
             && !self.dry_run
-            && (!selected.is_empty() || self.base_revision.is_some())
+            && (!self.files.is_empty() || self.base_revision.is_some())
             && selected.iter().all(|f| {
                 matches!(
                     f.status,
                     Status::Clear
+                        | Status::Consider
                         | Status::Review
                         | Status::Uncertain
                         | Status::NeedsContext
@@ -194,24 +268,23 @@ impl Report {
             });
         self.judgments_complete = self.complete
             && selected.iter().all(|f| {
-                if self.command == "classify-roles" {
-                    return f.status == Status::Clear;
-                }
                 f.dimensions.values().all(|d| {
                     matches!(
                         d.status,
-                        Status::Clear | Status::Review | Status::NotApplicable
+                        Status::Clear | Status::Consider | Status::Review | Status::NotApplicable
                     )
                 })
             });
         self.status = if !self.complete {
             "incomplete"
-        } else if selected.is_empty() && self.base_revision.is_some() {
+        } else if self.files.is_empty() && self.base_revision.is_some() {
             "no-changed-source"
         } else if selected.iter().all(|f| f.status == Status::NotApplicable) {
             "not-applicable"
         } else if selected.iter().any(|f| f.status == Status::Review) {
             "review"
+        } else if selected.iter().any(|f| f.status == Status::Consider) {
+            "consider"
         } else if selected.iter().any(|f| f.status == Status::NeedsContext) {
             "needs-context"
         } else if !self.judgments_complete {
@@ -220,9 +293,6 @@ impl Report {
             "clear"
         }
         .into();
-        if self.command == "classify-roles" && self.status == "clear" {
-            self.status = "classified".into();
-        }
     }
 }
 
@@ -260,4 +330,6 @@ pub struct Change {
     pub previous_generation: Option<u64>,
     pub state: String,
     pub reason: String,
+    #[serde(default)]
+    pub fingerprint: String,
 }

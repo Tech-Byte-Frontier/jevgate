@@ -1,6 +1,6 @@
+mod analysis;
 mod auth;
 mod cancellation;
-mod cascade;
 mod catalog;
 mod changes;
 mod config;
@@ -9,22 +9,20 @@ mod context_units;
 mod discovery;
 mod evaluate;
 mod file_kind;
+mod gate;
 mod html_report;
 mod inventory;
 mod locations;
-mod maintainability;
 mod options;
 mod output;
-mod questions;
-mod repetition;
 mod requests;
 mod response;
 mod revision;
-mod roles;
 mod schema;
 mod server;
 mod storage;
 mod transport;
+mod units;
 mod watch;
 
 use anyhow::Result;
@@ -64,6 +62,11 @@ fn run(command: JevCommand) -> Result<u8> {
                 args.base = Some(revision::resolve(&context.root, base)?);
             }
             check(&args, &context)
+        }
+        JevCommand::Baseline => {
+            let (path, count) = gate::write_baseline(&context.root)?;
+            println!("Accepted {count} finding(s) in {}", path.display());
+            Ok(0)
         }
         JevCommand::Rules => {
             println!("{}", serde_json::to_string_pretty(&catalog::describe())?);
@@ -116,7 +119,7 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         },
     );
     if args.dry_run {
-        output::emit(&report, args.output_format())?;
+        output::emit(&report, args.output_format(), args.verbose)?;
         return Ok(0);
     }
     let store = store.unwrap();
@@ -134,6 +137,8 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         requests: 0,
         paid_input_tokens: 0,
         paid_output_tokens: 0,
+        budget: requests::TokenBudget::load(&context.root),
+        observed: (0, 0),
     };
     if let Err(error) = session.evaluate(&inputs, &mut report) {
         report.watcher_pid = None;
@@ -146,32 +151,20 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         return Err(error);
     }
     changes::compare(baseline.as_ref(), &mut report);
+    gate::settle(&context.root, &mut report, &args.fail_on)?;
     report.settled = true;
     session.publish(&report)?;
     if args.report {
         html_report::open(&context.root);
     }
     if args.output_format() != Format::Jsonl {
-        output::emit(&report, args.output_format())?;
+        output::emit(&report, args.output_format(), args.verbose)?;
     }
     if args.watch {
         watch::run(&mut session, scope, inputs, report)?;
         return Ok(0);
     }
-    Ok(outcome(&report))
-}
-
-/// Process exit is the gate: 0 is clear, 1 is review, 2 is undecided or incomplete.
-/// Uncertain, needs-context and incomplete runs never claim a pass.
-fn outcome(report: &schema::Report) -> u8 {
-    if !report.complete {
-        return 2;
-    }
-    match report.status.as_str() {
-        "review" => 1,
-        "clear" | "not-applicable" | "no-changed-source" | "classified" => 0,
-        _ => 2,
-    }
+    Ok(gate::exit_code(&report))
 }
 
 #[cfg(test)]

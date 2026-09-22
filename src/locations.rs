@@ -119,15 +119,6 @@ fn visit(node: Node<'_>, source: &str, locations: &mut Vec<(String, usize)>) {
     }
 }
 
-/// Exact callable starts, without the display-window fallback used for text files.
-pub(crate) fn callable_lines(path: &Path, source: &str) -> Result<Vec<usize>> {
-    let mut locations = Vec::new();
-    if let Some(tree) = parse(path, source)? {
-        visit(tree.root_node(), source, &mut locations);
-    }
-    Ok(locations.into_iter().map(|(_, line)| line).collect())
-}
-
 pub fn collect(path: &Path, source: &str, _root: &Path) -> Result<(bool, Vec<(String, usize)>)> {
     let tree = parse(path, source)?;
     if let Some(tree) = &tree {
