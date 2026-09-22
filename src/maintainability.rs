@@ -411,12 +411,20 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
                     "No decisive judgment. Conditional candidate: {names} (probability {probability:.2}); this does not establish a need to refactor."
                 );
             }
+            let located =
+                response::probability_at_least(*probability, response::LOCATION_PROBABILITY);
             if status == Status::Review {
-                detail = format!(
-                    "{action}: {names}. Strongest candidate probability {probability:.2}; this is an advisory boundary, not a generated refactoring plan."
-                );
+                detail = if located {
+                    format!(
+                        "{action}: {names}. Strongest candidate probability {probability:.2}; this is an advisory boundary, not a generated refactoring plan."
+                    )
+                } else {
+                    format!(
+                        "{action}: {names}. Strongest candidate probability {probability:.2} is below the location bar and is not a finding."
+                    )
+                };
             }
-            if status == Status::Review {
+            if status == Status::Review && located {
                 let primary = selected
                     .iter()
                     .find(|v| v["path"] == json!(file.path))
@@ -434,8 +442,7 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
                     symbol: Some(names),
                     rule_version: crate::catalog::rule_version(key).into(),
                     concern_probability: concern,
-                    evidence_complete: missing < response::MISSING_CONTEXT
-                        && *probability >= response::LOCATION_PROBABILITY,
+                    evidence_complete: missing < response::MISSING_CONTEXT,
                 });
             }
         }
@@ -847,37 +854,45 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
     let detail = match status {
         Status::Review => {
             if key == "shared_logic" {
-                let names = evidence
-                    .map(|item| {
-                        if let Some(locations) = item["locations"].as_array() {
-                            locations
-                                .iter()
-                                .map(|location| {
-                                    location_label(
-                                        location["path"].as_str().unwrap_or(""),
-                                        location["start_line"].as_u64().unwrap_or(1),
-                                        location["end_line"].as_u64().unwrap_or(1),
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" and ")
-                        } else {
+                let Some(item) = evidence else {
+                    return Ok(());
+                };
+                let span = fragment_span(item);
+                if span < MIN_SHARED_SPAN {
+                    let dimension = file.dimensions.get_mut(key).unwrap();
+                    dimension.decision_basis = format!(
+                        "{}\nShort repeated span: {span} bytes stayed a probability ({concern:.2}) and was not printed as a finding.",
+                        overview_basis(&dimension.decision_basis)
+                    );
+                    if let Some(copy) = file.file_dimensions.get_mut(key) {
+                        copy.decision_basis = dimension.decision_basis.clone();
+                    }
+                    file.findings.retain(|finding| {
+                        finding.rule != IDS[2] || finding.message.starts_with("Test portion:")
+                    });
+                    response::update_status(file);
+                    return Ok(());
+                }
+                let names = if let Some(locations) = item["locations"].as_array() {
+                    locations
+                        .iter()
+                        .map(|location| {
                             location_label(
-                                item["path"].as_str().unwrap_or(""),
-                                item["start_line"].as_u64().unwrap_or(1),
-                                item["end_line"].as_u64().unwrap_or(1),
+                                location["path"].as_str().unwrap_or(""),
+                                location["start_line"].as_u64().unwrap_or(1),
+                                location["end_line"].as_u64().unwrap_or(1),
                             )
-                        }
-                    })
-                    .unwrap_or_else(|| name.to_string());
-                evidence
-                    .map(|item| shared_detail(&names, item))
-                    .unwrap_or_else(|| {
-                        format!(
-                            "Focused recheck of {name} found a maintainability concern. {}",
-                            CONCERNS[index]
-                        )
-                    })
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                } else {
+                    location_label(
+                        item["path"].as_str().unwrap_or(""),
+                        item["start_line"].as_u64().unwrap_or(1),
+                        item["end_line"].as_u64().unwrap_or(1),
+                    )
+                };
+                shared_detail(&names, item)
             } else {
                 format!(
                     "Focused recheck of {name} found a maintainability concern. {}",
@@ -1695,9 +1710,17 @@ mod tests {
         );
         body["answers"]["file_organization_location"] = json!({"type":"choice","choice":"p0","confidence":0.1,"probabilities":{"none":0.49,"p0":0.51}});
         apply(&mut file, &request, &body).unwrap();
+        assert!(file.findings.is_empty());
+        assert!(
+            file.dimensions[KEYS[0]]
+                .decision_basis
+                .contains("below the location bar")
+        );
+        body["answers"]["file_organization_location"] = json!({"type":"choice","choice":"p0","confidence":0.8,"probabilities":{"none":0.1,"p0":0.9}});
+        apply(&mut file, &request, &body).unwrap();
         assert_eq!(file.status, Status::Review);
         assert_eq!(file.findings.len(), 1);
-        assert!(!file.findings[0].evidence_complete);
+        assert!(file.findings[0].evidence_complete);
         assert!(file.findings[0].symbol.is_some());
         body["answers"]["file_organization"] = json!({"type":"choice","choice":"review","confidence":0.1,"probabilities":{"clear":0.4,"context":0.0,"not_applicable":0.0,"review":0.6}});
         apply(&mut file, &request, &body).unwrap();
@@ -1758,7 +1781,7 @@ mod tests {
         apply(&mut file, &request, &body).unwrap();
         assert_eq!(file.dimensions[KEYS[2]].status, Status::Uncertain);
         let fragment = json!({
-            "source": "normalized = value.strip().lower()\nrecord = dict(name=normalized, enabled=True)\nreturn save(record)\n",
+            "source": "normalized = value.strip().lower()\nrecord = dict(name=normalized, enabled=True, ready=True)\nreturn database.save(record)\n",
             "surroundings": [
                 {"path":"app.py","start_line":1,"source":"def save_order(order):\n    return database.write(order)"},
                 {"path":"app.py","start_line":4,"source":"def render_banner(user):\n    return user.name"}
@@ -1784,6 +1807,31 @@ mod tests {
         assert!(file.findings[0].message.contains("Repeated:"));
         assert!(file.findings[0].message.contains("save_order"));
         assert!(file.findings[0].message.contains("render_banner"));
+        let short = json!({
+            "source": "previous = super::evaluate::previous_judgments(Some(&report), false);",
+            "locations": [
+                {"path":"app.py","start_line":1,"end_line":1},
+                {"path":"app.py","start_line":4,"end_line":4}
+            ]
+        });
+        let short_focus = json!({
+            "model": options.model,
+            "state": {
+                "focused": "shared_logic",
+                "file": {"path":"app.py","source":"def save_order(order):\n    return database.write(order)"},
+                "focus_evidence": [short]
+            },
+            "questions": { "shared_logic": crate::questions::recheck(2, "") }
+        });
+        file.findings.clear();
+        file.dimensions.get_mut("shared_logic").unwrap().status = Status::Uncertain;
+        apply_focused(&mut file, &short_focus, &focused_body).unwrap();
+        assert!(file.findings.is_empty());
+        assert!(
+            file.dimensions["shared_logic"]
+                .decision_basis
+                .contains("Short repeated span")
+        );
     }
 
     #[test]
