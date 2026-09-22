@@ -21,12 +21,12 @@ const IDS: [&str; 3] = [
     "maintainability/shared-logic",
 ];
 const QUESTIONS: [&str; 3] = [
-    "Classify the primary file's module organization. Does it bundle unrelated domain or infrastructure responsibilities, or does it form one coherent feature or abstraction? Distinct independently useful concerns with their own dependencies belong behind separate module boundaries. Related validation, calculation, formatting and accessors for one feature can remain together. Different function names or separate algorithms alone do not establish unrelated responsibilities. Judge the source's actual concepts and dependencies, not file length or a preference for more files.",
+    "Classify the primary file's module organization. Does it implement one responsibility, or does it combine independently useful capabilities that would change for different reasons? A responsibility is a separately understandable job with its own concepts, data, and reason to change. A capability is independently useful when it could stand alone as its own module and change without the others. Capabilities that are each useful on their own, such as building inputs, composing judgments, formatting outputs, or follow-up probes, are separate responsibilities even when they serve one product feature. Steps of one workflow and variations of one concern can remain together. Different function names or separate algorithms alone do not establish separate responsibilities. Judge the source's actual concepts and dependencies. `file.line_count` over `file.line_budget` is evidence to weigh when inspecting responsibility boundaries, never a verdict on its own.",
     "Classify the internal organization of the primary file's functions. Is there a function doing several substantial jobs inline, or tangled control flow hiding a coherent task that should be extracted or simplified? Separately understandable parsing, transformation, rendering or delivery phases implemented inline can warrant extraction even in a sequential workflow. A short focused calculation, straightforward guard-and-aggregate operation, delegation to helpers, necessary domain branches and declarative tables are acceptable. The benefit must reduce the reasoning or repeated maintenance needed to change the implementation, not merely shorten it.",
     "Classify implementation repetition involving the primary file. Do supplied operations repeat the same meaningful sequence of implementation steps for the same responsibility, requiring corresponding corrections in multiple places? This includes multi-step setup or cleanup as well as algorithms, validation and transformations. Repeated resource construction, configuration or runtime record assembly is implementation, not merely declarative data. Distinguish shared mechanics from the variable policy values passed into them: consolidating common mechanics need not merge the policies. Once those mechanics are delegated, repeated calls with different policy inputs are acceptable. Tiny constructors and forwarding wrappers do not by themselves warrant consolidation. In tests, distinguish substantial repeated fixture implementation from short independent examples and assertion scaffolding. Or is their similarity incidental, trivial, already delegated, declarative, or part of independently owned policies? Shared implementation is useful when it removes repeated maintenance without coupling different meanings. Similar control-flow shape or thresholds alone is not duplicated responsibility. Compare only supplied source.",
 ];
 const CONCERNS: [&str; 3] = [
-    "The file bundles unrelated responsibilities with distinct concepts or dependencies; separate modules would give useful responsibility boundaries.",
+    "The file combines two or more capabilities that could each stand alone as a module and change for different reasons; separate modules would give useful responsibility boundaries.",
     "A function implements multiple substantial tasks inline or has unnecessarily tangled control flow; extracting a coherent task or restructuring it would make changes easier to understand.",
     "The same meaningful algorithm, transformation, validation, setup, cleanup or runtime assembly sequence is repeated for the same responsibility; a shared helper or fixture would remove corresponding maintenance edits.",
 ];
@@ -54,6 +54,7 @@ pub fn policy() -> BTreeMap<&'static str, f64> {
         ("location_probability", response::LOCATION_PROBABILITY),
         ("missing_context", response::MISSING_CONTEXT),
         ("extract_confidence", EXTRACT_CONFIDENCE),
+        ("line_budget", crate::options::DEFAULT_LINE_BUDGET as f64),
     ])
 }
 
@@ -227,9 +228,10 @@ pub(crate) fn request_with(
         }
     }
     let cascade_enabled = questions.contains_key("shared_logic");
+    let line_count = input.source.as_deref().unwrap_or(source).lines().count() as u64;
     let mut request = json!({"model":args.model,"state":{
-        "maintainability_version":7,
-        "file":{"path":input.result.path,"role":input.result.role,"language":view.classification.language,"classification":crate::file_kind::model_value(&view.classification),"source":source,"source_hash":input.result.source_hash},
+        "maintainability_version":9,
+        "file":{"path":input.result.path,"role":input.result.role,"language":view.classification.language,"classification":crate::file_kind::model_value(&view.classification),"source":source,"source_hash":input.result.source_hash,"line_count":line_count,"line_budget":args.line_budget},
         "context":input.context.iter().map(|c| json!({"path":c.file.path,"source":c.source,"source_hash":c.file.source_hash})).collect::<Vec<_>>(),
         "operations":operations,"pairs":pairs,"repeated_fragments":repetition["observations"],
         "limitations":{"fragment_excerpts_omitted":excerpts_omitted,"operations_omitted":total.saturating_sub(64),"pairs_omitted":pair_count.saturating_sub(240),"scope":"Selected file and explicit context only. Nested tasks and non-callable declarations may lack separate candidates. Full source remains visible; use context for an unrepresentable important opportunity."}
@@ -416,8 +418,14 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
             let located =
                 response::probability_at_least(*probability, response::LOCATION_PROBABILITY);
             if status == Status::Review && !located {
-                detail = format!("Review without a supported location ({probability:.2}).");
-                status = Status::Uncertain;
+                if key == "shared_logic" {
+                    detail = format!("Review without a supported location ({probability:.2}).");
+                    status = Status::Uncertain;
+                } else {
+                    // Location is an advisory boundary, not a verdict. A weak
+                    // pair neither erases a decisive review nor invents a split.
+                    selected_locations.clear();
+                }
             }
             if status == Status::Review && located {
                 detail = if key == "shared_logic" {
@@ -1035,9 +1043,6 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
                         "{}\nShort repeated span: {span} bytes stayed a probability ({concern:.2}) and was not printed as a finding.",
                         overview_basis(&dimension.decision_basis)
                     );
-                    if let Some(copy) = file.file_dimensions.get_mut(key) {
-                        copy.decision_basis = dimension.decision_basis.clone();
-                    }
                     file.findings.retain(|finding| {
                         finding.rule != IDS[2] || finding.message.starts_with("Test portion:")
                     });
@@ -1137,11 +1142,6 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
                 };
                 dimension.decision_basis = detail.clone();
             }
-        }
-        if let Some(copy) = file.file_dimensions.get_mut(key) {
-            copy.status = status.clone();
-            copy.concern_basis = "focused-evidence".into();
-            copy.decision_basis = detail.clone();
         }
     }
     // Test-portion findings share the rule id and stay beside an application recheck.
@@ -1391,17 +1391,20 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
     assessment.selected_operation = Some(key);
     assessment.selected_locations = vec![evidence.clone()];
     let task = extraction_choice(&operation);
-    // A follow-up choice of `none` means there is no extract task. The model
-    // already picked it over validation/parsing/delivery, so the dimension is
-    // clear even when the share is only a plurality. Named tasks still need a
+    // A decisive `none` means there is no extract task: the length is the work
+    // itself, so the dimension is clear. A plurality `none` is still uncertain
+    // and leaves the first-pass judgment unchanged. Named tasks need a
     // concentrated share and confidence before they count as a split.
-    let none_task = matches!(task, Some(("none", _, _)));
+    let none_task = matches!(
+        task,
+        Some(("none", share, _)) if response::probability_at_least(share, response::REVIEW_PROBABILITY)
+    );
     let note = match task {
-        Some(("none", share, _)) if share >= response::REVIEW_PROBABILITY => format!(
+        Some(("none", share, _)) if none_task => format!(
             "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and this dimension is clear."
         ),
         Some(("none", share, confidence)) => format!(
-            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}, confidence {confidence:.2}); no extract task was named and this dimension is clear."
+            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up favored none ({share:.2}, confidence {confidence:.2}) without a decisive share; no extract task was named and the first-pass judgment is unchanged."
         ),
         Some((task, share, confidence)) => format!(
             "Function probe: {name} at line {line} scored {concern:.2}. Follow-up: {task} ({share:.2}, confidence {confidence:.2})."
@@ -1411,9 +1414,11 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
         ),
     };
     dimension.decision_basis = format!("{}\n{note}", overview_basis(&dimension.decision_basis));
-    dimension.concern_basis = "file-wide-outcome".into();
     if none_task {
         dimension.status = Status::Clear;
+        dimension.concern_basis = "extraction-none".into();
+    } else {
+        dimension.concern_basis = "file-wide-outcome".into();
     }
     file.findings.retain(|finding| finding.rule != IDS[1]);
     let separable = task.is_some_and(|(choice, share, confidence)| {
@@ -1436,9 +1441,6 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
             evidence_complete: dimension.missing_context < response::MISSING_CONTEXT,
         });
     }
-    let saved = dimension.clone();
-    file.file_dimensions
-        .insert("function_simplification".into(), saved);
     response::update_status(file);
     Ok(())
 }
@@ -1527,8 +1529,6 @@ fn apply_fragments(file: &mut FileResult) -> Result<()> {
         concern_probability: concern,
         evidence_complete: dimension.missing_context < response::MISSING_CONTEXT,
     });
-    file.file_dimensions
-        .insert("shared_logic".into(), dimension.clone());
     Ok(())
 }
 
@@ -1757,13 +1757,29 @@ mod tests {
             file.dimensions["function_simplification"].status,
             Status::Clear
         );
+        assert_eq!(
+            file.dimensions["function_simplification"].concern_basis,
+            "extraction-none"
+        );
         assert!(file.findings.is_empty());
         assert!(
             file.dimensions["function_simplification"]
                 .decision_basis
                 .contains("this dimension is clear")
         );
+        let original_basis = file.file_dimensions["function_simplification"]
+            .decision_basis
+            .clone();
+        assert!(!original_basis.contains("Function probe:"));
+        assert_eq!(
+            file.file_dimensions["function_simplification"].concern_basis,
+            "direct-maintainability-outcome"
+        );
         let weak = json!({"type":"choice","choice":"none","confidence":0.4,"probabilities":{"parsing":0.2,"validation":0.1,"delivery":0.14,"none":0.56}});
+        file.dimensions
+            .get_mut("function_simplification")
+            .unwrap()
+            .status = Status::Review;
         apply_extraction(
             &mut file,
             &requests[0],
@@ -1772,13 +1788,18 @@ mod tests {
         .unwrap();
         assert_eq!(
             file.dimensions["function_simplification"].status,
-            Status::Clear
+            Status::Review,
+            "a plurality none is not decisive and must not clear the dimension"
         );
         assert!(file.findings.is_empty());
         assert!(
             file.dimensions["function_simplification"]
                 .decision_basis
-                .contains("no extract task was named")
+                .contains("without a decisive share")
+        );
+        assert_eq!(
+            file.file_dimensions["function_simplification"].decision_basis,
+            original_basis
         );
         let low_confidence = json!({"type":"choice","choice":"parsing","confidence":0.4,"probabilities":{"parsing":0.86,"validation":0.04,"delivery":0.05,"none":0.05}});
         apply_extraction(
@@ -2020,11 +2041,22 @@ mod tests {
         );
         body["answers"]["file_organization_location"] = json!({"type":"choice","choice":"p0","confidence":0.1,"probabilities":{"none":0.49,"p0":0.51}});
         apply(&mut file, &request, &body).unwrap();
-        assert!(file.findings.is_empty());
+        assert_eq!(file.status, Status::Review);
+        assert_eq!(file.findings.len(), 1);
+        assert!(file.findings[0].symbol.is_none());
+        assert!(!file.findings[0].evidence_complete);
+        assert!(
+            file.findings[0]
+                .message
+                .contains("no supplied candidate localizes its boundary")
+        );
         assert!(
             file.dimensions[KEYS[0]]
-                .decision_basis
-                .contains("Review without a supported location")
+                .refactoring_assessment
+                .as_ref()
+                .unwrap()
+                .selected_locations
+                .is_empty()
         );
         body["answers"]["file_organization_location"] = json!({"type":"choice","choice":"p0","confidence":0.8,"probabilities":{"none":0.1,"p0":0.9}});
         apply(&mut file, &request, &body).unwrap();
@@ -2292,7 +2324,7 @@ mod tests {
         let r = request(&inputs[0], &options).unwrap();
         assert_eq!(r["state"]["limitations"]["operations_omitted"], 6);
         assert!(r["state"]["limitations"]["pairs_omitted"].as_u64().unwrap() > 0);
-        assert_eq!(r["state"]["maintainability_version"], 7);
+        assert_eq!(r["state"]["maintainability_version"], 9);
         for (key, q) in r["questions"].as_object().unwrap() {
             assert!(q["criteria"].as_object().unwrap().len() <= 255, "{key}");
             assert!(q["instructions"].get("version").is_none(), "{key}");
@@ -2310,6 +2342,58 @@ mod tests {
                 assert!(q["criteria"]["context"]["examples"].is_array(), "{key}");
             }
         }
+    }
+
+    #[test]
+    fn line_budget_is_evidence_and_never_a_deterministic_verdict() {
+        let p = Project::new();
+        let tall = (0..60)
+            .map(|i| format!("def f{i}():\n    return {i}\n"))
+            .collect::<String>();
+        p.write("app.py", &tall);
+        let mut options = args();
+        options.rules = vec![KEYS[0].into()];
+        p.context().configure(&mut options).unwrap();
+        let inputs = crate::inventory::collect(&options, &p.context(), &[]).unwrap();
+        let request = request(&inputs[0], &options).unwrap();
+        assert_eq!(request["state"]["file"]["line_count"], 120);
+        assert_eq!(
+            request["state"]["file"]["line_budget"],
+            crate::options::DEFAULT_LINE_BUDGET
+        );
+        let focus = request["questions"]["file_organization"]["instructions"]["focus"]
+            .as_str()
+            .unwrap();
+        assert!(focus.contains("line_budget"));
+        let report = run(
+            &p,
+            &options,
+            &mut Judge {
+                calls: 0,
+                weights: vec![("clear", 1.0)],
+            },
+        );
+        assert_eq!(
+            report.files[0].dimensions["file_organization"].status,
+            Status::Clear,
+            "a tall clear file stays clear; size is not a verdict"
+        );
+        let mut options = args();
+        options.rules = vec![KEYS[0].into()];
+        options.line_budget = 50;
+        let report = run(
+            &p,
+            &options,
+            &mut Judge {
+                calls: 0,
+                weights: vec![("clear", 1.0)],
+            },
+        );
+        assert_eq!(
+            report.files[0].dimensions["file_organization"].status,
+            Status::Clear,
+            "exceeding a tighter budget still does not decide the verdict"
+        );
     }
 
     #[test]

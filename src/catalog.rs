@@ -19,8 +19,8 @@ pub fn rules() -> Vec<Rule> {
 }
 pub fn rule_version(key: &str) -> &'static str {
     match key {
-        "file_organization" => "9",
-        "function_simplification" => "8",
+        "file_organization" => "12",
+        "function_simplification" => "9",
         "shared_logic" => "16",
         _ => "8",
     }

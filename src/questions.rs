@@ -13,13 +13,13 @@ fn side(what: &str, examples: &[&str]) -> Value {
 }
 
 const VERDICT_QUESTION: [&str; 3] = [
-    "Does the primary file bundle unrelated domain or infrastructure responsibilities, or does it form one coherent feature or abstraction?",
+    "Does the primary file implement one responsibility, or does it combine several independently useful capabilities that would change for different reasons?",
     "Is a function doing several substantial jobs inline, or is tangled control flow hiding a coherent task that should be extracted or simplified?",
     "Do supplied operations repeat the same meaningful sequence of implementation steps for the same responsibility, so corresponding corrections would be required in more than one place?",
 ];
 
 const VERDICT_FOCUS: [&str; 3] = [
-    "Judge the source's actual concepts and dependencies. Distinct independently useful concerns with their own dependencies belong behind separate module boundaries. Related validation, calculation, formatting, and accessors for one feature can remain together.",
+    "Judge the source's actual concepts, data, and dependencies. A responsibility is a separately understandable job with its own vocabulary and reason to change. A capability is independently useful when it could stand alone as its own module and change without the others. Capabilities that are each useful on their own, such as building inputs, composing judgments, formatting outputs, or follow-up probes, are separate responsibilities even when they serve one product feature. Steps of one workflow and variations of one concern change together and belong together. Different function names or separate algorithms alone do not establish separate responsibilities. `file.line_count` over `file.line_budget` is a reason to inspect whether responsibilities have accumulated; it is evidence to weigh and never a verdict on its own.",
     "The benefit must reduce the reasoning or repeated maintenance needed to change the implementation, not merely shorten it. Separately understandable parsing, transformation, rendering, or delivery phases implemented inline can warrant extraction even in a sequential workflow. A function can have one overall purpose and still implement several substantial subtasks inline.",
     "Include multi-step setup or cleanup as well as algorithms, validation, transformations, resource construction, configuration, and runtime record assembly. Shared mechanics can be consolidated without merging the variable policy values passed into them. In tests, substantial repeated fixture implementation is in scope.",
 ];
@@ -54,19 +54,19 @@ fn verdict_criteria(index: usize, recheck: bool) -> Value {
     let (review, clear) = match index {
         0 => (
             choice(
-                "The file bundles unrelated responsibilities with distinct concepts or dependencies, and separate modules would give useful responsibility boundaries.",
-                "Related parts of one feature, different function names, separate algorithms alone, file length, or a preference for more files.",
+                "The file combines two or more capabilities that could each stand alone as a module and change for different reasons. Separate modules would give useful responsibility boundaries.",
+                "Steps of one workflow, helpers that exist only for that job, variations of one concern, different function names, separate algorithms alone, file length by itself, or a preference for more files.",
                 &[
                     "A persistence client and an unrelated rendering pipeline in one module",
-                    "Two domains that each have their own dependencies and no shared concept",
+                    "Request building, verdict composition, and follow-up extraction as separately useful capabilities in one module",
                 ],
             ),
             choice(
-                "The file is one coherent feature, abstraction, or family of related operations. Its helpers or data belong together.",
+                "The file is one responsibility or one workflow. Its steps, helpers, and data exist for that one job and change for the same reasons; no piece could stand alone as a different capability.",
                 "An optional extra file split that does not establish a maintenance improvement.",
                 &[
                     "Validation, calculation, formatting, and accessors for one feature",
-                    "Helpers that exist only to support that feature",
+                    "A single transform's parse, aggregate, and render helpers",
                 ],
             ),
         ),
@@ -165,8 +165,8 @@ pub(crate) fn location_instructions(index: usize) -> Value {
     let (question, focus, note) = match index {
         0 => (
             "Which supplied pair best illustrates the different responsibilities?",
-            "Select operations from unrelated domains or distinct infrastructure responsibilities. The pair should illustrate the file-level mix of responsibilities, not internal variation within one of those responsibilities. Pick concrete implementing operations, not incidental export lists.",
-            "Assume the primary file has responsibilities worth separating. This question only identifies a representative boundary; do not decide here whether splitting is worthwhile. Choose none only when no candidate pair represents different responsibilities. Do not choose merely different variants, input formats, or output formats within one coherent feature.",
+            "Select operations from different responsibilities: different concepts, data, or reasons to change, including different capabilities of one product feature. The pair should illustrate the file-level mix of responsibilities, not internal variation within one responsibility. Pick concrete implementing operations, not incidental export lists.",
+            "Assume the primary file has responsibilities worth separating. This question only identifies a representative boundary; do not decide here whether splitting is worthwhile. Choose none only when no candidate pair represents different responsibilities. Do not choose merely different variants, input formats, or output formats within one responsibility.",
         ),
         1 => (
             "Which supplied location best illustrates a function that should be simplified or split?",

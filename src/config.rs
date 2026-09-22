@@ -17,6 +17,7 @@ pub struct Config {
     pub concurrency: Option<u32>,
     pub max_file_bytes: Option<u64>,
     pub max_context_bytes: Option<u64>,
+    pub line_budget: Option<u64>,
 }
 
 pub struct ConfigContext {
@@ -85,6 +86,10 @@ impl ConfigContext {
         }
         if let Some(n) = self.config.max_context_bytes {
             args.max_context_bytes = args.max_context_bytes.min(n);
+        }
+        if let Some(n) = self.config.line_budget {
+            ensure!(n > 0, "Budgets must be positive");
+            args.line_budget = args.line_budget.min(n);
         }
         ensure!(
             args.max_requests != Some(0) && args.max_file_bytes > 0 && args.max_context_bytes > 0,

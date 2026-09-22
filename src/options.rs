@@ -82,6 +82,11 @@ pub struct CheckArgs {
     /// operation names are reported as needs-context. Source is never truncated.
     #[arg(long, default_value_t = DEFAULT_MAX_FILE_BYTES, value_parser = clap::value_parser!(u64).range(1..=1048576))]
     pub max_file_bytes: u64,
+    /// Soft line budget supplied as file-organization evidence. Exceeding it
+    /// never decides a verdict; it only tells the model to weigh size when
+    /// judging responsibility boundaries.
+    #[arg(long, default_value_t = DEFAULT_LINE_BUDGET, value_parser = clap::value_parser!(u64).range(1..=1_000_000))]
+    pub line_budget: u64,
     /// Cache lifetime; unchanged watch snapshots are not automatically reevaluated
     #[arg(long, default_value_t = 3600)]
     pub cache_ttl_secs: u64,
@@ -106,6 +111,10 @@ pub struct CheckArgs {
 /// three maintainability verdicts. Configuration and `--max-file-bytes` can
 /// only narrow this. The absolute read used to list operations is 1 MiB.
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 131_072;
+
+/// Soft file-size expectation passed to file organization as evidence. A file
+/// over this budget is not a review by itself.
+pub const DEFAULT_LINE_BUDGET: u64 = 500;
 
 fn source_extension(value: &str) -> Result<String, String> {
     if value.is_empty() || !value.bytes().all(|c| c.is_ascii_alphanumeric()) {
