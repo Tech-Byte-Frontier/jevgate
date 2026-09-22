@@ -28,7 +28,11 @@ signatures, or one candidate pair.
 5. **Composition** (`src/units/compose.rs`). Pure: review at 0.80 on a Score's
    top level (or a Noul), clear at 0.80 on the bottom level, consider when the
    middle-or-top mass reaches 0.80, otherwise uncertain. A review always carries
-   a finding, file-wide when no location is decisive.
+   a finding, file-wide when no location is decisive. Function simplification asks
+   two Scores over the same state: a task Score whose top level raises a review, and
+   a one-job Score (with the definition of a task spelled out) that can clear while the
+   task Score does not lean toward several tasks. Weak signals (flatten, a test's
+   internal details or mixed behaviors) can raise a finding but do not block a clear.
 6. **Gate.** `--fail-on` and the baseline act on composed findings only.
 
 ## Constraints
