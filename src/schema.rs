@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub const RUBRIC: &str = "jevgate-quality-v33";
 /// Changes how saved answers become a status. Included in the report identity
 /// and not in the judgment cache, so unchanged questions are not sent again.
-pub const COMPOSITION: &str = "file-wide-status-v3";
+pub const COMPOSITION: &str = "file-wide-status-v4";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
