@@ -114,10 +114,16 @@ fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         catalog::FUNCTION_SIMPLIFICATION => (|| {
             let tasks = score(get("tasks")?);
             let flatten = noul(get("flatten")?);
-            // The task Score decides; flatten can only add a review.
+            let [_, _, leans_review] = levels(get("tasks")?)?;
+            // Review comes from the task Score (or flatten); clear from the one-job
+            // Score while the task Score does not lean toward two or more tasks.
             Some(match (tasks, flatten) {
                 (Outcome::Review(p), _) | (_, Outcome::Review(p)) => Outcome::Review(p),
-                (tasks, _) => tasks,
+                _ if score(get("one_job")?) == Outcome::Clear && leans_review < 0.5 => {
+                    Outcome::Clear
+                }
+                (Outcome::Consider(p), _) => Outcome::Consider(p),
+                (tasks, _) => Outcome::Uncertain(tasks.concern()),
             })
         })(),
         catalog::FILE_ORGANIZATION => get("purpose").map(score),
@@ -140,20 +146,15 @@ fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
                     })
                     .reduce(f64::max)
             };
+            // Weak signals can raise a consider; their uncertainty does not block a clear.
             Some(if let Some(p) = strongest(&hollow) {
                 Outcome::Review(p)
             } else if let Some(p) = strongest(&weak) {
                 Outcome::Consider(p)
-            } else if hollow.iter().chain(&weak).all(|o| *o == Outcome::Clear) {
+            } else if hollow.iter().all(|o| *o == Outcome::Clear) {
                 Outcome::Clear
             } else {
-                Outcome::Uncertain(
-                    hollow
-                        .iter()
-                        .chain(&weak)
-                        .map(|o| o.concern())
-                        .fold(0.0, f64::max),
-                )
+                Outcome::Uncertain(hollow.iter().map(|o| o.concern()).fold(0.0, f64::max))
             })
         })(),
         catalog::TEST_REDUNDANCY => get("overlap").map(score),

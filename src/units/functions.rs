@@ -1,5 +1,6 @@
-//! Function simplification: packed function sources, one Score, one flatten
-//! Noul and a speculative task-kind Choice per function.
+//! Function simplification: packed function sources. Per function, a task Score
+//! that can raise a review, a one-job Score that can clear, a flatten Noul and a
+//! speculative task-kind Choice.
 use super::{
     Asked, Detail, FileContext, FilePlan, Planned, Presence, Scope, UnitPlan, compact, identity,
     pack, questions, unique_ids,
@@ -94,6 +95,10 @@ fn build(
         let path = format!("functions[{index}].source");
         for (question, body) in [
             ("tasks", questions::function_tasks(&path, callees.is_some())),
+            (
+                "one_job",
+                questions::function_one_job(&path, callees.is_some()),
+            ),
             ("flatten", questions::function_flatten(&path)),
             ("task_kind", questions::function_task_kind(&path)),
         ] {

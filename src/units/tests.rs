@@ -387,3 +387,59 @@ fn packing_and_cache_identity_do_not_depend_on_token_calibration() {
     };
     assert_eq!(keys(2.0), keys(6.0));
 }
+
+fn spread(p0: f64, p1: f64, p2: f64) -> Value {
+    json!({"type":"score","score":p1 + 2.0 * p2,"confidence":0.3,
+        "probabilities":{"0":p0,"1":p1,"2":p2}})
+}
+
+#[test]
+fn the_one_job_score_clears_only_when_the_task_score_does_not_lean_review() {
+    let project = Project::new();
+    project.write("lib.rs", &function("borderline"));
+    let mut options = args();
+    only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
+    let status = |tasks: Value, options: &CheckArgs| {
+        let mut eval = scripted(0);
+        eval.overrides.push(("tasks", tasks));
+        eval.overrides
+            .push(("flatten", json!({"type":"noul","noul":0.5})));
+        run(&project, options, &mut eval).files[0].status.clone()
+    };
+    options.refresh = true;
+    assert_eq!(status(spread(0.5, 0.3, 0.2), &options), Status::Clear);
+    assert_eq!(
+        status(spread(0.35, 0.05, 0.6), &options),
+        Status::Uncertain,
+        "a task Score leaning toward several tasks is never cleared"
+    );
+}
+
+#[test]
+fn undecided_weak_test_signals_do_not_block_a_clear_test() {
+    let project = Project::new();
+    project.write("lib.rs", TESTS);
+    let mut options = args();
+    options.include_tests = true;
+    options.rules = vec![catalog::TEST_VALUE.into()];
+    let mut eval = scripted(0);
+    eval.overrides
+        .push(("internal", json!({"type":"noul","noul":0.45})));
+    eval.overrides
+        .push(("several", json!({"type":"noul","noul":0.4})));
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(
+        report.files[0].dimensions["test_value"].status,
+        Status::Clear
+    );
+    options.refresh = true;
+    let mut hollow = scripted(0);
+    hollow
+        .overrides
+        .push(("own_logic", json!({"type":"noul","noul":0.5})));
+    let report = run(&project, &options, &mut hollow);
+    assert_eq!(
+        report.files[0].dimensions["test_value"].status,
+        Status::Uncertain
+    );
+}
