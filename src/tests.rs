@@ -146,12 +146,13 @@ fn unchanged_files_are_reused_from_the_last_report_without_api_calls() {
             requests: 0,
         },
     );
-    assert!(second.files.iter().all(|file| file.cached));
+    // Composition always reruns from cached judgments. Snapshot does not
+    // skip apply(), so a composition change cannot hide behind a reused report.
     assert!(
         second
             .files
             .iter()
-            .all(|file| file.status == schema::Status::Clear)
+            .all(|file| file.status == schema::Status::Pending)
     );
     let store = storage::Store::open(&project.0).unwrap();
     let mut session = evaluate::Session {
@@ -167,6 +168,13 @@ fn unchanged_files_are_reused_from_the_last_report_without_api_calls() {
     assert_eq!(mock.calls, 2);
     assert_eq!(second.api_requests, 0);
     assert_eq!(second.paid_input_tokens, 0);
+    assert!(second.files.iter().all(|file| file.cached));
+    assert!(
+        second
+            .files
+            .iter()
+            .all(|file| file.status == schema::Status::Clear)
+    );
     project.write("b.rs", "fn b() -> i32 { 3 }\n");
     let inputs = inventory::collect(&options, &project.context(), &[]).unwrap();
     let kept = evaluate::previous_judgments(Some(&second), false);
@@ -191,7 +199,7 @@ fn unchanged_files_are_reused_from_the_last_report_without_api_calls() {
         .find(|file| file.path.ends_with("a.rs"))
         .unwrap();
     assert_eq!(changed.status, schema::Status::Pending);
-    assert!(kept_file.cached);
+    assert_eq!(kept_file.status, schema::Status::Pending);
     assert!(evaluate::previous_judgments(Some(&first), true).is_empty());
 }
 

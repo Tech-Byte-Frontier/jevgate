@@ -413,18 +413,18 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
             }
             let located =
                 response::probability_at_least(*probability, response::LOCATION_PROBABILITY);
-            if status == Status::Review {
-                detail = if located {
+            if status == Status::Review && !located {
+                detail = format!("Review without a supported location ({probability:.2}).");
+                status = Status::Uncertain;
+            }
+            if status == Status::Review && located {
+                detail = if key == "shared_logic" {
+                    pair_detail(&names, &selected, request)
+                } else {
                     format!(
                         "{action}: {names}. Strongest candidate probability {probability:.2}; this is an advisory boundary, not a generated refactoring plan."
                     )
-                } else {
-                    format!(
-                        "{action}: {names}. Strongest candidate probability {probability:.2} is below the location bar and is not a finding."
-                    )
                 };
-            }
-            if status == Status::Review && located {
                 let primary = selected
                     .iter()
                     .find(|v| v["path"] == json!(file.path))
@@ -448,8 +448,8 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
         }
         if status == Status::Review && selected_locations.is_empty() {
             if key == "shared_logic" {
-                detail = "Shared-logic concern without a supplied pair or fragment boundary. Missing localization; do not invent a split.".into();
-                status = Status::NeedsContext;
+                detail = "Shared-logic concern without a supplied pair. A focused follow-up asks which pair repeats.".into();
+                status = Status::Uncertain;
             } else {
                 detail = "Refactoring concern identified, but no supplied candidate localizes its boundary. Review the complete file; do not infer a specific split.".into();
                 file.findings.push(Finding {
@@ -617,6 +617,24 @@ pub fn focused_requests(input: &Input, file: &FileResult, args: &CheckArgs) -> R
         let Some(excerpt) = focus_excerpt(&source, input, key, dimension) else {
             continue;
         };
+        let mut questions = serde_json::Map::new();
+        questions.insert(
+            (*key).into(),
+            verdict_question(index, file.classification.as_ref()),
+        );
+        if *key == "shared_logic" {
+            let candidates = shared_location_criteria(input, dimension);
+            if candidates.len() > 1 {
+                questions.insert(
+                    "shared_logic_location".into(),
+                    json!({
+                        "type": "choice",
+                        "instructions": crate::questions::location_instructions(2),
+                        "criteria": candidates,
+                    }),
+                );
+            }
+        }
         requests.push(json!({
             "model": args.model,
             "state": {
@@ -628,10 +646,72 @@ pub fn focused_requests(input: &Input, file: &FileResult, args: &CheckArgs) -> R
                 },
                 "focus_evidence": excerpt.evidence
             },
-            "questions": { *key: verdict_question(index, file.classification.as_ref()) }
+            "questions": questions
         }));
     }
     Ok(requests)
+}
+
+fn shared_location_criteria(
+    input: &Input,
+    dimension: &Dimension,
+) -> serde_json::Map<String, Value> {
+    let mut criteria = serde_json::Map::new();
+    criteria.insert(
+        "none".into(),
+        json!("No supplied pair repeats implementation for the same responsibility."),
+    );
+    let Some(source) = input.source.as_deref() else {
+        return criteria;
+    };
+    let mut index = 0usize;
+    if let Some(assessment) = dimension.refactoring_assessment.as_ref() {
+        for fragment in assessment.fragments.values() {
+            let Some(locations) = fragment["evidence"]["locations"].as_array() else {
+                continue;
+            };
+            let names = locations
+                .iter()
+                .map(|location| {
+                    format!(
+                        "{}:{}–{}",
+                        location["path"].as_str().unwrap_or(""),
+                        location["start_line"],
+                        location["end_line"]
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" and ");
+            if names.is_empty() {
+                continue;
+            }
+            criteria.insert(
+                format!("p{index}"),
+                json!(format!(
+                    "Operations {names} repeat the same implementation."
+                )),
+            );
+            index += 1;
+        }
+    }
+    if index == 0 {
+        for (name, range, _) in crate::context_units::review_targets(&input.result.path, source)
+            .iter()
+            .take(16)
+        {
+            criteria.insert(
+                format!("o{index}"),
+                json!(format!(
+                    "Operation {name} at {}:{}–{} embodies the repeated implementation.",
+                    input.result.path.display(),
+                    range.start_line,
+                    range.end_line
+                )),
+            );
+            index += 1;
+        }
+    }
+    criteria
 }
 
 struct FocusExcerpt {
@@ -831,7 +911,7 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
     }
     let concern = probabilities.get("review").copied().unwrap_or(0.0) / mass;
     let clear = probabilities.get("clear").copied().unwrap_or(0.0) / mass;
-    let status = if response::probability_at_least(concern, response::REVIEW_PROBABILITY) {
+    let mut status = if response::probability_at_least(concern, response::REVIEW_PROBABILITY) {
         Status::Review
     } else if response::probability_at_least(clear, response::REVIEW_PROBABILITY) {
         Status::Clear
@@ -851,7 +931,7 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
         .iter()
         .position(|candidate| *candidate == key)
         .unwrap_or(0);
-    let detail = match status {
+    let mut detail = match status {
         Status::Review => {
             if key == "shared_logic" {
                 let Some(item) = evidence else {
@@ -905,6 +985,7 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
         ),
     };
     let rule = IDS[index];
+    let focused_location = &body["answers"]["shared_logic_location"];
     {
         let dimension = file.dimensions.get_mut(key).unwrap();
         dimension.status = status.clone();
@@ -913,6 +994,41 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
         dimension.confidence = answer["confidence"].as_f64().unwrap_or(0.0);
         dimension.concern_basis = "focused-evidence".into();
         dimension.decision_basis = detail.clone();
+        if key == "shared_logic"
+            && status == Status::Review
+            && focused_location["choice"]
+                .as_str()
+                .is_some_and(|c| c != "none")
+        {
+            let location_probability = focused_location["probabilities"]
+                .as_object()
+                .and_then(|probs| {
+                    focused_location["choice"]
+                        .as_str()
+                        .and_then(|choice| probs.get(choice))
+                        .and_then(Value::as_f64)
+                })
+                .unwrap_or(0.0);
+            if response::probability_at_least(location_probability, response::LOCATION_PROBABILITY)
+            {
+                if let Some(assessment) = dimension.refactoring_assessment.as_mut()
+                    && let Some(locations) = evidence.and_then(|item| item["locations"].as_array())
+                {
+                    assessment.selected_locations = locations
+                        .iter()
+                        .map(|location| {
+                            json!({"path":location["path"],"range":{"start_line":location["start_line"],"end_line":location["end_line"]},"name":"repeated source fragment"})
+                        })
+                        .collect();
+                }
+            } else {
+                status = Status::Uncertain;
+                dimension.status = Status::Uncertain;
+                detail =
+                    format!("Review without a supported location ({location_probability:.2}).");
+                dimension.decision_basis = detail.clone();
+            }
+        }
         if let Some(copy) = file.file_dimensions.get_mut(key) {
             copy.status = status.clone();
             copy.concern_basis = "focused-evidence".into();
@@ -1041,6 +1157,42 @@ fn location_label(path: &str, start_line: u64, end_line: u64) -> String {
     format!("{path}:{start_line}–{end_line}")
 }
 
+fn pair_detail(names: &str, selected: &[&Value], request: &Value) -> String {
+    let file_source = request["state"]["file"]["source"].as_str().unwrap_or("");
+    let file_path = request["state"]["file"]["path"].as_str().unwrap_or("");
+    let mut primary = String::new();
+    let mut copies = Vec::new();
+    for (index, operation) in selected.iter().enumerate() {
+        let path = operation["path"].as_str().unwrap_or("");
+        let start = operation["range"]["start_line"].as_u64().unwrap_or(1) as usize;
+        let end = operation["range"]["end_line"]
+            .as_u64()
+            .unwrap_or(start as u64) as usize;
+        let owned;
+        let source = if path == file_path {
+            file_source
+        } else {
+            owned = request["state"]["context"]
+                .as_array()
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|item| item["path"].as_str() == Some(path))
+                        .and_then(|item| item["source"].as_str())
+                })
+                .unwrap_or("")
+                .to_string();
+            owned.as_str()
+        };
+        let text = line_window(source, start, end);
+        if index == 0 {
+            primary = text.clone();
+        }
+        copies.push(json!({"path": path, "start_line": start, "source": text}));
+    }
+    shared_detail(names, &json!({"source": primary, "surroundings": copies}))
+}
+
 fn shared_detail(names: &str, evidence: &Value) -> String {
     let mut detail = format!(
         "Candidate shared implementation at {names}.\nRepeated:\n{}",
@@ -1132,9 +1284,10 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
     assessment.selected_operation = Some(key);
     assessment.selected_locations = vec![evidence.clone()];
     let task = extraction_choice(&operation);
+    let hard_none = matches!(task, Some(("none", share, _)) if share >= HARD_NONE_SHARE);
     let note = match task {
         Some(("none", share, _)) if share >= HARD_NONE_SHARE => format!(
-            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and does not change the file status."
+            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and this dimension is clear."
         ),
         Some(("none", share, confidence)) => format!(
             "Function probe: {name} at line {line} scored {concern:.2}. The follow-up leans none ({share:.2}, confidence {confidence:.2}); that is not a hard verdict and does not change the file status."
@@ -1148,6 +1301,9 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
     };
     dimension.decision_basis = format!("{}\n{note}", overview_basis(&dimension.decision_basis));
     dimension.concern_basis = "file-wide-outcome".into();
+    if hard_none {
+        dimension.status = Status::Clear;
+    }
     file.findings.retain(|finding| finding.rule != IDS[1]);
     let separable = task.is_some_and(|(choice, share, confidence)| {
         matches!(choice, "validation" | "parsing" | "delivery")
@@ -1488,13 +1644,13 @@ mod tests {
         .unwrap();
         assert_eq!(
             file.dimensions["function_simplification"].status,
-            Status::Review
+            Status::Clear
         );
         assert!(file.findings.is_empty());
         assert!(
             file.dimensions["function_simplification"]
                 .decision_basis
-                .contains("work itself")
+                .contains("this dimension is clear")
         );
         let weak = json!({"type":"choice","choice":"none","confidence":0.4,"probabilities":{"parsing":0.2,"validation":0.1,"delivery":0.14,"none":0.56}});
         apply_extraction(
@@ -1714,7 +1870,7 @@ mod tests {
         assert!(
             file.dimensions[KEYS[0]]
                 .decision_basis
-                .contains("below the location bar")
+                .contains("Review without a supported location")
         );
         body["answers"]["file_organization_location"] = json!({"type":"choice","choice":"p0","confidence":0.8,"probabilities":{"none":0.1,"p0":0.9}});
         apply(&mut file, &request, &body).unwrap();
@@ -1734,7 +1890,7 @@ mod tests {
     }
 
     #[test]
-    fn unlocalized_shared_logic_is_needs_context_without_a_finding() {
+    fn unlocalized_shared_logic_awaits_a_pair_follow_up() {
         let p = Project::new();
         p.write("app.py", SOURCE);
         let mut options = args();
@@ -1752,12 +1908,12 @@ mod tests {
         crate::response::validate(&body, &request).unwrap();
         let mut file = inputs[0].result.clone();
         apply(&mut file, &request, &body).unwrap();
-        assert_eq!(file.dimensions[KEYS[2]].status, Status::NeedsContext);
+        assert_eq!(file.dimensions[KEYS[2]].status, Status::Uncertain);
         assert!(file.findings.is_empty());
         assert!(
             file.dimensions[KEYS[2]]
                 .decision_basis
-                .contains("Missing localization")
+                .contains("focused follow-up")
         );
     }
 
