@@ -8,7 +8,7 @@ pub enum JevCommand {
         #[command(subcommand)]
         command: crate::auth::AuthCommand,
     },
-    /// Evaluate code quality with TypeSafe (uploads selected source); advisory findings do not fail CI
+    /// Evaluate code quality with TypeSafe (uploads selected source); review exits 1, incomplete exits 2
     Check(Box<CheckArgs>),
     /// Print the versioned rule catalog as JSON
     Rules,

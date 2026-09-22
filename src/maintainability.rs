@@ -616,6 +616,17 @@ pub fn focused_requests(input: &Input, file: &FileResult, args: &CheckArgs) -> R
         if dimension.status != Status::Uncertain {
             continue;
         }
+        // A decisive file-wide verdict is already a gate answer. Weak or missing
+        // localization is reported as uncertain and is not re-asked; Jev already
+        // said review or clear on the file.
+        let probabilities = &dimension.probabilities;
+        let review = probabilities.get("review").copied().unwrap_or(0.0);
+        let clear = probabilities.get("clear").copied().unwrap_or(0.0);
+        if response::probability_at_least(review, response::REVIEW_PROBABILITY)
+            || response::probability_at_least(clear, response::REVIEW_PROBABILITY)
+        {
+            continue;
+        }
         let Some(excerpt) = focus_excerpt(&source, input, key, dimension) else {
             continue;
         };
@@ -1799,6 +1810,44 @@ mod tests {
                 .contains("none")
         );
     }
+
+    #[test]
+    fn focused_recheck_skips_a_decisive_file_wide_verdict() {
+        let p = Project::new();
+        p.write("app.py", SOURCE);
+        let mut options = args();
+        options.rules = vec![KEYS[2].into()];
+        let inputs = crate::inventory::collect(&options, &p.context(), &[]).unwrap();
+        let request = request(&inputs[0], &options).unwrap();
+        use crate::transport::Evaluator;
+        let mut judge = Judge {
+            calls: 0,
+            weights: vec![("clear", 1.0)],
+        };
+        let mut body = judge.evaluate(&request).unwrap();
+        body["answers"]["shared_logic"] = json!({"type":"choice","choice":"review","confidence":1.0,"probabilities":{"clear":0.0,"context":0.0,"not_applicable":0.0,"review":1.0}});
+        body["answers"]["shared_logic_location"] = json!({"type":"choice","choice":"none","confidence":0.4,"probabilities":{"none":0.51,"p0":0.49}});
+        crate::response::validate(&body, &request).unwrap();
+        let mut file = inputs[0].result.clone();
+        apply(&mut file, &request, &body).unwrap();
+        assert_eq!(file.dimensions[KEYS[2]].status, Status::Uncertain);
+        assert!(file.dimensions[KEYS[2]].probabilities["review"] >= 0.8);
+        let followups = focused_requests(&inputs[0], &file, &options).unwrap();
+        assert!(followups.is_empty());
+        file.dimensions
+            .get_mut("shared_logic")
+            .unwrap()
+            .probabilities
+            .insert("review".into(), 0.5);
+        file.dimensions
+            .get_mut("shared_logic")
+            .unwrap()
+            .probabilities
+            .insert("clear".into(), 0.4);
+        let undecided = focused_requests(&inputs[0], &file, &options).unwrap();
+        assert_eq!(undecided.len(), 1);
+    }
+
     #[test]
     fn fragment_evidence_is_shared_bounded_and_independent_of_selected_rules() {
         let p = Project::new();

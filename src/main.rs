@@ -161,8 +161,17 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
     Ok(outcome(&report))
 }
 
+/// Process exit is the gate: 0 is clear, 1 is review, 2 is undecided or incomplete.
+/// Uncertain, needs-context and incomplete runs never claim a pass.
 fn outcome(report: &schema::Report) -> u8 {
-    if report.complete { 0 } else { 2 }
+    if !report.complete {
+        return 2;
+    }
+    match report.status.as_str() {
+        "review" => 1,
+        "clear" | "not-applicable" | "no-changed-source" | "classified" => 0,
+        _ => 2,
+    }
 }
 
 #[cfg(test)]

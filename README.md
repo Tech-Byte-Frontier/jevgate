@@ -107,9 +107,9 @@ reused from the last report, so a repeat check does not call the API.
 request for one hour (`--cache-ttl-secs`). Inject `TYPESAFE_API_KEY`; local credentials
 can use `jevgate auth` or an explicit `--env-file`. Never commit credentials.
 
-Findings currently remain advisory; operational or incomplete runs exit 2.
-Whether semantic findings should block CI belongs to the configuring user;
-a built-in enforcement policy is not implemented yet.
+Process exit is the quality gate: `0` is clear or not-applicable, `1` is review,
+`2` is uncertain, needs-context or incomplete. Findings stay advisory in the
+report; CI can treat `1` as the block and `2` as a failed gate run.
 
 ## Limits
 
