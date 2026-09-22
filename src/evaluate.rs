@@ -41,51 +41,15 @@ pub fn previous_judgments(report: Option<&Report>, refresh: bool) -> BTreeMap<Pa
         .unwrap_or_default()
 }
 
-fn reusable(file: &FileResult) -> bool {
-    !file.source_hash.is_empty()
-        && file.error.is_none()
-        && file
-            .classification
-            .as_ref()
-            .is_none_or(|class| class.kind != "oversized")
-        && matches!(
-            file.status,
-            Status::Clear
-                | Status::Review
-                | Status::Uncertain
-                | Status::NeedsContext
-                | Status::NotApplicable
-        )
-}
-
 pub fn snapshot(
     inputs: &[Input],
-    previous: &BTreeMap<PathBuf, FileResult>,
+    _previous: &BTreeMap<PathBuf, FileResult>,
     args: &CheckArgs,
     current: SnapshotContext<'_>,
 ) -> Report {
-    let files = inputs
-        .iter()
-        .map(|input| {
-            previous
-                .get(&input.result.path)
-                .filter(|old| {
-                    reusable(old)
-                        && old.source_hash == input.result.source_hash
-                        && old.catalog_hash == input.result.catalog_hash
-                        && old.role == input.result.role
-                        && old.context_files == input.result.context_files
-                        && old.context_complete == input.result.context_complete
-                        && input.result.status == Status::Pending
-                })
-                .map(|old| {
-                    let mut reused = old.clone();
-                    reused.cached = true;
-                    reused
-                })
-                .unwrap_or_else(|| input.result.clone())
-        })
-        .collect();
+    // Always recompose from cached answers. Skipping apply() on reused
+    // FileResults hid composition changes until COMPOSITION was bumped.
+    let files = inputs.iter().map(|input| input.result.clone()).collect();
     let mut report = Report {
         quick: args.quick,
         base_revision: args.base.clone(),
