@@ -77,7 +77,10 @@ fn shrink_to_provider_budget(request: &mut Value) {
         if !drop_last_role_region(request)
             && !drop_last_specialist(request)
             && !strip_operation_excerpts(request)
+            && !strip_fragment_surroundings(request)
             && !drop_last_operation_probe(request)
+            && !drop_last_shared_fragment(request)
+            && !drop_last_pair(request)
         {
             return;
         }
@@ -180,6 +183,70 @@ fn drop_last_operation_probe(request: &mut Value) -> bool {
         .as_u64()
         .unwrap_or(0);
     request["state"]["limitations"]["operation_probes_omitted"] = json!(omitted + 1);
+    true
+}
+
+fn strip_fragment_surroundings(request: &mut Value) -> bool {
+    let mut stripped = 0u64;
+    if let Some(fragments) = request["state"]["repeated_fragments"].as_array_mut() {
+        for fragment in fragments.iter_mut() {
+            let Some(surroundings) = fragment["surroundings"].as_array_mut() else {
+                continue;
+            };
+            for copy in surroundings.iter_mut() {
+                if copy
+                    .as_object_mut()
+                    .is_some_and(|entry| entry.remove("source").is_some())
+                {
+                    stripped += 1;
+                }
+            }
+        }
+    }
+    if stripped == 0 {
+        return false;
+    }
+    let omitted = request["state"]["limitations"]["fragment_excerpts_omitted"]
+        .as_u64()
+        .unwrap_or(0);
+    request["state"]["limitations"]["fragment_excerpts_omitted"] = json!(omitted + stripped);
+    true
+}
+
+fn drop_last_shared_fragment(request: &mut Value) -> bool {
+    let Some(fragments) = request["state"]["repeated_fragments"].as_array_mut() else {
+        return false;
+    };
+    if fragments.is_empty() {
+        return false;
+    }
+    let index = fragments.len() - 1;
+    fragments.pop();
+    let questions = request["questions"].as_object_mut().unwrap();
+    questions.remove(&format!("shared_logic_fragment_{index}"));
+    questions.remove(&format!("cascade_specialist_{index}"));
+    true
+}
+
+fn drop_last_pair(request: &mut Value) -> bool {
+    let Some(pairs) = request["state"]["pairs"].as_array_mut() else {
+        return false;
+    };
+    if pairs.is_empty() {
+        return false;
+    }
+    let index = pairs.len() - 1;
+    pairs.pop();
+    let key = format!("p{index}");
+    for question in request["questions"].as_object_mut().unwrap().values_mut() {
+        if let Some(criteria) = question["criteria"].as_object_mut() {
+            criteria.remove(&key);
+        }
+    }
+    let omitted = request["state"]["limitations"]["pairs_omitted"]
+        .as_u64()
+        .unwrap_or(0);
+    request["state"]["limitations"]["pairs_omitted"] = json!(omitted + 1);
     true
 }
 

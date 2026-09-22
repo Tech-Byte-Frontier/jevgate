@@ -51,7 +51,9 @@ pub fn policy() -> BTreeMap<&'static str, f64> {
     BTreeMap::from([
         ("review_probability", response::REVIEW_PROBABILITY),
         ("clear_probability", response::REVIEW_PROBABILITY),
+        ("location_probability", response::LOCATION_PROBABILITY),
         ("missing_context", response::MISSING_CONTEXT),
+        ("extract_confidence", EXTRACT_CONFIDENCE),
     ])
 }
 
@@ -622,17 +624,19 @@ pub fn focused_requests(input: &Input, file: &FileResult, args: &CheckArgs) -> R
             (*key).into(),
             verdict_question(index, file.classification.as_ref()),
         );
+        let mut location_candidates = Vec::new();
         if *key == "shared_logic" {
-            let candidates = shared_location_criteria(input, dimension);
-            if candidates.len() > 1 {
+            let (criteria, candidates) = shared_location_criteria(input, dimension);
+            if !candidates.is_empty() {
                 questions.insert(
                     "shared_logic_location".into(),
                     json!({
                         "type": "choice",
                         "instructions": crate::questions::location_instructions(2),
-                        "criteria": candidates,
+                        "criteria": criteria,
                     }),
                 );
+                location_candidates = candidates;
             }
         }
         requests.push(json!({
@@ -644,7 +648,8 @@ pub fn focused_requests(input: &Input, file: &FileResult, args: &CheckArgs) -> R
                     "source": excerpt.text,
                     "classification": file.classification.as_ref().map(crate::file_kind::model_value)
                 },
-                "focus_evidence": excerpt.evidence
+                "focus_evidence": excerpt.evidence,
+                "location_candidates": location_candidates
             },
             "questions": questions
         }));
@@ -655,17 +660,67 @@ pub fn focused_requests(input: &Input, file: &FileResult, args: &CheckArgs) -> R
 fn shared_location_criteria(
     input: &Input,
     dimension: &Dimension,
-) -> serde_json::Map<String, Value> {
+) -> (serde_json::Map<String, Value>, Vec<Value>) {
     let mut criteria = serde_json::Map::new();
+    let mut candidates = Vec::new();
     criteria.insert(
         "none".into(),
         json!("No supplied pair repeats implementation for the same responsibility."),
     );
     let Some(source) = input.source.as_deref() else {
-        return criteria;
+        return (criteria, candidates);
     };
     let mut index = 0usize;
     if let Some(assessment) = dimension.refactoring_assessment.as_ref() {
+        // Prefer the first-pass pair when one was already selected, even if the
+        // location share was below the bar. The follow-up can confirm or reject it.
+        if !assessment.selected_locations.is_empty() {
+            let names = assessment
+                .selected_locations
+                .iter()
+                .map(|location| {
+                    location_label(
+                        location["path"].as_str().unwrap_or(""),
+                        location["range"]["start_line"].as_u64().unwrap_or(1),
+                        location["range"]["end_line"].as_u64().unwrap_or(1),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" and ");
+            let copies: Vec<Value> = assessment
+                .selected_locations
+                .iter()
+                .map(|location| {
+                    let start = location["range"]["start_line"].as_u64().unwrap_or(1) as usize;
+                    let end = location["range"]["end_line"]
+                        .as_u64()
+                        .unwrap_or(start as u64) as usize;
+                    json!({
+                        "path": location["path"],
+                        "start_line": start,
+                        "source": clip_text(&line_window(source, start, end)),
+                    })
+                })
+                .collect();
+            let repeated = copies
+                .first()
+                .and_then(|copy| copy["source"].as_str())
+                .unwrap_or("")
+                .to_string();
+            criteria.insert(
+                format!("p{index}"),
+                json!(format!(
+                    "Operations {names} repeat the same implementation."
+                )),
+            );
+            candidates.push(json!({
+                "key": format!("p{index}"),
+                "names": names,
+                "locations": assessment.selected_locations,
+                "evidence": {"source": clip_text(&repeated), "surroundings": copies},
+            }));
+            index += 1;
+        }
         for fragment in assessment.fragments.values() {
             let Some(locations) = fragment["evidence"]["locations"].as_array() else {
                 continue;
@@ -673,11 +728,10 @@ fn shared_location_criteria(
             let names = locations
                 .iter()
                 .map(|location| {
-                    format!(
-                        "{}:{}–{}",
+                    location_label(
                         location["path"].as_str().unwrap_or(""),
-                        location["start_line"],
-                        location["end_line"]
+                        location["start_line"].as_u64().unwrap_or(1),
+                        location["end_line"].as_u64().unwrap_or(1),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -691,6 +745,15 @@ fn shared_location_criteria(
                     "Operations {names} repeat the same implementation."
                 )),
             );
+            candidates.push(json!({
+                "key": format!("p{index}"),
+                "names": names,
+                "locations": locations,
+                "evidence": {
+                    "source": clip_text(fragment["evidence"]["source"].as_str().unwrap_or("")),
+                    "surroundings": fragment["evidence"]["surroundings"].clone(),
+                },
+            }));
             index += 1;
         }
     }
@@ -708,10 +771,27 @@ fn shared_location_criteria(
                     range.end_line
                 )),
             );
+            candidates.push(json!({
+                "key": format!("o{index}"),
+                "names": name,
+                "locations": [{
+                    "path": input.result.path,
+                    "start_line": range.start_line,
+                    "end_line": range.end_line,
+                }],
+                "evidence": {
+                    "source": clip_text(&line_window(source, range.start_line, range.end_line)),
+                    "surroundings": [{
+                        "path": input.result.path,
+                        "start_line": range.start_line,
+                        "source": clip_text(&line_window(source, range.start_line, range.end_line)),
+                    }],
+                },
+            }));
             index += 1;
         }
     }
-    criteria
+    (criteria, candidates)
 }
 
 struct FocusExcerpt {
@@ -986,6 +1066,20 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
     };
     let rule = IDS[index];
     let focused_location = &body["answers"]["shared_logic_location"];
+    let location_choice = focused_location["choice"].as_str().unwrap_or("none");
+    let location_probability = focused_location["probabilities"]
+        .as_object()
+        .and_then(|probs| probs.get(location_choice))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let selected_candidate = request["state"]["location_candidates"]
+        .as_array()
+        .and_then(|candidates| {
+            candidates
+                .iter()
+                .find(|candidate| candidate["key"] == json!(location_choice))
+        })
+        .cloned();
     {
         let dimension = file.dimensions.get_mut(key).unwrap();
         dimension.status = status.clone();
@@ -996,36 +1090,40 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
         dimension.decision_basis = detail.clone();
         if key == "shared_logic"
             && status == Status::Review
-            && focused_location["choice"]
-                .as_str()
-                .is_some_and(|c| c != "none")
+            && request["questions"].get("shared_logic_location").is_some()
         {
-            let location_probability = focused_location["probabilities"]
-                .as_object()
-                .and_then(|probs| {
-                    focused_location["choice"]
-                        .as_str()
-                        .and_then(|choice| probs.get(choice))
-                        .and_then(Value::as_f64)
-                })
-                .unwrap_or(0.0);
-            if response::probability_at_least(location_probability, response::LOCATION_PROBABILITY)
-            {
-                if let Some(assessment) = dimension.refactoring_assessment.as_mut()
-                    && let Some(locations) = evidence.and_then(|item| item["locations"].as_array())
-                {
-                    assessment.selected_locations = locations
-                        .iter()
-                        .map(|location| {
-                            json!({"path":location["path"],"range":{"start_line":location["start_line"],"end_line":location["end_line"]},"name":"repeated source fragment"})
+            let located = location_choice != "none"
+                && response::probability_at_least(
+                    location_probability,
+                    response::LOCATION_PROBABILITY,
+                )
+                && selected_candidate.is_some();
+            if located {
+                let candidate = selected_candidate.unwrap();
+                if let Some(assessment) = dimension.refactoring_assessment.as_mut() {
+                    assessment.selected_locations = candidate["locations"]
+                        .as_array()
+                        .map(|locations| {
+                            locations
+                                .iter()
+                                .map(|location| {
+                                    json!({"path":location["path"],"range":{"start_line":location["start_line"],"end_line":location["end_line"]},"name":"repeated source fragment"})
+                                })
+                                .collect()
                         })
-                        .collect();
+                        .unwrap_or_default();
                 }
+                let names = candidate["names"].as_str().unwrap_or(name);
+                detail = shared_detail(names, &candidate["evidence"]);
+                dimension.decision_basis = detail.clone();
             } else {
                 status = Status::Uncertain;
                 dimension.status = Status::Uncertain;
-                detail =
-                    format!("Review without a supported location ({location_probability:.2}).");
+                detail = if location_choice == "none" {
+                    "Shared-logic concern without a supplied pair. A focused follow-up asked which pair repeats and none fit.".into()
+                } else {
+                    format!("Review without a supported location ({location_probability:.2}).")
+                };
                 dimension.decision_basis = detail.clone();
             }
         }
@@ -1088,8 +1186,6 @@ const MIN_SHARED_SPAN: usize = 120;
 const EXTRACTION_LIMIT: usize = 8;
 /// Named extract tasks need a concentrated follow-up, not only a plurality.
 const EXTRACT_CONFIDENCE: f64 = 0.70;
-/// Below this share, `none` is only a lean and not a hard verdict.
-const HARD_NONE_SHARE: f64 = 0.70;
 
 fn concern_of(probabilities: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
     let total: f64 = probabilities.values().filter_map(Value::as_f64).sum();
@@ -1284,13 +1380,17 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
     assessment.selected_operation = Some(key);
     assessment.selected_locations = vec![evidence.clone()];
     let task = extraction_choice(&operation);
-    let hard_none = matches!(task, Some(("none", share, _)) if share >= HARD_NONE_SHARE);
+    // A follow-up choice of `none` means there is no extract task. The model
+    // already picked it over validation/parsing/delivery, so the dimension is
+    // clear even when the share is only a plurality. Named tasks still need a
+    // concentrated share and confidence before they count as a split.
+    let none_task = matches!(task, Some(("none", _, _)));
     let note = match task {
-        Some(("none", share, _)) if share >= HARD_NONE_SHARE => format!(
+        Some(("none", share, _)) if share >= response::REVIEW_PROBABILITY => format!(
             "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and this dimension is clear."
         ),
         Some(("none", share, confidence)) => format!(
-            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up leans none ({share:.2}, confidence {confidence:.2}); that is not a hard verdict and does not change the file status."
+            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}, confidence {confidence:.2}); no extract task was named and this dimension is clear."
         ),
         Some((task, share, confidence)) => format!(
             "Function probe: {name} at line {line} scored {concern:.2}. Follow-up: {task} ({share:.2}, confidence {confidence:.2})."
@@ -1301,7 +1401,7 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
     };
     dimension.decision_basis = format!("{}\n{note}", overview_basis(&dimension.decision_basis));
     dimension.concern_basis = "file-wide-outcome".into();
-    if hard_none {
+    if none_task {
         dimension.status = Status::Clear;
     }
     file.findings.retain(|finding| finding.rule != IDS[1]);
@@ -1659,11 +1759,15 @@ mod tests {
             &json!({"answers":{"function_simplification_extract_0":weak}}),
         )
         .unwrap();
+        assert_eq!(
+            file.dimensions["function_simplification"].status,
+            Status::Clear
+        );
         assert!(file.findings.is_empty());
         assert!(
             file.dimensions["function_simplification"]
                 .decision_basis
-                .contains("leans none")
+                .contains("no extract task was named")
         );
         let low_confidence = json!({"type":"choice","choice":"parsing","confidence":0.4,"probabilities":{"parsing":0.86,"validation":0.04,"delivery":0.05,"none":0.05}});
         apply_extraction(
@@ -1786,7 +1890,8 @@ mod tests {
         let first = run(&p, &options, &mut judge);
         assert_eq!(first.api_requests, 1);
         assert_eq!(first.decision_policy["clear_probability"], 0.8);
-        assert!(!first.decision_policy.contains_key("location_probability"));
+        assert_eq!(first.decision_policy["location_probability"], 0.65);
+        assert_eq!(first.decision_policy["extract_confidence"], 0.70);
         assert_eq!(first.files[0].dimensions.len(), 3);
         assert!(first.files[0].context_files.is_empty());
         assert_eq!(first.files[0].status, Status::Clear);
@@ -1987,6 +2092,93 @@ mod tests {
             file.dimensions["shared_logic"]
                 .decision_basis
                 .contains("Short repeated span")
+        );
+    }
+
+    #[test]
+    fn focused_pair_follow_up_resolves_a_weak_first_pass_location() {
+        let p = Project::new();
+        p.write("app.py", SOURCE);
+        let mut options = args();
+        options.rules = vec![KEYS[2].into()];
+        let inputs = crate::inventory::collect(&options, &p.context(), &[]).unwrap();
+        let request = request(&inputs[0], &options).unwrap();
+        use crate::transport::Evaluator;
+        let mut judge = Judge {
+            calls: 0,
+            weights: vec![("clear", 1.0)],
+        };
+        let mut body = judge.evaluate(&request).unwrap();
+        body["answers"]["shared_logic"] = json!({"type":"choice","choice":"review","confidence":1.0,"probabilities":{"clear":0.0,"context":0.0,"not_applicable":0.0,"review":1.0}});
+        let location_keys: Vec<String> = request["questions"]["shared_logic_location"]["criteria"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        let mut location_probs = serde_json::Map::new();
+        let rest = 0.49 / (location_keys.len() as f64 - 1.0).max(1.0);
+        for key in &location_keys {
+            location_probs.insert(key.clone(), json!(if key == "p0" { 0.51 } else { rest }));
+        }
+        body["answers"]["shared_logic_location"] =
+            json!({"type":"choice","choice":"p0","confidence":0.4,"probabilities":location_probs});
+        crate::response::validate(&body, &request).unwrap();
+        let mut file = inputs[0].result.clone();
+        apply(&mut file, &request, &body).unwrap();
+        assert_eq!(file.dimensions[KEYS[2]].status, Status::Uncertain);
+        assert!(file.findings.is_empty());
+        assert!(
+            file.dimensions[KEYS[2]]
+                .decision_basis
+                .contains("Review without a supported location")
+        );
+        let candidate = json!({
+            "key": "p0",
+            "names": "app.py:1–2 and app.py:4–5",
+            "locations": [
+                {"path":"app.py","start_line":1,"end_line":2},
+                {"path":"app.py","start_line":4,"end_line":5}
+            ],
+            "evidence": {
+                "source": "normalized = value.strip().lower()\nrecord = dict(name=normalized, enabled=True, ready=True)\nreturn database.save(record)\n",
+                "surroundings": [
+                    {"path":"app.py","start_line":1,"source":"def save_order(order):\n    return database.write(order)"},
+                    {"path":"app.py","start_line":4,"source":"def render_banner(user):\n    return user.name"}
+                ]
+            }
+        });
+        let focused = json!({
+            "model": options.model,
+            "state": {
+                "focused": "shared_logic",
+                "file": {"path":"app.py","source":"def save_order(order):\n    return database.write(order)"},
+                "focus_evidence": [candidate["evidence"].clone()],
+                "location_candidates": [candidate]
+            },
+            "questions": {
+                "shared_logic": crate::questions::recheck(2, ""),
+                "shared_logic_location": {"type":"choice","instructions": crate::questions::location_instructions(2), "criteria": {"none": "No pair.", "p0": "Operations app.py:1–2 and app.py:4–5 repeat the same implementation."}}
+            }
+        });
+        let focused_body = json!({"answers":{
+            "shared_logic":{"type":"choice","choice":"review","confidence":0.9,"probabilities":{"clear":0.05,"review":0.95}},
+            "shared_logic_location":{"type":"choice","choice":"p0","confidence":0.9,"probabilities":{"none":0.05,"p0":0.95}}
+        }});
+        apply_focused(&mut file, &focused, &focused_body).unwrap();
+        assert_eq!(file.dimensions[KEYS[2]].status, Status::Review);
+        assert_eq!(file.findings.len(), 1);
+        assert!(file.findings[0].message.contains("Repeated:"));
+        assert!(file.findings[0].message.contains("save_order"));
+        assert!(file.findings[0].message.contains("render_banner"));
+        assert_eq!(
+            file.dimensions[KEYS[2]]
+                .refactoring_assessment
+                .as_ref()
+                .unwrap()
+                .selected_locations
+                .len(),
+            2
         );
     }
 

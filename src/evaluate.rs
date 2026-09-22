@@ -169,11 +169,7 @@ impl Session<'_> {
                     self.args,
                     &mut report.files[owner],
                 ) {
-                    Ok(Some(request)) => gates.push(Task {
-                        owner,
-                        payload: request.clone(),
-                        request,
-                    }),
+                    Ok(Some(request)) => gates.push(queued(owner, request)),
                     Ok(None) => {}
                     Err(error) => fail(&mut report.files[owner], error),
                 }
@@ -196,11 +192,7 @@ impl Session<'_> {
                     self.args,
                     &mut report.files[owner],
                 ) {
-                    Ok(Some(request)) => portions.push(Task {
-                        owner,
-                        payload: request.clone(),
-                        request,
-                    }),
+                    Ok(Some(request)) => portions.push(queued(owner, request)),
                     Ok(None) => {}
                     Err(error) => report.errors.push(error.to_string()),
                 }
@@ -219,11 +211,7 @@ impl Session<'_> {
             match crate::maintainability::focused_requests(input, &report.files[owner], self.args) {
                 Ok(requests) => {
                     for request in requests {
-                        followups.push(Task {
-                            owner,
-                            payload: request.clone(),
-                            request,
-                        });
+                        followups.push(queued(owner, request));
                     }
                 }
                 Err(error) => report.errors.push(error.to_string()),
@@ -246,11 +234,7 @@ impl Session<'_> {
             ) {
                 Ok(requests) => {
                     for request in requests {
-                        extractions.push(Task {
-                            owner,
-                            payload: request.clone(),
-                            request,
-                        });
+                        extractions.push(queued(owner, request));
                     }
                 }
                 Err(error) => report.errors.push(error.to_string()),
@@ -407,6 +391,14 @@ enum Scheduled {
     Judge(serde_json::Value),
 }
 
+fn queued(owner: usize, request: serde_json::Value) -> Task<serde_json::Value> {
+    Task {
+        owner,
+        payload: request.clone(),
+        request,
+    }
+}
+
 fn enqueue(
     file: &mut FileResult,
     tasks: &mut Vec<Task<serde_json::Value>>,
@@ -414,11 +406,7 @@ fn enqueue(
     request: serde_json::Value,
 ) {
     file.cached = true;
-    tasks.push(Task {
-        owner,
-        payload: request.clone(),
-        request,
-    });
+    tasks.push(queued(owner, request));
 }
 
 fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {
