@@ -99,6 +99,7 @@ fn load(
         catalog_hash: hash(
             &serde_json::to_vec(&(
                 crate::schema::RUBRIC,
+                crate::schema::COMPOSITION,
                 crate::roles::VERSION,
                 crate::cascade::VERSION,
                 crate::file_kind::VERSION,

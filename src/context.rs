@@ -14,12 +14,13 @@ pub struct ContextInput {
 }
 
 pub(crate) fn package(path: &Path, source: String, reason: &str) -> ContextInput {
+    let lines = source.lines().count().max(1);
     ContextInput {
         file: ContextFile {
             path: path.into(),
             source_hash: hash(source.as_bytes()),
             start_line: 1,
-            end_line: source.lines().count().max(1),
+            end_line: lines,
             reason: reason.into(),
             dependent_rules: super::catalog::rules()
                 .iter()
@@ -28,7 +29,7 @@ pub(crate) fn package(path: &Path, source: String, reason: &str) -> ContextInput
             complete: true,
             line_ranges: vec![crate::schema::SourceRange {
                 start_line: 1,
-                end_line: source.lines().count().max(1),
+                end_line: lines,
             }],
             selection: "whole-file".into(),
         },

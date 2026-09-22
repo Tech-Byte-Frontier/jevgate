@@ -172,24 +172,22 @@ fn tokens(node: Node<'_>, source: &str, out: &mut String) {
     }
 }
 
-pub fn identity(path: &Path, source: &str) -> String {
+fn token_text(path: &Path, source: &str) -> Option<String> {
+    let tree = parse(path, source).ok().flatten()?;
     let mut normalized = String::new();
-    match parse(path, source) {
-        Ok(Some(tree)) => tokens(tree.root_node(), source, &mut normalized),
-        _ => normalized.push_str(source),
-    }
-    crate::schema::hash(normalized.as_bytes())
+    tokens(tree.root_node(), source, &mut normalized);
+    Some(normalized)
+}
+
+pub fn identity(path: &Path, source: &str) -> String {
+    let text = token_text(path, source).unwrap_or_else(|| source.to_string());
+    crate::schema::hash(text.as_bytes())
 }
 
 pub fn semantic_size(path: &Path, source: &str) -> usize {
-    let mut normalized = String::new();
-    match parse(path, source) {
-        Ok(Some(tree)) => {
-            tokens(tree.root_node(), source, &mut normalized);
-            normalized.bytes().filter(|b| *b == 0).count()
-        }
-        _ => source.split_whitespace().count(),
-    }
+    token_text(path, source)
+        .map(|text| text.bytes().filter(|byte| *byte == 0).count())
+        .unwrap_or_else(|| source.split_whitespace().count())
 }
 
 #[cfg(test)]

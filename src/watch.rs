@@ -21,11 +21,7 @@ pub fn run(
     let mut fingerprint = inventory::fingerprint(&inputs);
     let policy = policy_fingerprint(&session.context.root);
     let mut changed_at = None;
-    let mut previous = report
-        .files
-        .iter()
-        .map(|f| (f.path.clone(), f.clone()))
-        .collect();
+    let mut previous = super::evaluate::previous_judgments(Some(&report), false);
     loop {
         wait_for_poll(session, &mut report)?;
         if policy_fingerprint(&session.context.root) != policy {
@@ -80,11 +76,7 @@ pub fn run(
             session.publish(&report)?;
             baseline = report.clone();
             fingerprint = inventory::fingerprint(&inputs);
-            previous = report
-                .files
-                .iter()
-                .map(|f| (f.path.clone(), f.clone()))
-                .collect();
+            previous = super::evaluate::previous_judgments(Some(&report), false);
             if session.args.output_format() != Format::Jsonl {
                 output::emit(&report, session.args.output_format())?;
             }

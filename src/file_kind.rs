@@ -374,10 +374,7 @@ pub fn decide_after_purpose(
             class.gate = "application".into();
             class.separated_tests = separated;
             class.unresolved_units = unresolved;
-            class.reason = format!(
-                "Tests were separated from the application code.{}",
-                ranges_phrase(&class.separated_tests)
-            );
+            class.reason = separated_reason(&class.separated_tests);
         }
         return deliver(file, input, args, gate_source);
     }
@@ -410,10 +407,7 @@ pub fn decide_after_purpose(
         class.separated_tests = separated;
         class.unresolved_units = unresolved;
         class.reason = if class.kind == "mixed" {
-            format!(
-                "Tests were separated from the application code.{}",
-                ranges_phrase(&class.separated_tests)
-            )
+            separated_reason(&class.separated_tests)
         } else if units.as_array().is_none_or(|items| items.is_empty())
             && mixed > application
             && mixed > tests
@@ -571,10 +565,7 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
     }
     if structural_tests {
         class.kind = "mixed".into();
-        class.reason = format!(
-            "Tests were separated from the application code.{}",
-            ranges_phrase(&class.separated_tests)
-        );
+        class.reason = separated_reason(&class.separated_tests);
     }
     Ok(Prepared {
         classification: class,
@@ -1100,6 +1091,13 @@ fn merge_ranges(mut ranges: Vec<SourceRange>) -> Vec<SourceRange> {
         merged.push(range);
     }
     merged
+}
+
+fn separated_reason(ranges: &[SourceRange]) -> String {
+    format!(
+        "Tests were separated from the application code.{}",
+        ranges_phrase(ranges)
+    )
 }
 
 fn ranges_phrase(ranges: &[SourceRange]) -> String {

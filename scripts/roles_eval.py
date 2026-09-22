@@ -35,6 +35,13 @@ def preview(binary, workspace, case):
     return report, hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
 
 
+def checked_preview(root, binary, case):
+    workspace = root/case['id']/'workspace'
+    assert digest(workspace/case['path']) == case['source_hash']
+    report, fingerprint = preview(binary, workspace, case)
+    return workspace, report, fingerprint
+
+
 def freeze(root, binary):
     manifest = read(root/'manifest.json')
     assert not (root/'freeze.json').exists(), 'Already frozen; make a new dataset version instead of overwriting first evidence'
@@ -50,10 +57,9 @@ def freeze(root, binary):
     frozen = []
     for case in manifest['cases']:
         workspace = root/case['id']/'workspace'
-        assert digest(workspace/case['path']) == case['source_hash']
         assert not (workspace/'labels.json').exists()
         repos[case['repository']].add(case['split'])
-        report, fingerprint = preview(binary, workspace, case)
+        _, report, fingerprint = checked_preview(root, binary, case)
         save(root/case['id']/'preview.json', report)
         regions = report['initial_requests'][0]['state']['regions']
         frozen.append({'id': case['id'], 'request_hash': fingerprint, 'source_hash': case['source_hash']})
@@ -73,9 +79,7 @@ def run(root, binary, split, env_file, output):
     save(output/'run.json', {'split': split, 'binary_sha256': digest(binary), 'freeze_sha256': digest(root/'freeze.json'), 'labels_sha256': digest(root/'labels.json')})
     batches = []
     for case in cases:
-        workspace = root/case['id']/'workspace'
-        assert digest(workspace/case['path']) == case['source_hash']
-        report, fingerprint = preview(binary, workspace, case)
+        workspace, report, fingerprint = checked_preview(root, binary, case)
         assert fingerprint == next(c for c in frozen['cases'] if c['id'] == case['id'])['request_hash']
         target = output/case['id']; target.mkdir()
         save(target/'preview.json', report)

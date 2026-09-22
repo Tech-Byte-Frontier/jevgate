@@ -187,6 +187,42 @@ pub(crate) fn location_instructions(index: usize) -> Value {
     })
 }
 
+pub(crate) fn extraction(operation: &Value, source: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": "What coherent task, if extracted, would make this operation easier to change?",
+            "focus": "Choose none when the length is the work itself: one calculation, one workflow, or steps that already belong together.",
+            "note": EVIDENCE,
+            "inspect": "the supplied `operation` and its `source`",
+            "operation": operation,
+            "source": source,
+        },
+        "criteria": {
+            "validation": choice(
+                "A check or decision that can be named and tested apart from the rest of the operation.",
+                "A guard that only makes sense inline with the steps around it.",
+                &["A permission or input check copied beside the work it protects"],
+            ),
+            "parsing": choice(
+                "Turning input into a value the rest of the operation then uses.",
+                "A single expression that is already the whole operation.",
+                &["Reading fields out of a record before the real work"],
+            ),
+            "delivery": choice(
+                "Rendering, writing, or sending a result that is separate from computing it.",
+                "The write or send that is the operation's only job.",
+                &["Formatting a result after the value has been decided"],
+            ),
+            "none": choice(
+                "The length is the work itself. Extraction would only add a wrapper.",
+                "A separable validation, parse, or delivery step.",
+                &["One workflow whose steps are the task"],
+            ),
+        }
+    })
+}
+
 pub(crate) fn operation_probe(operation: &Value, source: &str) -> Value {
     json!({
         "type": "choice",
@@ -523,6 +559,7 @@ mod tests {
         }
         let probe = operation_probe(&json!({"name": "load"}), "fn load() {}");
         assert_choice(&probe);
+        assert_choice(&extraction(&json!({"name": "load"}), "fn load() {}"));
         let probe_bytes = serde_json::to_vec(&probe).unwrap().len();
         let fragment_bytes = serde_json::to_vec(&fragment(0)).unwrap().len();
         let role_bytes = serde_json::to_vec(&role_noul(0, "test_support"))

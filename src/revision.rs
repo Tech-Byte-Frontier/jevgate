@@ -13,6 +13,12 @@ pub struct Changes {
     pub deleted: Vec<PathBuf>,
 }
 
+fn git_path<'a>(fields: &mut impl Iterator<Item = &'a [u8]>, missing: &str) -> Result<PathBuf> {
+    Ok(PathBuf::from(std::str::from_utf8(
+        fields.next().with_context(|| missing.to_string())?,
+    )?))
+}
+
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("git")
         .arg("--literal-pathspecs")
@@ -73,14 +79,10 @@ impl Changes {
         let mut paths = BTreeMap::new();
         let mut deleted = Vec::new();
         while let Some(status) = fields.next() {
-            let old = PathBuf::from(std::str::from_utf8(
-                fields.next().context("Missing Git path")?,
-            )?);
+            let old = git_path(&mut fields, "Missing Git path")?;
             match status.first() {
                 Some(b'R') => {
-                    let new = PathBuf::from(std::str::from_utf8(
-                        fields.next().context("Missing Git rename target")?,
-                    )?);
+                    let new = git_path(&mut fields, "Missing Git rename target")?;
                     paths.insert(new, Some(old));
                 }
                 Some(b'D') => deleted.push(old),

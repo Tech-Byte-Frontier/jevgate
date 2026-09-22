@@ -6,7 +6,7 @@ use crate::{
     response,
     schema::{Dimension, FileResult, Finding, Status},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -505,6 +505,87 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
     Ok(())
 }
 
+/// One follow-up for functions that already scored review. The choice is the
+/// task to extract, or none when the length is the work itself.
+pub fn extraction_requests(
+    input: &Input,
+    file: &FileResult,
+    args: &CheckArgs,
+) -> Result<Vec<Value>> {
+    let Some(source) = input.source.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let Some(dimension) = file.dimensions.get("function_simplification") else {
+        return Ok(Vec::new());
+    };
+    let Some(assessment) = dimension.refactoring_assessment.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let mut hot: Vec<_> = assessment
+        .operations
+        .values()
+        .filter_map(|operation| {
+            let probabilities = operation["answer"]["probabilities"].as_object()?;
+            let concern = concern_of(probabilities, &["review"])?;
+            response::probability_at_least(concern, response::REVIEW_PROBABILITY)
+                .then_some((operation, concern))
+        })
+        .collect();
+    hot.sort_by(|left, right| right.1.total_cmp(&left.1));
+    let omitted = hot.len().saturating_sub(EXTRACTION_LIMIT);
+    hot.truncate(EXTRACTION_LIMIT);
+    if hot.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut questions = serde_json::Map::new();
+    for (index, (operation, _)) in hot.iter().enumerate() {
+        let evidence = &operation["evidence"];
+        questions.insert(
+            format!("function_simplification_extract_{index}"),
+            crate::questions::extraction(evidence, &operation_excerpt(source, evidence)),
+        );
+    }
+    Ok(vec![json!({
+        "model": args.model,
+        "state": {
+            "extraction_version": 1,
+            "file": {"path": file.path, "source_hash": file.source_hash},
+            "limitations": {"extraction_omitted": omitted}
+        },
+        "questions": questions
+    })])
+}
+
+pub fn apply_extraction(file: &mut FileResult, request: &Value, body: &Value) -> Result<()> {
+    {
+        let Some(dimension) = file.dimensions.get_mut("function_simplification") else {
+            return Ok(());
+        };
+        let Some(assessment) = dimension.refactoring_assessment.as_mut() else {
+            return Ok(());
+        };
+        let questions = request["questions"]
+            .as_object()
+            .context("Missing questions")?;
+        let answers = body["answers"].as_object().context("Missing answers")?;
+        for (name, question) in questions {
+            if !name.starts_with("function_simplification_extract_") {
+                continue;
+            }
+            let Some(answer) = answers.get(name) else {
+                continue;
+            };
+            let probe = &question["instructions"]["operation"];
+            for operation in assessment.operations.values_mut() {
+                if operation["evidence"] == *probe {
+                    operation["extraction"] = answer.clone();
+                }
+            }
+        }
+    }
+    apply_operations(file)
+}
+
 /// One follow-up per uncertain dimension. The state is only the undecided
 /// operation or repeated lines, or the file alone when the uncertain question
 /// is file organization. The question text matches the first pass.
@@ -820,25 +901,149 @@ pub fn apply_test_portion(file: &mut FileResult, request: &Value, body: &Value) 
     Ok(())
 }
 
-fn apply_operations(file: &mut FileResult) -> Result<()> {
-    let Some(dimension) = file.dimensions.get_mut("function_simplification") else {
-        return Ok(());
-    };
-    let Some(assessment) = dimension.refactoring_assessment.as_mut() else {
-        return Ok(());
-    };
-    let best = assessment
+const MIN_SHARED_SPAN: usize = 120;
+const EXTRACTION_LIMIT: usize = 8;
+
+fn concern_of(probabilities: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
+    let total: f64 = probabilities.values().filter_map(Value::as_f64).sum();
+    if total <= 0.0 {
+        return None;
+    }
+    let mass = keys
+        .iter()
+        .map(|key| {
+            probabilities
+                .get(*key)
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+        })
+        .sum::<f64>();
+    Some(mass / total)
+}
+
+fn overview_basis(basis: &str) -> &str {
+    basis
+        .split("\nFunction probe:")
+        .next()
+        .unwrap_or(basis)
+        .split("\nShort repeated span:")
+        .next()
+        .unwrap_or(basis)
+}
+
+fn clip_text(text: &str) -> String {
+    let trimmed = text.trim();
+    let mut out = String::new();
+    for (index, ch) in trimmed.chars().enumerate() {
+        if index == 160 {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn fragment_span(evidence: &Value) -> usize {
+    if let Some(source) = evidence["source"].as_str() {
+        let length = source.trim().len();
+        if length > 0 {
+            return length;
+        }
+    }
+    evidence["locations"]
+        .as_array()
+        .and_then(|locations| {
+            locations
+                .iter()
+                .filter_map(|location| {
+                    let start = location["start_byte"].as_u64()?;
+                    let end = location["end_byte"].as_u64()?;
+                    Some(end.saturating_sub(start) as usize)
+                })
+                .max()
+        })
+        .unwrap_or(0)
+}
+
+fn shared_detail(names: &str, evidence: &Value) -> String {
+    let mut detail = format!(
+        "Candidate shared implementation at {names}.\nRepeated:\n{}",
+        clip_text(evidence["source"].as_str().unwrap_or(""))
+    );
+    if let Some(copies) = evidence["surroundings"].as_array() {
+        for copy in copies.iter().take(2) {
+            detail.push_str(&format!(
+                "\n{}:{}:\n{}",
+                copy["path"].as_str().unwrap_or(""),
+                copy["start_line"].as_u64().unwrap_or(1),
+                clip_text(copy["source"].as_str().unwrap_or(""))
+            ));
+        }
+    }
+    detail
+}
+
+fn operation_excerpt(source: &str, operation: &Value) -> String {
+    let start = operation["range"]["start_line"].as_u64().unwrap_or(1) as usize;
+    let end = operation["range"]["end_line"]
+        .as_u64()
+        .unwrap_or(start as u64) as usize;
+    let text = source
+        .lines()
+        .skip(start.saturating_sub(1))
+        .take(end.saturating_sub(start).saturating_add(1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    clip_text(&text)
+}
+
+fn hot_operation(assessment: &Assessment) -> Option<(String, Value, f64)> {
+    assessment
         .operations
         .iter()
         .filter_map(|(key, operation)| {
             let probabilities = operation["answer"]["probabilities"].as_object()?;
-            let total: f64 = probabilities.values().filter_map(Value::as_f64).sum();
-            let concern = probabilities.get("review")?.as_f64()? / total;
-            (total > 0.0 && response::probability_at_least(concern, response::REVIEW_PROBABILITY))
-                .then_some((key.clone(), operation.clone(), concern))
+            let concern = concern_of(probabilities, &["review"])?;
+            response::probability_at_least(concern, response::REVIEW_PROBABILITY).then_some((
+                key.clone(),
+                operation.clone(),
+                concern,
+            ))
         })
-        .max_by(|a, b| a.2.total_cmp(&b.2));
-    let Some((key, operation, concern)) = best else {
+        .max_by(|left, right| left.2.total_cmp(&right.2))
+}
+
+fn extraction_choice(operation: &Value) -> Option<(&str, f64)> {
+    let extraction = operation.get("extraction")?;
+    let probabilities = extraction["probabilities"].as_object()?;
+    let total: f64 = probabilities.values().filter_map(Value::as_f64).sum();
+    if total <= 0.0 {
+        return None;
+    }
+    if let Some(choice) = extraction["choice"].as_str() {
+        let mass = probabilities
+            .get(choice)
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        return Some((choice, mass / total));
+    }
+    let (choice, mass) = probabilities
+        .iter()
+        .filter_map(|(key, value)| value.as_f64().map(|mass| (key.as_str(), mass)))
+        .max_by(|left, right| left.1.total_cmp(&right.1))?;
+    Some((choice, mass / total))
+}
+
+fn apply_operations(file: &mut FileResult) -> Result<()> {
+    let Some(dimension) = file.dimensions.get_mut("function_simplification") else {
+        return Ok(());
+    };
+    let file_status = dimension.status.clone();
+    let Some(assessment) = dimension.refactoring_assessment.as_mut() else {
+        return Ok(());
+    };
+    let Some((key, operation, concern)) = hot_operation(assessment) else {
         return Ok(());
     };
     let evidence = &operation["evidence"];
@@ -847,41 +1052,68 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
         "Operation does not belong to selected file"
     );
     let name = evidence["name"].as_str().unwrap_or("operation");
-    let detail = format!(
-        "Inspect {}:{}–{} ({name}) for a coherent task to extract or control flow to simplify. A direct function judgment establishes this advisory concern; the file-wide judgment is retained separately.",
-        file.path.display(),
-        evidence["range"]["start_line"],
-        evidence["range"]["end_line"]
-    );
+    let line = evidence["range"]["start_line"].as_u64().unwrap_or(1);
     assessment.selected_operation = Some(key);
     assessment.selected_locations = vec![evidence.clone()];
-    dimension.probabilities = serde_json::from_value(operation["answer"]["probabilities"].clone())?;
-    let total: f64 = dimension.probabilities.values().sum();
-    dimension.concern_probability = concern;
-    dimension.confidence = operation["answer"]["confidence"].as_f64().unwrap_or(0.0);
-    dimension.missing_context = dimension
-        .probabilities
-        .get("context")
-        .copied()
-        .unwrap_or(0.0)
-        / total;
-    dimension.evidence_sufficiency = Some(1.0 - dimension.missing_context);
-    dimension.concern_basis = "direct-function-outcome".into();
-    dimension.decision_basis = detail.clone();
-    dimension.status = Status::Review;
-    file.findings.retain(|f| f.rule != IDS[1]);
+    let task = extraction_choice(&operation);
+    let note = match task {
+        Some(("none", share)) => format!(
+            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and does not change the file status."
+        ),
+        Some((task, share)) => format!(
+            "Function probe: {name} at line {line} scored {concern:.2}. Follow-up: {task} ({share:.2})."
+        ),
+        None => format!(
+            "Function probe: {name} at line {line} scored {concern:.2}. That score is a place to inspect and does not by itself make the file a review."
+        ),
+    };
+    dimension.decision_basis = format!("{}\n{note}", overview_basis(&dimension.decision_basis));
+    dimension.concern_basis = "file-wide-outcome".into();
+    file.findings.retain(|finding| finding.rule != IDS[1]);
+    if file_status != Status::Review {
+        let saved = dimension.clone();
+        file.file_dimensions
+            .insert("function_simplification".into(), saved);
+        return Ok(());
+    }
+    let separable =
+        task.is_some_and(|(choice, _)| matches!(choice, "validation" | "parsing" | "delivery"));
+    let (message, action) = if separable {
+        let (task, share) = task.unwrap();
+        (
+            format!(
+                "File-wide review. {name} at line {line} has a {task} task to extract (follow-up {share:.2}, function score {concern:.2})."
+            ),
+            format!("Consider extracting the {task} task"),
+        )
+    } else if let Some(("none", share)) = task {
+        (
+            format!(
+                "File-wide review. {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and is not a split."
+            ),
+            "Inspect the file-wide concern; this function is not an extraction".into(),
+        )
+    } else {
+        (
+            format!(
+                "File-wide review. {name} at line {line} scored {concern:.2} is a place to inspect."
+            ),
+            "Inspect the function beside the file-wide concern".into(),
+        )
+    };
     file.findings.push(Finding {
         rule: IDS[1].into(),
-        line: evidence["range"]["start_line"].as_u64().unwrap_or(1) as usize,
-        message: detail,
-        action: "Consider extracting a coherent task or simplifying control flow".into(),
+        line: line as usize,
+        message,
+        action,
         symbol: Some(name.into()),
         rule_version: crate::catalog::rule_version("function_simplification").into(),
-        concern_probability: concern,
+        concern_probability: dimension.concern_probability,
         evidence_complete: dimension.missing_context < response::MISSING_CONTEXT,
     });
+    let saved = dimension.clone();
     file.file_dimensions
-        .insert("function_simplification".into(), dimension.clone());
+        .insert("function_simplification".into(), saved);
     Ok(())
 }
 
@@ -915,6 +1147,14 @@ fn apply_fragments(file: &mut FileResult) -> Result<()> {
     else {
         return Ok(());
     };
+    let span = fragment_span(&fragment["evidence"]);
+    if span < MIN_SHARED_SPAN {
+        dimension.decision_basis = format!(
+            "{}\nShort repeated span: {span} bytes stayed a probability ({concern:.2}) and was not printed as a finding.",
+            overview_basis(&dimension.decision_basis)
+        );
+        return Ok(());
+    }
     let locations = fragment["evidence"]["locations"]
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("Missing fragment source locations"))?;
@@ -934,9 +1174,7 @@ fn apply_fragments(file: &mut FileResult) -> Result<()> {
         })
         .collect::<Vec<_>>()
         .join(" and ");
-    let detail = format!(
-        "Candidate shared implementation at {names}. Inspect the surrounding operations to confirm that extraction reduces maintenance without hiding caller-specific behavior."
-    );
+    let detail = shared_detail(&names, &fragment["evidence"]);
     assessment.selected_fragment = Some(key);
     assessment.selected_locations = locations.iter().map(|location| json!({"path":location["path"],"range":{"start_line":location["start_line"],"end_line":location["end_line"]},"name":"repeated source fragment"})).collect();
     dimension.probabilities = serde_json::from_value(fragment["answer"]["probabilities"].clone())?;
@@ -1020,7 +1258,7 @@ mod tests {
                 weights: vec![("clear", 1.0)],
             },
         );
-        for (review, expected) in [(0.79, Status::Clear), (0.8, Status::Review)] {
+        for review in [0.79, 0.8] {
             let mut file = report.files[0].clone();
             let assessment = file
                 .dimensions
@@ -1033,37 +1271,23 @@ mod tests {
             assessment.operations.insert("operation_probe_1".into(),json!({"answer":{"confidence":0.8,"probabilities":{"review":review,"clear":1.0-review,"context":0.0}},"evidence":{"path":"app.py","name":"render_banner","range":{"start_line":4,"end_line":5}}}));
             apply_operations(&mut file).unwrap();
             let dimension = &file.dimensions["function_simplification"];
-            assert_eq!(dimension.status, expected);
+            assert_eq!(dimension.status, Status::Clear);
             assert_eq!(
                 dimension.refactoring_assessment.as_ref().unwrap().outcome["probabilities"]["clear"],
                 1.0
             );
-            assert_eq!(
-                file.file_dimensions["function_simplification"].status,
-                expected
-            );
-            if expected == Status::Review {
-                assert_eq!(file.findings.len(), 1);
-                assert_eq!(file.findings[0].line, 4);
-                assert_eq!(file.findings[0].symbol.as_deref(), Some("render_banner"));
-                assert_eq!(dimension.concern_basis, "direct-function-outcome");
-                let mut view = report.clone();
-                view.files[0] = file.clone();
-                let html = crate::html_report::render(&view).unwrap();
-                let data = html
-                    .split("<script id=\"data\" type=\"application/json\">")
-                    .nth(1)
-                    .unwrap()
-                    .split("</script>")
-                    .next()
-                    .unwrap();
-                let decoded: Value = serde_json::from_str(data).unwrap();
-                let card = &decoded["files"][0]["checks"][0];
-                assert_eq!(card["probabilities"]["review"], 0.8);
-                assert_eq!(card["overview_probabilities"]["clear"], 1.0);
-                assert!(card["location_probabilities"].is_null());
-            } else {
-                assert!(file.findings.is_empty());
+            assert!(file.findings.is_empty());
+            if review >= 0.8 {
+                assert!(dimension.decision_basis.contains("render_banner"));
+                assert_eq!(
+                    dimension
+                        .refactoring_assessment
+                        .as_ref()
+                        .unwrap()
+                        .selected_operation
+                        .as_deref(),
+                    Some("operation_probe_1")
+                );
             }
         }
         let mut file = report.files[0].clone();
@@ -1101,11 +1325,15 @@ mod tests {
                 weights: vec![("clear", 1.0)],
             },
         );
-        for (setup, construction, expected) in
-            [(0.59, 0.2, Status::Clear), (0.6, 0.2, Status::Review)]
-        {
+        let repeated = "normalized = value.strip().lower()\nrecord = dict(name=normalized, enabled=True, ready=True)\nreturn database.save(record)\n";
+        assert!(repeated.len() >= 120);
+        for (setup, construction, source, expected) in [
+            (0.59, 0.2, repeated, Status::Clear),
+            (0.6, 0.2, "record construction", Status::Clear),
+            (0.6, 0.2, repeated, Status::Review),
+        ] {
             let mut file = report.files[0].clone();
-            file.dimensions.get_mut("shared_logic").unwrap().refactoring_assessment.as_mut().unwrap().fragments.insert("shared_logic_fragment_0".into(),json!({"answer":{"confidence":0.8,"probabilities":{"shared_setup":setup,"shared_construction":construction,"idiom":1.0-setup-construction}},"evidence":{"source":"record construction","locations":[{"path":"app.py","start_line":1,"end_line":2},{"path":"app.py","start_line":4,"end_line":5}]}}));
+            file.dimensions.get_mut("shared_logic").unwrap().refactoring_assessment.as_mut().unwrap().fragments.insert("shared_logic_fragment_0".into(),json!({"answer":{"confidence":0.8,"probabilities":{"shared_setup":setup,"shared_construction":construction,"idiom":1.0-setup-construction}},"evidence":{"source":source,"surroundings":[{"path":"app.py","start_line":1,"source":"def save_order(order):\n    return database.write(order)"},{"path":"app.py","start_line":4,"source":"def render_banner(user):\n    return user.name"}],"locations":[{"path":"app.py","start_line":1,"end_line":2},{"path":"app.py","start_line":4,"end_line":5}]}}));
             apply_fragments(&mut file).unwrap();
             let dimension = &file.dimensions["shared_logic"];
             assert_eq!(dimension.status, expected);
@@ -1116,6 +1344,9 @@ mod tests {
             if expected == Status::Review {
                 assert_eq!(file.findings.len(), 1);
                 assert_eq!(file.findings[0].line, 1);
+                assert!(file.findings[0].message.contains("Repeated:"));
+                assert!(file.findings[0].message.contains("save_order"));
+                assert!(file.findings[0].message.contains("render_banner"));
                 assert_eq!(
                     dimension.concern_basis,
                     "direct-shared-fragment-responsibility"
@@ -1131,8 +1362,100 @@ mod tests {
                 );
             } else {
                 assert!(file.findings.is_empty());
+                if source == "record construction" {
+                    assert!(dimension.decision_basis.contains("Short repeated span"));
+                }
             }
         }
+    }
+    #[test]
+    fn extraction_follow_up_names_a_task_only_when_the_file_is_already_review() {
+        let project = Project::new();
+        project.write("app.py", SOURCE);
+        let options = args();
+        let report = run(
+            &project,
+            &options,
+            &mut Judge {
+                calls: 0,
+                weights: vec![("clear", 1.0)],
+            },
+        );
+        let mut file = report.files[0].clone();
+        let evidence =
+            json!({"path":"app.py","name":"render_banner","range":{"start_line":4,"end_line":5}});
+        file.dimensions.get_mut("function_simplification").unwrap().refactoring_assessment.as_mut().unwrap().operations.insert("operation_probe_1".into(), json!({"answer":{"confidence":0.8,"probabilities":{"review":0.9,"clear":0.1,"context":0.0}},"evidence":evidence}));
+        let requests = extraction_requests(
+            &crate::inventory::collect(&options, &project.context(), &[])
+                .unwrap()
+                .remove(0),
+            &file,
+            &options,
+        )
+        .unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0]["questions"]["function_simplification_extract_0"]["criteria"]["none"]
+                .is_object()
+        );
+        file.dimensions
+            .get_mut("function_simplification")
+            .unwrap()
+            .status = Status::Review;
+        let answer = json!({"type":"choice","choice":"parsing","confidence":0.8,"probabilities":{"parsing":0.86,"validation":0.04,"delivery":0.05,"none":0.05}});
+        apply_extraction(
+            &mut file,
+            &requests[0],
+            &json!({"answers":{"function_simplification_extract_0":answer}}),
+        )
+        .unwrap();
+        assert_eq!(
+            file.dimensions["function_simplification"].status,
+            Status::Review
+        );
+        assert_eq!(file.findings.len(), 1);
+        assert!(file.findings[0].message.contains("parsing"));
+        assert_eq!(file.findings[0].line, 4);
+        let none = json!({"type":"choice","choice":"none","confidence":0.8,"probabilities":{"parsing":0.05,"validation":0.04,"delivery":0.05,"none":0.86}});
+        file.findings.clear();
+        file.dimensions
+            .get_mut("function_simplification")
+            .unwrap()
+            .status = Status::Review;
+        apply_extraction(
+            &mut file,
+            &requests[0],
+            &json!({"answers":{"function_simplification_extract_0":none}}),
+        )
+        .unwrap();
+        assert_eq!(
+            file.dimensions["function_simplification"].status,
+            Status::Review
+        );
+        assert_eq!(file.findings.len(), 1);
+        assert!(!file.findings[0].message.contains("task to extract"));
+        assert!(file.findings[0].message.contains("work itself"));
+        file.findings.clear();
+        file.dimensions
+            .get_mut("function_simplification")
+            .unwrap()
+            .status = Status::Clear;
+        apply_extraction(
+            &mut file,
+            &requests[0],
+            &json!({"answers":{"function_simplification_extract_0":none}}),
+        )
+        .unwrap();
+        assert_eq!(
+            file.dimensions["function_simplification"].status,
+            Status::Clear
+        );
+        assert!(file.findings.is_empty());
+        assert!(
+            file.dimensions["function_simplification"]
+                .decision_basis
+                .contains("none")
+        );
     }
     #[test]
     fn fragment_evidence_is_shared_bounded_and_independent_of_selected_rules() {

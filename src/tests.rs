@@ -74,7 +74,9 @@ pub(super) struct Mock {
 impl transport::Evaluator for Mock {
     fn evaluate(&mut self, request: &Value) -> anyhow::Result<Value> {
         self.calls += 1;
-        assert!(request["state"]["file"]["source"].is_string());
+        if request["state"]["extraction_version"].is_null() {
+            assert!(request["state"]["file"]["source"].is_string());
+        }
         if let Some(path) = &self.edit {
             std::fs::write(path, "fn changed() {}")?;
         }
