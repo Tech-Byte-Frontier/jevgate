@@ -336,7 +336,7 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
         let missing = probabilities.get("context").copied().unwrap_or(0.0) / mass;
         let clear = probabilities.get("clear").copied().unwrap_or(0.0) / mass;
         let na = probabilities.get("not_applicable").copied().unwrap_or(0.0) / mass;
-        let status = if response::probability_at_least(concern, response::REVIEW_PROBABILITY) {
+        let mut status = if response::probability_at_least(concern, response::REVIEW_PROBABILITY) {
             Status::Review
         } else if response::probability_at_least(clear, response::REVIEW_PROBABILITY) {
             Status::Clear
@@ -440,22 +440,27 @@ pub fn apply(file: &mut FileResult, request: &Value, body: &Value) -> Result<()>
             }
         }
         if status == Status::Review && selected_locations.is_empty() {
-            detail = "Refactoring concern identified, but no supplied candidate localizes its boundary. Review the complete file; do not infer a specific split.".into();
-            file.findings.push(Finding {
-                rule: rules()
-                    .into_iter()
-                    .find(|r| r.key == key)
-                    .unwrap()
-                    .id
-                    .into(),
-                line: 1,
-                message: detail.clone(),
-                action: "Inspect the file to identify a concrete refactoring boundary".into(),
-                symbol: None,
-                rule_version: crate::catalog::rule_version(key).into(),
-                concern_probability: concern,
-                evidence_complete: false,
-            });
+            if key == "shared_logic" {
+                detail = "Shared-logic concern without a supplied pair or fragment boundary. Missing localization; do not invent a split.".into();
+                status = Status::NeedsContext;
+            } else {
+                detail = "Refactoring concern identified, but no supplied candidate localizes its boundary. Review the complete file; do not infer a specific split.".into();
+                file.findings.push(Finding {
+                    rule: rules()
+                        .into_iter()
+                        .find(|r| r.key == key)
+                        .unwrap()
+                        .id
+                        .into(),
+                    line: 1,
+                    message: detail.clone(),
+                    action: "Inspect the file to identify a concrete refactoring boundary".into(),
+                    symbol: None,
+                    rule_version: crate::catalog::rule_version(key).into(),
+                    concern_probability: concern,
+                    evidence_complete: false,
+                });
+            }
         }
         let dimension = Dimension {
             refactoring_assessment: Some(Assessment {
@@ -762,7 +767,18 @@ fn excerpt_from_ranges(source: &str, input: &Input, evidence: &[Value]) -> Focus
                 .or_else(|| item["name"].as_str())
                 .unwrap_or("excerpt");
             text.push_str(&format!("[{name} lines {start}–{end}]\n{slice}\n\n"));
-            kept.push(json!({"name": name, "path": path, "start_line": start, "end_line": end}));
+            let mut entry =
+                json!({"name": name, "path": path, "start_line": start, "end_line": end});
+            if item["locations"].is_array() {
+                entry["locations"] = item["locations"].clone();
+            }
+            if item["source"].is_string() {
+                entry["source"] = item["source"].clone();
+            }
+            if item["surroundings"].is_array() {
+                entry["surroundings"] = item["surroundings"].clone();
+            }
+            kept.push(entry);
         }
     }
     if text.is_empty() {
@@ -829,10 +845,46 @@ pub fn apply_focused(file: &mut FileResult, request: &Value, body: &Value) -> Re
         .position(|candidate| *candidate == key)
         .unwrap_or(0);
     let detail = match status {
-        Status::Review => format!(
-            "Focused recheck of {name} found a maintainability concern. {}",
-            CONCERNS[index]
-        ),
+        Status::Review => {
+            if key == "shared_logic" {
+                let names = evidence
+                    .map(|item| {
+                        if let Some(locations) = item["locations"].as_array() {
+                            locations
+                                .iter()
+                                .map(|location| {
+                                    location_label(
+                                        location["path"].as_str().unwrap_or(""),
+                                        location["start_line"].as_u64().unwrap_or(1),
+                                        location["end_line"].as_u64().unwrap_or(1),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" and ")
+                        } else {
+                            location_label(
+                                item["path"].as_str().unwrap_or(""),
+                                item["start_line"].as_u64().unwrap_or(1),
+                                item["end_line"].as_u64().unwrap_or(1),
+                            )
+                        }
+                    })
+                    .unwrap_or_else(|| name.to_string());
+                evidence
+                    .map(|item| shared_detail(&names, item))
+                    .unwrap_or_else(|| {
+                        format!(
+                            "Focused recheck of {name} found a maintainability concern. {}",
+                            CONCERNS[index]
+                        )
+                    })
+            } else {
+                format!(
+                    "Focused recheck of {name} found a maintainability concern. {}",
+                    CONCERNS[index]
+                )
+            }
+        }
         _ => format!(
             "Focused recheck of {name} found no concrete maintainability benefit. The first-pass overview stayed uncertain."
         ),
@@ -903,6 +955,10 @@ pub fn apply_test_portion(file: &mut FileResult, request: &Value, body: &Value) 
 
 const MIN_SHARED_SPAN: usize = 120;
 const EXTRACTION_LIMIT: usize = 8;
+/// Named extract tasks need a concentrated follow-up, not only a plurality.
+const EXTRACT_CONFIDENCE: f64 = 0.70;
+/// Below this share, `none` is only a lean and not a hard verdict.
+const HARD_NONE_SHARE: f64 = 0.70;
 
 fn concern_of(probabilities: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<f64> {
     let total: f64 = probabilities.values().filter_map(Value::as_f64).sum();
@@ -966,6 +1022,10 @@ fn fragment_span(evidence: &Value) -> usize {
         .unwrap_or(0)
 }
 
+fn location_label(path: &str, start_line: u64, end_line: u64) -> String {
+    format!("{path}:{start_line}–{end_line}")
+}
+
 fn shared_detail(names: &str, evidence: &Value) -> String {
     let mut detail = format!(
         "Candidate shared implementation at {names}.\nRepeated:\n{}",
@@ -1014,25 +1074,26 @@ fn hot_operation(assessment: &Assessment) -> Option<(String, Value, f64)> {
         .max_by(|left, right| left.2.total_cmp(&right.2))
 }
 
-fn extraction_choice(operation: &Value) -> Option<(&str, f64)> {
+fn extraction_choice(operation: &Value) -> Option<(&str, f64, f64)> {
     let extraction = operation.get("extraction")?;
     let probabilities = extraction["probabilities"].as_object()?;
     let total: f64 = probabilities.values().filter_map(Value::as_f64).sum();
     if total <= 0.0 {
         return None;
     }
+    let confidence = extraction["confidence"].as_f64().unwrap_or(0.0);
     if let Some(choice) = extraction["choice"].as_str() {
         let mass = probabilities
             .get(choice)
             .and_then(Value::as_f64)
             .unwrap_or(0.0);
-        return Some((choice, mass / total));
+        return Some((choice, mass / total, confidence));
     }
     let (choice, mass) = probabilities
         .iter()
         .filter_map(|(key, value)| value.as_f64().map(|mass| (key.as_str(), mass)))
         .max_by(|left, right| left.1.total_cmp(&right.1))?;
-    Some((choice, mass / total))
+    Some((choice, mass / total, confidence))
 }
 
 fn apply_operations(file: &mut FileResult) -> Result<()> {
@@ -1057,11 +1118,14 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
     assessment.selected_locations = vec![evidence.clone()];
     let task = extraction_choice(&operation);
     let note = match task {
-        Some(("none", share)) => format!(
+        Some(("none", share, _)) if share >= HARD_NONE_SHARE => format!(
             "Function probe: {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and does not change the file status."
         ),
-        Some((task, share)) => format!(
-            "Function probe: {name} at line {line} scored {concern:.2}. Follow-up: {task} ({share:.2})."
+        Some(("none", share, confidence)) => format!(
+            "Function probe: {name} at line {line} scored {concern:.2}. The follow-up leans none ({share:.2}, confidence {confidence:.2}); that is not a hard verdict and does not change the file status."
+        ),
+        Some((task, share, confidence)) => format!(
+            "Function probe: {name} at line {line} scored {concern:.2}. Follow-up: {task} ({share:.2}, confidence {confidence:.2})."
         ),
         None => format!(
             "Function probe: {name} at line {line} scored {concern:.2}. That score is a place to inspect and does not by itself make the file a review."
@@ -1070,50 +1134,30 @@ fn apply_operations(file: &mut FileResult) -> Result<()> {
     dimension.decision_basis = format!("{}\n{note}", overview_basis(&dimension.decision_basis));
     dimension.concern_basis = "file-wide-outcome".into();
     file.findings.retain(|finding| finding.rule != IDS[1]);
-    if file_status != Status::Review {
-        let saved = dimension.clone();
-        file.file_dimensions
-            .insert("function_simplification".into(), saved);
-        return Ok(());
-    }
-    let separable =
-        task.is_some_and(|(choice, _)| matches!(choice, "validation" | "parsing" | "delivery"));
-    let (message, action) = if separable {
-        let (task, share) = task.unwrap();
-        (
-            format!(
+    let separable = task.is_some_and(|(choice, share, confidence)| {
+        matches!(choice, "validation" | "parsing" | "delivery")
+            && response::probability_at_least(share, response::REVIEW_PROBABILITY)
+            && response::probability_at_least(confidence, EXTRACT_CONFIDENCE)
+    });
+    if file_status == Status::Review && separable {
+        let (task, share, _) = task.unwrap();
+        file.findings.push(Finding {
+            rule: IDS[1].into(),
+            line: line as usize,
+            message: format!(
                 "File-wide review. {name} at line {line} has a {task} task to extract (follow-up {share:.2}, function score {concern:.2})."
             ),
-            format!("Consider extracting the {task} task"),
-        )
-    } else if let Some(("none", share)) = task {
-        (
-            format!(
-                "File-wide review. {name} at line {line} scored {concern:.2}. The follow-up is none ({share:.2}); the length is the work itself and is not a split."
-            ),
-            "Inspect the file-wide concern; this function is not an extraction".into(),
-        )
-    } else {
-        (
-            format!(
-                "File-wide review. {name} at line {line} scored {concern:.2} is a place to inspect."
-            ),
-            "Inspect the function beside the file-wide concern".into(),
-        )
-    };
-    file.findings.push(Finding {
-        rule: IDS[1].into(),
-        line: line as usize,
-        message,
-        action,
-        symbol: Some(name.into()),
-        rule_version: crate::catalog::rule_version("function_simplification").into(),
-        concern_probability: dimension.concern_probability,
-        evidence_complete: dimension.missing_context < response::MISSING_CONTEXT,
-    });
+            action: format!("Consider extracting the {task} task"),
+            symbol: Some(name.into()),
+            rule_version: crate::catalog::rule_version("function_simplification").into(),
+            concern_probability: dimension.concern_probability,
+            evidence_complete: dimension.missing_context < response::MISSING_CONTEXT,
+        });
+    }
     let saved = dimension.clone();
     file.file_dimensions
         .insert("function_simplification".into(), saved);
+    response::update_status(file);
     Ok(())
 }
 
@@ -1165,11 +1209,10 @@ fn apply_fragments(file: &mut FileResult) -> Result<()> {
     let names = locations
         .iter()
         .map(|location| {
-            format!(
-                "{}:{}–{}",
+            location_label(
                 location["path"].as_str().unwrap_or(""),
-                location["start_line"],
-                location["end_line"]
+                location["start_line"].as_u64().unwrap_or(1),
+                location["end_line"].as_u64().unwrap_or(1),
             )
         })
         .collect::<Vec<_>>()
@@ -1432,9 +1475,33 @@ mod tests {
             file.dimensions["function_simplification"].status,
             Status::Review
         );
-        assert_eq!(file.findings.len(), 1);
-        assert!(!file.findings[0].message.contains("task to extract"));
-        assert!(file.findings[0].message.contains("work itself"));
+        assert!(file.findings.is_empty());
+        assert!(
+            file.dimensions["function_simplification"]
+                .decision_basis
+                .contains("work itself")
+        );
+        let weak = json!({"type":"choice","choice":"none","confidence":0.4,"probabilities":{"parsing":0.2,"validation":0.1,"delivery":0.14,"none":0.56}});
+        apply_extraction(
+            &mut file,
+            &requests[0],
+            &json!({"answers":{"function_simplification_extract_0":weak}}),
+        )
+        .unwrap();
+        assert!(file.findings.is_empty());
+        assert!(
+            file.dimensions["function_simplification"]
+                .decision_basis
+                .contains("leans none")
+        );
+        let low_confidence = json!({"type":"choice","choice":"parsing","confidence":0.4,"probabilities":{"parsing":0.86,"validation":0.04,"delivery":0.05,"none":0.05}});
+        apply_extraction(
+            &mut file,
+            &requests[0],
+            &json!({"answers":{"function_simplification_extract_0":low_confidence}}),
+        )
+        .unwrap();
+        assert!(file.findings.is_empty());
         file.findings.clear();
         file.dimensions
             .get_mut("function_simplification")
@@ -1641,6 +1708,82 @@ mod tests {
                 .decision_basis
                 .contains("does not establish a need to refactor")
         );
+    }
+
+    #[test]
+    fn unlocalized_shared_logic_is_needs_context_without_a_finding() {
+        let p = Project::new();
+        p.write("app.py", SOURCE);
+        let mut options = args();
+        options.rules = vec![KEYS[2].into()];
+        let inputs = crate::inventory::collect(&options, &p.context(), &[]).unwrap();
+        let request = request(&inputs[0], &options).unwrap();
+        use crate::transport::Evaluator;
+        let mut judge = Judge {
+            calls: 0,
+            weights: vec![("clear", 1.0)],
+        };
+        let mut body = judge.evaluate(&request).unwrap();
+        body["answers"]["shared_logic"] = json!({"type":"choice","choice":"review","confidence":1.0,"probabilities":{"clear":0.0,"context":0.0,"not_applicable":0.0,"review":1.0}});
+        body["answers"]["shared_logic_location"] = json!({"type":"choice","choice":"none","confidence":0.8,"probabilities":{"none":0.9,"p0":0.1}});
+        crate::response::validate(&body, &request).unwrap();
+        let mut file = inputs[0].result.clone();
+        apply(&mut file, &request, &body).unwrap();
+        assert_eq!(file.dimensions[KEYS[2]].status, Status::NeedsContext);
+        assert!(file.findings.is_empty());
+        assert!(
+            file.dimensions[KEYS[2]]
+                .decision_basis
+                .contains("Missing localization")
+        );
+    }
+
+    #[test]
+    fn focused_shared_logic_review_quotes_both_copies() {
+        let p = Project::new();
+        p.write("app.py", SOURCE);
+        let mut options = args();
+        options.rules = vec![KEYS[2].into()];
+        let inputs = crate::inventory::collect(&options, &p.context(), &[]).unwrap();
+        let request = request(&inputs[0], &options).unwrap();
+        use crate::transport::Evaluator;
+        let mut judge = Judge {
+            calls: 0,
+            weights: vec![("clear", 1.0)],
+        };
+        let mut body = judge.evaluate(&request).unwrap();
+        body["answers"]["shared_logic"] = json!({"type":"choice","choice":"review","confidence":0.5,"probabilities":{"clear":0.4,"context":0.0,"not_applicable":0.0,"review":0.6}});
+        crate::response::validate(&body, &request).unwrap();
+        let mut file = inputs[0].result.clone();
+        apply(&mut file, &request, &body).unwrap();
+        assert_eq!(file.dimensions[KEYS[2]].status, Status::Uncertain);
+        let fragment = json!({
+            "source": "normalized = value.strip().lower()\nrecord = dict(name=normalized, enabled=True)\nreturn save(record)\n",
+            "surroundings": [
+                {"path":"app.py","start_line":1,"source":"def save_order(order):\n    return database.write(order)"},
+                {"path":"app.py","start_line":4,"source":"def render_banner(user):\n    return user.name"}
+            ],
+            "locations": [
+                {"path":"app.py","start_line":1,"end_line":2},
+                {"path":"app.py","start_line":4,"end_line":5}
+            ]
+        });
+        let focused = json!({
+            "model": options.model,
+            "state": {
+                "focused": "shared_logic",
+                "file": {"path":"app.py","source":"def save_order(order):\n    return database.write(order)"},
+                "focus_evidence": [fragment]
+            },
+            "questions": { "shared_logic": crate::questions::recheck(2, "") }
+        });
+        let focused_body = json!({"answers":{"shared_logic":{"type":"choice","choice":"review","confidence":0.9,"probabilities":{"clear":0.05,"review":0.95}}}});
+        apply_focused(&mut file, &focused, &focused_body).unwrap();
+        assert_eq!(file.dimensions[KEYS[2]].status, Status::Review);
+        assert_eq!(file.findings.len(), 1);
+        assert!(file.findings[0].message.contains("Repeated:"));
+        assert!(file.findings[0].message.contains("save_order"));
+        assert!(file.findings[0].message.contains("render_banner"));
     }
 
     #[test]
