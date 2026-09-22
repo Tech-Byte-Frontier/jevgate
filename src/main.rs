@@ -77,7 +77,7 @@ fn run(command: JevCommand) -> Result<u8> {
     }
 }
 
-fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
+fn validate_check(args: &CheckArgs) -> Result<()> {
     anyhow::ensure!(
         !args.show_requests || args.output_format() == Format::Json,
         "--show-requests uses JSON output; omit --format or use --format json"
@@ -90,6 +90,11 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         !(args.watch && args.output_format() == Format::Json),
         "Use --format jsonl for watch snapshots"
     );
+    Ok(())
+}
+
+fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
+    validate_check(args)?;
     cancellation::install()?;
     let scope = inventory::scope(args, context)?;
     let inputs = inventory::collect(args, context, &scope)?;

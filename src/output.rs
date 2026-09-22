@@ -30,14 +30,19 @@ pub fn emit(report: &Report, format: Format) -> Result<()> {
     }
     Ok(())
 }
+fn status_label(value: &impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".into())
+}
+
 pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
     writeln!(
         out,
         "{} [{}]",
         file.path.display(),
-        serde_json::to_value(&file.status)?
-            .as_str()
-            .unwrap_or("unknown")
+        status_label(&file.status)
     )?;
     if let Some(error) = &file.error {
         writeln!(out, "  {error}")?;
@@ -80,9 +85,7 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
         writeln!(
             out,
             "  {name}: {} · concern {:.0}%",
-            serde_json::to_value(&d.status)?
-                .as_str()
-                .unwrap_or("unknown"),
+            status_label(&d.status),
             d.concern_probability * 100.0
         )?;
         writeln!(out, "    {}", d.decision_basis)?;

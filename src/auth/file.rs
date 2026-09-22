@@ -16,15 +16,18 @@ pub fn credential_path() -> Result<PathBuf> {
         );
         return Ok(path.join("credentials"));
     }
+    config_base()
+}
+
+fn required_env(key: &str) -> Result<std::ffi::OsString> {
+    std::env::var_os(key).with_context(|| format!("{key} is unavailable; set JEVGATE_CONFIG_DIR"))
+}
+
+fn config_base() -> Result<PathBuf> {
     #[cfg(target_os = "windows")]
-    let base = PathBuf::from(
-        std::env::var_os("APPDATA").context("APPDATA is unavailable; set JEVGATE_CONFIG_DIR")?,
-    );
+    let base = PathBuf::from(required_env("APPDATA")?);
     #[cfg(target_os = "macos")]
-    let base = PathBuf::from(
-        std::env::var_os("HOME").context("HOME is unavailable; set JEVGATE_CONFIG_DIR")?,
-    )
-    .join("Library/Application Support");
+    let base = PathBuf::from(required_env("HOME")?).join("Library/Application Support");
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let base = match std::env::var_os("XDG_CONFIG_HOME").filter(|p| !p.is_empty()) {
         Some(path) => {
@@ -32,10 +35,7 @@ pub fn credential_path() -> Result<PathBuf> {
             ensure!(path.is_absolute(), "XDG_CONFIG_HOME must be absolute");
             path
         }
-        None => PathBuf::from(
-            std::env::var_os("HOME").context("HOME is unavailable; set JEVGATE_CONFIG_DIR")?,
-        )
-        .join(".config"),
+        None => PathBuf::from(required_env("HOME")?).join(".config"),
     };
     ensure!(
         base.is_absolute(),

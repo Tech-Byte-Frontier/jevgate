@@ -142,12 +142,7 @@ fn load(
         result.status = Status::Skipped;
         result.error = Some(crate::file_kind::excluded_reason(&role).into());
         result.classification = Some(crate::file_kind::excluded(&role, relative));
-        return Ok(Input {
-            result,
-            source: None,
-
-            context: Vec::new(),
-        });
+        return Ok(bare_input(result));
     }
     if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
         return over_read_cap(result, relative, &path, args.max_file_bytes);
@@ -173,17 +168,22 @@ fn load(
                     .collect(),
             })
         }
-        Err(error) => {
-            result.status = Status::Error;
-            result.error = Some(error.to_string());
-            Ok(Input {
-                result,
-                source: None,
-
-                context: Vec::new(),
-            })
-        }
+        Err(error) => Ok(error_input(result, error)),
     }
+}
+
+fn bare_input(result: FileResult) -> Input {
+    Input {
+        result,
+        source: None,
+        context: Vec::new(),
+    }
+}
+
+fn error_input(mut result: FileResult, error: impl ToString) -> Input {
+    result.status = Status::Error;
+    result.error = Some(error.to_string());
+    bare_input(result)
 }
 
 const LOCAL_PARSE_MAX: u64 = 1_048_576;
@@ -199,13 +199,7 @@ fn over_read_cap(
         Err(error) => {
             let message = error.to_string();
             if !message.contains("exceeds") && !message.contains("grew beyond") {
-                result.status = Status::Error;
-                result.error = Some(message);
-                return Ok(Input {
-                    result,
-                    source: None,
-                    context: Vec::new(),
-                });
+                return Ok(error_input(result, message));
             }
             None
         }
@@ -228,11 +222,7 @@ fn over_read_cap(
             "{len} bytes exceeds the {cap}-byte read cap, so the complete source was not sent."
         ),
     ));
-    Ok(Input {
-        result,
-        source: None,
-        context: Vec::new(),
-    })
+    Ok(bare_input(result))
 }
 
 pub(super) fn read_source(path: &std::path::Path, limit: u64) -> Result<String> {

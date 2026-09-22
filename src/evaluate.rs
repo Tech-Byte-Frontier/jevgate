@@ -457,6 +457,11 @@ fn enqueue(
     });
 }
 
+fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {
+    file.contains_tests = class.kind == "tests" || !class.separated_tests.is_empty();
+    file.classification = Some(class);
+}
+
 fn schedule(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Result<Scheduled> {
     if file.status != Status::Pending {
         return Ok(Scheduled::None);
@@ -477,14 +482,12 @@ fn schedule(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Result<Sc
     }
     match crate::file_kind::plan(input, args)? {
         crate::file_kind::Plan::Skip(class) => {
-            file.contains_tests = class.kind == "tests" || !class.separated_tests.is_empty();
-            file.classification = Some(class);
+            apply_classification(file, class);
             file.status = Status::NotApplicable;
             Ok(Scheduled::None)
         }
         crate::file_kind::Plan::Unsent(class) => {
-            file.contains_tests = class.kind == "tests" || !class.separated_tests.is_empty();
-            file.classification = Some(class);
+            apply_classification(file, class);
             file.status = Status::NeedsContext;
             Ok(Scheduled::None)
         }

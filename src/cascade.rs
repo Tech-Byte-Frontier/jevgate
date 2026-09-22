@@ -132,21 +132,21 @@ fn drop_last_role_region(request: &mut Value) -> bool {
     true
 }
 
-fn drop_last_specialist(request: &mut Value) -> bool {
+fn drop_last_prefixed(request: &mut Value, prefix: &str) -> bool {
     let questions = request["questions"].as_object_mut().unwrap();
     let Some(index) = questions
         .keys()
-        .filter_map(|name| {
-            name.strip_prefix("cascade_specialist_")?
-                .parse::<usize>()
-                .ok()
-        })
+        .filter_map(|name| name.strip_prefix(prefix)?.parse::<usize>().ok())
         .max()
     else {
         return false;
     };
-    questions.remove(&format!("cascade_specialist_{index}"));
+    questions.remove(&format!("{prefix}{index}"));
     true
+}
+
+fn drop_last_specialist(request: &mut Value) -> bool {
+    drop_last_prefixed(request, "cascade_specialist_")
 }
 
 fn strip_operation_excerpts(request: &mut Value) -> bool {
@@ -173,15 +173,9 @@ fn strip_operation_excerpts(request: &mut Value) -> bool {
 }
 
 fn drop_last_operation_probe(request: &mut Value) -> bool {
-    let questions = request["questions"].as_object_mut().unwrap();
-    let Some(index) = questions
-        .keys()
-        .filter_map(|name| name.strip_prefix("operation_probe_")?.parse::<usize>().ok())
-        .max()
-    else {
+    if !drop_last_prefixed(request, "operation_probe_") {
         return false;
-    };
-    questions.remove(&format!("operation_probe_{index}"));
+    }
     let omitted = request["state"]["limitations"]["operation_probes_omitted"]
         .as_u64()
         .unwrap_or(0);

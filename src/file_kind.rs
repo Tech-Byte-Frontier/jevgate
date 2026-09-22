@@ -151,16 +151,20 @@ fn deliver(
     match gate_request(input, args, &class, &source)? {
         Some(request) => Ok(Some(request)),
         None => {
-            let bytes = input
-                .source
-                .as_deref()
-                .map(str::len)
-                .unwrap_or(source.len());
-            file.classification = Some(unsent(&input.result.path, &source, &budget_detail(bytes)));
+            file.classification = Some(budget_unsent(input, &source));
             file.status = Status::NeedsContext;
             Ok(None)
         }
     }
+}
+
+fn budget_unsent(input: &Input, source: &str) -> Classification {
+    let bytes = input
+        .source
+        .as_deref()
+        .map(str::len)
+        .unwrap_or(source.len());
+    unsent(&input.result.path, source, &budget_detail(bytes))
 }
 
 pub fn language(path: &Path) -> &'static str {
@@ -211,18 +215,7 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs) -> Result<Plan> {
             let source = prepared.gate_source;
             match gate_request(input, args, &prepared.classification, &source)? {
                 Some(request) => Ok(Plan::Judge(prepared.classification, request)),
-                None => {
-                    let bytes = input
-                        .source
-                        .as_deref()
-                        .map(str::len)
-                        .unwrap_or(source.len());
-                    Ok(Plan::Unsent(unsent(
-                        &input.result.path,
-                        &source,
-                        &budget_detail(bytes),
-                    )))
-                }
+                None => Ok(Plan::Unsent(budget_unsent(input, &source))),
             }
         }
     }
