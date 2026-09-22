@@ -12,19 +12,39 @@ fn equivalent(old: &FileResult, new: &FileResult, previous: &Report, current: &R
         && !matches!(new.status, Status::Error | Status::Pending)
 }
 
+fn record(
+    changes: &mut Vec<Change>,
+    rule: &str,
+    path: &std::path::Path,
+    previous_path: Option<&std::path::Path>,
+    previous_generation: Option<u64>,
+    state: &str,
+    reason: &str,
+) {
+    changes.push(Change {
+        rule: rule.into(),
+        path: path.into(),
+        previous_path: previous_path.map(std::path::Path::to_path_buf),
+        previous_generation,
+        state: state.into(),
+        reason: reason.into(),
+    });
+}
+
 pub fn compare(previous: Option<&Report>, report: &mut Report) {
     report.changes.clear();
     let Some(previous) = previous else {
         for file in &report.files {
             for finding in &file.findings {
-                report.changes.push(Change {
-                    rule: finding.rule.clone(),
-                    path: file.path.clone(),
-                    previous_path: None,
-                    previous_generation: None,
-                    state: "baseline".into(),
-                    reason: "First observed assessment; introduction time is unknown".into(),
-                });
+                record(
+                    &mut report.changes,
+                    &finding.rule,
+                    &file.path,
+                    None,
+                    None,
+                    "baseline",
+                    "First observed assessment; introduction time is unknown",
+                );
             }
         }
         return;
@@ -108,15 +128,15 @@ pub fn compare(previous: Option<&Report>, report: &mut Report) {
     }
     for old in previous.files.iter().filter(|f| !matched.contains(&f.path)) {
         for finding in &old.findings {
-            report.changes.push(Change {
-                rule: finding.rule.clone(),
-                path: old.path.clone(),
-                previous_path: Some(old.path.clone()),
-                previous_generation: Some(previous.generation),
-                state: "non-comparable".into(),
-                reason: "Deleted, moved ambiguously or excluded scope is not a verified resolution"
-                    .into(),
-            });
+            record(
+                &mut report.changes,
+                &finding.rule,
+                &old.path,
+                Some(&old.path),
+                Some(previous.generation),
+                "non-comparable",
+                "Deleted, moved ambiguously or excluded scope is not a verified resolution",
+            );
         }
     }
 }

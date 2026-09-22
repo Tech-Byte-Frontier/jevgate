@@ -69,24 +69,22 @@ impl Classifier {
     }
 }
 
-fn script_extension(path: &Path) -> bool {
-    let extension = path
-        .extension()
+fn file_extension(path: &Path) -> String {
+    path.extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or("")
-        .to_ascii_lowercase();
+        .to_ascii_lowercase()
+}
+
+fn script_extension(path: &Path) -> bool {
     matches!(
-        extension.as_str(),
+        file_extension(path).as_str(),
         "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd"
     )
 }
 
 pub fn source(path: &Path, extra: &[String]) -> bool {
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let extension = file_extension(path);
     [
         "rs", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "kt",
         "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "swift", "dart",

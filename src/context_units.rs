@@ -201,6 +201,10 @@ fn definition_start(node: Node<'_>) -> usize {
     start
 }
 
+fn line_number(source: &str, byte: usize) -> usize {
+    source[..byte].bytes().filter(|b| *b == b'\n').count() + 1
+}
+
 pub fn review_targets(path: &Path, source: &str) -> Vec<(String, SourceRange, String)> {
     let Some(tree) = locations::parse(path, source).ok().flatten() else {
         return Vec::new();
@@ -212,16 +216,8 @@ pub fn review_targets(path: &Path, source: &str) -> Vec<(String, SourceRange, St
         .filter(|unit| unit.reviewable)
         .map(|unit| {
             let range = SourceRange {
-                start_line: source[..unit.span.start]
-                    .bytes()
-                    .filter(|b| *b == b'\n')
-                    .count()
-                    + 1,
-                end_line: source[..unit.span.end]
-                    .bytes()
-                    .filter(|b| *b == b'\n')
-                    .count()
-                    + 1,
+                start_line: line_number(source, unit.span.start),
+                end_line: line_number(source, unit.span.end),
             };
             let name = if unit.names.is_empty() {
                 format!("declaration/effect at line {}", range.start_line)

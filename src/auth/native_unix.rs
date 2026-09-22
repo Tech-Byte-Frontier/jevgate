@@ -10,13 +10,19 @@ fn attributes() -> HashMap<&'static str, &'static str> {
     HashMap::from([("service", "jevgate"), ("username", "typesafe-api-key")])
 }
 
+fn unlocked_item<'a>(
+    service: &'a SecretService<'a>,
+) -> Result<Option<secret_service::blocking::Item<'a>>> {
+    let mut items = service.search_items(attributes())?;
+    ensure!(items.locked.is_empty(), "locked");
+    ensure!(items.unlocked.len() <= 1, "ambiguous");
+    Ok(items.unlocked.pop())
+}
+
 pub fn get() -> Result<Option<Secret>> {
     (|| -> Result<Option<Secret>> {
         let service = SecretService::connect(EncryptionType::Dh)?;
-        let mut items = service.search_items(attributes())?;
-        ensure!(items.locked.is_empty(), "locked");
-        ensure!(items.unlocked.len() <= 1, "ambiguous");
-        let Some(item) = items.unlocked.pop() else {
+        let Some(item) = unlocked_item(&service)? else {
             return Ok(None);
         };
         let bytes = zeroize::Zeroizing::new(item.get_secret()?);
@@ -32,10 +38,7 @@ pub fn delete() -> Result<bool> {
     (|| -> Result<bool> {
         let connection = Connection::session()?;
         let service = SecretService::connect_with_existing(EncryptionType::Dh, connection.clone())?;
-        let mut items = service.search_items(attributes())?;
-        ensure!(items.locked.is_empty(), "locked");
-        ensure!(items.unlocked.len() <= 1, "ambiguous");
-        let Some(item) = items.unlocked.pop() else {
+        let Some(item) = unlocked_item(&service)? else {
             return Ok(false);
         };
         let proxy = Proxy::new(

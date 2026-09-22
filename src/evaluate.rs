@@ -179,20 +179,10 @@ impl Session<'_> {
             match schedule(&inputs[owner], self.args, &mut report.files[owner]) {
                 Ok(Scheduled::None) => report.files[owner].cached = false,
                 Ok(Scheduled::Purpose(request)) => {
-                    report.files[owner].cached = true;
-                    purpose.push(Task {
-                        owner,
-                        payload: request.clone(),
-                        request,
-                    });
+                    enqueue(&mut report.files[owner], &mut purpose, owner, request);
                 }
                 Ok(Scheduled::Judge(request)) => {
-                    report.files[owner].cached = true;
-                    gates.push(Task {
-                        owner,
-                        payload: request.clone(),
-                        request,
-                    });
+                    enqueue(&mut report.files[owner], &mut gates, owner, request);
                 }
                 Err(error) => fail(&mut report.files[owner], error),
             }
@@ -278,6 +268,33 @@ impl Session<'_> {
         if !followups.is_empty() {
             self.dispatch(report, followups, |file, request, body| {
                 crate::maintainability::apply_focused(file, &request, body)
+            })?;
+        }
+        let mut extractions = Vec::new();
+        for (owner, input) in inputs.iter().enumerate() {
+            if report.files[owner].status == Status::Error {
+                continue;
+            }
+            match crate::maintainability::extraction_requests(
+                input,
+                &report.files[owner],
+                self.args,
+            ) {
+                Ok(requests) => {
+                    for request in requests {
+                        extractions.push(Task {
+                            owner,
+                            payload: request.clone(),
+                            request,
+                        });
+                    }
+                }
+                Err(error) => report.errors.push(error.to_string()),
+            }
+        }
+        if !extractions.is_empty() {
+            self.dispatch(report, extractions, |file, request, body| {
+                crate::maintainability::apply_extraction(file, &request, body)
             })?;
         }
         self.progress(report)
@@ -424,6 +441,20 @@ enum Scheduled {
     None,
     Purpose(serde_json::Value),
     Judge(serde_json::Value),
+}
+
+fn enqueue(
+    file: &mut FileResult,
+    tasks: &mut Vec<Task<serde_json::Value>>,
+    owner: usize,
+    request: serde_json::Value,
+) {
+    file.cached = true;
+    tasks.push(Task {
+        owner,
+        payload: request.clone(),
+        request,
+    });
 }
 
 fn schedule(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Result<Scheduled> {

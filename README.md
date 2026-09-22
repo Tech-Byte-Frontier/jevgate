@@ -33,7 +33,10 @@ probabilities. Watch refreshes it after edits. Opening the report makes no API c
 
 Each application file uses one request containing the three verdicts and their
 conditional locations, plus focused function judgments and judgments of repeated
-fragments when found. Direct function concerns retain the separate file-wide judgment.
+fragments when found. The file-wide answer keeps the status. A function score
+is a place to inspect, and a follow-up asks whether that function has a
+validation, parsing, or delivery task to extract. `none` means the length is
+the work itself.
 Operational scripts and TypeScript declaration files are reported and not judged.
 Test files are not judged unless you pass `--include-tests`. A file that mixes
 application code and tests is judged on the application portion; with that flag,
@@ -114,6 +117,8 @@ Results are `review`, `clear`, `uncertain`, `needs-context`, or `not-applicable`
 Probabilities are model judgments, not measured accuracy. A conditional location
 does not establish a concern. Syntax supplies candidates, never semantic verdicts.
 Candidates are capped at 64 operations and 240 pairs; omissions are reported.
+A shared-logic finding quotes the repeated text from each site. A match shorter
+than 120 bytes stays a probability and is not printed as a finding.
 
 The default read cap is 128 KiB. A file above it, or whose complete source does
 not fit one request beside the maintainability questions, is `needs-context`.
