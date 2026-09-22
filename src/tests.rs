@@ -229,12 +229,12 @@ fn advisory_reviews_and_abstentions_do_not_claim_acceptance() {
     };
     let report = run(&project, &options, &mut mock);
     assert_eq!(report.status, "review");
-    assert_eq!(outcome(&report), 0);
+    assert_eq!(outcome(&report), 1);
     assert!(!report.acceptance_evaluated);
     mock.missing = 0.8;
     let report = run(&project, &options, &mut mock);
     assert_eq!(report.files[0].status, schema::Status::NeedsContext);
-    assert_eq!(outcome(&report), 0);
+    assert_eq!(outcome(&report), 2);
 }
 
 #[test]
