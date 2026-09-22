@@ -2,7 +2,7 @@
 
 File-scoped code review using TypeSafe Jev. Three classifications:
 
-- **File organization:** would separating unrelated responsibilities help?
+- **File organization:** would separating independently useful capabilities help?
 - **Function simplification:** is there a useful task to extract or control flow to simplify?
 - **Shared logic:** should repeated implementations share a helper?
 
