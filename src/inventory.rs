@@ -91,7 +91,6 @@ fn load(
         .strip_prefix(&context.root)
         .context("Source outside root")?;
     let mut result = FileResult {
-        role_assessment: None,
         path: relative.into(),
         contains_tests: role == "test",
         role: role.clone(),
@@ -100,10 +99,8 @@ fn load(
             &serde_json::to_vec(&(
                 crate::schema::RUBRIC,
                 crate::schema::COMPOSITION,
-                crate::roles::VERSION,
-                crate::cascade::VERSION,
+                crate::units::questions::VERSION,
                 crate::file_kind::VERSION,
-                args.roles_only,
                 args.include_tests,
                 &args.model,
                 &args.rules,
@@ -132,7 +129,7 @@ fn load(
         model: None,
         elapsed_ms: 0,
         dimensions: BTreeMap::new(),
-        file_dimensions: BTreeMap::new(),
+        judgments: Vec::new(),
 
         findings: Vec::new(),
         error: None,
@@ -168,8 +165,19 @@ fn load(
                     .collect(),
             })
         }
+        // Binary and non-UTF-8 files are reported and skipped; they never make a run incomplete.
+        Err(error) if not_text(&error) => {
+            result.status = Status::Skipped;
+            result.error = Some(format!("{error}; this file was not judged."));
+            Ok(bare_input(result))
+        }
         Err(error) => Ok(error_input(result, error)),
     }
+}
+
+fn not_text(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<std::string::FromUtf8Error>().is_some()
+        || error.to_string().contains("NUL bytes")
 }
 
 fn bare_input(result: FileResult) -> Input {

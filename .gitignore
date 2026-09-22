@@ -23,9 +23,7 @@ GEMINI.md
 /.openai/
 /.github/copilot-instructions.md
 /evaluation/
-/scripts/*
-!/scripts/roles_eval.py
-!/scripts/test_roles_eval.py
+/scripts/
 /docs/*
 !/docs/classification-cascade.md
 *.log

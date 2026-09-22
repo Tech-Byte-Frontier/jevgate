@@ -81,13 +81,18 @@ pub fn run(
                 );
             }
             super::changes::compare(Some(&baseline), &mut report);
+            if let Err(error) =
+                crate::gate::settle(&session.context.root, &mut report, &session.args.fail_on)
+            {
+                return stop_watcher(session, &mut report, error.to_string(), error);
+            }
             report.settled = true;
             session.publish(&report)?;
             baseline = report.clone();
             fingerprint = inventory::fingerprint(&inputs);
             previous = super::evaluate::previous_judgments(Some(&report), false);
             if session.args.output_format() != Format::Jsonl {
-                output::emit(&report, session.args.output_format())?;
+                output::emit(&report, session.args.output_format(), session.args.verbose)?;
             }
             changed_at = None;
         }

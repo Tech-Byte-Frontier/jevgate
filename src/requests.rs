@@ -1,15 +1,20 @@
-//! Individual rule judgments are reusable across batch composition and unrelated edits.
+//! Cached, validated and budgeted TypeSafe requests. One cache entry per uploaded request.
 use crate::{evaluate::Session, response, schema};
 use anyhow::{Result, ensure};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub(super) type SourceHashes = BTreeMap<String, Option<String>>;
 
-/// Freshness checks, cache identity and reports retain the full internal request.
-/// Only the provider/preview copy omits local diagnostic validation metadata.
+/// Local metadata (stage, freshness hashes) lives under `jevgate` and is
+/// never uploaded. Cache identity and previews use the provider copy.
 pub(super) fn provider_request(request: &Value) -> std::borrow::Cow<'_, Value> {
-    std::borrow::Cow::Borrowed(request)
+    if request.get("jevgate").is_none() {
+        return std::borrow::Cow::Borrowed(request);
+    }
+    let mut copy = request.clone();
+    copy.as_object_mut().unwrap().remove("jevgate");
+    std::borrow::Cow::Owned(copy)
 }
 
 pub(super) fn evidence_bytes(request: &Value) -> u64 {
@@ -23,63 +28,120 @@ pub(super) struct Receipt {
     pub metrics: schema::StageMetrics,
 }
 
+/// Request kinds reported in `stages`, in dispatch order.
+pub(crate) const STAGES: [&str; 7] = [
+    "file-purpose",
+    "functions",
+    "outline",
+    "duplicate-pair",
+    "tests",
+    "test-pair",
+    "recheck",
+];
+
 pub(super) fn stage(request: &Value) -> &'static str {
-    if request["state"]["role_version"].is_string() {
-        "roles"
-    } else if request["state"]["purpose_version"].is_number() {
-        "file-purpose"
-    } else {
-        "maintainability"
+    match request["jevgate"]["stage"].as_str() {
+        Some(stage) => STAGES
+            .iter()
+            .find(|s| **s == stage)
+            .copied()
+            .unwrap_or("other"),
+        None if request["state"]["role_version"].is_string() => "roles",
+        None if request["state"]["purpose_version"].is_number() => "file-purpose",
+        None => "maintainability",
     }
 }
-fn groups(request: &Value) -> BTreeMap<String, Value> {
-    let mut groups = BTreeMap::new();
-    for (name, question) in request["questions"].as_object().unwrap() {
-        let group = crate::catalog::rules()
+
+/// Provider context limits: all questions plus state, and state plus the longest question.
+const TOTAL_TOKENS: f64 = 64_000.0;
+const STATE_TOKENS: f64 = 32_000.0;
+/// Headroom for estimation error.
+const MARGIN: f64 = 0.9;
+const BUDGET_FILE: &str = "token-budget.json";
+
+/// Token estimates from request bytes. The ratio is calibrated from observed
+/// `usage.input_tokens` and saved in `.jevgate/`; it only decides packing and
+/// whether a unit fits, never a verdict.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct TokenBudget {
+    pub bytes_per_token: f64,
+}
+
+impl Default for TokenBudget {
+    fn default() -> Self {
+        Self {
+            bytes_per_token: 3.0,
+        }
+    }
+}
+
+impl TokenBudget {
+    pub fn load(root: &std::path::Path) -> Self {
+        crate::inventory::read_source(&root.join(".jevgate").join(BUDGET_FILE), 4096)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Self>(&text).ok())
+            .map(|b| Self::calibrated(b.bytes_per_token))
+            .unwrap_or_default()
+    }
+
+    fn calibrated(bytes_per_token: f64) -> Self {
+        Self {
+            bytes_per_token: if bytes_per_token.is_finite() {
+                bytes_per_token.clamp(2.0, 6.0)
+            } else {
+                Self::default().bytes_per_token
+            },
+        }
+    }
+
+    /// Replace the ratio with one observed over a batch of fresh requests.
+    pub fn observe(&mut self, bytes: u64, tokens: u64) {
+        if tokens > 0 {
+            *self = Self::calibrated(bytes as f64 / tokens as f64);
+        }
+    }
+
+    pub fn save(&self, store: &crate::storage::Store) -> Result<()> {
+        store.write(BUDGET_FILE, &serde_json::to_vec(self)?)
+    }
+
+    pub fn tokens(&self, bytes: usize) -> usize {
+        (bytes as f64 / self.bytes_per_token).ceil() as usize
+    }
+
+    pub fn tokens_of(&self, value: &Value) -> usize {
+        self.tokens(serde_json::to_vec(value).map_or(0, |v| v.len()))
+    }
+
+    /// Estimated uploaded tokens of a request.
+    pub fn request_tokens(&self, request: &Value) -> usize {
+        self.tokens_of(&provider_request(request))
+    }
+
+    pub fn fits(&self, request: &Value) -> bool {
+        let provider = provider_request(request);
+        let state = self.tokens_of(&provider["state"]) as f64;
+        let longest = provider["questions"]
+            .as_object()
             .into_iter()
-            .find(|r| {
-                !name.starts_with("shared_logic_fragment_")
-                    && (name == r.key || name.starts_with(&format!("{}_", r.key)))
-            })
-            .map_or_else(|| name.clone(), |r| r.key.into());
-        let entry = groups.entry(group).or_insert_with(|| {
-            let mut r = request.clone();
-            r["questions"] = json!({});
-            r
-        });
-        entry["questions"][name] = question.clone();
+            .flat_map(|q| q.values())
+            .map(|q| self.tokens_of(q))
+            .max()
+            .unwrap_or(0) as f64;
+        (self.tokens_of(&provider) as f64) <= TOTAL_TOKENS * MARGIN
+            && state + longest <= STATE_TOKENS * MARGIN
     }
-    // Role-routing fields belong to the shared-logic cascade. Leaving them on
-    // the other gates would make a later single-rule check miss an identical judgment.
-    for (group, part) in &mut groups {
-        if group == "shared_logic"
-            || group.starts_with("role_")
-            || group.starts_with("cascade_")
-            || group.starts_with("shared_logic_fragment_")
-        {
-            continue;
-        }
-        let Some(state) = part["state"].as_object_mut() else {
-            continue;
-        };
-        for key in [
-            "regions",
-            "region_sources",
-            "fragments",
-            "role_limitations",
-            "cascade_role_version",
-            "cascade_version",
-        ] {
-            state.remove(key);
-        }
-    }
-    groups
 }
-pub(super) fn judgment_key(request: &Value, group: &str) -> String {
-    schema::hash(
-        &serde_json::to_vec(&(schema::RUBRIC, crate::catalog::rule_version(group), request))
-            .unwrap(),
-    )
+
+/// One cache entry per request: the model, state and questions it uploads.
+pub(super) fn judgment_key(request: &Value) -> String {
+    schema::hash(&serde_json::to_vec(&(schema::RUBRIC, provider_request(request))).unwrap())
+}
+
+/// Aliases move to new model versions, so their answers expire. A pinned
+/// version answers the same request the same way; its entries never expire.
+fn cache_ttl(model: &str, ttl: u64) -> Option<u64> {
+    matches!(model, "jev-latest" | "jev-preview").then_some(ttl)
 }
 
 impl Session<'_> {
@@ -92,44 +154,24 @@ impl Session<'_> {
             })
             .collect();
         let mut pending = Vec::new();
-        let mut assembled = BTreeMap::new();
+        let ttl = cache_ttl(&self.args.model, self.args.cache_ttl_secs);
         for (i, request) in requests.iter().enumerate() {
-            let mut body = json!({"model":request["model"],"answers":{},"usage":{"input_tokens":0,"output_tokens":0}});
-            let mut timestamp: Option<u64> = None;
-            let mut missing = (*request).clone();
-            missing["questions"] = json!({});
-            for (group, part) in groups(request) {
-                let key = judgment_key(&part, &group);
-                let cached = if self.args.refresh {
-                    None
-                } else {
-                    self.store.load(&key, self.args.cache_ttl_secs)
-                }
-                .filter(|(b, _)| response::validate(b, &part).is_ok());
-                if let Some((cached, created)) = cached {
-                    timestamp = Some(timestamp.map_or(created, |old| old.min(created)));
-                    body["model"] = cached["model"].clone();
-                    body["answers"]
-                        .as_object_mut()
-                        .unwrap()
-                        .extend(cached["answers"].as_object().unwrap().clone());
-                    receipts[i].metrics.cached_judgments += 1;
-                } else {
-                    for name in part["questions"].as_object().unwrap().keys() {
-                        missing["questions"][name] = request["questions"][name].clone();
-                    }
-                }
+            let cached = if self.args.refresh {
+                None
+            } else {
+                self.store.load(&judgment_key(request), ttl)
             }
-            if missing["questions"].as_object().unwrap().is_empty() {
+            .filter(|(b, _)| response::validate(b, request).is_ok());
+            if let Some((cached, created)) = cached {
                 receipts[i].metrics.cache_hits = 1;
-                receipts[i].result = Ok((body, timestamp.unwrap_or_else(schema::now), true));
+                receipts[i].metrics.cached_judgments = 1;
+                receipts[i].result = Ok((cached, created, true));
             } else if self.args.cache_only {
                 receipts[i].result = Err(anyhow::anyhow!(
                     "No current cached response; rerun without --cache-only to allow an API request"
                 ));
             } else {
-                assembled.insert(i, (body, timestamp));
-                pending.push((i, missing));
+                pending.push((i, *request));
             }
         }
         let count = pending.len().min(
@@ -150,7 +192,7 @@ impl Session<'_> {
             // source was already verified while preparing the batch.
             require_paths(root, max_bytes, request, &mut SourceHashes::new())
         };
-        let batch: Vec<_> = pending[..count].iter().map(|(_, r)| r).collect();
+        let batch: Vec<&Value> = pending[..count].iter().map(|(_, r)| *r).collect();
         if batch.is_empty() {
             return receipts;
         }
@@ -158,6 +200,7 @@ impl Session<'_> {
         let requests_count = &mut self.requests;
         let paid_input = &mut self.paid_input_tokens;
         let paid_output = &mut self.paid_output_tokens;
+        let observed = &mut self.observed;
         self.evaluator.evaluate_queue(
             &batch,
             self.args.concurrency as usize,
@@ -181,25 +224,19 @@ impl Session<'_> {
                     receipt.metrics.input_tokens += input;
                     receipt.metrics.output_tokens += output;
                     response::validate(&body, request)?;
+                    observed.0 += serde_json::to_vec(&provider_request(request))
+                        .map_or(0, |v| v.len() as u64);
+                    observed.1 += input;
                     let timestamp = schema::now();
-                    for (group, part) in groups(request) {
-                        let cached = response::cache_value(&body, &part);
-                        store.save(&judgment_key(&part, &group), &cached, timestamp)?;
-                        receipt.metrics.evaluated_judgments += 1;
-                    }
-                    let (mut merged, oldest) = assembled.remove(i).unwrap();
-                    merged["answers"]
-                        .as_object_mut()
-                        .unwrap()
-                        .extend(body["answers"].as_object().unwrap().clone());
-                    merged["model"] = body["model"].clone();
-                    merged["usage"] = body["usage"].clone();
-                    Ok((
-                        merged,
-                        oldest.map_or(timestamp, |old| timestamp.min(old)),
-                        false,
-                    ))
+                    store.save(
+                        &judgment_key(request),
+                        &response::cache_value(&body, request),
+                        timestamp,
+                    )?;
+                    receipt.metrics.evaluated_judgments += 1;
+                    Ok((body, timestamp, false))
                 });
+                receipt.metrics.retries = u64::from(outcome.retries);
                 if outcome.attempted {
                     if receipt.result.is_ok() {
                         receipt.metrics.successful_requests = 1;
@@ -234,9 +271,10 @@ fn require_paths(
     request: &Value,
     hashes: &mut SourceHashes,
 ) -> Result<()> {
-    let state = &request["state"];
-    for file in
-        std::iter::once(&state["file"]).chain(state["context"].as_array().into_iter().flatten())
+    for file in request["jevgate"]["sources"]
+        .as_array()
+        .into_iter()
+        .flatten()
     {
         if let (Some(path), Some(hash)) = (file["path"].as_str(), file["source_hash"].as_str()) {
             ensure!(
@@ -261,4 +299,37 @@ fn usage(body: &Value, field: &str) -> u64 {
         .as_u64()
         .filter(|n| *n <= 1_000_000_000)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pinned_answers_do_not_expire_and_aliases_do() {
+        let project = crate::tests::Project::new();
+        let store = crate::storage::Store::open(&project.0).unwrap();
+        let body = serde_json::json!({"model":"jev-1.13.0","answers":{}});
+        store.save("old", &body, schema::now() - 7200).unwrap();
+        for (model, kept) in [
+            ("jev-1.13.0", true),
+            ("jev-latest", false),
+            ("jev-preview", false),
+        ] {
+            let ttl = cache_ttl(model, 3600);
+            assert_eq!(store.load("old", ttl).is_some(), kept, "{model}");
+        }
+        assert!(store.load("old", cache_ttl("jev-latest", 86_400)).is_some());
+        assert!(store.load("other", None).is_none());
+    }
+
+    #[test]
+    fn local_metadata_is_not_uploaded_or_part_of_the_cache_key() {
+        let plain = serde_json::json!({"model":"m","state":{"a":1},"questions":{}});
+        let mut tagged = plain.clone();
+        tagged["jevgate"] = serde_json::json!({"stage":"functions","sources":[]});
+        assert_eq!(*provider_request(&tagged), plain);
+        assert_eq!(judgment_key(&tagged), judgment_key(&plain));
+        assert_eq!(stage(&tagged), "functions");
+    }
 }

@@ -2,9 +2,17 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 use std::{
     path::Path,
-    sync::atomic::{AtomicU16, Ordering},
-    time::Duration,
+    sync::{
+        Mutex,
+        atomic::{AtomicU16, Ordering},
+    },
+    time::{Duration, Instant},
 };
+
+/// Attempts per request, including the first send.
+const ATTEMPTS: u32 = 4;
+/// Longest provider-requested pause that is honored before a retry.
+const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 
 pub trait Evaluator {
     /// A new snapshot may retry after account access has been restored.
@@ -63,6 +71,8 @@ pub struct Outcome {
     pub elapsed_ms: u64,
     pub started_ms: u64,
     pub attempted: bool,
+    /// Sends after the first one; zero when the request was not retried.
+    pub retries: u32,
 }
 
 /// Workers claim the next item immediately after finishing, independent of the
@@ -172,6 +182,7 @@ impl Evaluator for Client {
                             elapsed_ms: 0,
                             started_ms: 0,
                             attempted: false,
+                            retries: 0,
                         },
                     );
                 }
@@ -191,16 +202,31 @@ impl Evaluator for Client {
 
 /// Reject further uploads in this review only after a typed account/access failure.
 /// Completed and in-flight requests keep their individual results; caches bypass this gate.
-#[derive(Default)]
-struct ProviderAccess(AtomicU16);
+/// Rate-limit and overload responses pause every worker through one shared cooldown.
+struct ProviderAccess {
+    rejected: AtomicU16,
+    cooldown: Mutex<Option<Instant>>,
+    backoff: Duration,
+}
+
+impl Default for ProviderAccess {
+    fn default() -> Self {
+        Self {
+            rejected: AtomicU16::new(0),
+            cooldown: Mutex::new(None),
+            backoff: Duration::from_millis(500),
+        }
+    }
+}
 
 impl ProviderAccess {
     fn reset(&mut self) -> bool {
-        self.0.swap(0, Ordering::AcqRel) != 0
+        *self.cooldown.lock().unwrap() = None;
+        self.rejected.swap(0, Ordering::AcqRel) != 0
     }
 
     fn check(&self) -> Result<()> {
-        let status = self.0.load(Ordering::Acquire);
+        let status = self.rejected.load(Ordering::Acquire);
         if status != 0 {
             bail!(
                 "TypeSafe request not sent after HTTP {status}; restore account access and rerun the review"
@@ -214,9 +240,74 @@ impl ProviderAccess {
             && let Some(error) = error.downcast_ref::<ProviderError>()
             && matches!(error.status, 401..=403)
         {
-            let _ = self
-                .0
-                .compare_exchange(0, error.status, Ordering::AcqRel, Ordering::Acquire);
+            let _ = self.rejected.compare_exchange(
+                0,
+                error.status,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
+    }
+
+    /// Extend the shared pause; a shorter request never shortens another worker's wait.
+    fn pause(&self, delay: Duration) {
+        let until = Instant::now() + delay;
+        let mut cooldown = self.cooldown.lock().unwrap();
+        if cooldown.is_none_or(|current| current < until) {
+            *cooldown = Some(until);
+        }
+    }
+
+    fn wait(&self) {
+        let until = *self.cooldown.lock().unwrap();
+        if let Some(remaining) =
+            until.and_then(|until| until.checked_duration_since(Instant::now()))
+        {
+            std::thread::sleep(remaining);
+        }
+    }
+
+    /// Exponential backoff with deterministic jitter, so reruns are reproducible
+    /// while concurrent requests still spread out.
+    fn backoff(&self, index: usize, retry: u32) -> Duration {
+        let jitter = (index as u64 * 37 + u64::from(retry) * 101) % 250;
+        self.backoff * 2u32.pow(retry) * (1000 + jitter as u32) / 1000
+    }
+
+    fn send_with_retries(
+        &self,
+        index: usize,
+        request: &Value,
+        before: &(dyn Fn(&Value) -> Result<()> + Sync),
+        send: &(impl Fn(&Value) -> Result<Value> + Sync),
+    ) -> (Result<Value>, u32) {
+        let mut retry = 0;
+        loop {
+            self.wait();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| send(request)))
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("TypeSafe request worker failed")));
+            self.observe(&result);
+            let Some(delay) = result.as_ref().err().and_then(retry_delay) else {
+                return (result, retry);
+            };
+            if retry + 1 >= ATTEMPTS {
+                return (
+                    result.map_err(|error| {
+                        anyhow::anyhow!("{error}; gave up after {ATTEMPTS} attempts")
+                    }),
+                    retry,
+                );
+            }
+            retry += 1;
+            self.pause(delay.unwrap_or_default().max(self.backoff(index, retry)));
+            // A rejected sibling or an edited source stops the retry like a first send.
+            if let Err(error) = self
+                .check()
+                .and_then(|()| before(request))
+                .and_then(|()| self.check())
+            {
+                return (Err(error), retry);
+            }
         }
     }
 
@@ -229,10 +320,11 @@ impl ProviderAccess {
         completed: &mut dyn FnMut(usize, Outcome),
     ) {
         let queue_start = std::time::Instant::now();
+        let indexed: Vec<_> = requests.iter().enumerate().collect();
         work_queue(
-            requests,
-            concurrency.clamp(1, 16),
-            |request| {
+            &indexed,
+            concurrency.clamp(1, crate::options::MAX_CONCURRENCY as usize),
+            |(index, request)| {
                 // Recheck after freshness work in case a sibling has since been rejected.
                 if let Err(error) = self
                     .check()
@@ -243,15 +335,28 @@ impl ProviderAccess {
                 }
                 let started_ms = queue_start.elapsed().as_millis() as u64;
                 let start = std::time::Instant::now();
-                let result =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| send(request)))
-                        .unwrap_or_else(|_| Err(anyhow::anyhow!("TypeSafe request worker failed")));
-                self.observe(&result);
-                Outcome::attempted(result, start, started_ms)
+                let (result, retries) = self.send_with_retries(*index, request, before, &send);
+                let mut outcome = Outcome::attempted(result, start, started_ms);
+                outcome.retries = retries;
+                outcome
             },
             completed,
         );
     }
+}
+
+/// `Some(pause)` for a failure worth retrying: rate limits, overload, gateway
+/// errors and connections that failed before the request was sent. Timeouts,
+/// validation and account errors are never retried; the request may have run.
+fn retry_delay(error: &anyhow::Error) -> Option<Option<Duration>> {
+    if let Some(error) = error.downcast_ref::<ProviderError>() {
+        return matches!(error.status, 429 | 502 | 503 | 504 | 529).then(|| {
+            error
+                .retry_after
+                .map(|s| Duration::from_secs(s).min(RETRY_AFTER_CAP))
+        });
+    }
+    error.downcast_ref::<Unsent>().map(|_| None)
 }
 
 impl Outcome {
@@ -261,6 +366,7 @@ impl Outcome {
             elapsed_ms: start.elapsed().as_millis() as u64,
             started_ms,
             attempted: true,
+            retries: 0,
         }
     }
 
@@ -270,6 +376,7 @@ impl Outcome {
             elapsed_ms: 0,
             started_ms: 0,
             attempted: false,
+            retries: 0,
         }
     }
 }
@@ -282,19 +389,27 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
     let mut response = match response {
         Ok(response) => response,
         Err(ureq::Error::StatusCode(status)) => {
-            return Err(provider_error(status, None).into());
+            return Err(provider_error(status, None, None).into());
+        }
+        Err(ureq::Error::HostNotFound | ureq::Error::ConnectionFailed) => {
+            return Err(Unsent.into());
         }
         Err(_) => bail!("TypeSafe transport failure or timeout; request was not retried"),
     };
     if !response.status().is_success() {
         let status = response.status().as_u16();
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok());
         let body = response
             .body_mut()
             .with_config()
             .limit(65_536)
             .read_json::<Value>()
             .ok();
-        return Err(provider_error(status, body.as_ref()).into());
+        return Err(provider_error(status, body.as_ref(), retry_after).into());
     }
     // Error bodies and headers may echo credentials or source; never render them.
     response
@@ -305,10 +420,22 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
         .map_err(|_| anyhow::anyhow!("TypeSafe returned invalid or oversized JSON"))
 }
 
+/// The connection failed before any request bytes were sent.
+#[derive(Debug)]
+struct Unsent;
+
+impl std::error::Error for Unsent {}
+impl std::fmt::Display for Unsent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cannot connect to TypeSafe; request was not sent")
+    }
+}
+
 #[derive(Debug)]
 struct ProviderError {
     status: u16,
     context_limit: bool,
+    retry_after: Option<u64>,
 }
 
 impl std::error::Error for ProviderError {}
@@ -319,20 +446,22 @@ impl std::fmt::Display for ProviderError {
         } else {
             ""
         };
-        write!(
-            f,
-            "TypeSafe HTTP {}{detail}; request was not retried",
-            self.status
-        )
+        let retried = if matches!(self.status, 429 | 502 | 503 | 504 | 529) {
+            ""
+        } else {
+            "; request was not retried"
+        };
+        write!(f, "TypeSafe HTTP {}{detail}{retried}", self.status)
     }
 }
 
-fn provider_error(status: u16, body: Option<&Value>) -> ProviderError {
+fn provider_error(status: u16, body: Option<&Value>, retry_after: Option<u64>) -> ProviderError {
     // Recognize only a verified machine code; do not echo arbitrary provider text.
     ProviderError {
         status,
         context_limit: status == 400
             && body.is_some_and(|body| body["detail"]["error_type"] == "max_tokens_exceeded"),
+        retry_after,
     }
 }
 
@@ -348,10 +477,94 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn fast() -> ProviderAccess {
+        ProviderAccess {
+            backoff: Duration::from_millis(1),
+            ..Default::default()
+        }
+    }
+
+    fn sends(access: &ProviderAccess, results: Vec<Result<Value>>) -> (Outcome, usize) {
+        let request = json!({"index":0});
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let results = Mutex::new(results.into_iter());
+        let mut last = None;
+        access.evaluate_queue(
+            &[&request],
+            1,
+            &|_| Ok(()),
+            |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                results.lock().unwrap().next().unwrap()
+            },
+            &mut |_, outcome| last = Some(outcome),
+        );
+        (last.unwrap(), calls.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn rate_limits_retry_after_the_requested_pause_and_count_retries() {
+        let access = fast();
+        let start = Instant::now();
+        let (outcome, calls) = sends(
+            &access,
+            vec![
+                Err(provider_error(429, None, Some(1)).into()),
+                Ok(json!({"answers":{}})),
+            ],
+        );
+        assert!(outcome.result.is_ok());
+        assert_eq!((calls, outcome.retries), (2, 1));
+        assert!(
+            start.elapsed() >= Duration::from_secs(1),
+            "retry-after is honored"
+        );
+        for (status, error) in [
+            (529, provider_error(529, None, None)),
+            (502, provider_error(502, None, None)),
+        ] {
+            let (outcome, calls) = sends(&access, vec![Err(error.into()), Ok(json!({}))]);
+            assert_eq!((calls, outcome.retries), (2, 1), "{status}");
+        }
+        let (outcome, calls) = sends(&access, vec![Err(Unsent.into()), Ok(json!({}))]);
+        assert_eq!((calls, outcome.retries), (2, 1), "connection never opened");
+        assert_eq!(
+            retry_delay(&provider_error(429, None, Some(3600)).into()),
+            Some(Some(RETRY_AFTER_CAP))
+        );
+    }
+
+    #[test]
+    fn validation_timeouts_and_account_errors_are_sent_once() {
+        for error in [
+            anyhow::Error::from(provider_error(422, None, None)),
+            provider_error(400, None, Some(1)).into(),
+            provider_error(401, None, None).into(),
+            anyhow::anyhow!("TypeSafe transport failure or timeout; request was not retried"),
+        ] {
+            let text = error.to_string();
+            let (outcome, calls) = sends(&fast(), vec![Err(error), Ok(json!({}))]);
+            assert_eq!((calls, outcome.retries), (1, 0), "{text}");
+            assert!(outcome.result.is_err());
+        }
+    }
+
+    #[test]
+    fn persistent_overload_stops_after_the_attempt_limit() {
+        let failures = (0..ATTEMPTS + 2)
+            .map(|_| Err(provider_error(503, None, None).into()))
+            .collect();
+        let (outcome, calls) = sends(&fast(), failures);
+        assert_eq!(calls, ATTEMPTS as usize);
+        assert_eq!(outcome.retries, ATTEMPTS - 1);
+        let message = outcome.result.unwrap_err().to_string();
+        assert!(message.contains("HTTP 503") && message.contains("gave up after 4 attempts"));
+    }
+
     #[test]
     fn account_rejections_stop_pending_uploads_but_keep_in_flight_successes() {
         use std::sync::{Barrier, Condvar, Mutex, atomic::AtomicUsize};
-        let access = ProviderAccess::default();
+        let access = fast();
         let requests: Vec<_> = (0..24).map(|i| json!({"index":i})).collect();
         let batch: Vec<_> = requests.iter().collect();
         let first_four = Barrier::new(4);
@@ -368,7 +581,7 @@ mod tests {
                 if index < 4 {
                     first_four.wait();
                     if index == 0 {
-                        return Err(provider_error(402, None).into());
+                        return Err(provider_error(402, None, None).into());
                     }
                     let (released, timeout) = released
                         .1
@@ -423,7 +636,7 @@ mod tests {
         let requests = [json!({"index":0}), json!({"index":1})];
         let batch: Vec<_> = requests.iter().collect();
         for status in [400, 401, 402, 403, 422, 429, 503, 529] {
-            let mut access = ProviderAccess::default();
+            let mut access = fast();
             let mut attempts = 0;
             access.evaluate_queue(
                 &batch,
@@ -431,7 +644,7 @@ mod tests {
                 &|_| Ok(()),
                 |request| {
                     if request["index"] == 0 {
-                        Err(anyhow::Error::new(provider_error(status, None))
+                        Err(anyhow::Error::new(provider_error(status, None, None))
                             .context("provider response"))
                     } else {
                         Ok(request.clone())
@@ -450,7 +663,7 @@ mod tests {
                 &mut |_, outcome| assert!(outcome.attempted && outcome.result.is_ok()),
             );
         }
-        let access = ProviderAccess::default();
+        let access = fast();
         let mut attempts = 0;
         access.evaluate_queue(
             &batch,
@@ -503,9 +716,9 @@ mod tests {
                     before,
                     |request| {
                         if self.reject {
-                            Err(provider_error(402, None).into())
+                            Err(provider_error(402, None, None).into())
                         } else {
-                            Ok(answer(request, 0, 0.0))
+                            Ok(answer(request, 0))
                         }
                     },
                     completed,
@@ -514,16 +727,16 @@ mod tests {
         }
         let project = Project::new();
         for name in ["a", "b", "c", "d"] {
-            project.write(&format!("{name}.py"), &format!("def {name}(fn):\n    try:\n        return fn()\n    except OSError:\n        raise\n"));
+            project.write(&format!("{name}.py"), &format!("def {name}(fn):\n    try:\n        return fn()\n    except OSError:\n        log(fn)\n        raise\n"));
         }
-        project.write("b.py", "def b(fn):\n    try:\n        return fn()\n    except OSError:\n        raise\n\ndef second(fn):\n    try:\n        return fn()\n    except ValueError:\n        raise\n");
+        project.write("b.py", "def b(fn):\n    try:\n        return fn()\n    except OSError:\n        log(fn)\n        raise\n\ndef second(fn):\n    try:\n        return fn()\n    except ValueError:\n        log(fn)\n        raise\n");
         let mut options = args();
         options.quick = true;
         options.rules = vec!["function_simplification".into()];
         options.concurrency = 1;
         options.paths = vec!["a.py".into()];
         let mut provider = Provider {
-            access: ProviderAccess::default(),
+            access: fast(),
             reject: false,
         };
         let warm = run(&project, &options, &mut provider);
@@ -541,8 +754,8 @@ mod tests {
                 .iter()
                 .all(|f| f.status == crate::schema::Status::Error)
         );
-        assert_eq!(rejected.stages["maintainability"].failed_attempts, 1);
-        assert_eq!(rejected.stages["maintainability"].cache_hits, 1);
+        assert_eq!(rejected.stages["functions"].failed_attempts, 1);
+        assert_eq!(rejected.stages["functions"].cache_hits, 1);
         assert_eq!(
             rejected.files[1].error.as_deref(),
             Some("TypeSafe HTTP 402; request was not retried"),
@@ -576,7 +789,7 @@ mod tests {
     fn provider_errors_explain_known_limits_without_echoing_private_text() {
         let body = json!({"detail":{"error_type":"max_tokens_exceeded","message":"private source and credentials"}});
         assert_eq!(
-            provider_error(400, Some(&body)).to_string(),
+            provider_error(400, Some(&body), None).to_string(),
             "TypeSafe HTTP 400 (model context limit exceeded); request was not retried"
         );
         for body in [
@@ -584,13 +797,13 @@ mod tests {
             json!({"detail":{"error_type":"private credentials"}}),
         ] {
             assert_eq!(
-                provider_error(400, Some(&body)).to_string(),
+                provider_error(400, Some(&body), None).to_string(),
                 "TypeSafe HTTP 400; request was not retried"
             );
         }
         assert_eq!(
-            provider_error(503, None).to_string(),
-            "TypeSafe HTTP 503; request was not retried"
+            provider_error(503, None, None).to_string(),
+            "TypeSafe HTTP 503"
         );
     }
 }

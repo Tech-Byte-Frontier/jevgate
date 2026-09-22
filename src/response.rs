@@ -1,4 +1,3 @@
-use crate::schema::{FileResult, Status};
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 
@@ -118,35 +117,7 @@ fn validate_distribution(answer: &Value, question: &Value) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn update_status(result: &mut FileResult) {
-    // A useful finding remains visible even if another independent dimension abstains.
-    result.status = if result
-        .dimensions
-        .values()
-        .all(|d| d.status == Status::NotApplicable)
-    {
-        Status::NotApplicable
-    } else if !result.findings.is_empty() {
-        Status::Review
-    } else if result
-        .dimensions
-        .values()
-        .any(|d| d.status == Status::NeedsContext)
-    {
-        Status::NeedsContext
-    } else if result
-        .dimensions
-        .values()
-        .any(|d| d.status == Status::Uncertain)
-    {
-        Status::Uncertain
-    } else {
-        Status::Clear
-    };
-}
-
 pub(crate) const REVIEW_PROBABILITY: f64 = 0.80;
-pub(super) const MISSING_CONTEXT: f64 = 0.50;
 pub(crate) const LOCATION_PROBABILITY: f64 = 0.65;
 
 /// Aggregating and normalizing binary floats can move an exact decimal boundary

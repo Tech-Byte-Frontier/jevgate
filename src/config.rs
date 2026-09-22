@@ -17,7 +17,8 @@ pub struct Config {
     pub concurrency: Option<u32>,
     pub max_file_bytes: Option<u64>,
     pub max_context_bytes: Option<u64>,
-    pub line_budget: Option<u64>,
+    /// Default `--fail-on` values when none are passed.
+    pub fail_on: Vec<String>,
 }
 
 pub struct ConfigContext {
@@ -59,16 +60,21 @@ impl ConfigContext {
             args.rules = self.config.rules.clone();
         }
         if args.rules.is_empty() {
-            args.rules = crate::maintainability::KEYS
-                .iter()
-                .map(|s| (*s).into())
-                .collect();
+            args.rules = crate::catalog::keys().into_iter().map(Into::into).collect();
         }
         for rule in &args.rules {
-            ensure!(
-                crate::maintainability::is_rule(rule),
-                "Unknown rule: {rule}"
-            );
+            ensure!(crate::catalog::find(rule).is_some(), "Unknown rule: {rule}");
+        }
+        if args.fail_on.is_empty() {
+            for name in &self.config.fail_on {
+                args.fail_on.push(
+                    <crate::options::FailOn as clap::ValueEnum>::from_str(name, true)
+                        .map_err(|_| anyhow::anyhow!("Unknown fail_on value: {name}"))?,
+                );
+            }
+        }
+        if args.fail_on.is_empty() {
+            args.fail_on.push(crate::options::FailOn::Review);
         }
         // Configuration is a ceiling; CLI flags may narrow but cannot bypass upload budgets.
         if let Some(n) = self.config.max_requests {
@@ -76,8 +82,9 @@ impl ConfigContext {
         }
         if let Some(n) = self.config.concurrency {
             ensure!(
-                (1..=16).contains(&n),
-                "Concurrency must be between 1 and 16"
+                (1..=crate::options::MAX_CONCURRENCY).contains(&n),
+                "Concurrency must be between 1 and {}",
+                crate::options::MAX_CONCURRENCY
             );
             args.concurrency = args.concurrency.min(n);
         }
@@ -86,10 +93,6 @@ impl ConfigContext {
         }
         if let Some(n) = self.config.max_context_bytes {
             args.max_context_bytes = args.max_context_bytes.min(n);
-        }
-        if let Some(n) = self.config.line_budget {
-            ensure!(n > 0, "Budgets must be positive");
-            args.line_budget = args.line_budget.min(n);
         }
         ensure!(
             args.max_requests != Some(0) && args.max_file_bytes > 0 && args.max_context_bytes > 0,

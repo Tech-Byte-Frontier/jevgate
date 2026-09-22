@@ -1,132 +1,89 @@
 # JevGate
 
-File-scoped code review using TypeSafe Jev. Three classifications:
+Code review with TypeSafe Jev over small evidence units. Five rules:
 
-- **File organization:** would separating independently useful capabilities help?
-- **Function simplification:** is there a useful task to extract or control flow to simplify?
-- **Shared logic:** should repeated implementations share a helper?
+- **File organization:** do a file's members serve separate purposes that could be their own modules?
+- **Function simplification:** does a function perform two or more substantial tasks, or could its nesting be flattened?
+- **Shared logic:** do two renamed or exact copies perform the same steps for the same purpose?
+- **Test value** (`--include-tests`): does a test only check its mocks, recompute its expected value, assert internal details or mix unrelated behaviors?
+- **Test redundancy** (`--include-tests`): do similar tests of one function check the same behavior?
 
 ## Use
 
 ```sh
-# Install the CLI
 cargo install jevgate --locked
-
-# Save your TypeSafe API key
 jevgate auth login
 
-# Review a file and open the results in your browser
-jevgate check src/example.ts --report
+# Review a directory and open a local dashboard
+jevgate check src --report
 
-# Recheck the file after edits and refresh the report
-jevgate check src/example.ts --watch --report
+# Include tests; judge changed files only; machine-readable output
+jevgate check --include-tests --base origin/main --format json
 
-# Include a related file to help interpret the selected file
-jevgate check src/example.ts --context src/peer.ts
-
-# Review files changed since the latest commit and output JSON
-jevgate check --base HEAD --format json
+# Inspect what would be uploaded, with planned requests and tokens per stage
+jevgate check src --dry-run --show-requests
 ```
 
-`--report` opens a local HTML dashboard with classifications, locations and raw
-probabilities. Watch refreshes it after edits. Opening the report makes no API calls.
+`jevgate rules` prints the rule catalog. `--rule` selects a subset. `--context`
+adds a related file as evidence for shared logic, callers and test subjects.
 
-Each application file uses one request containing the three verdicts and their
-conditional locations, plus focused function judgments and judgments of repeated
-fragments when found. The file-wide answer keeps the status. A function score
-is a place to inspect, and a follow-up asks whether that function has a
-validation, parsing, or delivery task to extract. `none` means the length is
-the work itself.
-Operational scripts and TypeScript declaration files are reported and not judged.
-Test files are not judged unless you pass `--include-tests`. A file that mixes
-application code and tests is judged on the application portion; with that flag,
-the test portion is judged separately. A test path that still contains other
-code is classified before the gates, and that classification is part of the
-gate request.
+## How it works
 
-Only that file and explicit context are uploaded; no automatic
-repository retrieval. Directory arguments select files recursively. `--base` selects
-changed files and reviews their current organization, not behavioral regressions.
+Local analysis runs first and uploads nothing: parsers find functions, methods
+and types; group a file's members by calls and shared types; find Type-2 clone
+candidates (identifiers and literals normalized, whole statements, consistent
+renaming) across the selected files; and map tests to the functions they call.
 
-Use `--dry-run --show-requests` to inspect uploads, `--cache-only` for offline replay,
-and `--refresh` for fresh inference. `jevgate check --help` lists all options.
-`jevgate rules` describes the three checks. Use `--rule` to select a subset.
+Each request then asks short questions about one unit: a pack of up to eight
+functions, one file outline (signatures and groups, no bodies), one candidate
+pair, a pack of tests, or one pair of tests. A unit that stays uncertain gets one
+recheck with more evidence (callee signatures, or the enclosing functions).
+Code composes the answers at a 0.80 threshold into `review`, `consider`,
+`clear` or `uncertain`, and ranks findings by probability × ln(1 + lines).
+Every `review` carries a finding. Raw answers are kept under `files[].judgments`.
 
-Shared logic includes the role cascade in the same request. Inspect
-`dimensions.shared_logic.refactoring_assessment.cascade` for raw overlapping
-occurrence relationships, specialist judgments, selected branches and unresolved
-conflicts; `files[].role_assessment` retains the four overlapping region roles.
-Only resolved test–test groups select the test specialist. Mixed, omitted or
-ambiguous relationships retain the general assessment. The specialist comparison
-does not replace that general verdict. It adds at most 160 role/evidence
-questions and 12 specialist questions per file in the same request. Only regions
-containing repeated occurrences receive role questions. Trailing regions are
-omitted when the combined request would exceed the provider context limit, and
-that omission stays visible. An uncertain result triggers one follow-up on only
-the undecided operation or repeated lines; it replaces that status only at the
-existing 0.80 threshold.
+Test files are judged only with `--include-tests`. A file that mixes code and
+tests keeps them apart: application rules judge the code, test rules the tests.
+A test path that still contains other code gets one file-purpose question first.
 
-Use `jevgate check src/example.rs --roles-only` to evaluate semantic roles without
-maintainability judgments. It defaults to JSON and reports overlapping test
-scenario, test support, framework/tool, and application/library roles under
-`files[].role_assessment`. Each of up to 32 deduplicated regions has raw yes/no
-probabilities and a separate evidence-sufficiency answer. Repeated occurrences
-reference their region and retain ambiguous or overlapping relationships.
-Complete region excerpts share a 16 KiB budget; omitted excerpts are reported
-and the complete selected source remains available. Test support means a fixture
-or helper provider; arranging inputs inside a scenario remains scenario behavior.
-Parameterized templates that own the tested operation and expected-result checks
-are scenarios even when reused.
-Omissions and unsupported parsers stay visible; `classified` means roles were
-resolved, not that code quality passed. `--roles-only` cannot be combined with
-`--rule` or `--report`.
+## Gate, baseline and exit codes
 
-For frozen role evaluations, `scripts/roles_eval.py` provides `freeze`, `run`, and
-`summarize` commands (`--help`). Keep source copies, manifests, human-reviewed
-labels and results in ignored `.jevgate/evaluation/`; labels never enter requests.
-The report separates false positives, missed roles, abstentions, calibration,
-language/repository groups and identical-source path comparisons. Reserve whole
-repositories for holdout evaluation. The shared-logic cascade uses these roles.
+`--fail-on review|consider|uncertain|none` (repeatable, default `review`, or
+`fail_on` in `jevgate.toml`) decides what fails the check. `consider` also fails
+on review findings. Exit codes: `0` pass, `1` gate failed, `2` incomplete or error.
+
+`jevgate baseline` accepts the findings of the last complete check in
+`jevgate-baseline.json` at the project root, without API calls. Later checks mark
+those findings `baselined` and fail only on new ones. Findings are matched by a
+fingerprint of rule, path, unit and normalized evidence.
 
 ## Configuration and CI
 
-The nearest `jevgate.toml` or Git root defines the project boundary. For example:
+The nearest `jevgate.toml` or Git root defines the project boundary:
 
 ```toml
 upload_allow = ["src/**", "tests/**"]
 upload_deny = ["src/private/**"]
 generated = ["**/*.generated.*"]
-max_file_bytes = 131072
+fail_on = ["review"]
 ```
 
-Unknown configuration keys are errors. Upload boundaries and configured ceilings
-also apply to explicit context. For CI, check changed files with `--base origin/main` and restore/save
-`.jevgate/latest.json` together with `.jevgate/cache`. An unchanged file is
-reused from the last report, so a repeat check does not call the API.
-`--refresh` judges those files again. The cache still answers a repeated
-request for one hour (`--cache-ttl-secs`). Inject `TYPESAFE_API_KEY`; local credentials
-can use `jevgate auth` or an explicit `--env-file`. Never commit credentials.
-
-Process exit is the quality gate: `0` is clear or not-applicable, `1` is review,
-`2` is uncertain, needs-context or incomplete. Findings stay advisory in the
-report; CI can treat `1` as the block and `2` as a failed gate run.
+Unknown keys are errors; configured budgets are ceilings. In CI, restore and
+save `.jevgate/cache` (and `.jevgate/latest.json` for change tracking) and inject
+`TYPESAFE_API_KEY`. Cached answers from a pinned model version do not expire;
+`jev-latest` and `jev-preview` answers expire after `--cache-ttl-secs`. An
+unchanged unit is not sent again. Rate limits and overload are retried with
+backoff (at most four attempts); account rejections stop further uploads.
 
 ## Limits
 
-Results are `review`, `clear`, `uncertain`, `needs-context`, or `not-applicable`.
-Probabilities are model judgments, not measured accuracy. A conditional location
-does not establish a concern. Syntax supplies candidates, never semantic verdicts.
-Candidates are capped at 64 operations and 240 pairs; omissions are reported.
-A shared-logic finding quotes the repeated text from each site. A match shorter
-than 120 bytes stays a probability and is not printed as a finding.
-
-The default read cap is 128 KiB. A file above it, or whose complete source does
-not fit one request beside the maintainability questions, is `needs-context`.
-The report includes its byte size and the operation names the parser found. That
-result is not a file-organization finding, the source is not truncated, and the
-other files are still judged. A lower `max_file_bytes` only narrows the cap.
-
-Shared logic can miss repeated sections inside larger files. Run linting,
+Parsers: Rust, Python, JavaScript and TypeScript. Files in other languages,
+with syntax errors, or not UTF-8 are reported as skipped with a reason; they do
+not make a run incomplete. Bodies under five lines are too small to judge and
+never count as clear. A unit too large for one request is `needs-context`.
+Clone candidates need two or more statements and 120 non-whitespace bytes;
+at most 64 pairs per run and 8 per file are judged, and omissions are counted.
+Probabilities are model judgments, not measured accuracy. Run linting,
 formatting, tests and type checks separately.
 
 Licensed under MIT OR Apache-2.0.

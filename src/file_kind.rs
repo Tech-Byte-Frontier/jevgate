@@ -1,9 +1,11 @@
 //! Deterministic file eligibility, then a test-versus-mix classification when a
 //! test path still contains other code. Parsers locate structural tests; they
-//! do not decide maintainability.
+//! do not decide maintainability. The result is a gate view: which code the
+//! application rules and the test rules judge.
 use crate::{
     inventory::Input,
     options::CheckArgs,
+    requests::TokenBudget,
     response,
     schema::{FileResult, SourceRange, Status},
 };
@@ -13,7 +15,7 @@ use serde_json::{Value, json};
 use std::path::Path;
 use tree_sitter::Node;
 
-pub const VERSION: &str = "file-kind-v3";
+pub const VERSION: &str = "file-kind-v4";
 const PORTION_PRESENT: f64 = response::REVIEW_PROBABILITY;
 const PORTION_ABSENT: f64 = 0.20;
 const PURPOSE_UNITS: usize = 24;
@@ -37,16 +39,23 @@ pub struct Classification {
     pub unresolved_units: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reason: String,
-    /// In-memory handoff from the purpose response to the gate request.
+    /// In-memory handoff from the purpose response to the gate view.
     #[serde(skip)]
     pub stage: String,
     #[serde(skip)]
     pub units: Value,
 }
 
+/// Which code of one file the rules judge.
+#[derive(Clone, Debug)]
 pub(crate) struct View {
     pub classification: Classification,
-    pub source: String,
+    /// Application rules judge the code outside `test_lines`.
+    pub application: bool,
+    /// Test rules judge the code inside `test_lines` (with `--include-tests`).
+    pub tests: bool,
+    /// Test code: the whole file for a test file, else the separated tests.
+    pub test_lines: Vec<SourceRange>,
 }
 
 enum Action {
@@ -57,16 +66,15 @@ enum Action {
 
 struct Prepared {
     classification: Classification,
-    gate_source: String,
     action: Action,
 }
 
 pub(crate) enum Plan {
     Skip(Classification),
-    /// The source was not sent. The file is needs-context, not a maintainability verdict.
+    /// The source was not sent. The file is needs-context, not a verdict.
     Unsent(Classification),
     Purpose(Classification, Value),
-    Judge(Classification, Value),
+    Ready(View),
 }
 
 pub fn excluded_reason(role: &str) -> &'static str {
@@ -117,56 +125,6 @@ pub fn unsent(path: &Path, named_source: &str, detail: &str) -> Classification {
     class
 }
 
-pub fn budget_detail(bytes: usize) -> String {
-    format!(
-        "The complete source is {bytes} bytes and does not fit one request beside the maintainability questions (budget {} bytes). It was not sent.",
-        crate::cascade::PROVIDER_REQUEST_BUDGET
-    )
-}
-
-fn gate_request(
-    input: &Input,
-    args: &CheckArgs,
-    class: &Classification,
-    source: &str,
-) -> Result<Option<Value>> {
-    let view = View {
-        classification: class.clone(),
-        source: source.to_string(),
-    };
-    let request = crate::maintainability::request_with(input, args, &view)?;
-    Ok(crate::cascade::within_budget(&request).then_some(request))
-}
-
-fn deliver(
-    file: &mut FileResult,
-    input: &Input,
-    args: &CheckArgs,
-    source: String,
-) -> Result<Option<Value>> {
-    let class = file
-        .classification
-        .clone()
-        .context("Missing classification")?;
-    match gate_request(input, args, &class, &source)? {
-        Some(request) => Ok(Some(request)),
-        None => {
-            file.classification = Some(budget_unsent(input, &source));
-            file.status = Status::NeedsContext;
-            Ok(None)
-        }
-    }
-}
-
-fn budget_unsent(input: &Input, source: &str) -> Classification {
-    let bytes = input
-        .source
-        .as_deref()
-        .map(str::len)
-        .unwrap_or(source.len());
-    unsent(&input.result.path, source, &budget_detail(bytes))
-}
-
 pub fn language(path: &Path) -> &'static str {
     match extension(path).as_str() {
         "rs" => "Rust",
@@ -195,92 +153,44 @@ pub fn language(path: &Path) -> &'static str {
     }
 }
 
-pub(crate) fn plan(input: &Input, args: &CheckArgs) -> Result<Plan> {
+pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: &TokenBudget) -> Result<Plan> {
     let prepared = prepare(input, args)?;
     match prepared.action {
         Action::Skip => Ok(Plan::Skip(prepared.classification)),
         Action::Purpose => {
             let request = purpose_request(input, args, &prepared.classification)?;
-            if !crate::cascade::within_budget(&request) {
+            if !budget.fits(&request) {
                 let source = input.source.as_deref().unwrap_or("");
                 return Ok(Plan::Unsent(unsent(
                     &input.result.path,
                     source,
-                    &budget_detail(source.len()),
+                    "The file-purpose request does not fit the provider limit, so it was not sent.",
                 )));
             }
             Ok(Plan::Purpose(prepared.classification, request))
         }
-        Action::Judge => {
-            let source = prepared.gate_source;
-            match gate_request(input, args, &prepared.classification, &source)? {
-                Some(request) => Ok(Plan::Judge(prepared.classification, request)),
-                None => Ok(Plan::Unsent(budget_unsent(input, &source))),
-            }
-        }
+        Action::Judge => Ok(Plan::Ready(view(input, args, prepared.classification))),
     }
 }
 
-#[cfg(test)]
-pub(crate) fn gate_view(input: &Input, args: &CheckArgs) -> Result<View> {
-    let prepared = prepare(input, args)?;
-    Ok(View {
-        classification: prepared.classification,
-        source: prepared.gate_source,
-    })
-}
-
-pub fn scope_sentence(class: &Classification) -> String {
-    if class.gate == "tests" && class.kind == "mixed" {
-        "This is the separated test portion. Blank lines are application code omitted on purpose, not missing context. Judge the test code's own organization, callbacks and helpers. Independent cases and ordinary arrange/act/assert repetition are acceptable.".to_string()
-    } else if class.gate == "tests" {
-        "This file is tests. Judge its own organization, callbacks and helpers, not whether the code under test is implemented here. Independent test cases and ordinary arrange/act/assert repetition are acceptable.".to_string()
-    } else if !class.separated_tests.is_empty() {
-        "file.classification lists test lines that are blank in file.source on purpose. Those blanks are not missing context, and removing the tests is not the refactor under judgment. Judge the remaining application or library implementation.".to_string()
-    } else {
-        "file.classification identifies this file as application or library source. Judge that implementation.".to_string()
+fn view(input: &Input, args: &CheckArgs, classification: Classification) -> View {
+    if classification.kind == "tests" {
+        let lines = input.source.as_deref().unwrap_or("").lines().count().max(1);
+        return View {
+            application: false,
+            tests: args.include_tests,
+            test_lines: vec![SourceRange {
+                start_line: 1,
+                end_line: lines,
+            }],
+            classification,
+        };
     }
-}
-
-pub fn model_value(class: &Classification) -> Value {
-    let mut value = json!({
-        "version": class.version,
-        "kind": class.kind,
-        "basis": class.basis,
-        "gate": class.gate,
-        "language": class.language,
-    });
-    if !class.separated_tests.is_empty() {
-        value["separated_tests"] = json!(class.separated_tests);
-    }
-    if let Some(purpose) = &class.purpose {
-        value["purpose"] = purpose.clone();
-    }
-    if !class.unresolved_units.is_empty() {
-        value["unresolved_units"] = json!(class.unresolved_units);
-    }
-    if !class.reason.is_empty() {
-        value["reason"] = json!(class.reason);
-    }
-    value
-}
-
-pub fn focus_note(class: Option<&Classification>) -> String {
-    class
-        .filter(|class| !class.separated_tests.is_empty() && class.gate != "tests")
-        .map(|_| {
-            " Blank lines listed in the base classification are separated tests, not missing context."
-                .to_string()
-        })
-        .unwrap_or_default()
-}
-
-pub fn judgment_source(source: &str, class: Option<&Classification>) -> String {
-    match class {
-        Some(class) if class.gate != "tests" && !class.separated_tests.is_empty() => {
-            blank_lines(source, &class.separated_tests)
-        }
-        _ => source.to_string(),
+    View {
+        application: true,
+        tests: args.include_tests && !classification.separated_tests.is_empty(),
+        test_lines: classification.separated_tests.clone(),
+        classification,
     }
 }
 
@@ -295,11 +205,11 @@ pub fn record_purpose(file: &mut FileResult, request: &Value, body: &Value) -> R
     Ok(())
 }
 
-pub fn decide_after_purpose(
+pub(crate) fn decide_after_purpose(
     input: &Input,
     args: &CheckArgs,
     file: &mut FileResult,
-) -> Result<Option<Value>> {
+) -> Result<Option<View>> {
     let answers = file
         .classification
         .as_ref()
@@ -334,7 +244,7 @@ pub fn decide_after_purpose(
     }
 
     if confident(tests) {
-        return finish_tests(input, args, file, original);
+        return Ok(finish_tests(input, args, file));
     }
     let mut separated = structural;
     let mut unresolved = Vec::new();
@@ -357,153 +267,100 @@ pub fn decide_after_purpose(
             }
         }
         separated = merge_ranges(separated);
-        let gate_source = blank_lines(original, &separated);
-        if !has_implementation(&input.result.path, &gate_source) {
-            return finish_tests(input, args, file, original);
+        if !has_implementation(&input.result.path, &blank_lines(original, &separated)) {
+            return Ok(finish_tests(input, args, file));
         }
-        {
-            let class = file.classification.as_mut().unwrap();
-            class.kind = "mixed".into();
-            class.gate = "application".into();
-            class.separated_tests = separated;
-            class.unresolved_units = unresolved;
-            class.reason = separated_reason(&class.separated_tests);
-        }
-        return deliver(file, input, args, gate_source);
-    }
-
-    let gate_source = blank_lines(original, &separated);
-    if confident(application) && separated.is_empty() {
-        {
-            let class = file.classification.as_mut().unwrap();
-            class.kind = "application".into();
-            class.gate = "application".into();
-            class.separated_tests.clear();
-            class.reason = "Classified as application or library code.".into();
-        }
-        return deliver(file, input, args, original.to_string());
-    }
-    if !has_implementation(&input.result.path, &gate_source) {
-        return finish_tests(input, args, file, original);
-    }
-    {
         let class = file.classification.as_mut().unwrap();
-        class.kind = if separated.is_empty() {
-            "unresolved"
-        } else if confident(application) {
-            "mixed"
-        } else {
-            "unresolved"
-        }
-        .into();
+        class.kind = "mixed".into();
         class.gate = "application".into();
         class.separated_tests = separated;
         class.unresolved_units = unresolved;
-        class.reason = if class.kind == "mixed" {
-            separated_reason(&class.separated_tests)
-        } else if units.as_array().is_none_or(|items| items.is_empty())
-            && mixed > application
-            && mixed > tests
-        {
-            "The file looks mixed, but it has no separable test boundaries, so the gates judge the whole file.".into()
-        } else {
-            "File purpose stayed below 0.80, so the gates judge the source without dropping unresolved regions.".into()
-        };
+        class.reason = separated_reason(&class.separated_tests);
+        return Ok(Some(view(input, args, class.clone())));
     }
-    deliver(file, input, args, gate_source)
-}
 
-pub fn test_portion_request(
-    input: &Input,
-    args: &CheckArgs,
-    file: &mut FileResult,
-) -> Result<Option<Value>> {
-    if !args.include_tests {
-        return Ok(None);
-    }
-    let Some(class) = file.classification.as_ref() else {
-        return Ok(None);
-    };
-    if class.kind != "mixed" || class.separated_tests.is_empty() || file.status == Status::Error {
-        return Ok(None);
-    }
-    let original = input.source.as_deref().unwrap_or("");
-    let mut class = class.clone();
-    class.gate = "tests".into();
-    class.reason = "Test portion separated from the application code.".into();
-    let source = test_portion_source(original, &class.separated_tests);
-    let view = View {
-        source: source.clone(),
-        classification: class,
-    };
-    let request = crate::maintainability::request_with(input, args, &view)?;
-    if !crate::cascade::within_budget(&request) {
-        file.context_limitations.push(format!(
-            "The separated test portion is {} bytes and does not fit one request, so it was not sent.",
-            source.len()
-        ));
-        return Ok(None);
-    }
-    Ok(Some(request))
-}
-
-fn finish_tests(
-    input: &Input,
-    args: &CheckArgs,
-    file: &mut FileResult,
-    original: &str,
-) -> Result<Option<Value>> {
-    file.contains_tests = true;
-    {
+    if confident(application) && separated.is_empty() {
         let class = file.classification.as_mut().unwrap();
-        class.kind = "tests".into();
+        class.kind = "application".into();
+        class.gate = "application".into();
         class.separated_tests.clear();
-        class.unresolved_units.clear();
-        if !args.include_tests {
-            class.gate = "excluded".into();
-            class.reason = "Test file. Pass --include-tests to judge tests.".into();
-        } else {
-            class.gate = "tests".into();
-            class.reason = "Test file. Gates judge this test code.".into();
-        }
+        class.reason = "Classified as application or library code.".into();
+        return Ok(Some(view(input, args, class.clone())));
     }
+    if !has_implementation(&input.result.path, &blank_lines(original, &separated)) {
+        return Ok(finish_tests(input, args, file));
+    }
+    let class = file.classification.as_mut().unwrap();
+    class.kind = if !separated.is_empty() && confident(application) {
+        "mixed"
+    } else {
+        "unresolved"
+    }
+    .into();
+    class.gate = "application".into();
+    class.separated_tests = separated;
+    class.unresolved_units = unresolved;
+    class.reason = if class.kind == "mixed" {
+        separated_reason(&class.separated_tests)
+    } else if units.as_array().is_none_or(|items| items.is_empty())
+        && mixed > application
+        && mixed > tests
+    {
+        "The file looks mixed, but it has no separable test boundaries, so the rules judge the whole file.".into()
+    } else {
+        "File purpose stayed below 0.80, so the rules judge the source without dropping unresolved regions.".into()
+    };
+    Ok(Some(view(input, args, class.clone())))
+}
+
+fn finish_tests(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Option<View> {
+    file.contains_tests = true;
+    let class = file.classification.as_mut().unwrap();
+    class.kind = "tests".into();
+    class.separated_tests.clear();
+    class.unresolved_units.clear();
     if !args.include_tests {
+        class.gate = "excluded".into();
+        class.reason = "Test file. Pass --include-tests to judge tests.".into();
         file.status = Status::NotApplicable;
-        return Ok(None);
+        return None;
     }
-    deliver(file, input, args, original.to_string())
+    class.gate = "tests".into();
+    class.reason = "Test file. Test rules judge this code.".into();
+    Some(view(input, args, class.clone()))
 }
 
 fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
     let original = input.source.clone().unwrap_or_default();
     let path = &input.result.path;
     let located = locate_tests(path, &original)?;
-    if located.whole_file {
+    let tests_class = || {
         let mut class = classification(
             "tests",
             "deterministic",
             "tests",
-            "Test file. Gates judge this test code.",
+            "Test file. Test rules judge this code.",
             language(path),
         );
         if !args.include_tests {
             class.gate = "excluded".into();
             class.reason = "Test file. Pass --include-tests to judge tests.".into();
-            return Ok(Prepared {
-                classification: class,
-                gate_source: original,
-                action: Action::Skip,
-            });
         }
-        return Ok(Prepared {
+        let action = if args.include_tests {
+            Action::Judge
+        } else {
+            Action::Skip
+        };
+        Prepared {
             classification: class,
-            gate_source: original,
-            action: Action::Judge,
-        });
+            action,
+        }
+    };
+    if located.whole_file {
+        return Ok(tests_class());
     }
     let separated = merge_ranges(located.ranges);
-    let gate_source = blank_lines(&original, &separated);
-    let remaining = has_implementation(path, &gate_source);
+    let remaining = has_implementation(path, &blank_lines(&original, &separated));
     let structural_tests = !separated.is_empty();
     let mut class = classification(
         "application",
@@ -518,43 +375,15 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
         class.kind = "unresolved".into();
         class.stage = "purpose".into();
         class.reason =
-            "This test path still contains other code. Its purpose is classified before the gates."
+            "This test path still contains other code. Its purpose is classified before the rules."
                 .into();
         return Ok(Prepared {
             classification: class,
-            gate_source,
             action: Action::Purpose,
         });
     }
     if !remaining && (input.result.role == "test" || structural_tests) {
-        class.kind = "tests".into();
-        class.reason = if args.include_tests {
-            "Test file. Gates judge this test code.".into()
-        } else {
-            "Test file. Pass --include-tests to judge tests.".into()
-        };
-        class.gate = if args.include_tests {
-            "tests"
-        } else {
-            "excluded"
-        }
-        .into();
-        if args.include_tests {
-            class.separated_tests.clear();
-        }
-        return Ok(Prepared {
-            classification: class,
-            gate_source: if args.include_tests {
-                original
-            } else {
-                gate_source
-            },
-            action: if args.include_tests {
-                Action::Judge
-            } else {
-                Action::Skip
-            },
-        });
+        return Ok(tests_class());
     }
     if structural_tests {
         class.kind = "mixed".into();
@@ -562,7 +391,6 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
     }
     Ok(Prepared {
         classification: class,
-        gate_source,
         action: Action::Judge,
     })
 }
@@ -570,13 +398,8 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
 fn purpose_request(input: &Input, args: &CheckArgs, class: &Classification) -> Result<Value> {
     let source = input.source.as_deref().context("Missing selected source")?;
     let mut units = Vec::new();
-    let mut omitted = 0usize;
     for (name, range, _) in crate::context_units::review_targets(&input.result.path, source) {
-        if overlaps(&range, &class.separated_tests) {
-            continue;
-        }
-        if units.len() == PURPOSE_UNITS {
-            omitted += 1;
+        if overlaps(&range, &class.separated_tests) || units.len() == PURPOSE_UNITS {
             continue;
         }
         units.push(json!({
@@ -587,29 +410,33 @@ fn purpose_request(input: &Input, args: &CheckArgs, class: &Classification) -> R
         }));
     }
     let mut questions = serde_json::Map::new();
-    questions.insert("file_purpose".into(), crate::questions::file_purpose());
-    for (index, unit) in units.iter().enumerate() {
+    questions.insert(
+        "file_purpose".into(),
+        crate::units::questions::file_purpose(),
+    );
+    for index in 0..units.len() {
         questions.insert(
             format!("test_portion_{index}"),
-            crate::questions::test_portion(index, unit["name"].as_str().unwrap_or("unit")),
+            crate::units::questions::test_portion(index),
         );
     }
     Ok(json!({
         "model": args.model,
         "state": {
-            "purpose_version": 2,
             "file": {
                 "path": input.result.path,
                 "role": input.result.role,
                 "language": class.language,
                 "source": source,
-                "source_hash": input.result.source_hash
             },
             "structural_tests": class.separated_tests,
             "units": units,
-            "limitations": {"units_omitted": omitted}
         },
-        "questions": questions
+        "questions": questions,
+        "jevgate": {
+            "stage": "file-purpose",
+            "sources": [{"path": input.result.path, "source_hash": input.result.source_hash}],
+        }
     }))
 }
 
@@ -735,7 +562,7 @@ fn has_inner_cfg_test(node: Node<'_>, source: &str) -> bool {
     })
 }
 
-fn preceding_attributes<'a>(node: Node<'_>, source: &'a str) -> Vec<&'a str> {
+pub(crate) fn preceding_attributes<'a>(node: Node<'_>, source: &'a str) -> Vec<&'a str> {
     let mut texts = Vec::new();
     let mut previous = node.prev_named_sibling();
     while let Some(sibling) = previous {
@@ -763,7 +590,7 @@ fn attribute_start(node: Node<'_>) -> usize {
     start
 }
 
-fn attribute_marks_test(text: &str) -> bool {
+pub(crate) fn attribute_marks_test(text: &str) -> bool {
     cfg_is_test_only(text) || attribute_path(text).is_some_and(is_test_attribute)
 }
 
@@ -890,6 +717,8 @@ fn is_test_call(name: &str) -> bool {
     const NAMES: &[&str] = &[
         "describe",
         "xdescribe",
+        "test",
+        "xtest",
         "fdescribe",
         "it",
         "xit",
@@ -1022,40 +851,6 @@ fn blank_lines(source: &str, ranges: &[SourceRange]) -> String {
     out
 }
 
-fn test_portion_source(source: &str, separated: &[SourceRange]) -> String {
-    let mut out = String::with_capacity(source.len());
-    for (index, line) in source.lines().enumerate() {
-        let line_number = index + 1;
-        let kept = separated
-            .iter()
-            .any(|range| line_number >= range.start_line && line_number <= range.end_line)
-            || scaffold_line(line);
-        if kept {
-            out.push_str(line);
-        } else {
-            out.push_str(&" ".repeat(line.len()));
-        }
-        out.push('\n');
-    }
-    if !source.ends_with('\n') {
-        out.pop();
-    }
-    out
-}
-
-fn scaffold_line(line: &str) -> bool {
-    let line = line.trim();
-    line.is_empty()
-        || line.starts_with("//")
-        || line.starts_with('#')
-        || line.starts_with("/*")
-        || line.starts_with('*')
-        || line.starts_with("use ")
-        || line.starts_with("pub use ")
-        || line.starts_with("import ")
-        || line.starts_with("from ")
-}
-
 fn merge_spans(mut spans: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     spans.sort_unstable();
     let mut merged: Vec<(usize, usize)> = Vec::new();
@@ -1164,6 +959,16 @@ mod tests {
 
     const MIXED: &str = "fn production(value: &str) -> String {\n    value.trim().to_string()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::production;\n\n    fn helper(value: &str) -> String {\n        production(value)\n    }\n\n    #[test]\n    fn checks_production() {\n        assert_eq!(helper(\" a \"), \"a\");\n    }\n}\n";
 
+    fn view_of(project: &Project, options: &CheckArgs) -> View {
+        let input = crate::inventory::collect(options, &project.context(), &[])
+            .unwrap()
+            .remove(0);
+        match plan(&input, options, &TokenBudget::default()).unwrap() {
+            Plan::Ready(view) => view,
+            _ => panic!("expected a gate view"),
+        }
+    }
+
     #[test]
     fn scripts_and_declarations_are_reported_and_not_judged() {
         let project = Project::new();
@@ -1192,17 +997,13 @@ mod tests {
                 .unwrap()
                 .contains("Operational script")
         );
-        let extra = file("tool.bash");
-        assert_eq!(extra.result.role, "script");
-        assert_eq!(extra.result.status, Status::Skipped);
-        let declarations = file("types.d.ts");
-        assert_eq!(declarations.result.role, "declarations");
-        assert_eq!(declarations.result.status, Status::Skipped);
+        assert_eq!(file("tool.bash").result.status, Status::Skipped);
+        assert_eq!(file("types.d.ts").result.status, Status::Skipped);
         assert!(file("lib.rs").result.status == Status::Pending);
     }
 
     #[test]
-    fn cfg_test_code_is_removed_before_the_gates_see_the_file() {
+    fn cfg_test_code_is_separated_from_the_application_view() {
         let project = Project::new();
         project.write(
             "lib.rs",
@@ -1210,50 +1011,36 @@ mod tests {
                 "{MIXED}\n#[cfg(not(test))]\nfn also_production() -> i32 {{ 2 }}\n\n#[tokio::test]\nasync fn checks_live() {{\n    assert_eq!(production(\"a\"), \"a\");\n}}\n"
             ),
         );
-        let options = args();
-        let input = crate::inventory::collect(&options, &project.context(), &[])
-            .unwrap()
-            .remove(0);
-        let request = crate::maintainability::request(&input, &options).unwrap();
-        let source = request["state"]["file"]["source"].as_str().unwrap();
-        assert!(source.contains("fn production"));
-        assert!(source.contains("fn also_production"));
-        assert!(!source.contains("assert_eq"));
-        assert!(!source.contains("fn helper"));
-        assert!(!source.contains("checks_live"));
-        assert_eq!(request["state"]["file"]["classification"]["kind"], "mixed");
-        assert_eq!(
-            request["state"]["file"]["classification"]["language"],
-            "Rust"
-        );
-        assert_eq!(request["state"]["operations"][0]["range"]["start_line"], 1);
-        assert!(
-            !request["questions"]
-                .as_object()
-                .unwrap()
-                .contains_key("file_purpose")
-        );
-        crate::locations::parse(&input.result.path, source).unwrap();
-        assert!(request["state"]["cascade_version"].is_string());
+        let view = view_of(&project, &args());
+        assert!(view.application && !view.tests);
+        assert_eq!(view.classification.kind, "mixed");
+        assert_eq!(view.classification.language, "Rust");
+        let lines: Vec<_> = view
+            .test_lines
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect();
+        assert_eq!(lines, [(5, 17), (22, 25)]);
+        let mut options = args();
+        options.include_tests = true;
+        assert!(view_of(&project, &options).tests);
     }
 
     #[test]
-    fn javascript_describe_blocks_are_separated_from_the_implementation() {
+    fn javascript_describe_and_test_blocks_are_separated_from_the_implementation() {
         let project = Project::new();
         project.write(
             "label.ts",
-            "export function label(name: string) { return name.trim(); }\n\ndescribe(\"label\", () => {\n  it(\"trims\", () => { expect(label(\" a \")).toBe(\"a\"); });\n});\n",
+            "export function label(name: string) { return name.trim(); }\n\ndescribe(\"label\", () => {\n  it(\"trims\", () => { expect(label(\" a \")).toBe(\"a\"); });\n});\ntest(\"empty\", () => expect(label(\"\")).toBe(\"\"));\n",
         );
-        let options = args();
-        let input = crate::inventory::collect(&options, &project.context(), &[])
-            .unwrap()
-            .remove(0);
-        let request = crate::maintainability::request(&input, &options).unwrap();
-        let source = request["state"]["file"]["source"].as_str().unwrap();
-        assert!(source.contains("function label"));
-        assert!(!source.contains("describe"));
-        assert!(!source.contains("toBe"));
-        assert_eq!(request["state"]["file"]["classification"]["kind"], "mixed");
+        let view = view_of(&project, &args());
+        assert_eq!(view.classification.kind, "mixed");
+        let lines: Vec<_> = view
+            .test_lines
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect();
+        assert_eq!(lines, [(3, 6)]);
     }
 
     #[test]
@@ -1267,7 +1054,6 @@ mod tests {
         let mut mock = crate::tests::Mock::default();
         let report = run(&project, &options, &mut mock);
         assert_eq!(mock.calls, 0);
-        assert_eq!(report.api_requests, 0);
         assert_eq!(report.files[0].status, Status::NotApplicable);
         assert!(
             report.files[0]
@@ -1281,89 +1067,67 @@ mod tests {
         options.include_tests = true;
         let mut mock = crate::tests::Mock::default();
         let report = run(&project, &options, &mut mock);
-        assert_eq!(mock.calls, 1);
+        assert_eq!(mock.calls, 1, "one test-value request");
+        assert!(mock.requests[0]["state"]["tests"].is_array());
         assert_eq!(
             report.files[0].classification.as_ref().unwrap().kind,
             "tests"
         );
         assert_eq!(report.files[0].status, Status::Clear);
+        assert!(!report.files[0].dimensions.contains_key("file_organization"));
     }
 
+    const AMBIGUOUS: &str = "fn helper(value: &str) -> String {\n    let trimmed = value.trim();\n    let lower = trimmed.to_lowercase();\n    let joined = lower.replace(' ', \"-\");\n    let limited = joined.chars().take(8).collect::<String>();\n    limited\n}\n\n#[test]\nfn checks_helper() {\n    assert_eq!(helper(\" a \"), \"a\");\n}\n";
+
     #[test]
-    fn ambiguous_test_paths_are_classified_before_the_gates() {
+    fn ambiguous_test_paths_are_classified_before_the_rules() {
         let project = Project::new();
-        project.write(
-            "tests/flow.rs",
-            "fn helper(value: &str) -> &str {\n    value.trim()\n}\n\n#[test]\nfn checks_helper() {\n    assert_eq!(helper(\" a \"), \"a\");\n}\n",
-        );
+        project.write("tests/flow.rs", AMBIGUOUS);
         let mut options = args();
         options.refresh = true;
-        let mut tests_only = PurposeEval {
-            mode: "tests",
-            calls: 0,
-            gate_source: String::new(),
-        };
+        let mut tests_only = PurposeEval::new("tests");
         let skipped = run(&project, &options, &mut tests_only);
         assert_eq!(tests_only.calls, 1);
         assert_eq!(skipped.files[0].status, Status::NotApplicable);
         assert_eq!(skipped.api_requests, 1);
 
-        options.refresh = true;
-        let mut unresolved = PurposeEval {
-            mode: "unresolved",
-            calls: 0,
-            gate_source: String::new(),
-        };
-        let judged = run(&project, &options, &mut unresolved);
-        assert_eq!(unresolved.calls, 2);
-        assert!(unresolved.gate_source.contains("fn helper"));
-        assert!(!unresolved.gate_source.contains("assert_eq"));
-        assert_eq!(
-            judged.files[0].classification.as_ref().unwrap().kind,
-            "unresolved"
-        );
-
-        options.refresh = true;
-        let mut mixed = PurposeEval {
-            mode: "mixed",
-            calls: 0,
-            gate_source: String::new(),
-        };
-        let split = run(&project, &options, &mut mixed);
-        assert_eq!(mixed.calls, 2);
-        assert!(mixed.gate_source.contains("fn helper"));
-        assert!(!mixed.gate_source.contains("assert_eq"));
-        assert_eq!(
-            split.files[0].classification.as_ref().unwrap().kind,
-            "mixed"
-        );
+        for mode in ["unresolved", "mixed"] {
+            let mut eval = PurposeEval::new(mode);
+            let judged = run(&project, &options, &mut eval);
+            assert_eq!(eval.calls, 2, "{mode}");
+            assert!(eval.functions.contains("fn helper"), "{mode}");
+            assert!(!eval.functions.contains("assert_eq"), "{mode}");
+            assert_eq!(judged.files[0].classification.as_ref().unwrap().kind, mode);
+        }
         let mut included = args();
         included.refresh = true;
         included.include_tests = true;
-        let mut mixed = PurposeEval {
-            mode: "mixed",
-            calls: 0,
-            gate_source: String::new(),
-        };
+        let mut mixed = PurposeEval::new("mixed");
         let report = run(&project, &included, &mut mixed);
-        assert_eq!(mixed.calls, 3);
-        assert!(
-            report.files[0]
-                .dimensions
-                .contains_key("test_file_organization")
-        );
+        assert_eq!(mixed.calls, 3, "purpose, functions and tests");
+        assert!(report.files[0].dimensions.contains_key("test_value"));
     }
 
     struct PurposeEval {
         mode: &'static str,
         calls: usize,
-        gate_source: String,
+        functions: String,
+    }
+
+    impl PurposeEval {
+        fn new(mode: &'static str) -> Self {
+            Self {
+                mode,
+                calls: 0,
+                functions: String::new(),
+            }
+        }
     }
 
     impl crate::transport::Evaluator for PurposeEval {
         fn evaluate(&mut self, request: &Value) -> Result<Value> {
             self.calls += 1;
-            if request["state"]["purpose_version"].is_number() {
+            if request["questions"]["file_purpose"].is_object() {
                 let mut answers = serde_json::Map::new();
                 let (tests, mixed, application) = match self.mode {
                     "tests" => (1.0, 0.0, 0.0),
@@ -1403,11 +1167,10 @@ mod tests {
                     json!({"model":request["model"],"answers":answers,"usage":{"input_tokens":8,"output_tokens":2}}),
                 );
             }
-            self.gate_source = request["state"]["file"]["source"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            Ok(crate::tests::answer(request, 0, 0.0))
+            if request["state"]["functions"].is_array() {
+                self.functions = request["state"]["functions"].to_string();
+            }
+            Ok(crate::tests::answer(request, 0))
         }
     }
 }
