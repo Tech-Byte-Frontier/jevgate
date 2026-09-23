@@ -416,7 +416,16 @@ impl Outcome {
     }
 }
 
+/// Compact JSON: ureq's `send_json` pretty-prints, and the provider's edge
+/// blocks indented bodies carrying JSX that it accepts when compact.
+fn request_body(request: &Value) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(
+        crate::requests::provider_request(request).as_ref(),
+    )?)
+}
+
 fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
+    let body = request_body(request)?;
     let response = agent
         .post("https://api.typesafe.ai/v1/systemone")
         .header("Authorization", format!("Bearer {key}"))
@@ -428,7 +437,8 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
                 " (+https://github.com/Tech-Byte-Frontier/jevgate)"
             ),
         )
-        .send_json(crate::requests::provider_request(request).as_ref());
+        .content_type("application/json")
+        .send(&body[..]);
     let mut response = match response {
         Ok(response) => response,
         Err(ureq::Error::StatusCode(status)) => {
@@ -811,6 +821,13 @@ mod tests {
 
     const EDGE_PAGE: &str =
         "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head></html>";
+
+    #[test]
+    fn request_bodies_are_compact_without_local_metadata() {
+        let request = json!({"model": "m", "state": {"source": "<a b={c} />"}, "jevgate": {}});
+        let body = String::from_utf8(request_body(&request).unwrap()).unwrap();
+        assert_eq!(body, r#"{"model":"m","state":{"source":"<a b={c} />"}}"#);
+    }
 
     #[test]
     fn edge_firewall_blocks_are_told_apart_from_account_rejections() {
