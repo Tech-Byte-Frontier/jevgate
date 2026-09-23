@@ -13,31 +13,34 @@ signatures, or one candidate pair.
 
 ## Pipeline
 
-1. **Eligibility and purpose.** Deterministic roles and structural test markers
-   decide which code the application rules and the test rules see. A test path
-   that still contains other code gets one file-purpose request.
-2. **Local analysis** (`src/analysis/`). Units with signatures, calls and
-   references; member groups by average linkage over calls, owners and
-   file-declared types; Type-2 clone candidates across the selected files and
-   explicit context; test cases with their subjects and similar pairs.
-3. **First pass** (`src/units/`). One dispatch of every unit request. State uses
-   literal paths such as `functions[2].source`; group IDs are Choice options.
-   Stage and freshness hashes stay in local `jevgate` metadata that is not uploaded.
-4. **Recheck.** One request per uncertain unit, with callee signatures or the
-   enclosing functions. A decisive recheck replaces the first answer; both are kept.
-5. **Composition** (`src/units/compose.rs`). Pure: review at 0.80 on a Score's
-   top level (or a Noul), clear at 0.80 on the bottom level, consider when the
-   middle-or-top mass reaches 0.80, otherwise uncertain. A review always carries
-   a finding, file-wide when no location is decisive. Function simplification asks
-   two Scores over the same state: a task Score whose top level raises a review, and
-   a one-job Score (with the definition of a task spelled out) that can clear while the
-   task Score does not lean toward several tasks. Weak signals (flatten, a test's
-   internal details or mixed behaviors) can raise a finding but do not block a clear.
+1. **Eligibility and purpose.** Deterministic roles, generated-code headers and
+   structural test markers decide which code the application rules and the test
+   rules see. Only a test path without structural tests gets a file-purpose request.
+2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
+   and control-flow nesting; callbacks registered through calls; member groups by
+   average linkage; callers that import the file; Type-2 clone candidates grouped
+   by overlapping copies; test cases with their subjects and similar pairs.
+3. **First pass** (`src/units/`). One dispatch of every unit request. Functions
+   are packed eight per request; tests are sent one per request, because unrelated
+   tests in the same state left more answers undecided. State uses literal paths
+   such as `functions[2].source`; group IDs are Choice options. Stage and freshness
+   hashes stay in local `jevgate` metadata that is not uploaded.
+4. **Recheck.** One request per uncertain unit, with callee signatures, the
+   enclosing functions or the file's application source. A decisive recheck
+   replaces the first answer; both are kept.
+5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
+   the actionable concern: review at 0.80 on the top level, consider at 0.80 on
+   middle-or-top, clear when the top level is ruled out at 0.80, otherwise
+   uncertain. Questions ask whether a change would help a reader ("would splitting
+   it make it easier to understand?"), not how many tasks or purposes there are:
+   Jev does not count reliably and reads "tasks" literally. Copies within one test
+   raise at most a consider. A review always carries a finding.
 6. **Gate.** `--fail-on` and the baseline act on composed findings only.
 
 ## Constraints
 
-- Syntax supplies units, candidates and locations, never verdicts.
+- Syntax supplies units, candidates, locations and eligibility (size, nesting),
+  never verdicts; a unit below an eligibility floor is too small, never clear.
 - Keep questions atomic and literal; no thresholds, hashes or self-descriptions in
   uploaded state or questions.
 - Preserve raw answers, uncertainty and needs-context outcomes.

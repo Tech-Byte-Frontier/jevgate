@@ -1,8 +1,8 @@
-//! Test quality: packed per-test value checks and one request per candidate
+//! Test quality: one request per test for value checks and one per candidate
 //! redundant pair.
 use super::{
-    Asked, Detail, FileContext, FilePlan, Planned, Presence, UnitPlan, compact, identity, pack,
-    questions, unique_ids,
+    Asked, Detail, FileContext, FilePlan, Planned, Presence, TEST_PACK_ITEMS, UnitPlan, compact,
+    identity, pack, questions, unique_ids,
 };
 use crate::{
     analysis::test_map::{self, TestCase},
@@ -58,7 +58,7 @@ pub(super) fn plan_values(
             json!({"name": case.name, "source": source}),
         ));
     }
-    for group in pack(items, |(_, _, _, item)| item) {
+    for group in pack(items, TEST_PACK_ITEMS, |(_, _, _, item)| item) {
         let mut questions = Map::new();
         let mut asked = Asked::default();
         for (index, (_, id, _, _)) in group.iter().enumerate() {

@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use std::path::Path;
 use tree_sitter::Node;
 
-pub const VERSION: &str = "file-kind-v4";
+pub const VERSION: &str = "file-kind-v5";
 const PORTION_PRESENT: f64 = response::REVIEW_PROBABILITY;
 const PORTION_ABSENT: f64 = 0.20;
 const PURPOSE_UNITS: usize = 24;
@@ -83,6 +83,7 @@ pub fn excluded_reason(role: &str) -> &'static str {
             "Operational script. Maintainability gates apply to application and library source."
         }
         "declarations" => "Type declarations have no implementation for these gates.",
+        "generated" => "Generated code. Review its generator or source definitions instead.",
         _ => "Outside source/test semantic scope",
     }
 }
@@ -371,7 +372,9 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
     );
     class.separated_tests = separated;
     class.unresolved_units = located.unresolved;
-    if input.result.role == "test" && remaining {
+    // A test path with structural tests holds their support code; only a test
+    // path without any asks what the file contains.
+    if input.result.role == "test" && remaining && !structural_tests {
         class.kind = "unresolved".into();
         class.stage = "purpose".into();
         class.reason =
@@ -382,7 +385,8 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
             action: Action::Purpose,
         });
     }
-    if !remaining && (input.result.role == "test" || structural_tests) {
+    let test_path = input.result.role == "test";
+    if (test_path && structural_tests) || (!remaining && (test_path || structural_tests)) {
         return Ok(tests_class());
     }
     if structural_tests {
@@ -463,7 +467,7 @@ fn locate_tests(path: &Path, source: &str) -> Result<Located> {
         });
     }
     let mut spans = Vec::new();
-    walk(root, source, &mut spans);
+    walk(root, source, pytest_file(path), &mut spans);
     let mut ranges = Vec::new();
     let mut unresolved = Vec::new();
     for (start, end) in merge_spans(spans) {
@@ -480,16 +484,56 @@ fn locate_tests(path: &Path, source: &str) -> Result<Located> {
     })
 }
 
-fn walk(node: Node<'_>, source: &str, spans: &mut Vec<(usize, usize)>) {
-    if let Some(span) = rust_test_span(node, source).or_else(|| javascript_test_span(node, source))
+fn walk(node: Node<'_>, source: &str, pytest: bool, spans: &mut Vec<(usize, usize)>) {
+    if let Some(span) = rust_test_span(node, source)
+        .or_else(|| javascript_test_span(node, source))
+        .or_else(|| python_test_span(node, source, pytest))
     {
         spans.push(span);
         return;
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        walk(child, source, spans);
+        walk(child, source, pytest, spans);
     }
+}
+
+/// pytest collects top-level `test*` functions only from `test_*.py` and `*_test.py`.
+fn pytest_file(path: &Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    name.ends_with(".py") && (name.starts_with("test_") || name.ends_with("_test.py"))
+}
+
+/// A pytest `Test*` class or a `unittest` `TestCase` subclass.
+pub(crate) fn python_test_class(node: Node<'_>, source: &str) -> bool {
+    node.kind() == "class_definition"
+        && (node
+            .child_by_field_name("name")
+            .is_some_and(|name| child_text(name, source).starts_with("Test"))
+            || node
+                .child_by_field_name("superclasses")
+                .is_some_and(|bases| child_text(bases, source).contains("TestCase")))
+}
+
+/// Python test classes anywhere, and top-level `test*` functions in pytest files.
+fn python_test_span(node: Node<'_>, source: &str, pytest: bool) -> Option<(usize, usize)> {
+    let definition = if node.kind() == "decorated_definition" {
+        node.child_by_field_name("definition")?
+    } else if matches!(node.kind(), "class_definition" | "function_definition")
+        && node.parent()?.kind() != "decorated_definition"
+    {
+        node
+    } else {
+        return None;
+    };
+    let test = python_test_class(definition, source)
+        || pytest
+            && definition.kind() == "function_definition"
+            && node.parent()?.kind() == "module"
+            && definition
+                .child_by_field_name("name")
+                .is_some_and(|name| child_text(name, source).starts_with("test"));
+    test.then(|| (node.start_byte(), node.end_byte()))
 }
 
 fn rust_test_span(node: Node<'_>, source: &str) -> Option<(usize, usize)> {
@@ -1044,6 +1088,27 @@ mod tests {
     }
 
     #[test]
+    fn python_test_classes_and_pytest_functions_are_structural_tests() {
+        let project = Project::new();
+        let source = "import unittest\n\ndef total(rows):\n    return sum(rows)\n\nclass TotalChecks(unittest.TestCase):\n    def test_sum(self):\n        self.assertEqual(total([1, 2]), 3)\n\ndef test_empty():\n    assert total([]) == 0\n";
+        project.write("lib/checks.py", source);
+        let lines = |view: View| -> Vec<_> {
+            view.test_lines
+                .iter()
+                .map(|r| (r.start_line, r.end_line))
+                .collect()
+        };
+        // Outside a pytest file only the TestCase class is a test.
+        assert_eq!(lines(view_of(&project, &args())), [(6, 8)]);
+        // A pytest file with structural tests is a test file, without a purpose request.
+        std::fs::remove_file(project.0.join("lib/checks.py")).unwrap();
+        project.write("lib/test_checks.py", source);
+        let mut included = args();
+        included.include_tests = true;
+        assert_eq!(view_of(&project, &included).classification.kind, "tests");
+    }
+
+    #[test]
     fn pure_test_files_are_judged_only_with_include_tests() {
         let project = Project::new();
         project.write(
@@ -1080,9 +1145,41 @@ mod tests {
     const AMBIGUOUS: &str = "fn helper(value: &str) -> String {\n    let trimmed = value.trim();\n    let lower = trimmed.to_lowercase();\n    let joined = lower.replace(' ', \"-\");\n    let limited = joined.chars().take(8).collect::<String>();\n    limited\n}\n\n#[test]\nfn checks_helper() {\n    assert_eq!(helper(\" a \"), \"a\");\n}\n";
 
     #[test]
-    fn ambiguous_test_paths_are_classified_before_the_rules() {
+    fn test_paths_with_structural_tests_hold_test_support_without_a_purpose_request() {
         let project = Project::new();
         project.write("tests/flow.rs", AMBIGUOUS);
+        let mut options = args();
+        options.refresh = true;
+        let mut eval = PurposeEval::new("mixed");
+        let skipped = run(&project, &options, &mut eval);
+        assert_eq!(eval.calls, 0);
+        assert_eq!(skipped.files[0].status, Status::NotApplicable);
+        assert_eq!(
+            skipped.files[0].classification.as_ref().unwrap().kind,
+            "tests"
+        );
+
+        options.include_tests = true;
+        let mut eval = PurposeEval::new("mixed");
+        let report = run(&project, &options, &mut eval);
+        assert!(eval.functions.contains("fn helper"), "support is judged");
+        assert!(report.files[0].dimensions.contains_key("test_value"));
+        assert!(
+            report.files[0]
+                .classification
+                .as_ref()
+                .unwrap()
+                .separated_tests
+                .is_empty()
+        );
+    }
+
+    const SUPPORT: &str = "fn helper(value: &str) -> String {\n    let trimmed = value.trim();\n    let lower = trimmed.to_lowercase();\n    let joined = lower.replace(' ', \"-\");\n    let limited = joined.chars().take(8).collect::<String>();\n    limited\n}\n\nfn fixture() -> String {\n    let value = helper(\" a \");\n    let again = helper(&value);\n    let joined = format!(\"{value}{again}\");\n    let trimmed = joined.trim().to_string();\n    trimmed\n}\n";
+
+    #[test]
+    fn test_paths_without_structural_tests_are_classified_before_the_rules() {
+        let project = Project::new();
+        project.write("tests/support.rs", SUPPORT);
         let mut options = args();
         options.refresh = true;
         let mut tests_only = PurposeEval::new("tests");
@@ -1094,18 +1191,10 @@ mod tests {
         for mode in ["unresolved", "mixed"] {
             let mut eval = PurposeEval::new(mode);
             let judged = run(&project, &options, &mut eval);
-            assert_eq!(eval.calls, 2, "{mode}");
+            assert_eq!(eval.calls, 2, "{mode}: purpose and functions");
             assert!(eval.functions.contains("fn helper"), "{mode}");
-            assert!(!eval.functions.contains("assert_eq"), "{mode}");
             assert_eq!(judged.files[0].classification.as_ref().unwrap().kind, mode);
         }
-        let mut included = args();
-        included.refresh = true;
-        included.include_tests = true;
-        let mut mixed = PurposeEval::new("mixed");
-        let report = run(&project, &included, &mut mixed);
-        assert_eq!(mixed.calls, 3, "purpose, functions and tests");
-        assert!(report.files[0].dimensions.contains_key("test_value"));
     }
 
     struct PurposeEval {

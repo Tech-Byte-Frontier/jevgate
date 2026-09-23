@@ -1,9 +1,9 @@
 [package]
 name = "jevgate"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.90"
-description = "File-scoped maintainability review with TypeSafe Jev"
+description = "Code-quality review over small evidence units with TypeSafe Jev: file organization, function simplification, shared logic and test value"
 repository = "https://github.com/Tech-Byte-Frontier/jevgate"
 homepage = "https://github.com/Tech-Byte-Frontier/jevgate"
 readme = "README.md"

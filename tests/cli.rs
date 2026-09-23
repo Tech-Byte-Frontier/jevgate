@@ -129,10 +129,13 @@ fn default_preview_sends_units_without_automatic_context_or_state() {
     assert_eq!(body["files"][0]["context_files"], serde_json::json!([]));
     let stages = body["stages"].as_object().unwrap();
     assert_eq!(stages["functions"]["planned_requests"], 1);
-    assert_eq!(stages["outline"]["planned_requests"], 1);
+    assert!(
+        stages.get("outline").is_none(),
+        "a short file is too small to split"
+    );
     let functions = &body["initial_requests"][0];
     assert_eq!(functions["state"]["functions"].as_array().unwrap().len(), 2);
-    assert!(functions["questions"]["f1_tasks"].is_object());
+    assert!(functions["questions"]["f1_split"].is_object());
     assert!(!project.0.join(".jevgate").exists());
 }
 
@@ -174,7 +177,10 @@ fn browser_report_is_local_and_does_not_change_json_or_failure_status() {
     assert!(html.contains("api.py"));
     assert!(html.contains("\"status\":\"error\""));
     let deadline = Instant::now() + Duration::from_secs(3);
-    while !capture.exists() && Instant::now() < deadline {
+    // The opener creates the file before writing it; wait for its content.
+    while std::fs::read_to_string(&capture).map_or(true, |text| text.is_empty())
+        && Instant::now() < deadline
+    {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(
@@ -234,7 +240,7 @@ fn initial_request_preview_is_explicit_offline_and_contains_selected_evidence() 
             .unwrap()
             .contains("return True")
     );
-    assert_eq!(requests[0]["questions"]["f0_tasks"]["type"], "score");
+    assert_eq!(requests[0]["questions"]["f0_split"]["type"], "score");
     assert!(!project.0.join(".jevgate").exists());
     let normal = project
         .command()

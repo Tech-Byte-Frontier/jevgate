@@ -2,9 +2,9 @@
 
 Code review with TypeSafe Jev over small evidence units. Five rules:
 
-- **File organization:** do a file's members serve separate purposes that could be their own modules?
-- **Function simplification:** does a function perform two or more substantial tasks, or could its nesting be flattened?
-- **Shared logic:** do two renamed or exact copies perform the same steps for the same purpose?
+- **File organization:** would moving some members into a separate module make the file easier to understand?
+- **Function simplification:** would splitting a function into named functions make it easier to understand, or, for deeply nested code, would flattening it help?
+- **Shared logic:** do renamed or exact copies perform the same steps for the same purpose?
 - **Test value** (`--include-tests`): does a test only check its mocks, recompute its expected value, assert internal details or mix unrelated behaviors?
 - **Test redundancy** (`--include-tests`): do similar tests of one function check the same behavior?
 
@@ -29,22 +29,30 @@ adds a related file as evidence for shared logic, callers and test subjects.
 
 ## How it works
 
-Local analysis runs first and uploads nothing: parsers find functions, methods
-and types; group a file's members by calls and shared types; find Type-2 clone
-candidates (identifiers and literals normalized, whole statements, consistent
-renaming) across the selected files; and map tests to the functions they call.
+Local analysis runs first and uploads nothing: parsers find functions, methods,
+types and callbacks registered through calls (`const view = db.view(opts, (ctx) => …)`);
+measure control-flow nesting; group a file's members by calls, owners and shared
+types; list callers that import each file; find Type-2 clone candidates
+(identifiers and literals normalized, whole statements, consistent renaming) and
+merge overlapping copies into one group; and map tests to the functions they call.
+Generated files (`@generated`, "DO NOT EDIT" headers) are skipped.
 
-Each request then asks short questions about one unit: a pack of up to eight
-functions, one file outline (signatures and groups, no bodies), one candidate
-pair, a pack of tests, or one pair of tests. A unit that stays uncertain gets one
-recheck with more evidence (callee signatures, or the enclosing functions).
-Code composes the answers at a 0.80 threshold into `review`, `consider`,
-`clear` or `uncertain`, and ranks findings by probability × ln(1 + lines).
-Every `review` carries a finding. Raw answers are kept under `files[].judgments`.
+Each request asks short questions about one unit: a pack of up to eight
+functions, one file outline (signatures, callers and groups, no bodies), one clone
+group's representative pair, one test, or one pair of tests. Flattening is asked
+only for control flow nested four deep or four-branch chains. A unit that stays
+uncertain gets one recheck with more evidence (callee signatures, the enclosing
+functions, or the file's source for an outline).
+Code composes the answers at a 0.80 threshold into `review` (top level),
+`consider` (middle-or-top mass), `clear` (top level ruled out) or `uncertain`,
+and ranks findings by probability × ln(1 + lines). Every `review` carries a
+finding. Raw answers are kept under `files[].judgments`.
 
 Test files are judged only with `--include-tests`. A file that mixes code and
 tests keeps them apart: application rules judge the code, test rules the tests.
-A test path that still contains other code gets one file-purpose question first.
+A test path with structural tests (including Python `unittest` classes and pytest
+functions) is a test file; one without any gets one file-purpose question first.
+Copies inside one test raise at most `consider`: a table of cases is a style choice.
 
 ## Gate, baseline and exit codes
 
@@ -73,16 +81,19 @@ save `.jevgate/cache` (and `.jevgate/latest.json` for change tracking) and injec
 `TYPESAFE_API_KEY`. Cached answers from a pinned model version do not expire;
 `jev-latest` and `jev-preview` answers expire after `--cache-ttl-secs`. An
 unchanged unit is not sent again. Rate limits and overload are retried with
-backoff (at most four attempts); account rejections stop further uploads.
+backoff (at most four attempts); account rejections stop further uploads. A
+request blocked by the provider's edge firewall fails alone; three blocks in a
+row stop further uploads, and a rerun resumes from the cache.
 
 ## Limits
 
 Parsers: Rust, Python, JavaScript and TypeScript. Files in other languages,
 with syntax errors, or not UTF-8 are reported as skipped with a reason; they do
 not make a run incomplete. Bodies under five lines are too small to judge and
-never count as clear. A unit too large for one request is `needs-context`.
-Clone candidates need two or more statements and 120 non-whitespace bytes;
-at most 64 pairs per run and 8 per file are judged, and omissions are counted.
+never count as clear; files under 100 lines of member code are too small to
+split. A unit too large for one request is `needs-context`. Clone candidates
+need three or more statements and 120 non-whitespace bytes; at most 64 groups
+per run and 8 per file are judged, and omissions are counted.
 Probabilities are model judgments, not measured accuracy. Run linting,
 formatting, tests and type checks separately.
 

@@ -146,6 +146,14 @@ fn load(
     }
     let source = read_source(&path, args.max_file_bytes);
     match source {
+        Ok(source) if discovery::generated_header(&source) => {
+            result.role = "generated".into();
+            result.contains_tests = false;
+            result.status = Status::Skipped;
+            result.error = Some(crate::file_kind::excluded_reason("generated").into());
+            result.classification = Some(crate::file_kind::excluded("generated", relative));
+            Ok(bare_input(result))
+        }
         Ok(source) => {
             result.source_hash = hash(source.as_bytes());
             result.content_identity = super::locations::identity(&path, &source);
