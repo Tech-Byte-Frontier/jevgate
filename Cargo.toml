@@ -1,6 +1,6 @@
 [package]
 name = "jevgate"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.90"
 description = "Code-review gate over small evidence units with TypeSafe Jev: maintainability, test value, and opt-in security and documentation findings with locations and probabilities"
