@@ -494,7 +494,10 @@ pub(super) fn security_wording(
                 (Strength::Consider, false) => format!(
                     "{subject} places its parameters into {noun} without binding, escaping or checking them; a caller passing outside input would make it exploitable ({p:.2})."
                 ),
-                (Strength::Note, _) => format!(
+                (Strength::Note, true) => format!(
+                    "{subject} places values from another party into {noun}, but no check found one placed unhandled ({p:.2})."
+                ),
+                (Strength::Note, false) => format!(
                     "{subject} places a parameter into {noun}; it may already be bound or checked, or its callers may pass only the program's own values ({p:.2})."
                 ),
             };
