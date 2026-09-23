@@ -65,6 +65,9 @@ pub struct UnitCounts {
     pub too_small: usize,
     /// Candidates beyond the per-file or per-run caps.
     pub omitted: usize,
+    /// Candidates inside a document another finding already covers, not asked.
+    #[serde(default)]
+    pub covered: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

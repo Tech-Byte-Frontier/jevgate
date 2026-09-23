@@ -4,6 +4,7 @@
 mod answers;
 pub mod compose;
 mod documents;
+mod drift;
 mod duplicates;
 mod evidence;
 mod follow_ups;
@@ -21,7 +22,7 @@ mod wording;
 use answers::Questions;
 pub use answers::{Asked, record};
 use evidence::{FileContext, compact, identity, pack, request, unique_ids};
-pub use follow_ups::{locates, rechecks, traces};
+pub use follow_ups::{doc_checks, locates, rechecks, traces};
 use plan::Scope;
 pub use plan::plan;
 
@@ -108,6 +109,23 @@ pub enum Detail {
     Document {
         parts: Vec<Block>,
         locate: Option<(Value, Asked)>,
+    },
+    /// A document whose release is tagged or whose named paths were deleted:
+    /// the facts a finished plan finding cites.
+    Plan {
+        facts: Vec<String>,
+    },
+    /// A section naming paths or scripts the repository lacks, and the check
+    /// sent unless its document is a finished plan.
+    Stale {
+        missing: Vec<String>,
+        check: Option<(Value, Asked)>,
+    },
+    /// A candidate pair of sections, the other in `other`, and the check
+    /// sent unless either document is a finished plan.
+    DocPair {
+        other: Location,
+        check: Option<(Value, Asked)>,
     },
     /// A heading section of an agent instruction file.
     Section {

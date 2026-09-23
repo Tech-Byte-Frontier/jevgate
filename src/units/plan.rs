@@ -12,7 +12,7 @@ pub(super) struct Scope<'a> {
 }
 
 use super::{
-    FileContext, FilePlan, Plan, Planned, documents, duplicates, functions, hardcoded,
+    FileContext, FilePlan, Plan, Planned, documents, drift, duplicates, functions, hardcoded,
     instructions, outline, security, test_units,
 };
 use crate::{
@@ -78,8 +78,21 @@ pub fn plan(
         let file = plan_file(&scope, &shared, owner, args, budget, &mut result.requests);
         result.files.insert(owner, file);
     }
+    let drift = drift::Shared::new(
+        inputs,
+        &scope.documents,
+        args.enabled(catalog::DOC_STALENESS),
+        args.enabled(catalog::DOC_DUPLICATION),
+    );
     for &owner in &scope.documents {
-        let file = plan_document(&inputs[owner], owner, args, budget, &mut result.requests);
+        let file = plan_document(
+            &inputs[owner],
+            owner,
+            args,
+            budget,
+            &drift,
+            &mut result.requests,
+        );
         result.files.insert(owner, file);
     }
     result
@@ -91,6 +104,7 @@ fn plan_document(
     owner: usize,
     args: &CheckArgs,
     budget: &TokenBudget,
+    drift: &drift::Shared<'_>,
     requests: &mut Vec<Planned>,
 ) -> FilePlan {
     let mut file = FilePlan {
@@ -115,6 +129,7 @@ fn plan_document(
     {
         instructions::plan(&context, repository, &mut file, requests);
     }
+    drift.plan(&context, &mut file, requests);
     file
 }
 

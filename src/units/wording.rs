@@ -220,6 +220,10 @@ pub(super) fn question_label(question: &str) -> &str {
         "commands" => "commands the manifests show",
         "generic" => "generic advice",
         "history" => "past work",
+        "plan" => "finished plan",
+        "relies" => "relies on a missing path",
+        "a_covers" | "b_covers" => "repeats the other section",
+        "conflict" => "disagrees with the other section",
         "enforced" => "rule linters check",
         other => other,
     }
@@ -474,6 +478,78 @@ pub(super) fn document_wording(
         ),
         "Remove finished plans and logs, or move them out of the living documentation",
     )
+}
+
+/// A plan whose work Git shows finished, with the facts that show it.
+pub(super) fn plan_wording(name: &str, facts: &[String], p: f64) -> Wording {
+    (
+        format!(
+            "`{name}` is a plan whose work is finished: {} ({p:.2}).",
+            facts.join("; ")
+        ),
+        "Delete the finished plan, or move it out of the living documentation",
+    )
+}
+
+/// A section that tells the reader to use a path or script that is gone.
+pub(super) fn stale_wording(name: &str, missing: &[String], p: f64) -> Wording {
+    (
+        format!(
+            "Section `{name}` tells the reader to use {} ({p:.2}).",
+            missing.join(", ")
+        ),
+        "Update the section to the current path or command, or remove it",
+    )
+}
+
+/// A section repeated by, or disagreeing with, a section of another document;
+/// true when the pair disagrees.
+pub(super) fn doc_pair_wording(
+    name: &str,
+    other: &crate::schema::Location,
+    answers: &Answers<'_>,
+    p: f64,
+) -> (Wording, bool) {
+    let decided = |q: &str| {
+        answers
+            .get(q)
+            .is_some_and(|a| matches!(noul(a), Outcome::Review(_)))
+    };
+    let there = format!(
+        "section `{}` of `{}`",
+        other.symbol.as_deref().unwrap_or(""),
+        other.path.display()
+    );
+    if decided("conflict") {
+        return (
+            (
+                format!(
+                    "Section `{name}` and {there} give different values or instructions for the same thing ({p:.2})."
+                ),
+                "Reconcile the two sections and keep the fact in one place",
+            ),
+            true,
+        );
+    }
+    let message = if decided("a_covers") {
+        format!("Section `{name}` states everything {there} states ({p:.2}).")
+    } else {
+        format!("{there} states everything section `{name}` states ({p:.2}).")
+    };
+    (
+        (
+            capitalized(&message),
+            "Keep one copy and link to it from the other document",
+        ),
+        false,
+    )
+}
+
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or(String::new(), |c| {
+        c.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
 
 /// Each test-value signal that reached review, in plain words.

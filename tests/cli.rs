@@ -590,7 +590,9 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "test_value",
             "test_redundancy",
             "agent_context",
-            "large_docs"
+            "large_docs",
+            "doc_staleness",
+            "doc_duplication"
         ]
     );
     for arguments in [

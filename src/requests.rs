@@ -29,7 +29,7 @@ pub(super) struct Receipt {
 }
 
 /// Request kinds reported in `stages`, in dispatch order.
-pub(crate) const STAGES: [&str; 14] = [
+pub(crate) const STAGES: [&str; 15] = [
     "file-purpose",
     "functions",
     "outline",
@@ -44,6 +44,7 @@ pub(crate) const STAGES: [&str; 14] = [
     "trace",
     "instructions",
     "docs",
+    "doc-checks",
 ];
 
 pub(super) fn stage(request: &Value) -> &'static str {

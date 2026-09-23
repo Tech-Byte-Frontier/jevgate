@@ -168,6 +168,30 @@ fn manifests(root: &Path, base: &Path, linters: &mut BTreeSet<String>) -> Vec<Va
     found
 }
 
+/// Scripts of every tracked `package.json` and targets of every tracked
+/// Makefile or justfile.
+pub fn scripts(root: &Path, history: &crate::revision::History) -> BTreeSet<String> {
+    let mut scripts = BTreeSet::new();
+    for path in &history.tracked {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let Ok(text) = std::fs::read_to_string(root.join(path)) else {
+            continue;
+        };
+        match name {
+            "package.json" => {
+                if let Ok(package) = serde_json::from_str::<Value>(&text)
+                    && let Some(declared) = package["scripts"].as_object()
+                {
+                    scripts.extend(declared.keys().cloned());
+                }
+            }
+            "Makefile" | "justfile" | "Justfile" => scripts.extend(targets(&text)),
+            _ => {}
+        }
+    }
+    scripts
+}
+
 /// The first `LISTED` names, then how many more there are.
 fn listed(mut names: Vec<String>) -> Value {
     let extra = names.len().saturating_sub(LISTED);
