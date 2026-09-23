@@ -16,6 +16,7 @@ impl Project {
         command
             .current_dir(&self.0)
             .env_remove("TYPESAFE_API_KEY")
+            .env_remove("CI")
             .env("JEVGATE_CREDENTIAL_STORE", "file")
             .env("JEVGATE_CONFIG_DIR", self.0.join("isolated-auth"));
         command
@@ -192,6 +193,20 @@ fn browser_report_is_local_and_does_not_change_json_or_failure_status() {
         std::fs::read_to_string(&capture).unwrap(),
         project.0.join(".jevgate/report.html").to_str().unwrap()
     );
+    // In CI the dashboard is written but no browser is started.
+    std::fs::remove_file(&capture).unwrap();
+    let ci = project
+        .command()
+        .env("PATH", &bin)
+        .env("REPORT_CAPTURE", &capture)
+        .env("CI", "true")
+        .args(["check", "api.py", "--cache-only", "--report"])
+        .output()
+        .unwrap();
+    assert_eq!(ci.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&ci.stderr).contains("report.html"));
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!capture.exists());
     let preview = project
         .command()
         .args(["check", "api.py", "--report", "--dry-run"])
