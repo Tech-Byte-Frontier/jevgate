@@ -8,6 +8,7 @@ mod evidence;
 mod follow_ups;
 mod functions;
 mod hardcoded;
+mod outcome;
 pub(crate) mod outline;
 mod plan;
 pub mod questions;

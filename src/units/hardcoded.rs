@@ -1,7 +1,8 @@
 //! Hardcoded values: packed function sources with the literal values each one
 //! uses, and one unit per file for its module-level constants. Per function,
 //! Scores on whether a value belongs in configuration or deserves a name, and
-//! a Noul on whether the function special-cases one identity.
+//! a Noul on whether the function special-cases one identity. A unit left
+//! undecided is asked, alone, whether every value is of an acceptable kind.
 use super::{
     Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, UnitPlan, compact,
     identity, pack, questions, unique_ids,
@@ -29,6 +30,8 @@ pub(super) fn plan(
     let mut items = Vec::new();
     for (unit, id) in units.iter().zip(ids) {
         let source = unit.source(file.source);
+        let values: Vec<&str> = unit.literals.iter().map(|l| l.text.as_str()).collect();
+        let state = json!({"name": unit.name, "source": source, "values": values});
         out.units.push(UnitPlan {
             rule: HARDCODED_VALUES,
             id: id.clone(),
@@ -41,14 +44,9 @@ pub(super) fn plan(
             detail: Detail::Values {
                 values: unit.literals.iter().map(|l| l.text.clone()).collect(),
             },
-            recheck: None,
+            recheck: benign_request(file, &id, json!({"functions": [state.clone()]}), true),
         });
-        let values: Vec<&str> = unit.literals.iter().map(|l| l.text.as_str()).collect();
-        items.push((
-            out.units.len() - 1,
-            id,
-            json!({"name": unit.name, "source": source, "values": values}),
-        ));
+        items.push((out.units.len() - 1, id, state));
     }
     for group in pack(items, PACK_ITEMS, |(_, _, state)| state) {
         send_or_split(file, group, out, requests);
@@ -84,6 +82,7 @@ fn send_or_split(
             });
         } else {
             out.units[item.0].presence = Presence::NeedsContext;
+            out.units[item.0].recheck = None;
         }
     }
 }
@@ -147,6 +146,12 @@ fn plan_constants(
             None => json!({"name": c.name, "values": c.values}),
         })
         .collect();
+    let recheck = benign_request(
+        file,
+        CONSTANTS_ID,
+        json!({"constants": listed.clone()}),
+        false,
+    );
     let state = json!({"file": file.file_state(), "constants": listed});
     let (request, asked) = file.request("constants", state, questions);
     let fits = file.budget.fits(&request);
@@ -170,7 +175,7 @@ fn plan_constants(
         detail: Detail::Constants {
             values: constants.iter().flat_map(|c| c.values.clone()).collect(),
         },
-        recheck: None,
+        recheck: recheck.filter(|_| fits),
     });
     if fits {
         requests.push(Planned {
@@ -179,4 +184,38 @@ fn plan_constants(
             asked,
         });
     }
+}
+
+/// The benign-kind checks for one unit, sent only when a question stayed
+/// undecided: every question for a function, the environment for constants.
+fn benign_request(
+    file: &FileContext<'_>,
+    id: &str,
+    evidence: Value,
+    function: bool,
+) -> Option<(Value, super::Asked)> {
+    let (values, code, asked): (&str, &str, &[&'static str]) = if function {
+        (
+            "functions[0].values",
+            "functions[0].source",
+            &["environment", "magic", "special"],
+        )
+    } else {
+        ("constants", "the program", &["environment"])
+    };
+    let mut questions = Questions::default();
+    for question in asked {
+        questions.ask(
+            question.to_string(),
+            questions::hardcoded_benign(question, values, code),
+            id,
+            HARDCODED_VALUES,
+            super::outcome::benign_key(question),
+            Pass::Recheck,
+        );
+    }
+    let mut state = evidence;
+    state["file"] = file.file_state();
+    let (request, asked) = file.request("recheck", state, questions);
+    file.budget.fits(&request).then_some((request, asked))
 }

@@ -1,12 +1,11 @@
 //! Pure composition from typed judgments to unit outcomes, rule dimensions,
-//! findings and a file status. Thresholds are the shared 0.80 policy on a
-//! Score whose top level is the actionable concern: review when the top level
-//! reaches it, consider when the middle-or-top mass does, clear when the top
-//! level is ruled out (its complement reaches it), otherwise uncertain. Where
-//! the middle level says the code is fine as it is, a consider needs the top
-//! level to lead; middle mass alone is an optional note.
+//! findings and a file status; each unit's outcome comes from `outcome`.
 use super::{
-    Block, Detail, FilePlan, GroupInfo, Presence, UnitPlan,
+    Block, Detail, FilePlan, Presence, UnitPlan,
+    outcome::{
+        Answers, Outcome, benefit, checks, choice, noul, origin_outcome, score, split_has_users,
+        unit_outcome, value_signals,
+    },
     wording::{
         function_wording, outline_wording, pair_wording, question_label, security_wording,
         test_pair_wording, test_wording, values_wording,
@@ -14,41 +13,11 @@ use super::{
 };
 use crate::{
     catalog,
-    policy::{LEADING_PROBABILITY, LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
     schema::{
         Answer, Dimension, Finding, Judgment, Pass, Status, Strength, Undecided, UnitCounts, hash,
     },
 };
 use std::collections::{BTreeMap, BTreeSet};
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Outcome {
-    Review(f64),
-    Consider(f64),
-    /// An optional improvement to code that reads well as it is.
-    Note(f64),
-    Clear,
-    /// Carries the concern probability that stayed below the thresholds.
-    Uncertain(f64),
-    /// No answers were recorded, for example after a failed request.
-    Missing,
-}
-
-impl Outcome {
-    fn decisive(self) -> bool {
-        matches!(
-            self,
-            Self::Review(_) | Self::Consider(_) | Self::Note(_) | Self::Clear
-        )
-    }
-
-    fn concern(self) -> f64 {
-        match self {
-            Self::Review(p) | Self::Consider(p) | Self::Note(p) | Self::Uncertain(p) => p,
-            Self::Clear | Self::Missing => 0.0,
-        }
-    }
-}
 
 pub struct Composed {
     pub dimensions: BTreeMap<String, Dimension>,
@@ -56,265 +25,12 @@ pub struct Composed {
     pub status: Status,
 }
 
-fn at_least(value: f64) -> bool {
-    probability_at_least(value, REVIEW_PROBABILITY)
-}
-
-pub(super) fn levels(answer: &Answer) -> Option<[f64; 3]> {
-    let Answer::Score { probabilities, .. } = answer else {
-        return None;
-    };
-    let mass: f64 = probabilities.values().sum();
-    if mass <= 0.0 {
-        return None;
-    }
-    let level = |i: usize| probabilities.get(&i.to_string()).copied().unwrap_or(0.0) / mass;
-    Some([level(0), level(1), level(2)])
-}
-
-pub fn score(answer: &Answer) -> Outcome {
-    let Some([bottom, middle, top]) = levels(answer) else {
-        return Outcome::Missing;
-    };
-    if at_least(top) {
-        Outcome::Review(top)
-    } else if at_least(middle + top) {
-        Outcome::Consider(middle + top)
-    } else if at_least(bottom + middle) {
-        Outcome::Clear
-    } else {
-        Outcome::Uncertain(top)
-    }
-}
-
-/// A Score whose middle level says the code reads well as it is ("Slightly …,
-/// but it is fine as it is"): that mass alone raises a note, not a consider.
-pub fn benefit(answer: &Answer) -> Outcome {
-    match (score(answer), levels(answer)) {
-        (Outcome::Consider(p), Some([_, _, top]))
-            if !probability_at_least(top, LEADING_PROBABILITY) =>
-        {
-            Outcome::Note(p)
-        }
-        (outcome, _) => outcome,
-    }
-}
-
-/// One level lower: review becomes consider, consider becomes note.
-fn lowered(outcome: Outcome) -> Outcome {
-    match outcome {
-        Outcome::Review(p) => Outcome::Consider(p),
-        Outcome::Consider(p) => Outcome::Note(p),
-        other => other,
-    }
-}
-
-pub fn noul(answer: &Answer) -> Outcome {
-    let Answer::Noul { noul } = answer else {
-        return Outcome::Missing;
-    };
-    if at_least(*noul) {
-        Outcome::Review(*noul)
-    } else if at_least(1.0 - noul) {
-        Outcome::Clear
-    } else {
-        Outcome::Uncertain(*noul)
-    }
-}
-
-pub(super) fn choice(answer: Option<&Answer>) -> Option<(&str, f64)> {
-    let Answer::Choice {
-        choice,
-        probabilities,
-        ..
-    } = answer?
-    else {
-        return None;
-    };
-    let mass: f64 = probabilities.values().sum();
-    let p = probabilities.get(choice).copied().unwrap_or(0.0) / mass.max(f64::MIN_POSITIVE);
-    (choice != "none" && probability_at_least(p, LOCATION_PROBABILITY)).then_some((choice, p))
-}
-
-pub(super) type Answers<'a> = BTreeMap<&'a str, &'a Answer>;
-
 fn answers<'a>(judgments: &'a [Judgment], unit: &str, pass: Pass) -> Answers<'a> {
     judgments
         .iter()
         .filter(|j| j.unit == unit && j.pass == pass)
         .map(|j| (j.question.as_str(), &j.answer))
         .collect()
-}
-
-fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
-    let get = |q: &str| answers.get(q).copied();
-    let result = match unit.rule {
-        catalog::FUNCTION_SIMPLIFICATION => function_outcome(get("split"), get("flatten")),
-        catalog::FILE_ORGANIZATION => {
-            organization_outcome(get("split"), get("module"), &unit.detail)
-        }
-        catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), &unit.detail),
-        catalog::TEST_VALUE => test_value_outcome(&get),
-        catalog::TEST_REDUNDANCY => get("overlap").map(score),
-        catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
-        catalog::INJECTION => injection_outcome(&get),
-        catalog::SENSITIVE_DATA => {
-            exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
-        }
-        catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
-        _ => None,
-    };
-    result.unwrap_or(Outcome::Missing)
-}
-
-/// The strongest of several signals about one unit: review, then consider,
-/// then note, each at its highest probability. Clear only when every signal
-/// is clear; otherwise uncertain.
-fn strongest(outcomes: &[Outcome]) -> Outcome {
-    let best = |pick: fn(Outcome) -> Option<f64>| {
-        outcomes.iter().filter_map(|o| pick(*o)).reduce(f64::max)
-    };
-    if let Some(p) = best(|o| matches!(o, Outcome::Review(_)).then(|| o.concern())) {
-        Outcome::Review(p)
-    } else if let Some(p) = best(|o| matches!(o, Outcome::Consider(_)).then(|| o.concern())) {
-        Outcome::Consider(p)
-    } else if let Some(p) = best(|o| matches!(o, Outcome::Note(_)).then(|| o.concern())) {
-        Outcome::Note(p)
-    } else if outcomes.iter().all(|o| *o == Outcome::Clear) {
-        Outcome::Clear
-    } else {
-        Outcome::Uncertain(outcomes.iter().map(|o| o.concern()).fold(0.0, f64::max))
-    }
-}
-
-/// The stronger of splitting and (for deeply nested functions only) flattening.
-fn function_outcome(split: Option<&Answer>, flatten: Option<&Answer>) -> Option<Outcome> {
-    let mut outcomes = vec![benefit(split?)];
-    outcomes.extend(flatten.map(benefit));
-    Some(strongest(&outcomes))
-}
-
-/// A function's environment, naming and special-case signals; a file's
-/// constants are asked only about the environment.
-fn values_outcome<'a>(
-    get: &impl Fn(&str) -> Option<&'a Answer>,
-    detail: &Detail,
-) -> Option<Outcome> {
-    let mut outcomes = vec![benefit(get("environment")?)];
-    if matches!(detail, Detail::Values { .. }) {
-        outcomes.push(benefit(get("magic")?));
-        outcomes.push(noul(get("special")?));
-    }
-    Some(strongest(&outcomes))
-}
-
-/// Where an injection's values come from: another party (top) is a review;
-/// parameters of unknown origin (middle) are a concern a caller settles, so
-/// middle-or-top mass is a consider; the program itself (bottom) is clear.
-pub(super) fn origin_outcome(answer: &Answer) -> Outcome {
-    let Some([bottom, middle, top]) = levels(answer) else {
-        return Outcome::Missing;
-    };
-    if at_least(top) {
-        Outcome::Review(top)
-    } else if at_least(middle + top) {
-        Outcome::Consider(middle + top)
-    } else if at_least(bottom) {
-        Outcome::Clear
-    } else {
-        Outcome::Uncertain(top)
-    }
-}
-
-/// The outcomes of a rule's specific trace checks that were answered.
-fn checks<'a>(rule: &str, get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<Outcome> {
-    super::security::checks(rule)
-        .iter()
-        .filter_map(|check| get(check.id).map(noul))
-        .collect()
-}
-
-/// Kinds where a variable is a concern only when another party controls it:
-/// helpers that build a path or URL from their parameters are everywhere.
-const RESOURCE_CHECKS: [&str; 2] = ["path", "url"];
-
-/// Presence alone never raises an injection: it only decides whether the
-/// trace is asked. When every specific check clears the unit, it is clear;
-/// otherwise the origin of its values decides. Only a check that finds a
-/// variable placed unhandled raises a consider or review, so a finding names
-/// its kind; without one, values from another party are a note and
-/// parameters stay undecided. Parameters spliced into SQL, a
-/// shell command, code or markup are a consider (bind, quote or escape them);
-/// parameters in a path or URL are a note until a caller shows another party
-/// controls them.
-fn injection_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
-    let presence = [noul(get("interpreted")?), noul(get("resource")?)];
-    if presence.iter().all(|o| *o == Outcome::Clear) {
-        return Some(Outcome::Clear);
-    }
-    let unhandled = checks(catalog::INJECTION, get);
-    let (Some(origin), false) = (get("origin"), unhandled.is_empty()) else {
-        return Some(Outcome::Uncertain(
-            presence.iter().map(|o| o.concern()).fold(0.0, f64::max),
-        ));
-    };
-    if unhandled.iter().all(|o| *o == Outcome::Clear) {
-        return Some(Outcome::Clear);
-    }
-    let outcome = origin_outcome(origin);
-    let found: Vec<&str> = super::security::checks(catalog::INJECTION)
-        .iter()
-        .filter(|check| {
-            get(check.id)
-                .map(noul)
-                .is_some_and(|o| matches!(o, Outcome::Review(_)))
-        })
-        .map(|check| check.id)
-        .collect();
-    let resource_only = found.iter().all(|id| RESOURCE_CHECKS.contains(id));
-    Some(match outcome {
-        Outcome::Review(p) if found.is_empty() => Outcome::Note(p),
-        Outcome::Consider(p) if found.is_empty() => Outcome::Uncertain(p),
-        Outcome::Consider(_) if resource_only => lowered(outcome),
-        _ => outcome,
-    })
-}
-
-/// Logged secrets, exposed error details and weak settings: a presence
-/// question or a specific check at review raises it, one level lower for
-/// code that runs only in development; clear when presence or every check
-/// rules it out.
-fn exposure_outcome<'a>(
-    rule: &str,
-    get: &impl Fn(&str) -> Option<&'a Answer>,
-    questions: &[&str],
-) -> Option<Outcome> {
-    let presence: Vec<Outcome> = questions
-        .iter()
-        .map(|q| get(q).map(noul))
-        .collect::<Option<_>>()?;
-    let specific = checks(rule, get);
-    let ruled_out = presence.iter().all(|o| *o == Outcome::Clear)
-        || (!specific.is_empty() && specific.iter().all(|o| *o == Outcome::Clear));
-    let found: Vec<Outcome> = presence
-        .into_iter()
-        .chain(specific)
-        .filter(|o| matches!(o, Outcome::Review(_)))
-        .collect();
-    let outcome = if !found.is_empty() {
-        strongest(&found)
-    } else if ruled_out {
-        Outcome::Clear
-    } else {
-        Outcome::Uncertain(0.0)
-    };
-    Some(
-        if matches!(get("dev_only").map(noul), Some(Outcome::Review(_))) {
-            lowered(outcome)
-        } else {
-            outcome
-        },
-    )
 }
 
 fn security(rule: &str) -> bool {
@@ -339,94 +55,16 @@ fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'
     merged
 }
 
-/// A split is suggested only when the proposed group has users of its own in
-/// other files: a group nothing else imports gains little from its own module.
-/// When no member has known users (an entry point, or callers outside the
-/// selected files), the evidence is missing and the answer stands.
-fn organization_outcome(
-    split: Option<&Answer>,
-    module: Option<&Answer>,
-    detail: &Detail,
-) -> Option<Outcome> {
-    let outcome = benefit(split?);
-    let Detail::Outline { groups } = detail else {
-        return Some(outcome);
-    };
-    Some(match outcome {
-        Outcome::Review(p) | Outcome::Consider(p) if !split_has_users(groups, module) => {
-            Outcome::Note(p)
-        }
-        other => other,
-    })
-}
-
-/// Whether the chosen group (or, without a choice, any group) has a user that
-/// no other group of the file has; true when no users are known at all.
-pub(super) fn split_has_users(groups: &[GroupInfo], module: Option<&Answer>) -> bool {
-    if groups.iter().all(|g| g.users.is_empty()) {
-        return true;
-    }
-    let own_users = |group: &GroupInfo| {
-        group.users.iter().any(|user| {
-            groups
-                .iter()
-                .filter(|other| other.id != group.id)
-                .all(|other| !other.users.contains(user))
-        })
-    };
-    match choice(module).and_then(|(id, _)| groups.iter().find(|g| g.id == id)) {
-        Some(chosen) => own_users(chosen),
-        None => groups.iter().any(own_users),
-    }
-}
-
-/// Repetition the behavior requires is not a concern. Copies whose every site
-/// is inside test cases are one level lower: spelling out each case is how
-/// tests are written, so a table of cases or a fixture is a style choice.
-fn shared_outcome(
-    required: Option<&Answer>,
-    same: Option<&Answer>,
-    detail: &Detail,
-) -> Option<Outcome> {
-    if matches!(noul(required?), Outcome::Review(_)) {
-        return Some(Outcome::Clear);
-    }
-    let same = score(same?);
-    Some(match detail {
-        Detail::Pair { in_cases: true, .. } => lowered(same),
-        _ => same,
-    })
-}
-
-/// Hollow signals decide review and clear; weak signals can raise a consider,
-/// and their uncertainty does not block a clear.
-fn test_value_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
-    let hollow = [noul(get("own_logic")?), noul(get("mock_only")?)];
-    let weak = [noul(get("internal")?), noul(get("several")?)];
-    let strongest = |outcomes: &[Outcome]| {
-        outcomes
-            .iter()
-            .filter_map(|o| match o {
-                Outcome::Review(p) => Some(*p),
-                _ => None,
-            })
-            .reduce(f64::max)
-    };
-    Some(if let Some(p) = strongest(&hollow) {
-        Outcome::Review(p)
-    } else if let Some(p) = strongest(&weak) {
-        Outcome::Consider(p)
-    } else if hollow.iter().all(|o| *o == Outcome::Clear) {
-        Outcome::Clear
-    } else {
-        Outcome::Uncertain(hollow.iter().map(|o| o.concern()).fold(0.0, f64::max))
-    })
-}
-
 /// The first-pass outcome, replaced by a decisive recheck when one exists.
 fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers<'a>) {
     if security(unit.rule) {
         let merged = security_answers(unit, judgments);
+        return (unit_outcome(unit, &merged), merged);
+    }
+    if unit.rule == catalog::HARDCODED_VALUES {
+        // Benign-kind checks have their own ids beside the first answers.
+        let mut merged = answers(judgments, &unit.id, Pass::First);
+        merged.extend(answers(judgments, &unit.id, Pass::Recheck));
         return (unit_outcome(unit, &merged), merged);
     }
     let first = answers(judgments, &unit.id, Pass::First);
@@ -485,6 +123,14 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                         merged.get("origin").map(|a| origin_outcome(a)),
                         Some(Outcome::Uncertain(_) | Outcome::Consider(_))
                     )
+            } else if u.rule == catalog::HARDCODED_VALUES {
+                let first = answers(judgments, &u.id, Pass::First);
+                let get = |q: &str| first.get(q).copied();
+                value_signals(&get, &u.detail, false).is_some_and(|signals| {
+                    signals
+                        .iter()
+                        .any(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
+                })
             } else {
                 matches!(
                     unit_outcome(u, &answers(judgments, &u.id, Pass::First)),
@@ -642,20 +288,18 @@ const SHOWN_VALUES: usize = 3;
 
 /// The unit and its undecided questions; with no answers, why.
 fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
-    let mut questions: Vec<String> = deciding_questions(unit.rule)
-        .iter()
-        .filter(|q| {
-            answers.get(*q).is_some_and(|a| {
-                let outcome = match a {
-                    Answer::Noul { .. } => noul(a),
-                    _ if **q == "origin" => origin_outcome(a),
-                    _ => score(a),
-                };
-                matches!(outcome, Outcome::Uncertain(_))
-            })
-        })
-        .map(|q| question_label(q).to_string())
-        .collect();
+    let get = |q: &str| answers.get(q).copied();
+    let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
+        .then(|| value_signals(&get, &unit.detail, true))
+        .flatten();
+    let mut questions: Vec<String> = match settled_values {
+        Some(signals) => signals
+            .iter()
+            .filter(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
+            .map(|(q, ..)| question_label(q).to_string())
+            .collect(),
+        None => undecided_questions(unit.rule, answers),
+    };
     if answers.is_empty() {
         questions.push("no answer".into());
     }
@@ -676,6 +320,24 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
         line: unit.locations.first().map_or(1, |l| l.start_line),
         questions,
     }
+}
+
+/// The deciding questions of a rule whose own answers stayed undecided.
+fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<String> {
+    deciding_questions(rule)
+        .iter()
+        .filter(|q| {
+            answers.get(*q).is_some_and(|a| {
+                let outcome = match a {
+                    Answer::Noul { .. } => noul(a),
+                    _ if **q == "origin" => origin_outcome(a),
+                    _ => score(a),
+                };
+                matches!(outcome, Outcome::Uncertain(_))
+            })
+        })
+        .map(|q| question_label(q).to_string())
+        .collect()
 }
 
 /// A rule's status is its most severe unit outcome.
@@ -845,7 +507,7 @@ fn finding(
             p,
         ),
         Detail::Values { .. } | Detail::Constants { .. } => {
-            values_wording(name, strength, p, answers)
+            values_wording(name, &unit.detail, strength, p, answers)
         }
         Detail::Security { sites, .. } => {
             let site = choice(answers.get("site").copied())

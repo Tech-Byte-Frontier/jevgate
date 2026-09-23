@@ -155,7 +155,8 @@ impl Scripted {
 
 /// Rechecks carry more evidence: callees, enclosing functions or file source.
 fn is_recheck(request: &Value) -> bool {
-    request["state"]["callees"].is_array()
+    request["jevgate"]["stage"] == "recheck"
+        || request["state"]["callees"].is_array()
         || request["state"]["callers"].is_array()
         || request["state"]["site_a"]["function_source"].is_string()
         || request["state"]["file"]["source"].is_string()
@@ -456,15 +457,15 @@ fn a_split_needs_a_group_with_users_of_its_own_when_users_are_known() {
     };
     let unknown = [group("G1", &[]), group("G2", &[])];
     assert!(
-        compose::split_has_users(&unknown, None),
+        outcome::split_has_users(&unknown, None),
         "missing evidence stands"
     );
     let shared = [group("G1", &["a.rs"]), group("G2", &["a.rs"])];
-    assert!(!compose::split_has_users(&shared, None));
+    assert!(!outcome::split_has_users(&shared, None));
     let own = [group("G1", &["a.rs", "b.rs"]), group("G2", &["a.rs"])];
-    assert!(compose::split_has_users(&own, None));
-    assert!(compose::split_has_users(&own, Some(&chosen("G1"))));
-    assert!(!compose::split_has_users(&own, Some(&chosen("G2"))));
+    assert!(outcome::split_has_users(&own, None));
+    assert!(outcome::split_has_users(&own, Some(&chosen("G1"))));
+    assert!(!outcome::split_has_users(&own, Some(&chosen("G2"))));
 }
 
 #[test]
@@ -743,7 +744,15 @@ fn undecided_units_are_listed_with_the_questions_left_undecided() {
 #[test]
 fn undecided_hardcoded_units_name_their_few_candidate_values() {
     let (project, options) = hardcoded_project();
-    let report = run(&project, &options, &mut scripted(3));
+    // Split answers that lean away from the concern, and follow-ups that do
+    // not clear them: they stay undecided.
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("environment", spread(0.55, 0.05, 0.4)),
+        ("magic", spread(0.55, 0.05, 0.4)),
+        ("special", noul_at(0.3)),
+    ];
+    let report = run(&project, &options, &mut eval);
     let undecided = &report.files[0].dimensions["hardcoded_values"].undecided;
     let connect = undecided.iter().find(|u| u.unit == "connect").unwrap();
     assert_eq!(connect.values, ["\"db.internal:5432\"", "30_000"]);
@@ -959,4 +968,82 @@ fn top_level_setup_is_one_unit_for_unsafe_settings() {
     let finding = &report.files[0].findings[0];
     assert_eq!(finding.category.as_deref(), Some("CWE-942 permissive CORS"));
     assert!(finding.message.starts_with("Module setup"));
+}
+
+#[test]
+fn an_undecided_value_is_cleared_by_its_kind_or_leans_into_a_note() {
+    let (project, mut options) = hardcoded_project();
+    let split = || {
+        vec![
+            ("environment", spread(0.4, 0.1, 0.5)),
+            ("magic", spread(0.6, 0.1, 0.3)),
+        ]
+    };
+    let mut eval = scripted(0);
+    eval.overrides = split();
+    let report = run(&project, &options, &mut eval);
+    assert!(eval.stages.contains(&"recheck".to_string()));
+    let dimension = &report.files[0].dimensions["hardcoded_values"];
+    assert_eq!(
+        (dimension.units.note, dimension.units.uncertain),
+        (2, 0),
+        "not cleared by the kind checks, and leaning toward the concern"
+    );
+    let leaned = report.files[0]
+        .findings
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("connect"))
+        .expect("the environment answer leaned toward its concern");
+    assert_eq!(leaned.strength, Strength::Note);
+    assert!(
+        leaned.message.contains("the answer was split"),
+        "{}",
+        leaned.message
+    );
+    options.refresh = true;
+    let mut eval = scripted(0);
+    eval.overrides = split();
+    eval.recheck_level = Some(2);
+    let report = run(&project, &options, &mut eval);
+    let dimension = &report.files[0].dimensions["hardcoded_values"];
+    assert_eq!(
+        dimension.status,
+        Status::Clear,
+        "every value is of an acceptable kind"
+    );
+}
+
+#[test]
+fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
+    let (project, mut options) = security_project(QUERY);
+    let status = |report: &Report| {
+        report.files[0].dimensions[catalog::SENSITIVE_DATA]
+            .status
+            .clone()
+    };
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("error_details", noul_at(0.3)),
+        ("exception_to_client", noul_at(0.3)),
+        ("own_messages", noul_at(0.95)),
+    ];
+    assert_eq!(status(&run(&project, &options, &mut eval)), Status::Clear);
+    options.refresh = true;
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("error_details", noul_at(0.6)),
+        ("exception_to_client", noul_at(0.3)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let note = &report.files[0].findings[0];
+    assert_eq!(note.strength, Strength::Note);
+    assert!(
+        note.message.contains("may send internal error details"),
+        "{}",
+        note.message
+    );
+    assert_eq!(
+        note.category.as_deref(),
+        Some("CWE-209 error details exposed")
+    );
 }

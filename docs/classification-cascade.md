@@ -27,7 +27,9 @@ signatures, or one candidate pair.
    hashes stay in local `jevgate` metadata that is not uploaded.
 4. **Follow-ups.** One recheck per uncertain unit, with callee signatures, the
    enclosing functions or the file's application source; a decisive recheck
-   replaces the first answer and both are kept. Hardcoded values have no recheck.
+   replaces the first answer and both are kept. A hardcoded-value unit is asked
+   instead whether every value is of an acceptable kind; that check can only
+   clear, since re-asking the concern per value added false findings.
    Then one locate Choice per split finding picks the body block to extract.
    Security units whose presence answers are not clear get one trace before the
    rechecks: specific literal checks per kind, a Choice among the unit's sites,
@@ -41,7 +43,11 @@ signatures, or one candidate pair.
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise
    uncertain. Where the middle level says the code is fine as it is, a consider
-   also needs the top level at 0.50; middle mass alone is an optional note. Questions ask whether a change would help a reader ("would splitting
+   also needs the top level at 0.50; middle mass alone is an optional note. For hardcoded values and security, an answer still
+   undecided after its follow-up is a note when it leans toward the concern
+   (0.50, the leading probability) and stays uncertain otherwise: undecided
+   answers leaning away were almost all acceptable code, and leaning toward
+   held both real positives of the labeled set. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
    Jev does not count reliably and reads "tasks" literally. Copies inside test
    cases are one level lower. A review always carries a finding.
