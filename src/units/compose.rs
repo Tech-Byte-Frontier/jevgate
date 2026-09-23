@@ -196,7 +196,7 @@ fn values_outcome<'a>(
     detail: &Detail,
 ) -> Option<Outcome> {
     let mut outcomes = vec![benefit(get("environment")?)];
-    if matches!(detail, Detail::Values) {
+    if matches!(detail, Detail::Values { .. }) {
         outcomes.push(benefit(get("magic")?));
         outcomes.push(noul(get("special")?));
     }
@@ -443,6 +443,10 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
     }
 }
 
+/// Candidate values are listed with an undecided unit only when this few,
+/// so the entry names what the question was about without repeating the code.
+const SHOWN_VALUES: usize = 3;
+
 /// The unit and its undecided questions; with no answers, why.
 fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
     let mut questions: Vec<String> = deciding_questions(unit.rule)
@@ -461,11 +465,20 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
     if answers.is_empty() {
         questions.push("no answer".into());
     }
+    let values = match &unit.detail {
+        Detail::Values { values } | Detail::Constants { values }
+            if values.len() <= SHOWN_VALUES =>
+        {
+            values.clone()
+        }
+        _ => Vec::new(),
+    };
     Undecided {
         unit: match unit.detail {
             Detail::Outline { .. } => "file outline".into(),
             _ => unit.name.clone(),
         },
+        values,
         line: unit.locations.first().map_or(1, |l| l.start_line),
         questions,
     }
@@ -635,7 +648,9 @@ fn finding(
             strength,
             p,
         ),
-        Detail::Values | Detail::Constants => values_wording(name, strength, p, answers),
+        Detail::Values { .. } | Detail::Constants { .. } => {
+            values_wording(name, strength, p, answers)
+        }
         Detail::Test => test_wording(name, strength == Strength::Review, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;

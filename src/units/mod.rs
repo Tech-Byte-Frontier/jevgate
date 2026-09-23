@@ -84,9 +84,13 @@ pub enum Detail {
         in_cases: bool,
     },
     /// A function and the literal values it uses.
-    Values,
-    /// A file's module-level constants.
-    Constants,
+    Values {
+        values: Vec<String>,
+    },
+    /// A file's module-level constants and the literal values they hold.
+    Constants {
+        values: Vec<String>,
+    },
     Test,
     TestPair {
         names: [String; 2],

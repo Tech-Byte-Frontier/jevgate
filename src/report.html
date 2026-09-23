@@ -88,7 +88,7 @@ function fileCard(f){
  if(f.error)p(body,f.error,'warning');
  if(f.classification)p(body,f.classification,'small');
  if(f.findings.length){body.append(el('h2','Findings'));for(const finding of f.findings)body.append(findingRow(finding))}
- if(undecided.length){body.append(el('h2','Undecided'));p(body,'Answers stayed split for these units, so no finding was raised.','small');const list=el('ul',null,'undecided');for(const u of undecided){const item=el('li');item.append(el('span',u.unit,'unit'),document.createTextNode(' · line '+u.line+' · '+name(u.rule)+': '+u.questions.join(', ')));list.append(item)}body.append(list)}
+ if(undecided.length){body.append(el('h2','Undecided'));p(body,'Answers stayed split for these units, so no finding was raised.','small');const list=el('ul',null,'undecided');for(const u of undecided){const item=el('li');item.append(el('span',u.unit,'unit'),document.createTextNode(' · line '+u.line+' · '+name(u.rule)+': '+u.questions.join(', ')+(u.values&&u.values.length?' ('+u.values.join(', ')+')':'')));list.append(item)}body.append(list)}
  if(f.limitations.length){body.append(el('h2','Evidence gaps'));for(const limit of f.limitations)p(body,limit,'small')}
  if(f.checks.length){body.append(el('h2','Classifications'));const inactive=el('details');inactive.append(el('summary',f.checks.filter(c=>c.status==='not-applicable').length+' checks not applicable in this scope'));for(const c of [...f.checks].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status))){
   const row=el('div',null,'check'),title=el('div'),info=el('div');title.append(el('strong',name(c.rule)));p(title,c.scope,'small');row.append(title,badge(c.status),info);

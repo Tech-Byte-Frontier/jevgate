@@ -227,9 +227,14 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
             d.decision_basis
         )?;
         for unit in &d.undecided {
+            let values = if unit.values.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", unit.values.join(", "))
+            };
             writeln!(
                 out,
-                "    undecided: {} (line {}) · {}",
+                "    undecided: {} (line {}) · {}{values}",
                 unit.unit,
                 unit.line,
                 unit.questions.join(", ")
