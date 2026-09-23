@@ -39,7 +39,16 @@ pub enum JevCommand {
     /// `.jevgate/latest.json`. Commit the file. Findings are matched by a
     /// fingerprint of rule, path, unit and evidence, so unrelated edits keep
     /// them accepted. Offline: no source is read or sent.
-    Baseline,
+    Baseline {
+        /// Keep earlier accepted findings for files the last check did not cover
+        ///
+        /// Without it, the file is replaced, so after a `--base` or path-limited
+        /// check the findings accepted for every other file are dropped. With it,
+        /// entries for files the check covered, or that were deleted, are replaced
+        /// by what the check found, and the rest are kept.
+        #[arg(long)]
+        merge: bool,
+    },
     /// List every rule with its group, default and the question it asks
     ///
     /// A rule is named by its ID (`maintainability/shared-logic`), its key
@@ -82,6 +91,7 @@ Workflow:
   jevgate check --dry-run --show-requests   Print every request body; no key, no network
   jevgate check                             Review and apply the gate
   jevgate baseline                          Accept current findings; later checks fail only on new ones
+  jevgate baseline --merge                  Accept a partial check's findings, keeping the rest
 
 For agents and CI:
   jevgate check --base origin/main                   Only files changed since a revision

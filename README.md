@@ -100,6 +100,7 @@ jevgate check --rule documentation                # only agent instruction files
 jevgate check --include-tests                     # also judge tests
 jevgate check --base origin/main --format json    # changed files only, for agents and scripts
 jevgate check --watch                             # re-check on save
+jevgate baseline --merge                          # after a --base or path check: accept its findings, keep the rest
 ```
 
 Every command documents itself: `jevgate --help` gives the workflow, exit codes, files and environment, and `jevgate check --help` explains each flag and the JSON report. `-h` prints a short summary.
@@ -117,7 +118,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     env:
-      JEVGATE_VERSION: 0.7.0
+      JEVGATE_VERSION: 0.8.0
     steps:
       - uses: actions/checkout@v7
         with:

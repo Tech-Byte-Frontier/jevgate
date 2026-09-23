@@ -263,6 +263,22 @@ fn a_rule_level_fails_the_gate_only_for_that_rule() {
     }
 }
 
+/// A project with two judged functions, `a.rs` and `b.rs`.
+fn two_files() -> Project {
+    let project = Project::new();
+    project.write("a.rs", &function("a"));
+    project.write("b.rs", &function("b"));
+    project
+}
+
+/// Save a report as the last check, as `jevgate check` does.
+fn publish(project: &Project, report: &schema::Report) {
+    storage::Store::open(&project.0)
+        .unwrap()
+        .publish(report)
+        .unwrap();
+}
+
 #[test]
 fn baselined_findings_do_not_fail_the_gate_but_new_ones_do() {
     let project = Project::new();
@@ -272,13 +288,12 @@ fn baselined_findings_do_not_fail_the_gate_but_new_ones_do() {
         level: 2,
         ..Default::default()
     };
-    let report = run(&project, &options, &mut review);
-    storage::Store::open(&project.0)
-        .unwrap()
-        .publish(&report)
-        .unwrap();
-    let (path, count) = gate::write_baseline(&project.0).unwrap();
-    assert_eq!((path, count), (project.0.join(gate::BASELINE_FILE), 1));
+    publish(&project, &run(&project, &options, &mut review));
+    let written = gate::write_baseline(&project.0, false).unwrap();
+    assert_eq!(
+        (written.path, written.accepted),
+        (project.0.join(gate::BASELINE_FILE), 1)
+    );
     let report = run(&project, &options, &mut review);
     assert!(report.files[0].findings[0].baselined);
     assert_eq!(gate::exit_code(&report), 0);
@@ -289,10 +304,36 @@ fn baselined_findings_do_not_fail_the_gate_but_new_ones_do() {
 }
 
 #[test]
+fn a_merged_baseline_keeps_accepted_findings_for_files_the_check_did_not_cover() {
+    let project = two_files();
+    let mut options = args();
+    let mut review = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    publish(&project, &run(&project, &options, &mut review));
+    assert_eq!(gate::write_baseline(&project.0, false).unwrap().accepted, 2);
+    // A check of `a.rs` alone, as a `--base` run that only changed it.
+    project.write("a.rs", &function("a2"));
+    options.paths = vec!["a.rs".into()];
+    publish(&project, &run(&project, &options, &mut review));
+    let merged = gate::write_baseline(&project.0, true).unwrap();
+    assert_eq!((merged.accepted, merged.kept), (1, 1));
+    options.paths.clear();
+    let report = run(&project, &options, &mut review);
+    assert!(report.files.iter().all(|f| f.findings[0].baselined));
+    assert_eq!(gate::exit_code(&report), 0);
+    // Without merge the same partial check drops `b.rs`.
+    options.paths = vec!["a.rs".into()];
+    publish(&project, &run(&project, &options, &mut review));
+    assert_eq!(gate::write_baseline(&project.0, false).unwrap().accepted, 1);
+    options.paths.clear();
+    assert_eq!(gate::exit_code(&run(&project, &options, &mut review)), 1);
+}
+
+#[test]
 fn malformed_response_and_exhausted_budget_never_pass() {
-    let project = Project::new();
-    project.write("a.rs", &function("a"));
-    project.write("b.rs", &function("b"));
+    let project = two_files();
     let mut options = args();
     options.max_requests = Some(1);
     let mut mock = Mock {

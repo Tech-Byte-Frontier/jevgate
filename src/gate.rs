@@ -117,17 +117,25 @@ pub fn settle(root: &Path, report: &mut Report, args: &CheckArgs) -> Result<()> 
     Ok(())
 }
 
-/// Mark findings whose fingerprints the baseline accepted.
-pub fn apply_baseline(root: &Path, report: &mut Report) -> Result<()> {
+/// The committed baseline, when there is one.
+fn read_baseline(root: &Path) -> Result<Option<Baseline>> {
     let path = root.join(BASELINE_FILE);
     if !path.exists() {
-        return Ok(());
+        return Ok(None);
     }
     let text = crate::inventory::read_source(&path, 16 * 1024 * 1024)
         .with_context(|| format!("Cannot read {BASELINE_FILE}"))?;
     let baseline: Baseline =
         serde_json::from_str(&text).with_context(|| format!("Invalid {BASELINE_FILE}"))?;
     ensure!(baseline.version == 1, "Unsupported {BASELINE_FILE} version");
+    Ok(Some(baseline))
+}
+
+/// Mark findings whose fingerprints the baseline accepted.
+pub fn apply_baseline(root: &Path, report: &mut Report) -> Result<()> {
+    let Some(baseline) = read_baseline(root)? else {
+        return Ok(());
+    };
     let accepted: BTreeSet<&str> = baseline
         .findings
         .iter()
@@ -139,8 +147,19 @@ pub fn apply_baseline(root: &Path, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
+/// What `jevgate baseline` wrote: the file, the findings it accepted from the
+/// last check, and the earlier entries it kept for files that check did not cover.
+pub struct Written {
+    pub path: std::path::PathBuf,
+    pub accepted: usize,
+    pub kept: usize,
+}
+
 /// Accept every finding of the last complete check. No source is read or sent.
-pub fn write_baseline(root: &Path) -> Result<(std::path::PathBuf, usize)> {
+/// With `merge`, earlier entries stay for files the check did not cover, such
+/// as unchanged files of a `--base` run; entries for checked or deleted files
+/// are replaced by what the check found.
+pub fn write_baseline(root: &Path, merge: bool) -> Result<Written> {
     let report = crate::storage::read_latest(root)
         .context("No compatible .jevgate/latest.json; run jevgate check first")?;
     ensure!(
@@ -159,9 +178,25 @@ pub fn write_baseline(root: &Path) -> Result<(std::path::PathBuf, usize)> {
             })
         })
         .collect();
+    let accepted = findings.len();
+    let mut kept = 0;
+    if merge && let Some(previous) = read_baseline(root)? {
+        let covered: BTreeSet<&Path> = report
+            .files
+            .iter()
+            .map(|f| f.path.as_path())
+            .chain(report.deleted_files.iter().map(|p| p.as_path()))
+            .collect();
+        let earlier: Vec<Accepted> = previous
+            .findings
+            .into_iter()
+            .filter(|f| !covered.contains(f.path.as_path()))
+            .collect();
+        kept = earlier.len();
+        findings.extend(earlier);
+    }
     findings.sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
     findings.dedup_by(|a, b| a.fingerprint == b.fingerprint);
-    let count = findings.len();
     let path = root.join(BASELINE_FILE);
     let baseline = Baseline {
         version: 1,
@@ -171,5 +206,9 @@ pub fn write_baseline(root: &Path) -> Result<(std::path::PathBuf, usize)> {
     let mut bytes = serde_json::to_vec_pretty(&baseline)?;
     bytes.push(b'\n');
     std::fs::write(&path, bytes).with_context(|| format!("Cannot write {}", path.display()))?;
-    Ok((path, count))
+    Ok(Written {
+        path,
+        accepted,
+        kept,
+    })
 }
