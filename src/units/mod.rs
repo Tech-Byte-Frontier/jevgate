@@ -6,6 +6,7 @@ pub mod compose;
 mod duplicates;
 mod evidence;
 mod functions;
+mod hardcoded;
 pub(crate) mod outline;
 mod plan;
 pub mod questions;
@@ -82,6 +83,10 @@ pub enum Detail {
         /// Every copy is inside a test case, where spelling out each case is idiomatic.
         in_cases: bool,
     },
+    /// A function and the literal values it uses.
+    Values,
+    /// A file's module-level constants.
+    Constants,
     Test,
     TestPair {
         names: [String; 2],

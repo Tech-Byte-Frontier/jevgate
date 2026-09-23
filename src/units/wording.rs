@@ -3,7 +3,7 @@ use super::{
     Block, GroupInfo,
     compose::{Answers, Outcome, benefit, levels, noul},
 };
-use crate::schema::Strength;
+use crate::schema::{Answer, Strength};
 
 /// A finding's message and the action it recommends.
 pub(super) type Wording = (String, &'static str);
@@ -191,6 +191,87 @@ pub(super) fn pair_wording(
             "Decide whether one implementation should serve both",
         ),
     }
+}
+
+/// One hardcoded-value question, how it composes, and its words.
+struct ValueSignal {
+    question: &'static str,
+    outcome: fn(&Answer) -> Outcome,
+    finding: &'static str,
+    note: &'static str,
+    action: &'static str,
+}
+
+const VALUE_SIGNALS: [ValueSignal; 3] = [
+    ValueSignal {
+        question: "environment",
+        outcome: benefit,
+        finding: "fixes a value that differs between deployments",
+        note: "has a local default that configuration could own",
+        action: "Read the value from configuration or the environment",
+    },
+    ValueSignal {
+        question: "magic",
+        outcome: benefit,
+        finding: "uses a value whose meaning a reader must guess",
+        note: "has a value that could be named, though its context explains it",
+        action: "Give the value a descriptive constant name",
+    },
+    ValueSignal {
+        question: "special",
+        outcome: noul,
+        finding: "special-cases one specific identity",
+        note: "special-cases one specific identity",
+        action: "Move the special case into data or configuration",
+    },
+];
+
+/// Each hardcoded-value signal that reached this strength, in plain words; the
+/// first one's remedy is the action.
+pub(super) fn values_wording(
+    name: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> Wording {
+    let reached: Vec<&ValueSignal> = VALUE_SIGNALS
+        .iter()
+        .filter(|signal| {
+            answers.get(signal.question).is_some_and(|a| {
+                matches!(
+                    (strength, (signal.outcome)(a)),
+                    (Strength::Review, Outcome::Review(_))
+                        | (Strength::Consider, Outcome::Consider(_))
+                        | (Strength::Note, Outcome::Note(_))
+                )
+            })
+        })
+        .collect();
+    let reasons: Vec<&str> = reached
+        .iter()
+        .map(|signal| match strength {
+            Strength::Note => signal.note,
+            _ => signal.finding,
+        })
+        .collect();
+    let subject = if name == "module constants" {
+        "Module constants".to_string()
+    } else {
+        format!("`{name}`")
+    };
+    let likely = if strength == Strength::Consider {
+        " likely"
+    } else {
+        ""
+    };
+    (
+        format!("{subject}{likely} {} ({p:.2}).", reasons.join("; ")),
+        match (strength, reached.first()) {
+            (Strength::Note, _) => "Optional: name or configure the value if it changes",
+            (_, Some(signal)) => signal.action,
+            (_, None) => "Review the values",
+        },
+    )
 }
 
 /// Each test-value signal that reached review, in plain words.

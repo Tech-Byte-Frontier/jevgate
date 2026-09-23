@@ -7,7 +7,10 @@
 //! level to lead; middle mass alone is an optional note.
 use super::{
     Block, Detail, FilePlan, GroupInfo, Presence, UnitPlan,
-    wording::{function_wording, outline_wording, pair_wording, test_pair_wording, test_wording},
+    wording::{
+        function_wording, outline_wording, pair_wording, test_pair_wording, test_wording,
+        values_wording,
+    },
 };
 use crate::{
     catalog,
@@ -151,24 +154,51 @@ fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), &unit.detail),
         catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => get("overlap").map(score),
+        catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
 }
 
+/// The strongest of several signals about one unit: review, then consider,
+/// then note, each at its highest probability. Clear only when every signal
+/// is clear; otherwise uncertain.
+fn strongest(outcomes: &[Outcome]) -> Outcome {
+    let best = |pick: fn(Outcome) -> Option<f64>| {
+        outcomes.iter().filter_map(|o| pick(*o)).reduce(f64::max)
+    };
+    if let Some(p) = best(|o| matches!(o, Outcome::Review(_)).then(|| o.concern())) {
+        Outcome::Review(p)
+    } else if let Some(p) = best(|o| matches!(o, Outcome::Consider(_)).then(|| o.concern())) {
+        Outcome::Consider(p)
+    } else if let Some(p) = best(|o| matches!(o, Outcome::Note(_)).then(|| o.concern())) {
+        Outcome::Note(p)
+    } else if outcomes.iter().all(|o| *o == Outcome::Clear) {
+        Outcome::Clear
+    } else {
+        Outcome::Uncertain(outcomes.iter().map(|o| o.concern()).fold(0.0, f64::max))
+    }
+}
+
 /// The stronger of splitting and (for deeply nested functions only) flattening.
 fn function_outcome(split: Option<&Answer>, flatten: Option<&Answer>) -> Option<Outcome> {
-    let split = benefit(split?);
-    let flatten = flatten.map(benefit);
-    Some(match (split, flatten) {
-        (Outcome::Review(p), _) | (_, Some(Outcome::Review(p))) => Outcome::Review(p),
-        (Outcome::Consider(p), _) | (_, Some(Outcome::Consider(p))) => Outcome::Consider(p),
-        (Outcome::Note(p), _) | (_, Some(Outcome::Note(p))) => Outcome::Note(p),
-        (Outcome::Clear, None | Some(Outcome::Clear)) => Outcome::Clear,
-        (split, flatten) => {
-            Outcome::Uncertain(split.concern().max(flatten.map_or(0.0, Outcome::concern)))
-        }
-    })
+    let mut outcomes = vec![benefit(split?)];
+    outcomes.extend(flatten.map(benefit));
+    Some(strongest(&outcomes))
+}
+
+/// A function's environment, naming and special-case signals; a file's
+/// constants are asked only about the environment.
+fn values_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    detail: &Detail,
+) -> Option<Outcome> {
+    let mut outcomes = vec![benefit(get("environment")?)];
+    if matches!(detail, Detail::Values) {
+        outcomes.push(benefit(get("magic")?));
+        outcomes.push(noul(get("special")?));
+    }
+    Some(strongest(&outcomes))
 }
 
 /// A split is suggested only when the proposed group has users of its own in
@@ -444,6 +474,7 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::FUNCTION_SIMPLIFICATION => "function",
         catalog::SHARED_LOGIC => "candidate pair",
         catalog::TEST_VALUE => "test",
+        catalog::HARDCODED_VALUES => "value unit",
         _ => "test pair",
     };
     let plural = |n: usize| if n == 1 { "" } else { "s" };
@@ -545,6 +576,7 @@ fn finding(
             strength,
             p,
         ),
+        Detail::Values | Detail::Constants => values_wording(name, strength, p, answers),
         Detail::Test => test_wording(name, strength == Strength::Review, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;

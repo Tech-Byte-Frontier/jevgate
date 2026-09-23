@@ -183,13 +183,17 @@ fn only(options: &mut CheckArgs, rule: &str) {
     options.rules = vec![rule.into()];
 }
 
-/// A project whose `lib.rs` holds `source`, checked for function simplification only.
-fn function_rule_project(source: &str) -> (Project, CheckArgs) {
+/// A project whose `lib.rs` holds `source`, checked for one rule only.
+fn rule_project(source: &str, rule: &str) -> (Project, CheckArgs) {
     let project = Project::new();
     project.write("lib.rs", source);
     let mut options = args();
-    only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
+    only(&mut options, rule);
     (project, options)
+}
+
+fn function_rule_project(source: &str) -> (Project, CheckArgs) {
+    rule_project(source, catalog::FUNCTION_SIMPLIFICATION)
 }
 
 #[test]
@@ -644,4 +648,69 @@ fn undecided_weak_test_signals_do_not_block_a_clear_test() {
         report.files[0].dimensions["test_value"].status,
         Status::Uncertain
     );
+}
+
+const HARDCODED: &str = "const REGION: &str = \"eu-west-1\";\n\nfn connect() -> Client {\n    Client::new(\"db.internal:5432\", 30_000)\n}\n\nfn total(values: &[i32]) -> i32 {\n    values.iter().sum()\n}\n";
+
+fn hardcoded_project() -> (Project, CheckArgs) {
+    rule_project(HARDCODED, catalog::HARDCODED_VALUES)
+}
+
+#[test]
+fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
+    let (project, options) = hardcoded_project();
+    let (_, plan) = planned(&project, &options);
+    let stages: Vec<_> = plan
+        .requests
+        .iter()
+        .map(|p| p.request["jevgate"]["stage"].as_str().unwrap())
+        .collect();
+    assert_eq!(stages, ["values", "constants"]);
+    let values = &plan.requests[0].request["state"]["functions"];
+    assert_eq!(
+        values.as_array().unwrap().len(),
+        1,
+        "`total` has no literal"
+    );
+    assert_eq!(
+        values[0]["values"],
+        json!(["\"db.internal:5432\"", "30_000"])
+    );
+    let questions = plan.requests[0].request["questions"].as_object().unwrap();
+    assert_eq!(questions.len(), 3);
+    assert_eq!(
+        plan.requests[1].request["state"]["constants"][0]["value"],
+        "\"eu-west-1\""
+    );
+}
+
+#[test]
+fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
+    let (project, mut options) = hardcoded_project();
+    let run_with = |options: &CheckArgs, overrides: Vec<(&'static str, Value)>| {
+        let mut eval = scripted(0);
+        eval.overrides = overrides;
+        run(&project, options, &mut eval)
+    };
+    let report = run_with(&options, vec![("environment", spread(0.1, 0.8, 0.1))]);
+    let strengths: Vec<_> = report.files[0]
+        .findings
+        .iter()
+        .map(|f| f.strength)
+        .collect();
+    assert_eq!(strengths, [Strength::Note, Strength::Note]);
+    options.refresh = true;
+    let report = run_with(
+        &options,
+        vec![("special", json!({"type":"noul","noul":0.9}))],
+    );
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(finding.rule, "maintainability/hardcoded-values");
+    assert!(
+        finding
+            .message
+            .contains("special-cases one specific identity")
+    );
+    assert!(finding.action.contains("data or configuration"));
 }

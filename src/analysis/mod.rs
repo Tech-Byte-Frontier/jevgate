@@ -5,7 +5,9 @@ pub mod blocks;
 pub mod clones;
 pub mod groups;
 pub mod imports;
+pub mod literals;
 pub mod nesting;
+mod summary;
 pub mod test_map;
 pub mod units;
 

@@ -29,7 +29,7 @@ pub(super) struct Receipt {
 }
 
 /// Request kinds reported in `stages`, in dispatch order.
-pub(crate) const STAGES: [&str; 8] = [
+pub(crate) const STAGES: [&str; 10] = [
     "file-purpose",
     "functions",
     "outline",
@@ -38,6 +38,8 @@ pub(crate) const STAGES: [&str; 8] = [
     "test-pair",
     "recheck",
     "locate",
+    "values",
+    "constants",
 ];
 
 pub(super) fn stage(request: &Value) -> &'static str {
@@ -238,10 +240,13 @@ fn require_paths(
     Ok(())
 }
 
+/// A usage count above this is corrupt, not a real count, and is ignored.
+const MAX_REPORTED_TOKENS: u64 = 1_000_000_000;
+
 fn usage(body: &Value, field: &str) -> u64 {
     body["usage"][field]
         .as_u64()
-        .filter(|n| *n <= 1_000_000_000)
+        .filter(|n| *n <= MAX_REPORTED_TOKENS)
         .unwrap_or(0)
 }
 

@@ -204,6 +204,13 @@ impl Evaluator for Client {
 /// Consecutive edge blocks that stop further uploads.
 const EDGE_BLOCKS: u16 = 3;
 
+/// Backoff jitter in thousandths of the delay: coprime steps spread requests
+/// and retries over up to a quarter of it.
+const JITTER_INDEX_STEP: u64 = 37;
+const JITTER_RETRY_STEP: u64 = 101;
+const JITTER_RANGE: u64 = 250;
+const PER_MILLE: u32 = 1000;
+
 /// Reject further uploads in this review only after a typed account/access failure.
 /// Completed and in-flight requests keep their individual results; caches bypass this gate.
 /// Rate-limit and overload responses pause every worker through one shared cooldown.
@@ -297,8 +304,9 @@ impl ProviderAccess {
     /// Exponential backoff with deterministic jitter, so reruns are reproducible
     /// while concurrent requests still spread out.
     fn backoff(&self, index: usize, retry: u32) -> Duration {
-        let jitter = (index as u64 * 37 + u64::from(retry) * 101) % 250;
-        self.backoff * 2u32.pow(retry) * (1000 + jitter as u32) / 1000
+        let jitter = (index as u64 * JITTER_INDEX_STEP + u64::from(retry) * JITTER_RETRY_STEP)
+            % JITTER_RANGE;
+        self.backoff * 2u32.pow(retry) * (PER_MILLE + jitter as u32) / PER_MILLE
     }
 
     fn send_with_retries(

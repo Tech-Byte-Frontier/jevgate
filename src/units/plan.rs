@@ -9,7 +9,9 @@ pub(super) struct Scope<'a> {
     context: Vec<(PathBuf, &'a str, FileUnits)>,
 }
 
-use super::{FileContext, FilePlan, Plan, Planned, duplicates, functions, outline, test_units};
+use super::{
+    FileContext, FilePlan, Plan, Planned, duplicates, functions, hardcoded, outline, test_units,
+};
 use crate::{
     analysis::{
         clones::{self, SourceFile},
@@ -213,6 +215,23 @@ fn plan_file(
             let parsed = &scope.units[&owner];
             outline::plan(&context, parsed, &members, &callers, &mut file, requests);
         }
+    }
+    if shared.enabled(catalog::HARDCODED_VALUES) && view.application {
+        file.rules.insert(catalog::HARDCODED_VALUES, 0);
+        let parsed = &scope.units[&owner];
+        let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
+        let units: Vec<&Unit> = parsed
+            .units
+            .iter()
+            .filter(|u| u.callable() && outside_tests(u.line))
+            .collect();
+        let constants: Vec<_> = parsed
+            .constants
+            .iter()
+            .filter(|c| outside_tests(c.line))
+            .cloned()
+            .collect();
+        hardcoded::plan(&context, &units, &constants, &mut file, requests);
     }
     if shared.enabled(catalog::SHARED_LOGIC) {
         file.rules.insert(catalog::SHARED_LOGIC, 0);

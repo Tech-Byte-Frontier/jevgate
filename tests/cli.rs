@@ -579,6 +579,7 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "file_organization",
             "function_simplification",
             "shared_logic",
+            "hardcoded_values",
             "test_value",
             "test_redundancy"
         ]

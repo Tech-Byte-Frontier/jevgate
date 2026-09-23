@@ -1,0 +1,178 @@
+//! Hardcoded values: packed function sources with the literal values each one
+//! uses, and one unit per file for its module-level constants. Per function,
+//! Scores on whether a value belongs in configuration or deserves a name, and
+//! a Noul on whether the function special-cases one identity.
+use super::{
+    Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, UnitPlan, compact,
+    identity, pack, questions, unique_ids,
+};
+use crate::{
+    analysis::{literals::Constant, units::Unit},
+    catalog::HARDCODED_VALUES,
+    schema::Pass,
+};
+use serde_json::{Value, json};
+
+pub(super) fn plan(
+    file: &FileContext<'_>,
+    units: &[&Unit],
+    constants: &[Constant],
+    out: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let units: Vec<&Unit> = units
+        .iter()
+        .copied()
+        .filter(|u| !u.literals.is_empty())
+        .collect();
+    let ids = unique_ids("values", units.iter().map(|u| u.name.as_str()));
+    let mut items = Vec::new();
+    for (unit, id) in units.iter().zip(ids) {
+        let source = unit.source(file.source);
+        out.units.push(UnitPlan {
+            rule: HARDCODED_VALUES,
+            id: id.clone(),
+            name: unit.name.clone(),
+            presence: Presence::Judged,
+            locations: vec![file.location(unit.line, unit.end_line, Some(&unit.name))],
+            quote: None,
+            lines: unit.lines(),
+            identity: identity(&[&unit.name, &compact(source)]),
+            detail: Detail::Values,
+            recheck: None,
+        });
+        let values: Vec<&str> = unit.literals.iter().map(|l| l.text.as_str()).collect();
+        items.push((
+            out.units.len() - 1,
+            id,
+            json!({"name": unit.name, "source": source, "values": values}),
+        ));
+    }
+    for group in pack(items, PACK_ITEMS, |(_, _, state)| state) {
+        send_or_split(file, group, out, requests);
+    }
+    if !constants.is_empty() {
+        plan_constants(file, constants, out, requests);
+    }
+}
+
+/// A pack that is too large is sent one function at a time.
+fn send_or_split(
+    file: &FileContext<'_>,
+    group: Vec<(usize, String, Value)>,
+    out: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let (request, asked) = functions_request(file, &group);
+    if file.budget.fits(&request) {
+        requests.push(Planned {
+            owner: file.owner,
+            request,
+            asked,
+        });
+        return;
+    }
+    for item in group {
+        let (request, asked) = functions_request(file, std::slice::from_ref(&item));
+        if file.budget.fits(&request) {
+            requests.push(Planned {
+                owner: file.owner,
+                request,
+                asked,
+            });
+        } else {
+            out.units[item.0].presence = Presence::NeedsContext;
+        }
+    }
+}
+
+fn functions_request(
+    file: &FileContext<'_>,
+    items: &[(usize, String, Value)],
+) -> (Value, super::Asked) {
+    let mut questions = Questions::default();
+    for (index, (_, id, _)) in items.iter().enumerate() {
+        let values = format!("functions[{index}].values");
+        let code = format!("functions[{index}].source");
+        for (question, body) in [
+            (
+                "environment",
+                questions::hardcoded_environment(&values, &format!("`{code}`")),
+            ),
+            ("magic", questions::hardcoded_magic(&values, &code)),
+            ("special", questions::hardcoded_special(&code)),
+        ] {
+            questions.ask(
+                format!("f{index}_{question}"),
+                body,
+                id,
+                HARDCODED_VALUES,
+                question,
+                Pass::First,
+            );
+        }
+    }
+    let state = json!({
+        "file": file.file_state(),
+        "functions": items.iter().map(|(_, _, state)| state.clone()).collect::<Vec<_>>(),
+    });
+    file.request("values", state, questions)
+}
+
+const CONSTANTS_ID: &str = "constants";
+
+/// One unit for the file's module-level constants: only the environment
+/// question, since a name already explains each value.
+fn plan_constants(
+    file: &FileContext<'_>,
+    constants: &[Constant],
+    out: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let mut questions = Questions::default();
+    questions.ask(
+        "environment".into(),
+        questions::hardcoded_environment("constants", "the program"),
+        CONSTANTS_ID,
+        HARDCODED_VALUES,
+        "environment",
+        Pass::First,
+    );
+    let listed: Vec<Value> = constants
+        .iter()
+        .map(|c| match &c.value {
+            Some(value) => json!({"name": c.name, "value": value}),
+            None => json!({"name": c.name, "values": c.values}),
+        })
+        .collect();
+    let state = json!({"file": file.file_state(), "constants": listed});
+    let (request, asked) = file.request("constants", state, questions);
+    let fits = file.budget.fits(&request);
+    let names: Vec<&str> = constants.iter().map(|c| c.name.as_str()).collect();
+    out.units.push(UnitPlan {
+        rule: HARDCODED_VALUES,
+        id: CONSTANTS_ID.into(),
+        name: "module constants".into(),
+        presence: if fits {
+            Presence::Judged
+        } else {
+            Presence::NeedsContext
+        },
+        locations: constants
+            .iter()
+            .map(|c| file.location(c.line, c.end_line, Some(&c.name)))
+            .collect(),
+        quote: None,
+        lines: constants.iter().map(|c| c.end_line + 1 - c.line).sum(),
+        identity: identity(&names),
+        detail: Detail::Constants,
+        recheck: None,
+    });
+    if fits {
+        requests.push(Planned {
+            owner: file.owner,
+            request,
+            asked,
+        });
+    }
+}

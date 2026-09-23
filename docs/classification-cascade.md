@@ -25,16 +25,18 @@ signatures, or one candidate pair.
    tests in the same state left more answers undecided. State uses literal paths
    such as `functions[2].source`; group IDs are Choice options. Stage and freshness
    hashes stay in local `jevgate` metadata that is not uploaded.
-4. **Recheck.** One request per uncertain unit, with callee signatures, the
-   enclosing functions or the file's application source. A decisive recheck
-   replaces the first answer; both are kept.
+4. **Follow-ups.** One recheck per uncertain unit, with callee signatures, the
+   enclosing functions or the file's application source; a decisive recheck
+   replaces the first answer and both are kept. Hardcoded values have no recheck.
+   Then one locate Choice per split finding picks the body block to extract.
 5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise
-   uncertain. Questions ask whether a change would help a reader ("would splitting
+   uncertain. Where the middle level says the code is fine as it is, a consider
+   also needs the top level at 0.50; middle mass alone is an optional note. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
-   Jev does not count reliably and reads "tasks" literally. Copies within one test
-   raise at most a consider. A review always carries a finding.
+   Jev does not count reliably and reads "tasks" literally. Copies inside test
+   cases are one level lower. A review always carries a finding.
 6. **Gate.** `--fail-on` and the baseline act on composed findings only.
 
 ## Constraints

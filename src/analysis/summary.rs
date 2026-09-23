@@ -1,0 +1,66 @@
+//! What an outline shows of a definition: its header on one line and the
+//! first line of its documentation, both clipped.
+use super::text;
+use tree_sitter::Node;
+
+const SIGNATURE_CHARS: usize = 240;
+const DOC_CHARS: usize = 160;
+
+/// The definition's header on one line, without attributes, decorators or
+/// the opening of its body.
+pub(super) fn signature(outer: Node<'_>, body: Option<Node<'_>>, source: &str) -> String {
+    let end = body.map_or(outer.end_byte(), |b| b.start_byte());
+    clip(
+        source[outer.start_byte()..end]
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("#[") && !line.starts_with('@'))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim_end_matches(['{', ':', ' ', '='])
+            .trim_end_matches("=>")
+            .trim(),
+        SIGNATURE_CHARS,
+    )
+}
+
+pub(super) fn doc_line(leading: &str, node: Node<'_>, source: &str) -> String {
+    let comment = leading
+        .lines()
+        .map(clean_comment)
+        .find(|line| !line.is_empty());
+    let docstring = || {
+        // A Python docstring is the first statement of the body.
+        let body = node.child_by_field_name("body")?;
+        let first = body.named_child(0)?;
+        let string = (first.kind() == "expression_statement")
+            .then(|| first.named_child(0))
+            .flatten()
+            .filter(|n| n.kind() == "string")?;
+        text(string, source)
+            .trim_matches(['"', '\'', 'r', 'b', 'f'])
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(str::to_string)
+    };
+    clip(&comment.or_else(docstring).unwrap_or_default(), DOC_CHARS)
+}
+
+fn clean_comment(line: &str) -> String {
+    let line = line.trim();
+    if line.starts_with("#[") {
+        return String::new();
+    }
+    line.trim_start_matches(['/', '*', '!', '#'])
+        .trim_end_matches("*/")
+        .trim()
+        .to_string()
+}
+
+fn clip(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    format!("{}…", text.chars().take(limit).collect::<String>())
+}

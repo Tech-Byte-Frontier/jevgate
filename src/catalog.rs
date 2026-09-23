@@ -19,6 +19,7 @@ pub struct Rule {
 pub const FILE_ORGANIZATION: &str = "file_organization";
 pub const FUNCTION_SIMPLIFICATION: &str = "function_simplification";
 pub const SHARED_LOGIC: &str = "shared_logic";
+pub const HARDCODED_VALUES: &str = "hardcoded_values";
 pub const TEST_VALUE: &str = "test_value";
 pub const TEST_REDUNDANCY: &str = "test_redundancy";
 
@@ -58,6 +59,18 @@ pub fn rules() -> Vec<Rule> {
             unit: "one representative pair per clone group, with its renamed names and values",
             inspection: "Do the two sites perform the same steps for the same purpose, so one shared implementation would serve both?",
             acceptable_example: "Different work that only looks alike, or repetition the behavior requires",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "maintainability/hardcoded-values",
+            key: HARDCODED_VALUES,
+            version: rule_version(HARDCODED_VALUES),
+            scope: "application functions and module constants that use literal values other than 0, 1, 2 or one-character strings",
+            unit: "one function's source with its literal values, or a file's module-level constants",
+            inspection: "Does a value fixed in code change between deployments, need a descriptive name, or special-case one identity?",
+            acceptable_example: "Messages, formats, protocol names and values whose meaning the code around them makes clear",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,

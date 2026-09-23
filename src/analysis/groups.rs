@@ -9,6 +9,9 @@ pub const MAX_GROUPS: usize = 6;
 /// Clusters merge while the average weight between their members reaches one
 /// shared name; a call alone links two members strongly.
 const LINK: f64 = 1.0;
+/// A call between members links them more strongly than a shared owner.
+const CALL_WEIGHT: u32 = 3;
+const OWNER_WEIGHT: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Group {
@@ -192,10 +195,10 @@ fn link(a: &Unit, b: &Unit) -> u32 {
     };
     let mut weight = 0;
     if calls(a, b) || calls(b, a) {
-        weight += 3;
+        weight += CALL_WEIGHT;
     }
     if !a.owner.is_empty() && a.owner == b.owner {
-        weight += 2;
+        weight += OWNER_WEIGHT;
     }
     weight
 }

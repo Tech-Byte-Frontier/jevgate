@@ -4,6 +4,12 @@ use anyhow::Result;
 use std::path::Path;
 use tree_sitter::Node;
 
+/// A file with more functions than this is located by line windows instead.
+const MAX_LOCATIONS: usize = 256;
+/// Line windows: at most this many, each at least `MIN_WINDOW_LINES` long.
+const MAX_WINDOWS: usize = 128;
+const MIN_WINDOW_LINES: usize = 80;
+
 fn visit(node: Node<'_>, source: &str, locations: &mut Vec<(String, usize)>) {
     if matches!(
         node.kind(),
@@ -27,7 +33,7 @@ pub fn collect(path: &Path, source: &str, _root: &Path) -> Result<(bool, Vec<(St
     if let Some(tree) = &tree {
         let mut locations = Vec::new();
         visit(tree.root_node(), source, &mut locations);
-        if locations.len() <= 256 {
+        if locations.len() <= MAX_LOCATIONS {
             return Ok((true, locations));
         }
     }
@@ -46,7 +52,7 @@ fn function_name(node: Node<'_>, source: &str) -> String {
 /// Fixed line ranges, used when a file has no parser or too many functions.
 fn line_windows(source: &str) -> Vec<(String, usize)> {
     let lines = source.lines().count().max(1);
-    let step = lines.div_ceil(128).max(80);
+    let step = lines.div_ceil(MAX_WINDOWS).max(MIN_WINDOW_LINES);
     (1..=lines)
         .step_by(step)
         .map(|start| {

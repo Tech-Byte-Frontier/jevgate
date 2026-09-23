@@ -806,6 +806,7 @@ mod tests {
         project.write("tests/support.rs", SUPPORT);
         let mut options = args();
         options.refresh = true;
+        options.rules = vec![crate::catalog::FUNCTION_SIMPLIFICATION.into()];
         let mut tests_only = PurposeEval::new("tests");
         let skipped = run(&project, &options, &mut tests_only);
         assert_eq!(tests_only.calls, 1);

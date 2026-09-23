@@ -1,6 +1,6 @@
 //! Functions, methods and types of one file, with the local facts used for
 //! grouping, callee and subject lookup, and marking bodies too small to judge.
-use super::{callee_name, is_comment, line_of, macro_calls, text};
+use super::{callee_name, is_comment, line_of, macro_calls, summary, text};
 use anyhow::Result;
 use std::{collections::BTreeSet, ops::Range, path::Path};
 use tree_sitter::Node;
@@ -37,6 +37,8 @@ pub struct Unit {
     /// Top-level statement blocks of the body, as byte ranges; empty when
     /// there is no choice of block to extract.
     pub blocks: Vec<Range<usize>>,
+    /// Eligible literal values in the body, for hardcoded-value questions.
+    pub literals: Vec<super::literals::Literal>,
     pub calls: BTreeSet<String>,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
@@ -76,6 +78,8 @@ impl Unit {
 pub struct FileUnits {
     pub units: Vec<Unit>,
     pub imports: BTreeSet<String>,
+    /// Top-level constants and bindings whose values hold literals.
+    pub constants: Vec<super::literals::Constant>,
     /// False when no parser supports this language.
     pub parsed: bool,
 }
@@ -91,6 +95,7 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         ..Default::default()
     };
     walk(tree.root_node(), source, "", &mut file);
+    file.constants = super::literals::constants(tree.root_node(), source);
     // A function passed by name, such as `map(parse)`, is used like a call.
     let names: BTreeSet<String> = file.units.iter().map(|u| u.short_name.clone()).collect();
     for unit in &mut file.units {
@@ -306,19 +311,6 @@ fn push(
     }
     let Definition { outer, node, body } = definition;
     let start = leading_start(outer);
-    let signature_end = body.map_or(outer.end_byte(), |b| b.start_byte());
-    let signature = clip(
-        source[outer.start_byte()..signature_end]
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.starts_with("#[") && !line.starts_with('@'))
-            .collect::<Vec<_>>()
-            .join(" ")
-            .trim_end_matches(['{', ':', ' ', '='])
-            .trim_end_matches("=>")
-            .trim(),
-        240,
-    );
     // Parameters and return types count as references, not only the body.
     let mut facts = Facts::default();
     facts.visit(node, source);
@@ -350,12 +342,13 @@ fn push(
             outer.end_byte().saturating_sub(1).max(outer.start_byte()),
         ),
         body: body.map(|b| b.byte_range()),
-        signature,
-        doc: doc_line(&source[start..outer.start_byte()], outer, source),
+        signature: summary::signature(outer, body, source),
+        doc: summary::doc_line(&source[start..outer.start_byte()], outer, source),
         body_lines: body.map_or(0, |b| body_lines(text(b, source))),
         nesting: body.map_or(0, |b| super::nesting::control(b).0),
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
+        literals: body.map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
         calls: facts.calls,
         refs,
         mentions: facts.idents,
@@ -377,47 +370,6 @@ fn leading_start(node: Node<'_>) -> usize {
         previous = sibling.prev_named_sibling();
     }
     start
-}
-
-fn doc_line(leading: &str, node: Node<'_>, source: &str) -> String {
-    let comment = leading
-        .lines()
-        .map(clean_comment)
-        .find(|line| !line.is_empty());
-    let docstring = || {
-        // A Python docstring is the first statement of the body.
-        let body = node.child_by_field_name("body")?;
-        let first = body.named_child(0)?;
-        let string = (first.kind() == "expression_statement")
-            .then(|| first.named_child(0))
-            .flatten()
-            .filter(|n| n.kind() == "string")?;
-        text(string, source)
-            .trim_matches(['"', '\'', 'r', 'b', 'f'])
-            .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .map(str::to_string)
-    };
-    clip(&comment.or_else(docstring).unwrap_or_default(), 160)
-}
-
-fn clean_comment(line: &str) -> String {
-    let line = line.trim();
-    if line.starts_with("#[") {
-        return String::new();
-    }
-    line.trim_start_matches(['/', '*', '!', '#'])
-        .trim_end_matches("*/")
-        .trim()
-        .to_string()
-}
-
-fn clip(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    format!("{}…", text.chars().take(limit).collect::<String>())
 }
 
 /// Non-blank lines that are more than an opening or closing brace.

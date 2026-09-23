@@ -2,6 +2,12 @@
 use anyhow::{Context, Result, ensure};
 use serde_json::{Map, Value};
 
+/// Providers round each probability to about two decimals: allow half a
+/// hundredth per rounded value, at most `MAX_MASS_ERROR` in total, plus float noise.
+const ROUNDING_PER_VALUE: f64 = 0.005;
+const MAX_MASS_ERROR: f64 = 0.05;
+const FLOAT_NOISE: f64 = 1e-9;
+
 pub fn validate(response: &Value, request: &Value) -> Result<()> {
     validate_model(response, request)?;
     let answers = response["answers"].as_object().context("Missing answers")?;
@@ -82,7 +88,8 @@ fn validate_distribution(answer: &Value, question: &Value) -> Result<()> {
         .iter()
         .sum::<f64>();
     ensure!(
-        (sum - 1.0).abs() <= (0.005 * keys.len() as f64).min(0.05) + 1e-9,
+        (sum - 1.0).abs()
+            <= (ROUNDING_PER_VALUE * keys.len() as f64).min(MAX_MASS_ERROR) + FLOAT_NOISE,
         "Invalid probability mass"
     );
     if question["type"] == "score" {
@@ -122,7 +129,7 @@ fn validate_score(
         .enumerate()
         .map(|(i, k)| i as f64 * probabilities[k].as_f64().unwrap())
         .sum::<f64>();
-    let rounding = 0.005 * (1 + (0..keys.len()).sum::<usize>()) as f64 + 1e-9;
+    let rounding = ROUNDING_PER_VALUE * (1 + (0..keys.len()).sum::<usize>()) as f64 + FLOAT_NOISE;
     ensure!(
         (0.0..=(keys.len() - 1) as f64).contains(&score) && (score - expected).abs() <= rounding,
         "Inconsistent score"

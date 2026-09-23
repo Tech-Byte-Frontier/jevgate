@@ -10,6 +10,12 @@ const STATE_TOKENS: f64 = 32_000.0;
 /// Headroom for estimation error.
 const MARGIN: f64 = 0.9;
 const BUDGET_FILE: &str = "token-budget.json";
+/// The saved calibration is a few bytes; a larger file is not read.
+const BUDGET_READ_BYTES: u64 = 4096;
+/// Bytes per token before calibration, and the range a calibration may set.
+const DEFAULT_BYTES_PER_TOKEN: f64 = 3.0;
+const MIN_BYTES_PER_TOKEN: f64 = 2.0;
+const MAX_BYTES_PER_TOKEN: f64 = 6.0;
 
 /// The bytes-per-token ratio, calibrated from observed `usage.input_tokens` and
 /// saved in `.jevgate/`.
@@ -21,14 +27,14 @@ pub struct TokenBudget {
 impl Default for TokenBudget {
     fn default() -> Self {
         Self {
-            bytes_per_token: 3.0,
+            bytes_per_token: DEFAULT_BYTES_PER_TOKEN,
         }
     }
 }
 
 impl TokenBudget {
     pub fn load(root: &std::path::Path) -> Self {
-        crate::inventory::read_source(&root.join(".jevgate").join(BUDGET_FILE), 4096)
+        crate::inventory::read_source(&root.join(".jevgate").join(BUDGET_FILE), BUDGET_READ_BYTES)
             .ok()
             .and_then(|text| serde_json::from_str::<Self>(&text).ok())
             .map(|b| Self::calibrated(b.bytes_per_token))
@@ -38,7 +44,7 @@ impl TokenBudget {
     fn calibrated(bytes_per_token: f64) -> Self {
         Self {
             bytes_per_token: if bytes_per_token.is_finite() {
-                bytes_per_token.clamp(2.0, 6.0)
+                bytes_per_token.clamp(MIN_BYTES_PER_TOKEN, MAX_BYTES_PER_TOKEN)
             } else {
                 Self::default().bytes_per_token
             },

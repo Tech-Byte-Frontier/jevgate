@@ -112,6 +112,49 @@ fn choose_id(question: &str, note: String, ids: &[String], none: &str) -> Value 
     })
 }
 
+/// Whether a value fixed in code changes between environments. `values` names
+/// the list of candidate values; `code` describes the code that uses them.
+/// Criteria name what is not environment-specific (the program's own routes,
+/// project-relative paths, public addresses): examples of "URL" and "path"
+/// alone were read literally and flagged routes and repository files.
+pub fn hardcoded_environment(values: &str, code: &str) -> Value {
+    score(
+        format!(
+            "Would a value in `{values}` need to change when {code} runs in another environment, such as another server, account or machine?"
+        ),
+        "",
+        [
+            "No. Every value stays the same in every environment: the program's own routes and file names, paths relative to the project, public addresses such as documentation links, messages and formats.",
+            "Slightly. A value is a default for local development, such as localhost, that configuration already overrides.",
+            "Yes. A value names something outside the program that differs between environments, such as a specific server address, database, account, or an absolute path on one machine, fixed in the code or used as its default.",
+        ],
+    )
+}
+
+pub fn hardcoded_magic(values: &str, code: &str) -> Value {
+    score(
+        format!(
+            "Would giving a value in `{values}` a descriptive name make `{code}` easier to understand?"
+        ),
+        "",
+        [
+            "No. Each value explains itself where it is used, such as a message, format, key, or a count its context makes clear.",
+            "Slightly. One value could be named, but its meaning is clear from the code around it.",
+            "Yes. A reader must guess what a number or string means or why it has that value, or the same value repeats.",
+        ],
+    )
+}
+
+pub fn hardcoded_special(code: &str) -> Value {
+    noul(
+        format!(
+            "Does `{code}` treat one specific user, account, tenant, record or name differently from the rest?"
+        ),
+        "It checks for, or holds a table of, particular users, accounts, tenants, records or items by their literal identifiers, instead of reading them from data or configuration.",
+        "It treats every identity alike, or compares against values that are part of the program's own rules, such as states, roles or commands.",
+    )
+}
+
 pub fn duplicate_same(recheck: bool) -> Value {
     let note = if recheck {
         "`site_a.function_source` and `site_b.function_source` hold the enclosing functions."
@@ -274,6 +317,9 @@ mod tests {
             function_split("functions[0].source", true),
             function_flatten("functions[0].source"),
             function_block(&["B1".into(), "B2".into()]),
+            hardcoded_environment("functions[0].values", "`functions[0].source`"),
+            hardcoded_magic("functions[0].values", "functions[0].source"),
+            hardcoded_special("functions[0].source"),
             outline_split(false),
             outline_split(true),
             outline_module(&["G1".into(), "G2".into()]),
