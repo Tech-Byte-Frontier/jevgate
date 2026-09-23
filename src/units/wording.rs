@@ -1,8 +1,9 @@
 //! The message and recommended action of each kind of finding.
 use super::{
     Block, GroupInfo,
-    compose::{Answers, Outcome, benefit, levels, noul},
+    compose::{Answers, Outcome, benefit, levels, noul, origin_outcome},
 };
+use crate::catalog;
 use crate::schema::{Answer, Strength};
 
 /// A finding's message and the action it recommends.
@@ -202,6 +203,13 @@ pub(super) fn question_label(question: &str) -> &str {
         "environment" => "environment value",
         "magic" => "unnamed value",
         "special" => "special case",
+        "interpreted" => "variable in interpreted text",
+        "resource" => "variable in a path or URL",
+        "origin" => "origin of values",
+        "handled" => "values bound or checked",
+        "logs_secret" => "secret in logs",
+        "error_details" => "error details to clients",
+        "weakened" => "weak setting",
         "own_logic" => "recomputed expected value",
         "mock_only" => "checks only its mocks",
         "overlap" => "overlapping tests",
@@ -334,5 +342,205 @@ pub(super) fn test_pair_wording(name: &str, review: bool, p: f64) -> Wording {
             format!("{name} check the same behavior with different inputs ({p:.2})."),
             "Combine them into one parameterized test",
         )
+    }
+}
+
+/// Injection kinds: the text a variable is placed into, its weakness and remedy.
+const INJECTIONS: [(&str, &str, &str, &str); 7] = [
+    (
+        "sql",
+        "a database query",
+        "CWE-89 SQL injection",
+        "Pass the values as bound query parameters",
+    ),
+    (
+        "shell",
+        "a command",
+        "CWE-78 OS command injection",
+        "Pass arguments as a list to the program, without a shell",
+    ),
+    (
+        "code",
+        "code it evaluates",
+        "CWE-94 code injection",
+        "Map the input to allowed operations instead of evaluating text built from it",
+    ),
+    (
+        "markup",
+        "markup",
+        "CWE-79 cross-site scripting",
+        "Escape the value or render it as text",
+    ),
+    (
+        "path",
+        "a file path",
+        "CWE-22 path traversal",
+        "Resolve the path and check that it stays under the allowed directory",
+    ),
+    (
+        "url",
+        "a URL it requests",
+        "CWE-918 server-side request forgery",
+        "Check the host against an allowed list before requesting it",
+    ),
+    (
+        "",
+        "text another program interprets",
+        "CWE-74 injection",
+        "Pass the value as data, not as part of the text",
+    ),
+];
+
+/// Weak settings: what the code does, its weakness and remedy.
+const SETTINGS: [(&str, &str, &str, &str); 6] = [
+    (
+        "tls",
+        "turns off certificate or signature verification",
+        "CWE-295 improper certificate validation",
+        "Keep verification on; trust a specific certificate authority instead",
+    ),
+    (
+        "hash",
+        "hashes passwords with a fast or broken hash",
+        "CWE-916 weak password hash",
+        "Hash passwords with Argon2, bcrypt or scrypt",
+    ),
+    (
+        "random",
+        "makes secret tokens or identifiers with a non-cryptographic random generator",
+        "CWE-338 weak random for secrets",
+        "Use a cryptographically secure random generator",
+    ),
+    (
+        "cors",
+        "allows credentialed requests from any origin",
+        "CWE-942 permissive CORS",
+        "Allow only the origins that need credentialed access",
+    ),
+    (
+        "cookie",
+        "sets session cookies without HttpOnly, Secure or SameSite",
+        "CWE-1004 cookie without HttpOnly or Secure",
+        "Set HttpOnly, Secure and SameSite on session cookies",
+    ),
+    (
+        "",
+        "chooses a weak security setting",
+        "CWE-1188 insecure setting",
+        "Use the secure default",
+    ),
+];
+
+/// The specific check of a rule's trace that found the concern most surely.
+fn found_check(rule: &str, answers: &Answers<'_>) -> &'static str {
+    super::security::checks(rule)
+        .iter()
+        .filter_map(|check| match answers.get(check.id).map(|a| noul(a)) {
+            Some(Outcome::Review(p)) => Some((check.id, p)),
+            _ => None,
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map_or("", |(id, _)| id)
+}
+
+/// A security finding's message, action and category (a CWE and its name).
+pub(super) fn security_wording(
+    rule: &str,
+    name: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> (Wording, String) {
+    let subject = if name == "module setup" {
+        "Module setup".to_string()
+    } else {
+        format!("`{name}`")
+    };
+    let kind = found_check(rule, answers);
+    let find = |table: &'static [(&str, &str, &str, &str)]| {
+        table
+            .iter()
+            .find(|(id, ..)| *id == kind)
+            .unwrap_or(table.last().unwrap())
+    };
+    let development = matches!(
+        answers.get("dev_only").map(|a| noul(a)),
+        Some(Outcome::Review(_))
+    );
+    let where_ = if development {
+        " It runs only in development or tests."
+    } else {
+        ""
+    };
+    let likely = if strength == Strength::Consider {
+        " likely"
+    } else {
+        ""
+    };
+    match rule {
+        catalog::INJECTION => {
+            let (_, noun, category, action) = find(&INJECTIONS);
+            let outside = matches!(
+                answers.get("origin").map(|a| origin_outcome(a)),
+                Some(Outcome::Review(_))
+            );
+            let message = match (strength, outside) {
+                (Strength::Review, _) => format!(
+                    "{subject} places values from another party into {noun} without binding, escaping or checking them ({p:.2})."
+                ),
+                (Strength::Consider, true) => format!(
+                    "{subject} places values from another party into {noun}; they may not be bound, escaped or checked ({p:.2})."
+                ),
+                (Strength::Consider, false) => format!(
+                    "{subject} places its parameters into {noun} without binding, escaping or checking them; a caller passing outside input would make it exploitable ({p:.2})."
+                ),
+                (Strength::Note, _) => format!(
+                    "{subject} places a parameter into {noun}; it may already be bound or checked, or its callers may pass only the program's own values ({p:.2})."
+                ),
+            };
+            let action = if strength == Strength::Note {
+                "Optional: bind or check the value where it enters"
+            } else {
+                action
+            };
+            ((message, action), category.to_string())
+        }
+        catalog::SENSITIVE_DATA => {
+            let logs = ["logs_secret", "logs_object_secret"].iter().any(|q| {
+                answers
+                    .get(q)
+                    .is_some_and(|a| matches!(noul(a), Outcome::Review(_)))
+            });
+            let (what, category, action) = if logs {
+                (
+                    "writes a password, token, key or personal data to a log",
+                    "CWE-532 sensitive data in logs",
+                    "Log an identifier instead of the secret or personal value",
+                )
+            } else {
+                (
+                    "sends internal error details to a remote client",
+                    "CWE-209 error details exposed",
+                    "Return a generic message and keep the details in server logs",
+                )
+            };
+            (
+                (
+                    format!("{subject}{likely} {what} ({p:.2}).{where_}"),
+                    action,
+                ),
+                category.to_string(),
+            )
+        }
+        _ => {
+            let (_, what, category, action) = find(&SETTINGS);
+            (
+                (
+                    format!("{subject}{likely} {what} ({p:.2}).{where_}"),
+                    *action,
+                ),
+                category.to_string(),
+            )
+        }
     }
 }

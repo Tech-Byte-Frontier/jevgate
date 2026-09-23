@@ -156,6 +156,7 @@ impl Scripted {
 /// Rechecks carry more evidence: callees, enclosing functions or file source.
 fn is_recheck(request: &Value) -> bool {
     request["state"]["callees"].is_array()
+        || request["state"]["callers"].is_array()
         || request["state"]["site_a"]["function_source"].is_string()
         || request["state"]["file"]["source"].is_string()
 }
@@ -752,4 +753,183 @@ fn undecided_hardcoded_units_name_their_few_candidate_values() {
         .find(|u| u.unit == "module constants")
         .unwrap();
     assert_eq!(constants.values, ["\"eu-west-1\""]);
+}
+
+const QUERY: &str = "fn find(conn: &Connection, name: &str) -> Result<Row> {\n    let sql = format!(\"SELECT id FROM users WHERE name = '{name}'\");\n    conn.query_row(&sql, [], Row::from)\n}\n\nfn total(a: i32, b: i32) -> i32 {\n    a + b\n}\n";
+
+fn security_project(source: &str) -> (Project, CheckArgs) {
+    let project = Project::new();
+    project.write("lib.rs", source);
+    let mut options = args();
+    options.rules = catalog::SECURITY.iter().map(|r| r.to_string()).collect();
+    (project, options)
+}
+
+fn noul_at(p: f64) -> Value {
+    json!({"type":"noul","noul":p})
+}
+
+/// A certain choice of `id` among the two sites of `find` in `QUERY`.
+fn site(id: &str) -> Value {
+    let probabilities: serde_json::Map<String, Value> = ["S1", "S2", "none"]
+        .iter()
+        .map(|option| {
+            (
+                option.to_string(),
+                json!(if *option == id { 1.0 } else { 0.0 }),
+            )
+        })
+        .collect();
+    json!({"type":"choice","choice":id,"confidence":1.0,"probabilities":probabilities})
+}
+
+#[test]
+fn security_units_are_packed_and_traced_only_when_presence_is_not_clear() {
+    let (project, options) = security_project(QUERY);
+    let (_, plan) = planned(&project, &options);
+    assert_eq!(plan.requests.len(), 1);
+    let request = &plan.requests[0].request;
+    assert_eq!(request["jevgate"]["stage"], "security");
+    assert_eq!(
+        request["state"]["functions"].as_array().unwrap().len(),
+        1,
+        "`total` has no call, built text or field assignment"
+    );
+    assert_eq!(request["questions"].as_object().unwrap().len(), 5);
+    let mut eval = scripted(0);
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(eval.stages, ["first"], "clear presence needs no trace");
+    for rule in catalog::SECURITY {
+        assert_eq!(report.files[0].dimensions[rule].status, Status::Clear);
+    }
+}
+
+#[test]
+fn an_unhandled_value_from_another_party_is_a_located_injection_review() {
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("interpreted", noul_at(0.95)),
+        ("sql", noul_at(0.95)),
+        ("origin", spread(0.0, 0.1, 0.9)),
+        ("site", site("S1")),
+    ];
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(eval.stages, ["first", "first"], "one trace, no recheck");
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.rule, "security/injection");
+    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(finding.category.as_deref(), Some("CWE-89 SQL injection"));
+    assert_eq!(finding.line, 2, "located at the chosen site");
+    assert!(finding.action.contains("bound query parameters"));
+}
+
+#[test]
+fn a_parameter_origin_is_a_consider_that_callers_can_settle() {
+    let caller = format!(
+        "{QUERY}\nfn handler(conn: &Connection) -> Result<Row> {{\n    find(conn, \"admin\")\n}}\n"
+    );
+    let overrides = || {
+        vec![
+            ("interpreted", noul_at(0.95)),
+            ("sql", noul_at(0.95)),
+            ("origin", spread(0.0, 0.9, 0.1)),
+        ]
+    };
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = overrides();
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(
+        report.files[0].dimensions[catalog::INJECTION].status,
+        Status::Consider,
+        "no caller is known, so the parameter stays a concern"
+    );
+    let (project, options) = security_project(&caller);
+    let mut eval = scripted(0);
+    eval.overrides = overrides();
+    eval.recheck_level = Some(0);
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(eval.stages.last().unwrap(), "recheck");
+    let find = |report: &Report| {
+        report.files[0]
+            .findings
+            .iter()
+            .any(|f| f.rule == "security/injection" && f.symbol.as_deref() == Some("find"))
+    };
+    assert!(!find(&report), "the caller passes a fixed value");
+}
+
+#[test]
+fn a_parameter_in_a_path_or_url_is_a_note_until_callers_show_another_party() {
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("resource", noul_at(0.95)),
+        ("url", noul_at(0.95)),
+        ("origin", spread(0.0, 0.9, 0.1)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Note);
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-918 server-side request forgery")
+    );
+}
+
+#[test]
+fn checks_that_all_clear_rule_out_an_uncertain_presence() {
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("interpreted", noul_at(0.5)),
+        ("origin", spread(0.0, 1.0, 0.0)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(
+        report.files[0].dimensions[catalog::INJECTION].status,
+        Status::Clear
+    );
+}
+
+#[test]
+fn development_only_exposure_is_one_level_lower_and_names_its_weakness() {
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = vec![("logs_secret", noul_at(0.95)), ("dev_only", noul_at(0.95))];
+    let report = run(&project, &options, &mut eval);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.rule, "security/sensitive-data");
+    assert_eq!(finding.strength, Strength::Consider);
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-532 sensitive data in logs")
+    );
+    assert!(finding.message.contains("runs only in development"));
+}
+
+#[test]
+fn top_level_setup_is_one_unit_for_unsafe_settings() {
+    let project = Project::new();
+    project.write(
+        "server.ts",
+        "const app = express()\napp.use(cors({ origin: true, credentials: true }))\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
+    let (_, plan) = planned(&project, &options);
+    let request = &plan.requests[0].request;
+    assert!(
+        request["state"]["module"]["source"]
+            .as_str()
+            .unwrap()
+            .contains("app.use(cors(")
+    );
+    let mut eval = scripted(0);
+    eval.overrides = vec![("weakened", noul_at(0.95)), ("cors", noul_at(0.95))];
+    let report = run(&project, &options, &mut eval);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.category.as_deref(), Some("CWE-942 permissive CORS"));
+    assert!(finding.message.starts_with("Module setup"));
 }

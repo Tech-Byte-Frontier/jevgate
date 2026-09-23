@@ -10,7 +10,8 @@ pub(super) struct Scope<'a> {
 }
 
 use super::{
-    FileContext, FilePlan, Plan, Planned, duplicates, functions, hardcoded, outline, test_units,
+    FileContext, FilePlan, Plan, Planned, duplicates, functions, hardcoded, outline, security,
+    test_units,
 };
 use crate::{
     analysis::{
@@ -233,6 +234,13 @@ fn plan_file(
             .collect();
         hardcoded::plan(&context, &units, &constants, &mut file, requests);
     }
+    let rules: Vec<&'static str> = catalog::SECURITY
+        .into_iter()
+        .filter(|rule| shared.enabled(rule))
+        .collect();
+    if !rules.is_empty() && view.application {
+        plan_security(scope, shared, &context, &lines, &rules, &mut file, requests);
+    }
     if shared.enabled(catalog::SHARED_LOGIC) {
         file.rules.insert(catalog::SHARED_LOGIC, 0);
         let pairs = &shared.pairs;
@@ -250,6 +258,73 @@ fn plan_file(
         plan_tests(shared, &context, cases, &mut file, requests);
     }
     file
+}
+
+/// Application functions outside tests and the file's setup statements; the
+/// injection recheck shows up to three callers of each function.
+fn plan_security(
+    scope: &Scope<'_>,
+    shared: &Shared<'_>,
+    context: &FileContext<'_>,
+    lines: &[Range<usize>],
+    rules: &[&'static str],
+    file: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    for rule in rules {
+        file.rules.insert(rule, 0);
+    }
+    let parsed = &scope.units[&context.owner];
+    let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
+    let subjects: Vec<security::Subject<'_>> = parsed
+        .units
+        .iter()
+        .filter(|u| u.callable() && outside_tests(u.line))
+        .map(|unit| {
+            let callers = if rules.contains(&catalog::INJECTION) {
+                callers_of(scope, &shared.imports, context.owner, unit)
+            } else {
+                Vec::new()
+            };
+            security::function_subject(context, unit, callers)
+        })
+        .collect();
+    let setup = security::setup_subject(context, &parsed.setup)
+        .filter(|_| parsed.setup.statements.iter().all(|s| outside_tests(s.1)));
+    security::plan(context, &subjects, setup, rules, file, requests);
+}
+
+/// Functions outside tests, in this file and in selected files that import
+/// it, that call `unit`, as (name, source).
+fn callers_of(
+    scope: &Scope<'_>,
+    imports: &BTreeMap<usize, Imports>,
+    owner: usize,
+    unit: &Unit,
+) -> Vec<(String, String)> {
+    let path = &scope.inputs[owner].result.path;
+    let others = scope.owners.iter().filter(|&&o| o != owner);
+    let mut found = Vec::new();
+    for &other in std::iter::once(&owner).chain(others) {
+        if other != owner && !imports[&other].reach(path) {
+            continue;
+        }
+        let source = scope.inputs[other].source.as_deref().unwrap_or("");
+        let lines = scope.test_lines(other);
+        for caller in &scope.units[&other].units {
+            if found.len() == security::CALLERS {
+                return found;
+            }
+            if caller.callable()
+                && caller.name != unit.name
+                && caller.calls.contains(&unit.short_name)
+                && !lines.iter().any(|l| caller.overlaps(l))
+            {
+                found.push((caller.name.clone(), caller.source(source).to_string()));
+            }
+        }
+    }
+    found
 }
 
 /// Callable units: application code with the application view, and test

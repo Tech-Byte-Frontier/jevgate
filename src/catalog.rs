@@ -24,6 +24,10 @@ pub const FILE_ORGANIZATION: &str = "file_organization";
 pub const FUNCTION_SIMPLIFICATION: &str = "function_simplification";
 pub const SHARED_LOGIC: &str = "shared_logic";
 pub const HARDCODED_VALUES: &str = "hardcoded_values";
+pub const INJECTION: &str = "injection";
+pub const SENSITIVE_DATA: &str = "sensitive_data";
+pub const UNSAFE_SETTINGS: &str = "unsafe_settings";
+pub const SECURITY: [&str; 3] = [INJECTION, SENSITIVE_DATA, UNSAFE_SETTINGS];
 pub const TEST_VALUE: &str = "test_value";
 pub const TEST_REDUNDANCY: &str = "test_redundancy";
 
@@ -83,6 +87,48 @@ pub fn rules() -> Vec<Rule> {
             unit: "one function's source with its literal values, or a file's module-level constants",
             inspection: "Does a value fixed in code change between deployments, need a descriptive name, or special-case one identity?",
             acceptable_example: "Messages, formats, protocol names and values whose meaning the code around them makes clear",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "security/injection",
+            group: "security",
+            default_enabled: false,
+            key: INJECTION,
+            version: rule_version(INJECTION),
+            scope: "application functions with calls, built text or field assignments",
+            unit: "one function's source; then its statements as sites, and up to three callers when the origin of its values is unclear",
+            inspection: "Does a variable that another party controls reach the text of a query, command, code, markup, file path or URL without being bound, escaped or checked?",
+            acceptable_example: "Bound query parameters, argument lists, escaping templates, and values the program fixes or checks",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "security/sensitive-data",
+            group: "security",
+            default_enabled: false,
+            key: SENSITIVE_DATA,
+            version: rule_version(SENSITIVE_DATA),
+            scope: "application functions with calls, built text or field assignments",
+            unit: "one function's source; then its statements as sites",
+            inspection: "Does the function log a password, token, key or personal data, or send internal error details to a remote client?",
+            acceptable_example: "Logging record ids and messages; generic error responses with details kept in server logs",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "security/unsafe-settings",
+            group: "security",
+            default_enabled: false,
+            key: UNSAFE_SETTINGS,
+            version: rule_version(UNSAFE_SETTINGS),
+            scope: "application functions, and each file's top-level statements that call something",
+            unit: "one function's source or the file's setup statements; then their statements as sites",
+            inspection: "Does the code turn off a security check or choose a weak setting: certificate verification, password hashing, random tokens, CORS or cookies?",
+            acceptable_example: "MD5 for cache keys, non-cryptographic random for shuffling, secure defaults",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,
