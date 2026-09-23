@@ -235,11 +235,7 @@ pub fn security_origin(code: &str, callers: bool) -> Value {
         format!(
             "Where do the variables that `{code}` places into a query, command, code, markup, file path or URL come from?"
         ),
-        if callers {
-            "`callers` holds functions that call it."
-        } else {
-            ""
-        },
+        if callers { CALLERS } else { "" },
         [
             "Only from the program itself: constants, fixed choices, numbers, values checked against an allowed list, the deployment's configuration, or the command line and settings of the person running a local program.",
             "From the function's parameters or other data whose origin this code does not show.",
@@ -283,9 +279,21 @@ impl Check {
     pub fn body(&self, code: &str) -> Value {
         noul(self.question.replace("{code}", code), self.yes, self.no)
     }
+
+    /// The same check with the functions that call the code in `callers`.
+    pub fn with_callers(&self, code: &str) -> Value {
+        let mut body = self.body(code);
+        body["instructions"]["note"] = json!(format!("{CALLERS} {EVIDENCE}"));
+        body
+    }
 }
 
-/// Whether a variable reaches each kind of interpreted text unhandled. One
+const CALLERS: &str = "`callers` holds functions that call it.";
+
+/// Whether a variable reaches each kind of interpreted text unhandled. The
+/// path check names the program's own directories as safe: without them, a
+/// third of injection units stayed undecided on paths the program builds from
+/// its project root. One
 /// broad question ("is every variable bound, escaped or checked?") stayed
 /// undecided even for `eval` of model output; one literal check per kind
 /// decides, and names the kind.
@@ -317,8 +325,8 @@ pub const UNHANDLED: [Check; 6] = [
     Check {
         id: "path",
         question: "Does `{code}` open, write or delete a file at a path built from a variable without checking that it stays inside a directory?",
-        yes: "A path is built from a variable and used without reducing it to a base name, rejecting parent-directory parts, or checking that the resolved path stays under a base directory.",
-        no: "Such paths are checked, or come only from fixed values or the program's configuration, or it uses no such path.",
+        yes: "A path is built from a variable that can hold a name or path from outside the program, such as a request, upload, archive entry or user input, and is used without reducing it to a base name, rejecting parent-directory parts, or checking that the resolved path stays under a base directory.",
+        no: "Such paths are checked; are built from the program's own directories, such as its project root, data or cache directory, joined with names the program chooses; come from the program's configuration or the command line of the person running it; or it uses no such path.",
     },
     Check {
         id: "url",

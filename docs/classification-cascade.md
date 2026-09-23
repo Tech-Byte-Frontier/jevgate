@@ -35,7 +35,8 @@ signatures, or one candidate pair.
    broad "is every value bound, escaped or checked?" stayed undecided even for
    `eval` of model output; a check per kind decides and names the kind. An
    injection whose origin stays unclear or is the function's parameters is
-   rechecked with up to three callers.
+   asked its origin and checks again with up to three callers; a decisive
+   answer replaces the traced one.
 5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise

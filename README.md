@@ -77,8 +77,8 @@ code, markup, path, URL; TLS, hashing, randomness, CORS, cookies; logged
 secrets, exception text in responses), the site, and where the values come
 from or whether the code runs only in development. Values from another party
 are a review; parameters of unknown origin are a consider for SQL, shell, code
-and markup and a note for paths and URLs, and get one recheck with up to three
-callers. Findings name a CWE in `category`.
+and markup and a note for paths and URLs; their origin and checks are asked
+again with up to three callers. Findings name a CWE in `category`.
 
 Test files are judged only with `--include-tests`. A file that mixes code and
 tests keeps them apart: application rules judge the code, test rules the tests.
