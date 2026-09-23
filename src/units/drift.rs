@@ -386,12 +386,13 @@ fn facts(
             facts.push(format!("the repository has a release tag v{version}"));
         }
     }
-    let removed: Vec<&str> = missing
-        .iter()
-        .flatten()
-        .filter(|m| matches!(m.fate, Fate::Deleted | Fate::Renamed(_)))
-        .map(|m| m.name.as_str())
-        .collect();
+    let mut removed: Vec<&str> = Vec::new();
+    for m in missing.iter().flatten() {
+        if matches!(m.fate, Fate::Deleted | Fate::Renamed(_)) && !removed.contains(&m.name.as_str())
+        {
+            removed.push(&m.name);
+        }
+    }
     if !removed.is_empty() {
         let shown: Vec<String> = removed
             .iter()
