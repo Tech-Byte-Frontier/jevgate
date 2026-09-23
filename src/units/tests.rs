@@ -1047,3 +1047,60 @@ fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
         Some("CWE-209 error details exposed")
     );
 }
+
+#[test]
+fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
+    let project = Project::new();
+    project.write("Cargo.toml", "[package]\nname = \"demo\"\n");
+    project.write("src/lib.rs", "");
+    project.write("web/app.ts", "");
+    project.write(
+        "AGENTS.md",
+        "# Stack\nThis is a Rust project.\n\n# Web\nUse the design tokens in `web/theme.ts`.\n\n# Release\nTag with `v` then push.\n",
+    );
+    let mut options = args();
+    only(&mut options, catalog::AGENT_CONTEXT);
+    let mut eval = scripted(0);
+    let top = json!({"type":"score","score":2.0,"confidence":1.0,
+        "probabilities":{"0":0.0,"1":0.0,"2":1.0}});
+    let web = json!({"type":"choice","choice":"web/","confidence":1.0,
+        "probabilities":{"src/":0.0,"web/":1.0,"none":0.0}});
+    eval.overrides = vec![("s0_inferable", top), ("s1_scope", web)];
+    let report = run(&project, &options, &mut eval);
+    let file = report
+        .files
+        .iter()
+        .find(|f| f.path == std::path::Path::new("AGENTS.md"))
+        .unwrap();
+    let dimension = &file.dimensions[catalog::AGENT_CONTEXT];
+    assert_eq!(
+        (
+            dimension.units.judged,
+            dimension.units.consider,
+            dimension.units.note
+        ),
+        (3, 1, 1)
+    );
+    let stack = &file.findings[0];
+    assert_eq!(stack.strength, Strength::Consider, "capped below review");
+    assert_eq!(
+        (stack.rule.as_str(), stack.line),
+        ("documentation/agent-context", 1)
+    );
+    assert!(
+        stack.message.starts_with("Section `Stack` restates what the repository's files show (1.00). Codex, GitHub Copilot, Cursor, Windsurf, Cline and Claude Code load it at the start of every session"),
+        "{}",
+        stack.message
+    );
+    assert_eq!(file.findings[1].symbol.as_deref(), Some("Web"));
+    assert!(
+        file.findings[1]
+            .message
+            .contains("applies only to work in `web/`"),
+        "{}",
+        file.findings[1].message
+    );
+    assert!(file.findings[1].action.starts_with("Optional: move it"));
+    let load = report.context_load.as_ref().unwrap();
+    assert!(load.harnesses.iter().any(|h| h.harness == "Codex"));
+}

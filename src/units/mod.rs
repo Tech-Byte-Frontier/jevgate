@@ -8,6 +8,7 @@ mod evidence;
 mod follow_ups;
 mod functions;
 mod hardcoded;
+mod instructions;
 mod outcome;
 pub(crate) mod outline;
 mod plan;
@@ -100,6 +101,13 @@ pub enum Detail {
     Security {
         sites: Vec<Block>,
         trace: Option<(Value, Asked)>,
+    },
+    /// A heading section of an agent instruction file.
+    Section {
+        /// Estimated tokens of the section's text.
+        tokens: usize,
+        /// Which harnesses load the file and when.
+        loaded: String,
     },
     Test,
     TestPair {

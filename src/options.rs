@@ -201,6 +201,28 @@ fn source_extension(value: &str) -> Result<String, String> {
 }
 
 impl CheckArgs {
+    /// Whether a rule is selected, by key or ID.
+    pub fn enabled(&self, key: &str) -> bool {
+        self.rules
+            .iter()
+            .any(|r| r == key || r == crate::catalog::id(key))
+    }
+
+    /// Whether a rule that judges source code is selected.
+    pub fn code_rules(&self) -> bool {
+        self.rules.iter().any(|r| {
+            crate::catalog::find(r)
+                .is_some_and(|rule| !crate::catalog::DOCUMENTATION.contains(&rule.key))
+        })
+    }
+
+    /// Whether any documentation rule is selected, so instruction files are found.
+    pub fn documentation(&self) -> bool {
+        crate::catalog::DOCUMENTATION
+            .iter()
+            .any(|key| self.enabled(key))
+    }
+
     pub fn fail_on_names(&self) -> Vec<String> {
         names(&self.fail_on)
     }

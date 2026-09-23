@@ -275,6 +275,9 @@ pub struct Report {
     pub settled: bool,
     pub files: Vec<FileResult>,
     pub changes: Vec<Change>,
+    /// With a documentation rule: what each harness loads at session start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_load: Option<crate::docs::load::ContextLoad>,
 }
 
 impl Report {

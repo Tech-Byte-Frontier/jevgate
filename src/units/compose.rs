@@ -7,8 +7,8 @@ use super::{
         unit_outcome, value_signals,
     },
     wording::{
-        function_wording, outline_wording, pair_wording, question_label, security_wording,
-        test_pair_wording, test_wording, values_wording,
+        function_wording, outline_wording, pair_wording, question_label, section_wording,
+        security_wording, test_pair_wording, test_wording, values_wording,
     },
 };
 use crate::{
@@ -278,6 +278,14 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "exception_to_client",
         ],
         catalog::UNSAFE_SETTINGS => &["weakened", "tls", "hash", "random", "cors", "cookie"],
+        catalog::AGENT_CONTEXT => &[
+            "inferable",
+            "describes",
+            "commands",
+            "generic",
+            "history",
+            "enforced",
+        ],
         _ => &["overlap"],
     }
 }
@@ -397,6 +405,7 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::TEST_VALUE => "test",
         catalog::HARDCODED_VALUES => "value unit",
         catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::UNSAFE_SETTINGS => "security unit",
+        catalog::AGENT_CONTEXT => "section",
         _ => "test pair",
     };
     let plural = |n: usize| if n == 1 { "" } else { "s" };
@@ -517,6 +526,7 @@ fn finding(
             category = Some(named);
             wording
         }
+        Detail::Section { .. } => section_wording(name, &unit.detail, strength, p, answers),
         Detail::Test => test_wording(name, strength == Strength::Review, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;

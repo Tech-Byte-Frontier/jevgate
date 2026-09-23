@@ -25,6 +25,7 @@ mod config;
 mod context;
 mod context_units;
 mod discovery;
+mod docs;
 mod evaluate;
 mod file_kind;
 mod gate;

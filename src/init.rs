@@ -18,7 +18,8 @@ pub fn run(root: &Path, force: bool) -> Result<(PathBuf, Vec<String>)> {
         "{} already exists; pass --force to replace it",
         path.display()
     );
-    let allow = source_patterns(root)?;
+    let mut allow = source_patterns(root)?;
+    allow.extend(instruction_patterns(root)?);
     std::fs::write(&path, render(&allow))
         .with_context(|| format!("Cannot write {}", path.display()))?;
     Ok((path, allow))
@@ -53,6 +54,32 @@ fn source_patterns(root: &Path) -> Result<Vec<String>> {
         .collect())
 }
 
+/// Patterns for the agent instruction files present, so the documentation
+/// rules can upload them: by name wherever they appear, or by rule directory.
+fn instruction_patterns(root: &Path) -> Result<Vec<String>> {
+    let found = crate::docs::discover::discover(root)?;
+    let patterns: BTreeSet<String> = found
+        .agent
+        .iter()
+        .map(|path| {
+            let parts: Vec<String> = path
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            let name = parts.last().map_or("", String::as_str);
+            let hidden = parts.iter().position(|p| p.starts_with('.'));
+            if crate::docs::discover::AGENT_NAMES.contains(&name) {
+                format!("**/{name}")
+            } else if let Some(at) = hidden.filter(|at| at + 2 < parts.len()) {
+                format!("{}/**", parts[at..at + 2].join("/"))
+            } else {
+                parts.join("/")
+            }
+        })
+        .collect();
+    Ok(patterns.into_iter().collect())
+}
+
 fn render(allow: &[String]) -> String {
     let list = |items: &[String]| {
         let quoted: Vec<String> = items.iter().map(|i| format!("{i:?}")).collect();
@@ -85,7 +112,8 @@ fn render(allow: &[String]) -> String {
 # `jevgate rules` lists every rule; `jevgate check --dry-run --show-requests`
 # shows what would be uploaded without sending anything.
 
-# Only these paths may be uploaded: the detected source and test directories.
+# Only these paths may be uploaded: the detected source and test directories,
+# and agent instruction files for the documentation rules.
 {allow}# Never uploaded, even when allowed above.
 upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 
@@ -115,12 +143,24 @@ mod tests {
             "main.py",
             "docs/guide.md",
             "target/x.rs",
+            "AGENTS.md",
+            "web/CLAUDE.md",
+            ".cursor/rules/style.mdc",
         ] {
             project.write(file, "fn f() {}\n");
         }
         let dir = project.0.to_path_buf();
         let (path, allow) = run(&dir, false).unwrap();
-        assert_eq!(allow, ["src/**", "tests/**"]);
+        assert_eq!(
+            allow,
+            [
+                "src/**",
+                "tests/**",
+                "**/AGENTS.md",
+                "**/CLAUDE.md",
+                ".cursor/rules/**"
+            ]
+        );
         let config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(config.upload_allow, allow);
         let Rules::Levels(levels) = config.rules else {

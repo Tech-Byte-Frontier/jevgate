@@ -139,9 +139,39 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
         }
         catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
+        catalog::AGENT_CONTEXT => {
+            section_signals(&get).map(|s| strongest(&s.iter().map(|(_, o)| *o).collect::<Vec<_>>()))
+        }
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
+}
+
+/// Each answered question about an instruction section with its outcome.
+/// Removing documentation is a cleanup, never a defect, so a signal is at
+/// most a consider. A section that loads in every session but applies to one
+/// directory is a note, and only on a clear choice of that directory.
+pub(super) fn section_signals<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Option<Vec<(&'static str, Outcome)>> {
+    let capped = |outcome: Outcome| match outcome {
+        Outcome::Review(p) => Outcome::Consider(p),
+        other => other,
+    };
+    let mut signals = vec![("inferable", capped(benefit(get("inferable")?)))];
+    for question in ["describes", "commands", "generic", "history", "enforced"] {
+        if let Some(answer) = get(question) {
+            signals.push((question, capped(noul(answer))));
+        }
+    }
+    if let Some(answer) = get("scope") {
+        let chosen = choice(Some(answer)).filter(|(_, p)| at_least(*p));
+        signals.push((
+            "scope",
+            chosen.map_or(Outcome::Clear, |(_, p)| Outcome::Note(p)),
+        ));
+    }
+    Some(signals)
 }
 
 /// The strongest of several signals about one unit: review, then consider,

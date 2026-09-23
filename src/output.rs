@@ -62,6 +62,9 @@ pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Res
     emit_header(out, report)?;
     emit_findings(out, report, verbose)?;
     emit_summary(out, report)?;
+    if let Some(load) = &report.context_load {
+        emit_context_load(out, load)?;
+    }
     if verbose {
         writeln!(out)?;
         for file in &report.files {
@@ -187,6 +190,47 @@ fn emit_summary(out: &mut impl Write, report: &Report) -> Result<()> {
     }
     for (reason, n) in skipped {
         writeln!(out, "Skipped {n}: {reason}")?;
+    }
+    Ok(())
+}
+
+/// Estimated tokens each harness loads at session start, then loading facts.
+fn emit_context_load(out: &mut impl Write, load: &crate::docs::load::ContextLoad) -> Result<()> {
+    if load.harnesses.is_empty() {
+        return Ok(());
+    }
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let harnesses: Vec<String> = load
+        .harnesses
+        .iter()
+        .map(|h| {
+            let later = if h.on_demand_files > 0 {
+                format!(", +{} on demand", h.on_demand_files)
+            } else {
+                String::new()
+            };
+            let files = h.files.len();
+            format!(
+                "{} ~{} ({files} file{}{later})",
+                h.harness,
+                h.estimated_tokens,
+                plural(files)
+            )
+        })
+        .collect();
+    writeln!(
+        out,
+        "\nInstructions loaded at session start (estimated tokens): {}",
+        harnesses.join(" · ")
+    )?;
+    for fact in &load.facts {
+        writeln!(
+            out,
+            "  {}:{} {}",
+            fact.path.display(),
+            fact.line,
+            fact.message
+        )?;
     }
     Ok(())
 }

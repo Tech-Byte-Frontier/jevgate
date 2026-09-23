@@ -588,7 +588,8 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "sensitive_data",
             "unsafe_settings",
             "test_value",
-            "test_redundancy"
+            "test_redundancy",
+            "agent_context"
         ]
     );
     for arguments in [
@@ -609,7 +610,7 @@ fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
     let table = String::from_utf8(output.stdout).unwrap();
     assert!(table.starts_with("RULE") && table.contains("maintainability/shared-logic"));
     assert!(
-        table.contains("Groups: maintainability, security, tests"),
+        table.contains("Groups: maintainability, security, tests, documentation"),
         "{table}"
     );
     assert!(table.contains("security/injection") && table.contains("opt-in"));
@@ -650,6 +651,32 @@ fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
         "json",
     ]);
     assert_eq!(stages(&security), ["security"]);
+    std::fs::write(
+        project.0.join("AGENTS.md"),
+        "# Build\nRun `cargo test` before a commit.\n",
+    )
+    .unwrap();
+    assert!(
+        !stages(&project.preview(&["check", "--dry-run", "--format", "json"]))
+            .contains(&"instructions".to_string()),
+        "documentation is opt-in"
+    );
+    let documentation = project.preview(&[
+        "check",
+        "--rule",
+        "documentation",
+        "--dry-run",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(stages(&documentation), ["instructions"]);
+    let codex = &documentation["context_load"]["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["harness"] == "Codex")
+        .unwrap()["files"];
+    assert_eq!(codex, &serde_json::json!(["AGENTS.md"]));
     let preview = project.preview(&[
         "check",
         "--rule",
