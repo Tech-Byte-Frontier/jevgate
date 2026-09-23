@@ -193,6 +193,22 @@ pub(super) fn pair_wording(
     }
 }
 
+/// A question in plain words, for listing what a unit left undecided.
+pub(super) fn question_label(question: &str) -> &str {
+    match question {
+        "split" => "splitting",
+        "flatten" => "flattening",
+        "same" => "same steps",
+        "environment" => "environment value",
+        "magic" => "unnamed value",
+        "special" => "special case",
+        "own_logic" => "recomputed expected value",
+        "mock_only" => "checks only its mocks",
+        "overlap" => "overlapping tests",
+        other => other,
+    }
+}
+
 /// One hardcoded-value question, how it composes, and its words.
 struct ValueSignal {
     question: &'static str,

@@ -8,14 +8,16 @@
 use super::{
     Block, Detail, FilePlan, GroupInfo, Presence, UnitPlan,
     wording::{
-        function_wording, outline_wording, pair_wording, test_pair_wording, test_wording,
-        values_wording,
+        function_wording, outline_wording, pair_wording, question_label, test_pair_wording,
+        test_wording, values_wording,
     },
 };
 use crate::{
     catalog,
     policy::{LEADING_PROBABILITY, LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
-    schema::{Answer, Dimension, Finding, Judgment, Pass, Status, Strength, UnitCounts, hash},
+    schema::{
+        Answer, Dimension, Finding, Judgment, Pass, Status, Strength, Undecided, UnitCounts, hash,
+    },
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -345,6 +347,7 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
     let mut concern = BTreeMap::<&str, f64>::new();
     let mut findings = Vec::new();
     let mut redundant = Vec::new();
+    let mut undecided = BTreeMap::<&str, Vec<Undecided>>::new();
     for (rule, omitted) in &plan.rules {
         counts.entry(rule).or_default().omitted = *omitted;
     }
@@ -392,7 +395,13 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
                 findings.push(finding(plan, unit, Strength::Note, p, &answers, judgments));
             }
             Outcome::Clear => count.clear += 1,
-            Outcome::Uncertain(_) | Outcome::Missing => count.uncertain += 1,
+            Outcome::Uncertain(_) | Outcome::Missing => {
+                count.uncertain += 1;
+                undecided
+                    .entry(unit.rule)
+                    .or_default()
+                    .push(undecided_unit(unit, &answers));
+            }
         }
         if let (Detail::TestPair { names, subject }, Outcome::Review(p) | Outcome::Consider(p)) =
             (&unit.detail, outcome)
@@ -407,7 +416,8 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         .map(|rule| {
             let count = counts.remove(rule).unwrap_or_default();
             let concern = concern.get(rule).copied().unwrap_or(0.0);
-            (rule.to_string(), dimension(rule, count, concern))
+            let undecided = undecided.remove(rule).unwrap_or_default();
+            (rule.to_string(), dimension(rule, count, concern, undecided))
         })
         .collect();
     // Strongest first, so a note never sits above a review or consider.
@@ -420,8 +430,49 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
     }
 }
 
+/// Questions whose undecided answer leaves a unit of the rule undecided; the
+/// other questions are weak signals or only matter when decisive.
+fn deciding_questions(rule: &str) -> &'static [&'static str] {
+    match rule {
+        catalog::FUNCTION_SIMPLIFICATION => &["split", "flatten"],
+        catalog::FILE_ORGANIZATION => &["split"],
+        catalog::SHARED_LOGIC => &["same"],
+        catalog::HARDCODED_VALUES => &["environment", "magic", "special"],
+        catalog::TEST_VALUE => &["own_logic", "mock_only"],
+        _ => &["overlap"],
+    }
+}
+
+/// The unit and its undecided questions; with no answers, why.
+fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
+    let mut questions: Vec<String> = deciding_questions(unit.rule)
+        .iter()
+        .filter(|q| {
+            answers.get(*q).is_some_and(|a| {
+                let outcome = match a {
+                    Answer::Noul { .. } => noul(a),
+                    _ => score(a),
+                };
+                matches!(outcome, Outcome::Uncertain(_))
+            })
+        })
+        .map(|q| question_label(q).to_string())
+        .collect();
+    if answers.is_empty() {
+        questions.push("no answer".into());
+    }
+    Undecided {
+        unit: match unit.detail {
+            Detail::Outline { .. } => "file outline".into(),
+            _ => unit.name.clone(),
+        },
+        line: unit.locations.first().map_or(1, |l| l.start_line),
+        questions,
+    }
+}
+
 /// A rule's status is its most severe unit outcome.
-fn dimension(rule: &str, count: UnitCounts, concern: f64) -> Dimension {
+fn dimension(rule: &str, count: UnitCounts, concern: f64, undecided: Vec<Undecided>) -> Dimension {
     let status = if count.review > 0 {
         Status::Review
     } else if count.consider > 0 {
@@ -443,6 +494,7 @@ fn dimension(rule: &str, count: UnitCounts, concern: f64) -> Dimension {
         concern_probability: concern,
         rule_version: catalog::rule_version(rule).into(),
         units: count,
+        undecided,
     }
 }
 
@@ -530,7 +582,14 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
 }
 
 fn fingerprint(rule: &str, plan: &FilePlan, identity: &str) -> String {
-    hash(format!("{rule}\u{0}{}\u{0}{identity}", plan.path.display()).as_bytes())
+    let separator = crate::schema::HASH_SEPARATOR;
+    hash(
+        format!(
+            "{rule}{separator}{}{separator}{identity}",
+            plan.path.display()
+        )
+        .as_bytes(),
+    )
 }
 
 fn rank(probability: f64, lines: usize) -> f64 {

@@ -33,6 +33,18 @@ pub struct Dimension {
     pub decision_basis: String,
     pub rule_version: String,
     pub units: UnitCounts,
+    /// Judged units whose answers stayed undecided, so a reader can see what
+    /// an uncertain status is about.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub undecided: Vec<Undecided>,
+}
+
+/// A judged unit that stayed undecided, and the questions left undecided.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Undecided {
+    pub unit: String,
+    pub line: usize,
+    pub questions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -324,6 +336,9 @@ pub fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+
+/// Joins the parts of a hashed identity; it cannot occur in a path or in source.
+pub const HASH_SEPARATOR: &str = "\u{0}";
 
 pub fn hash(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
