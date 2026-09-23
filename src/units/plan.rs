@@ -12,8 +12,8 @@ pub(super) struct Scope<'a> {
 }
 
 use super::{
-    FileContext, FilePlan, Plan, Planned, duplicates, functions, hardcoded, instructions, outline,
-    security, test_units,
+    FileContext, FilePlan, Plan, Planned, documents, duplicates, functions, hardcoded,
+    instructions, outline, security, test_units,
 };
 use crate::{
     analysis::{
@@ -106,7 +106,11 @@ fn plan_document(
         model: &args.model,
         budget,
     };
-    if let Some(repository) = &input.repository
+    if input.result.role == crate::inventory::DOCS {
+        if args.enabled(catalog::LARGE_DOCS) {
+            documents::plan(&context, &mut file, requests);
+        }
+    } else if let Some(repository) = &input.repository
         && args.enabled(catalog::AGENT_CONTEXT)
     {
         instructions::plan(&context, repository, &mut file, requests);
@@ -131,7 +135,9 @@ fn parsed_scope<'a>(
     };
     for (&owner, view) in views {
         let input = &inputs[owner];
-        if view.classification.kind == crate::file_kind::INSTRUCTIONS {
+        if [crate::file_kind::INSTRUCTIONS, crate::file_kind::DOCS]
+            .contains(&view.classification.kind.as_str())
+        {
             scope.documents.push(owner);
             continue;
         }

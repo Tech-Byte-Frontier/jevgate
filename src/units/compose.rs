@@ -7,8 +7,8 @@ use super::{
         unit_outcome, value_signals,
     },
     wording::{
-        function_wording, outline_wording, pair_wording, question_label, section_wording,
-        security_wording, test_pair_wording, test_wording, values_wording,
+        document_wording, function_wording, outline_wording, pair_wording, question_label,
+        section_wording, security_wording, test_pair_wording, test_wording, values_wording,
     },
 };
 use crate::{
@@ -89,6 +89,9 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
             matches!(
                 &u.detail,
                 Detail::Function {
+                    locate: Some(_),
+                    ..
+                } | Detail::Document {
                     locate: Some(_),
                     ..
                 }
@@ -278,6 +281,7 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "exception_to_client",
         ],
         catalog::UNSAFE_SETTINGS => &["weakened", "tls", "hash", "random", "cors", "cookie"],
+        catalog::LARGE_DOCS => &["split", "history"],
         catalog::AGENT_CONTEXT => &[
             "inferable",
             "describes",
@@ -406,6 +410,7 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::HARDCODED_VALUES => "value unit",
         catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::UNSAFE_SETTINGS => "security unit",
         catalog::AGENT_CONTEXT => "section",
+        catalog::LARGE_DOCS => "document",
         _ => "test pair",
     };
     let plural = |n: usize| if n == 1 { "" } else { "s" };
@@ -490,7 +495,7 @@ fn finding(
     let mut category = None;
     let (message, action) = match &unit.detail {
         Detail::Function { blocks, .. } => {
-            block = located_block(unit, blocks, judgments);
+            block = located_block(unit, blocks, judgments, "block");
             function_wording(name, strength, p, answers, block)
         }
         Detail::Outline { groups } => {
@@ -527,6 +532,11 @@ fn finding(
             wording
         }
         Detail::Section { .. } => section_wording(name, &unit.detail, strength, p, answers),
+        Detail::Document { parts, .. } => {
+            symbol = None;
+            block = located_block(unit, parts, judgments, "part");
+            document_wording(name, strength, p, answers, block)
+        }
         Detail::Test => test_wording(name, strength == Strength::Review, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;
@@ -560,14 +570,15 @@ fn finding(
     }
 }
 
-/// The block chosen by the locate follow-up, when its choice is clear.
+/// The block chosen by the locate follow-up `question`, when its choice is clear.
 fn located_block<'a>(
     unit: &UnitPlan,
     blocks: &'a [Block],
     judgments: &[Judgment],
+    question: &str,
 ) -> Option<&'a Block> {
     let located = answers(judgments, &unit.id, Pass::Locate);
-    let (id, _) = choice(located.get("block").copied())?;
+    let (id, _) = choice(located.get(question).copied())?;
     blocks.iter().find(|b| b.id == id)
 }
 

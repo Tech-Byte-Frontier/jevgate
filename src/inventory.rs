@@ -85,24 +85,33 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
         .collect::<Result<_>>()?;
     if args.documentation() {
         let repository = std::sync::Arc::new(crate::docs::scan(&context.root)?);
-        for relative in repository.readers.keys() {
+        let instructions = repository
+            .readers
+            .keys()
+            .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT))
+            .map(|p| (p, INSTRUCTIONS));
+        let docs = repository
+            .docs
+            .iter()
+            .filter(|_| args.enabled(crate::catalog::LARGE_DOCS))
+            .map(|p| (p, DOCS));
+        for (relative, role) in instructions.chain(docs) {
             let path = context.root.join(relative);
             let selected = (scope.is_empty() || scope.iter().any(|s| path.starts_with(s)))
                 && changes
                     .as_ref()
                     .is_none_or(|c| c.paths.contains_key(relative))
-                && repository.judged(relative)
+                && (role == DOCS || repository.judged(relative))
                 && !inputs.iter().any(|i| i.result.path == *relative);
             if selected && !boundary.permits(relative) {
                 // Named, so an allow list that leaves them out is visible.
-                let mut result = pending_result(relative, INSTRUCTIONS, args, &[]);
+                let mut result = pending_result(relative, role, args, &[]);
                 result.status = Status::Skipped;
-                result.error = Some(
-                    "Agent instruction file outside upload_allow/upload_deny; not judged.".into(),
-                );
+                result.error =
+                    Some("Documentation outside upload_allow/upload_deny; not judged.".into());
                 inputs.push(bare_input(result));
             } else if selected {
-                let mut input = load_instructions(relative, args, &path)?;
+                let mut input = load_document(relative, role, args, &path)?;
                 input.repository = Some(repository.clone());
                 inputs.push(input);
             }
@@ -111,13 +120,14 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
     Ok(inputs)
 }
 
-/// An agent instruction file, read whole; hidden and ignored paths are allowed.
-fn load_instructions(
+/// A documentation file, read whole; hidden and ignored paths are allowed.
+fn load_document(
     relative: &std::path::Path,
+    role: &str,
     args: &CheckArgs,
     path: &std::path::Path,
 ) -> Result<Input> {
-    let mut result = pending_result(relative, INSTRUCTIONS, args, &[]);
+    let mut result = pending_result(relative, role, args, &[]);
     if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
         return over_read_cap(result, relative, path, args.max_file_bytes);
     }
@@ -138,6 +148,8 @@ fn load_instructions(
 
 /// The role of an agent instruction file.
 pub const INSTRUCTIONS: &str = "instructions";
+/// The role of project documentation such as a README or a docs page.
+pub const DOCS: &str = "docs";
 
 fn load(
     (path, role): (PathBuf, String),

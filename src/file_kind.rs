@@ -156,7 +156,16 @@ pub fn language(path: &Path) -> &'static str {
 
 pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: &TokenBudget) -> Result<Plan> {
     if input.result.role == crate::inventory::INSTRUCTIONS {
-        return Ok(Plan::Ready(instructions()));
+        return Ok(Plan::Ready(document(
+            INSTRUCTIONS,
+            "Agent instruction file. Documentation rules judge its sections.",
+        )));
+    }
+    if input.result.role == crate::inventory::DOCS {
+        return Ok(Plan::Ready(document(
+            DOCS,
+            "Project documentation. Documentation rules judge its sections.",
+        )));
     }
     let prepared = prepare(input, args)?;
     match prepared.action {
@@ -177,24 +186,19 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: &TokenBudget) -> Res
     }
 }
 
-/// An agent instruction file: only the documentation rules judge it.
-fn instructions() -> View {
+/// A documentation file: only the documentation rules judge it.
+fn document(kind: &str, reason: &str) -> View {
     View {
-        classification: classification(
-            INSTRUCTIONS,
-            "deterministic",
-            "documentation",
-            "Agent instruction file. Documentation rules judge its sections.",
-            "Markdown",
-        ),
+        classification: classification(kind, "deterministic", "documentation", reason, "Markdown"),
         application: false,
         tests: false,
         test_lines: Vec::new(),
     }
 }
 
-/// The classification kind of an agent instruction file.
+/// The classification kinds of an agent instruction file and project documentation.
 pub(crate) const INSTRUCTIONS: &str = "instructions";
+pub(crate) const DOCS: &str = "docs";
 
 fn view(input: &Input, args: &CheckArgs, classification: Classification) -> View {
     if classification.kind == "tests" {

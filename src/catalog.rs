@@ -31,7 +31,8 @@ pub const SECURITY: [&str; 3] = [INJECTION, SENSITIVE_DATA, UNSAFE_SETTINGS];
 pub const TEST_VALUE: &str = "test_value";
 pub const TEST_REDUNDANCY: &str = "test_redundancy";
 pub const AGENT_CONTEXT: &str = "agent_context";
-pub const DOCUMENTATION: [&str; 1] = [AGENT_CONTEXT];
+pub const LARGE_DOCS: &str = "large_docs";
+pub const DOCUMENTATION: [&str; 2] = [AGENT_CONTEXT, LARGE_DOCS];
 
 const DATASET: &str = "focused development set; not calibrated";
 
@@ -173,6 +174,20 @@ pub fn rules() -> Vec<Rule> {
             unit: "one file's heading sections, with the repository's manifests, linters and directories",
             inspection: "Does a section restate what the repository's files show, give generic advice, repeat what linters check, or record past work?",
             acceptable_example: "Project-specific commands, constraints, decisions and workflows the code does not show",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "documentation/large-docs",
+            group: "documentation",
+            default_enabled: false,
+            key: LARGE_DOCS,
+            version: rule_version(LARGE_DOCS),
+            scope: "project Markdown of 300 or more lines: root files, README and CONTRIBUTING anywhere, docs/ and doc/ (read even when ignored)",
+            unit: "one document's headings in order, without its text",
+            inspection: "Would splitting the document make it easier to find and maintain, or does it mainly record past work?",
+            acceptable_example: "One long guide, reference or concept, and living procedures",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,

@@ -23,6 +23,9 @@ pub struct Repository {
     /// load but are judged at their source.
     pub generated: BTreeSet<PathBuf>,
     pub load: load::ContextLoad,
+    /// Project documentation judged by the documentation rules: README,
+    /// docs and other Markdown, without generated files.
+    pub docs: BTreeSet<PathBuf>,
 }
 
 impl Repository {
@@ -41,7 +44,7 @@ pub fn scan(root: &Path) -> Result<Repository> {
         .filter(|p| std::fs::metadata(root.join(p)).is_ok_and(|m| m.len() <= MAX_BYTES))
         .filter_map(|p| Some((p.clone(), std::fs::read_to_string(root.join(p)).ok()?)))
         .collect();
-    let generated = sources
+    let generated_files: BTreeSet<PathBuf> = sources
         .iter()
         .filter(|(_, source)| generated(source))
         .map(|(p, _)| p.clone())
@@ -49,6 +52,17 @@ pub fn scan(root: &Path) -> Result<Repository> {
     let files = load::files(sources, &found.links);
     let load = load::context_load(&files, &found.links, root);
     let links: BTreeSet<&PathBuf> = found.links.iter().map(|(p, _)| p).collect();
+    let docs = found
+        .project
+        .iter()
+        .filter(|p| {
+            let path = root.join(p);
+            path.symlink_metadata()
+                .is_ok_and(|m| m.is_file() && m.len() <= MAX_BYTES)
+                && std::fs::read_to_string(&path).is_ok_and(|s| !generated(&s))
+        })
+        .cloned()
+        .collect();
     Ok(Repository {
         project: project::read(root, &found.directories),
         readers: files
@@ -56,8 +70,9 @@ pub fn scan(root: &Path) -> Result<Repository> {
             .filter(|f| !links.contains(&f.path))
             .map(|f| (f.path, f.readers))
             .collect(),
-        generated,
+        generated: generated_files,
         load,
+        docs,
     })
 }
 

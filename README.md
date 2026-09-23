@@ -48,6 +48,7 @@ Consider (2):
 | Rule | Example finding |
 |---|---|
 | Agent context | A section of `CLAUDE.md` only lists the scripts `package.json` already shows, and six harnesses load it at the start of every session. |
+| Large docs | `docs/operations/runbook.md` holds several unrelated subjects; `docs/plans/v0.2-plan.md` mainly records finished work. |
 
 It reads the instruction files that coding agents load: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and Claude, Cursor, Copilot, Windsurf and Cline rules. These files are read even when hidden or gitignored. Each heading section, or each paragraph and list item of a long section, is asked four things:
 
@@ -56,7 +57,7 @@ It reads the instruction files that coding agents load: `AGENTS.md`, `CLAUDE.md`
 - is it generic advice, a record of past work, or a style rule a configured linter already checks?
 - is it text loaded in every session that applies to one directory?
 
-Findings are at most `consider`. The run also estimates the tokens each harness loads at session start and lists loading facts, such as identical copies, imports that do not resolve, or an `AGENTS.md` that Claude Code skips. These facts are evidence and never fail the gate.
+Project Markdown of 300 or more lines is judged from its headings alone, never its full text. This covers root files, README and CONTRIBUTING files, and `docs/` and `doc/` even when gitignored. The questions are whether splitting it would help and whether it mainly records past work. Findings are at most `consider`. The run also estimates the tokens each harness loads at session start and lists loading facts, such as identical copies, imports that do not resolve, or an `AGENTS.md` that Claude Code skips. These facts are evidence and never fail the gate.
 
 `jevgate rules` prints every rule with its question and default.
 
@@ -134,7 +135,7 @@ In CI, inject `TYPESAFE_API_KEY`, and restore and save `.jevgate/cache` (plus `.
 
 - **Languages:** Rust, Python, JavaScript and TypeScript are supported. Other files are listed as skipped, with the reason.
 - **Security scope:** security rules look at one function plus at most one hop of callers. They are not whole-program data-flow analysis, and they don't cover SQL files, row-level policies or access control.
-- **Documentation scope:** the documentation rules judge agent instruction files one section at a time. Duplication across files, staleness against the code, and code comments are not judged yet. Token counts are estimates at four bytes per token.
+- **Documentation scope:** agent instruction files are judged one section at a time, and large project docs by their outline. Duplication across files, staleness against the code, and code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
 
 ## Contributing

@@ -72,24 +72,36 @@ pub fn agent_file(path: &Path) -> bool {
         || (parts.contains(&".clinerules") && matches!(extension, "md" | "txt"))
 }
 
+/// Project documentation: Markdown at the root, README and CONTRIBUTING
+/// files anywhere, and Markdown under `docs/` or `doc/`, outside records
+/// such as changelogs.
 fn project_doc(path: &Path) -> bool {
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let lower = |p: &std::ffi::OsStr| p.to_string_lossy().to_ascii_lowercase();
+    let stem = path.file_stem().map(lower).unwrap_or_default();
+    let dirs: Vec<String> = path
+        .parent()
+        .into_iter()
+        .flat_map(|p| p.iter())
+        .map(lower)
+        .collect();
     let hidden = path.iter().any(|p| p.to_string_lossy().starts_with('.'));
-    let fixture = path.iter().any(|p| {
-        matches!(
-            p.to_string_lossy().to_ascii_lowercase().as_str(),
-            "fixtures" | "__fixtures__" | "testdata" | "__snapshots__"
-        )
+    let excluded = dirs.iter().any(|d| {
+        RECORD_STEMS.contains(&d.as_str())
+            || matches!(
+                d.as_str(),
+                "fixtures" | "__fixtures__" | "testdata" | "__snapshots__" | "archive"
+            )
     });
+    let documentation = dirs.is_empty()
+        || stem.starts_with("readme")
+        || stem.starts_with("contributing")
+        || dirs.iter().any(|d| DOC_DIRS.contains(&d.as_str()));
     matches!(extension.to_ascii_lowercase().as_str(), "md" | "mdx")
+        && documentation
         && !agent_file(path)
         && !hidden
-        && !fixture
+        && !excluded
         && !RECORD_STEMS.contains(&stem.as_str())
 }
 
@@ -143,8 +155,39 @@ pub fn discover(root: &Path) -> Result<Found> {
                 walk_agent_dir(root, &path, &mut found)?;
             }
         }
+        // Documentation folders kept out of Git are still read by agents on request.
+        for name in DOC_DIRS {
+            let path = directory.join(name);
+            if root.join(&path).is_dir() {
+                walk_doc_dir(root, &root.join(&path), &mut found)?;
+            }
+        }
     }
     Ok(found)
+}
+
+/// Documentation folders read even when ignored.
+const DOC_DIRS: &[&str] = &["docs", "doc"];
+
+fn walk_doc_dir(root: &Path, dir: &Path, found: &mut Found) -> Result<()> {
+    let walk = ignore::WalkBuilder::new(dir)
+        .standard_filters(false)
+        .follow_links(false)
+        .filter_entry(|e| {
+            let name = e.file_name().to_str().unwrap_or_default();
+            e.depth() == 0
+                || !e.file_type().is_some_and(|t| t.is_dir())
+                || !(SKIPPED_DIRS.contains(&name) || name.starts_with('.'))
+        })
+        .build();
+    for entry in walk {
+        let entry = entry.context("Failed while discovering documentation")?;
+        let relative = entry.path().strip_prefix(root)?.to_path_buf();
+        if entry.file_type().is_some_and(|t| t.is_file()) && project_doc(&relative) {
+            found.project.insert(relative);
+        }
+    }
+    Ok(())
 }
 
 fn walk_agent_dir(root: &Path, dir: &Path, found: &mut Found) -> Result<()> {
@@ -209,13 +252,21 @@ mod tests {
         assert!(!project_doc(Path::new("CLAUDE.md")));
         assert!(!project_doc(Path::new(".github/ISSUE_TEMPLATE/bug.md")));
         assert!(!project_doc(Path::new("tests/fixtures/readme.md")));
+        assert!(project_doc(Path::new("web/README.md")));
+        assert!(project_doc(Path::new("doc/api/errors.mdx")));
+        assert!(!project_doc(Path::new("docs/changelog/v1.md")));
+        assert!(!project_doc(Path::new("docs/archive/plan.md")));
+        assert!(!project_doc(Path::new("config/notes/SAUD3.md")));
+        assert!(project_doc(Path::new("ROADMAP.md")));
+        assert!(!project_doc(Path::new("src/NOTES.md")));
     }
 
     #[test]
     fn ignored_and_hidden_agent_files_are_found() {
         let project = crate::tests::Project::new();
         for (path, text) in [
-            (".gitignore", "AGENTS.md\n/.claude/\n/notes/\n"),
+            (".gitignore", "AGENTS.md\n/.claude/\n/notes/\n/docs/*\n"),
+            ("docs/plan.md", "# Plan\n"),
             ("AGENTS.md", "# A\n"),
             ("README.md", "# R\n"),
             (".claude/rules/x.md", "# X\n"),
@@ -229,6 +280,6 @@ mod tests {
         let agent: Vec<_> = found.agent.iter().map(|p| p.to_str().unwrap()).collect();
         assert_eq!(agent, [".claude/rules/x.md", "AGENTS.md", "src/CLAUDE.md"]);
         let docs: Vec<_> = found.project.iter().map(|p| p.to_str().unwrap()).collect();
-        assert_eq!(docs, ["README.md"]);
+        assert_eq!(docs, ["README.md", "docs/plan.md"]);
     }
 }

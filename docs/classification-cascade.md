@@ -45,7 +45,11 @@ signatures, or one candidate pair.
    linters and the directories. Code decides which harness loads each file and
    when, from its documented discovery rules. It also records loading facts:
    copies, unresolved imports, and files a harness skips or truncates. These
-   are reported, never judged.
+   are reported, never judged. Project Markdown of 300 or more lines is sent
+   as its headings only, with `#` marks for nesting. A split finding is then
+   located with one Choice among its top-level parts. Per-section questions on
+   project docs were dropped: on a labeled sample they found almost nothing,
+   and they cost about five times more than an outline.
 5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise
@@ -56,7 +60,9 @@ signatures, or one candidate pair.
    answers leaning away were almost all acceptable code, and leaning toward
    held both real positives of the labeled set. Instruction sections are
    cleanups, so their findings are at most a consider. Undecided answers do not
-   lean into notes, because on the labeled set that added notes to kept sections. Questions ask whether a change would help a reader ("would splitting
+   lean into notes, because on the labeled set that added notes to kept sections.
+   A large document's undecided history answer does lean into a note. On its
+   labeled set, no living document leaned past 0.50. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
    Jev does not count reliably and reads "tasks" literally. Copies inside test
    cases are one level lower. A review always carries a finding.

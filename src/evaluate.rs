@@ -112,6 +112,11 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         fail_on: args.fail_on_names(),
         fail_on_rules: args.rule_fail_on_names(),
         gate: None,
+        rules: crate::catalog::rules()
+            .into_iter()
+            .filter(|r| args.enabled(r.key))
+            .map(|r| r.id.to_string())
+            .collect(),
         context_load: None,
     }
 }
