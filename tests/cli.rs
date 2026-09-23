@@ -681,6 +681,8 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "injection",
             "sensitive_data",
             "unsafe_settings",
+            "access_control",
+            "workflows",
             "test_value",
             "test_redundancy",
             "agent_context",

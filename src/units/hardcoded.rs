@@ -41,8 +41,20 @@ pub(super) fn plan(
             quote: None,
             lines: unit.lines(),
             identity: identity(&[&unit.name, &compact(source)]),
-            detail: Detail::Values {
-                values: unit.literals.iter().map(|l| l.text.clone()).collect(),
+            detail: {
+                let mut choices: Vec<String> = Vec::new();
+                for literal in &unit.literals {
+                    if !choices.contains(&literal.text) {
+                        choices.push(literal.text.clone());
+                    }
+                }
+                let locate = (choices.len() <= LOCATE_CHOICES)
+                    .then(|| locate(file, &unit.name, source, &id, &choices));
+                Detail::Values {
+                    values: unit.literals.iter().map(|l| l.text.clone()).collect(),
+                    choices,
+                    locate,
+                }
             },
             recheck: benign_request(file, &id, json!({"functions": [state.clone()]}), true),
         });
@@ -54,6 +66,38 @@ pub(super) fn plan(
     if !constants.is_empty() {
         plan_constants(file, constants, out, requests);
     }
+}
+
+/// Most distinct values a locate Choice offers; a unit with more is not located.
+const LOCATE_CHOICES: usize = 24;
+
+/// Which value a finding is about: the function's source and its distinct values.
+fn locate(
+    file: &FileContext<'_>,
+    name: &str,
+    source: &str,
+    id: &str,
+    choices: &[String],
+) -> (Value, super::Asked) {
+    let ids: Vec<String> = (0..choices.len()).map(|i| format!("v{i}")).collect();
+    let mut questions = Questions::default();
+    questions.ask(
+        "value".into(),
+        questions::hardcoded_value(&ids),
+        id,
+        HARDCODED_VALUES,
+        "value",
+        Pass::Locate,
+    );
+    let state = json!({
+        "file": file.file_state(),
+        "function": {
+            "name": name,
+            "source": source,
+            "values": ids.iter().zip(choices).map(|(id, value)| json!({"id": id, "value": value})).collect::<Vec<_>>(),
+        },
+    });
+    file.request("locate", state, questions)
 }
 
 /// A pack that is too large is sent one function at a time.

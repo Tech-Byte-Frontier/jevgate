@@ -5,11 +5,14 @@ use crate::schema::{FileResult, Judgment, Status};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-/// One locate follow-up per function whose split raised a review or consider.
+/// One locate follow-up per function whose split raised a review or consider,
+/// and per hardcoded-value function raised to a review or consider.
 pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::unlocated_units, |unit| {
         match &unit.detail {
-            Detail::Function { locate, .. } | Detail::Document { locate, .. } => locate.as_ref(),
+            Detail::Function { locate, .. }
+            | Detail::Document { locate, .. }
+            | Detail::Values { locate, .. } => locate.as_ref(),
             _ => None,
         }
     })

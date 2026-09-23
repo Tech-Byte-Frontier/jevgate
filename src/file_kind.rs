@@ -168,6 +168,35 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: &TokenBudget) -> Res
             "Project documentation. Documentation rules judge its sections.",
         )));
     }
+    let configuration = match input.result.role.as_str() {
+        crate::inventory::SQL => Some((
+            "SQL. The access-control rule judges its policies, SECURITY DEFINER functions and grants.",
+            "SQL",
+        )),
+        crate::inventory::SQL_CONTEXT => Some((
+            "Unchanged SQL, read only for the final state of changed migrations.",
+            "SQL",
+        )),
+        crate::inventory::WORKFLOW => Some((
+            "GitHub Actions workflow. The workflow rule judges its jobs.",
+            "YAML",
+        )),
+        _ => None,
+    };
+    if let Some((reason, language)) = configuration {
+        return Ok(Plan::Ready(View {
+            classification: classification(
+                &input.result.role,
+                "deterministic",
+                "security",
+                reason,
+                language,
+            ),
+            application: false,
+            tests: false,
+            test_lines: Vec::new(),
+        }));
+    }
     let prepared = prepare(input, args)?;
     match prepared.action {
         Action::Skip => Ok(Plan::Skip(prepared.classification)),

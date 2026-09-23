@@ -4,7 +4,7 @@
 //! when the top level is ruled out (its complement reaches it), otherwise
 //! uncertain. Where the middle level says the code is fine as it is, a
 //! consider needs the top level to lead; middle mass alone is an optional note.
-use super::{Detail, GroupInfo, UnitPlan};
+use super::{Access, Detail, GroupInfo, UnitPlan};
 use crate::{
     catalog,
     policy::{LEADING_PROBABILITY, LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
@@ -167,6 +167,14 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
         }
         catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
+        catalog::ACCESS_CONTROL => access_outcome(&get, &unit.detail),
+        catalog::WORKFLOWS => {
+            let asked: Vec<Outcome> = ["outside", "untrusted"]
+                .iter()
+                .filter_map(|q| get(q).map(noul))
+                .collect();
+            (!asked.is_empty()).then(|| strongest(&asked))
+        }
         catalog::LARGE_DOCS => document_outcome(&get),
         catalog::DOC_STALENESS => {
             let question = if matches!(unit.detail, Detail::Plan { .. }) {
@@ -187,6 +195,28 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
+}
+
+/// Policies and grants whose intent may be public data are at most a
+/// consider, as is an open `search_path`; a SECURITY DEFINER function that
+/// skips checking its caller can be a review.
+fn access_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    detail: &Detail,
+) -> Option<Outcome> {
+    let Detail::Access(access) = detail else {
+        return None;
+    };
+    Some(match access {
+        Access::Policy { .. } => strongest(&[
+            cleanup(noul(get("others")?)),
+            cleanup(noul(get("editable")?)),
+        ]),
+        Access::Definer => {
+            strongest(&[noul(get("unchecked")?), cleanup(noul(get("search_path")?))])
+        }
+        Access::Grant => cleanup(noul(get("broad")?)),
+    })
 }
 
 /// Documentation findings are cleanups, never defects: at most a consider.
@@ -599,11 +629,14 @@ pub(super) fn shared_outcome(
     })
 }
 
-/// Hollow signals decide review and clear; weak signals can raise a consider,
-/// and their uncertainty does not block a clear.
+/// Hollow signals decide review and clear; internal details can raise a
+/// consider, and their uncertainty does not block a clear. "Several unrelated
+/// behaviors" is only a note: on labeled tests it rated tables of inputs and
+/// browser journeys as high as tests that really mix behaviors.
 pub(super) fn test_value_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
     let hollow = [noul(get("own_logic")?), noul(get("mock_only")?)];
-    let weak = [noul(get("internal")?), noul(get("several")?)];
+    let weak = [noul(get("internal")?)];
+    let several = noul(get("several")?);
     let strongest = |outcomes: &[Outcome]| {
         outcomes
             .iter()
@@ -617,6 +650,8 @@ pub(super) fn test_value_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) 
         Outcome::Review(p)
     } else if let Some(p) = strongest(&weak) {
         Outcome::Consider(p)
+    } else if let Outcome::Review(p) = several {
+        Outcome::Note(p)
     } else if hollow.iter().all(|o| *o == Outcome::Clear) {
         Outcome::Clear
     } else {

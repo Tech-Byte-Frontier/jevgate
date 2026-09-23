@@ -446,6 +446,7 @@ fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
         file.findings = composed.findings;
         file.status = composed.status;
     }
+    crate::units::grouping::group_repeated_values(&mut report.files);
 }
 
 fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {

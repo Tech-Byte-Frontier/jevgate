@@ -157,6 +157,7 @@ mod tests {
             }],
             quote: None,
             category: None,
+            values: Vec::new(),
             fingerprint: String::new(),
             rank: 1.0,
             baselined: false,

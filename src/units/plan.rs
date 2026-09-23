@@ -9,11 +9,13 @@ pub(super) struct Scope<'a> {
     context: Vec<(PathBuf, &'a str, FileUnits)>,
     /// Agent instruction files, judged by the documentation rules only.
     documents: Vec<usize>,
+    /// SQL and workflow files, judged by the access-control and workflow rules.
+    configuration: Vec<usize>,
 }
 
 use super::{
-    FileContext, FilePlan, Plan, Planned, documents, drift, duplicates, functions, hardcoded,
-    instructions, outline, security, test_units,
+    FileContext, FilePlan, Plan, Planned, access, documents, drift, duplicates, functions,
+    hardcoded, instructions, outline, security, test_units, workflows,
 };
 use crate::{
     analysis::{
@@ -84,6 +86,34 @@ pub fn plan(
         args.enabled(catalog::DOC_STALENESS),
         args.enabled(catalog::DOC_DUPLICATION),
     );
+    let sql: Vec<(usize, &Input)> = scope
+        .configuration
+        .iter()
+        .filter(|&&o| inputs[o].result.role != crate::inventory::WORKFLOW)
+        .map(|&o| (o, &inputs[o]))
+        .collect();
+    access::plan(&sql, args, budget, &mut result.files, &mut result.requests);
+    for &owner in &scope.configuration {
+        let input = &inputs[owner];
+        if input.result.role != crate::inventory::WORKFLOW {
+            continue;
+        }
+        let mut file = FilePlan {
+            path: input.result.path.clone(),
+            ..Default::default()
+        };
+        let context = FileContext {
+            owner,
+            path: &input.result.path,
+            language: "YAML",
+            source: input.source.as_deref().unwrap_or(""),
+            source_hash: &input.result.source_hash,
+            model: args.model(),
+            budget,
+        };
+        workflows::plan(&context, &mut file, &mut result.requests);
+        result.files.insert(owner, file);
+    }
     for &owner in &scope.documents {
         let file = plan_document(
             &inputs[owner],
@@ -147,6 +177,7 @@ fn parsed_scope<'a>(
         units: BTreeMap::new(),
         context: Vec::new(),
         documents: Vec::new(),
+        configuration: Vec::new(),
     };
     for (&owner, view) in views {
         let input = &inputs[owner];
@@ -154,6 +185,10 @@ fn parsed_scope<'a>(
             .contains(&view.classification.kind.as_str())
         {
             scope.documents.push(owner);
+            continue;
+        }
+        if view.classification.gate == "security" && !view.application {
+            scope.configuration.push(owner);
             continue;
         }
         let source = input.source.as_deref().unwrap_or("");

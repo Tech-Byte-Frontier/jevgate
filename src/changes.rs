@@ -153,6 +153,7 @@ mod tests {
             locations: Vec::new(),
             quote: None,
             category: None,
+            values: Vec::new(),
             fingerprint: fingerprint.into(),
             rank: 1.0,
             baselined: false,

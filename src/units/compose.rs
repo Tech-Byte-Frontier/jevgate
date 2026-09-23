@@ -1,15 +1,15 @@
 //! Pure composition from typed judgments to unit outcomes, rule dimensions,
 //! findings and a file status; each unit's outcome comes from `outcome`.
 use super::{
-    Block, Detail, FilePlan, Presence, UnitPlan,
+    Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, benefit, checks, choice, noul, open, origin_outcome, score,
         split_has_users, unit_outcome, value_signals,
     },
     wording::{
         doc_pair_wording, document_wording, function_wording, outline_wording, pair_wording,
-        plan_wording, question_label, section_wording, security_wording, stale_wording,
-        test_pair_wording, test_wording, values_wording,
+        plan_wording, privilege_wording, question_label, section_wording, security_wording,
+        stale_wording, test_pair_wording, test_wording, values_wording,
     },
 };
 use crate::{
@@ -93,29 +93,29 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
 }
 
 /// Functions whose split question raised a review or consider, and whose
-/// block has not been located yet.
+/// block has not been located yet; hardcoded-value functions raised to a
+/// review or consider whose value has not been named yet.
 pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
         .iter()
         .filter(|u| u.presence == Presence::Judged)
+        .filter(|u| answers(judgments, &u.id, Pass::Locate).is_empty())
         .filter(|u| {
-            matches!(
-                &u.detail,
+            let (outcome, resolved) = resolved(u, judgments);
+            let raised =
+                |o: Option<Outcome>| matches!(o, Some(Outcome::Review(_) | Outcome::Consider(_)));
+            match &u.detail {
+                Detail::Values {
+                    locate: Some(_), ..
+                } => raised(Some(outcome)),
                 Detail::Function {
-                    locate: Some(_),
-                    ..
-                } | Detail::Document {
-                    locate: Some(_),
-                    ..
+                    locate: Some(_), ..
                 }
-            )
-        })
-        .filter(|u| {
-            let (_, resolved) = resolved(u, judgments);
-            matches!(
-                resolved.get("split").map(|a| benefit(a)),
-                Some(Outcome::Review(_) | Outcome::Consider(_))
-            ) && answers(judgments, &u.id, Pass::Locate).is_empty()
+                | Detail::Document {
+                    locate: Some(_), ..
+                } => raised(resolved.get("split").map(|a| benefit(a))),
+                _ => false,
+            }
         })
         .map(|u| u.id.clone())
         .collect()
@@ -318,6 +318,8 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "exception_to_client",
         ],
         catalog::UNSAFE_SETTINGS => &["weakened", "tls", "hash", "random", "cors", "cookie"],
+        catalog::ACCESS_CONTROL => &["others", "editable", "search_path", "unchecked", "broad"],
+        catalog::WORKFLOWS => &["outside", "untrusted"],
         catalog::LARGE_DOCS => &["split", "history"],
         catalog::DOC_STALENESS => &["plan", "relies"],
         catalog::DOC_DUPLICATION => &["a_covers", "b_covers", "conflict"],
@@ -355,7 +357,7 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
         questions.push("no answer".into());
     }
     let values = match &unit.detail {
-        Detail::Values { values } | Detail::Constants { values }
+        Detail::Values { values, .. } | Detail::Constants { values }
             if values.len() <= SHOWN_VALUES =>
         {
             values.clone()
@@ -393,7 +395,18 @@ fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<String> {
 
 /// A rule's status is its most severe unit outcome.
 fn dimension(rule: &str, count: UnitCounts, concern: f64, undecided: Vec<Undecided>) -> Dimension {
-    let status = if count.review > 0 {
+    Dimension {
+        decision_basis: basis(rule, &count),
+        status: counted_status(&count),
+        concern_probability: concern,
+        rule_version: catalog::rule_version(rule).into(),
+        units: count,
+        undecided,
+    }
+}
+
+pub(super) fn counted_status(count: &UnitCounts) -> Status {
+    if count.review > 0 {
         Status::Review
     } else if count.consider > 0 {
         Status::Consider
@@ -407,18 +420,13 @@ fn dimension(rule: &str, count: UnitCounts, concern: f64, undecided: Vec<Undecid
         Status::Clear
     } else {
         Status::NotApplicable
-    };
-    Dimension {
-        decision_basis: basis(rule, &count),
-        status,
-        concern_probability: concern,
-        rule_version: catalog::rule_version(rule).into(),
-        units: count,
-        undecided,
     }
 }
 
-fn file_status(dimensions: &BTreeMap<String, Dimension>, findings: &[Finding]) -> Status {
+pub(super) fn file_status(
+    dimensions: &BTreeMap<String, Dimension>,
+    findings: &[Finding],
+) -> Status {
     let any = |status: Status| dimensions.values().any(|d| d.status == status);
     if dimensions
         .values()
@@ -448,6 +456,8 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::TEST_VALUE => "test",
         catalog::HARDCODED_VALUES => "value unit",
         catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::UNSAFE_SETTINGS => "security unit",
+        catalog::ACCESS_CONTROL => "access statement",
+        catalog::WORKFLOWS => "workflow job",
         catalog::AGENT_CONTEXT => "section",
         catalog::LARGE_DOCS => "document",
         catalog::DOC_STALENESS => "document check",
@@ -569,7 +579,11 @@ fn finding(
             p,
         ),
         Detail::Values { .. } | Detail::Constants { .. } => {
-            values_wording(name, &unit.detail, strength, p, answers)
+            let (message, action) = values_wording(name, &unit.detail, strength, p, answers);
+            match located_value(unit, judgments) {
+                Some(value) => (format!("{message} The value is {value}."), action),
+                None => (message, action),
+            }
         }
         Detail::Security { sites, .. } => {
             let site = choice(answers.get("site").copied())
@@ -596,6 +610,38 @@ fn finding(
             symbol = None;
             block = located_block(unit, parts, judgments, "part");
             document_wording(name, strength, p, answers, block)
+        }
+        Detail::Access(access) => {
+            let subject = match access {
+                Access::Policy { table } => format!("Policy `{name}` on `{table}`"),
+                Access::Definer => format!("SECURITY DEFINER function `{name}`"),
+                Access::Grant => format!("A grant on `{name}`"),
+            };
+            let (wording, named) = privilege_wording(&subject, strength, p, answers);
+            category = Some(named);
+            wording
+        }
+        Detail::Job { expressions } => {
+            let ((message, action), named) =
+                privilege_wording(&format!("Job `{name}`"), strength, p, answers);
+            category = Some(named);
+            let outside = matches!(
+                answers.get("outside").map(|a| noul(a)),
+                Some(Outcome::Review(_))
+            );
+            let listed = expressions
+                .iter()
+                .map(|e| format!("`${{{{ {e} }}}}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if outside {
+                (
+                    format!("{message} Expressions in its scripts: {listed}."),
+                    action,
+                )
+            } else {
+                (message, action)
+            }
         }
         Detail::Test => test_wording(name, strength == Strength::Review, p, answers),
         Detail::TestPair { .. } => {
@@ -624,10 +670,32 @@ fn finding(
         locations,
         quote: unit.quote.clone(),
         category,
+        // Only a special-cased identity groups across files: the same number
+        // or path can mean different things in different code.
+        values: located_value(unit, judgments)
+            .filter(|_| {
+                matches!(
+                    answers.get("special").map(|a| noul(a)),
+                    Some(Outcome::Review(_) | Outcome::Consider(_))
+                )
+            })
+            .into_iter()
+            .collect(),
         fingerprint: fingerprint(unit.rule, plan, &unit.identity),
         rank: rank(p, lines),
         baselined: false,
     }
+}
+
+/// The value a hardcoded-value finding is about, when the locate choice is clear.
+fn located_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<String> {
+    let Detail::Values { choices, .. } = &unit.detail else {
+        return None;
+    };
+    let located = answers(judgments, &unit.id, Pass::Locate);
+    let (id, _) = choice(located.get("value").copied())?;
+    let index: usize = id.strip_prefix('v')?.parse().ok()?;
+    choices.get(index).cloned()
 }
 
 /// The block chosen by the locate follow-up `question`, when its choice is clear.
@@ -689,6 +757,7 @@ fn over_tested(
                 locations,
                 quote: None,
                 category: None,
+                values: Vec::new(),
                 fingerprint: fingerprint(
                     catalog::TEST_REDUNDANCY,
                     plan,

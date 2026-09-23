@@ -390,11 +390,14 @@ impl CheckArgs {
             .any(|r| r == key || r == crate::catalog::id(key))
     }
 
-    /// Whether a rule that judges source code is selected.
+    /// Whether a rule that judges application source is selected.
     pub fn code_rules(&self) -> bool {
         self.rules.iter().any(|r| {
-            crate::catalog::find(r)
-                .is_some_and(|rule| !crate::catalog::DOCUMENTATION.contains(&rule.key))
+            crate::catalog::find(r).is_some_and(|rule| {
+                !crate::catalog::DOCUMENTATION.contains(&rule.key)
+                    && ![crate::catalog::ACCESS_CONTROL, crate::catalog::WORKFLOWS]
+                        .contains(&rule.key)
+            })
         })
     }
 
