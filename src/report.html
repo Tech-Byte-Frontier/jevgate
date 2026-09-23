@@ -38,7 +38,7 @@
 const data=JSON.parse(document.getElementById('data').textContent);
 const $=id=>document.getElementById(id);
 const labels={review:'Needs review',consider:'Consider',note:'Note',clear:'Clear',uncertain:'Uncertain','needs-context':'Needs context','not-applicable':'Not applicable',error:'Error',pending:'Pending',skipped:'Skipped'};
-const names={file_organization:'File organization',function_simplification:'Function simplification',shared_logic:'Shared logic',hardcoded_values:'Hardcoded values',test_value:'Test value',test_redundancy:'Test redundancy'};
+const names={file_organization:'File organization',function_simplification:'Function simplification',shared_logic:'Shared logic',hardcoded_values:'Hardcoded values',injection:'Injection',sensitive_data:'Sensitive data',unsafe_settings:'Unsafe settings',test_value:'Test value',test_redundancy:'Test redundancy'};
 const rules=new Map();for(const r of data.rules){rules.set(r.key,r);rules.set(r.id,r)}
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n}
 function badge(status){return el('span',labels[status]||status,'badge '+(Object.hasOwn(labels,status)?status:''))}
@@ -74,6 +74,7 @@ function findingRow(finding){
  summary.append(main,el('span',name(finding.rule),'count'),badge(finding.strength));row.append(summary);
  const body=el('div',null,'detail');row.append(body);
  p(body,finding.action);
+ p(body,finding.category,'small');
  if(finding.locations&&finding.locations.length>1)p(body,'Locations: '+finding.locations.map(l=>l.path+':'+l.start_line+'–'+l.end_line).join(', '),'small');
  p(body,'Concern '+pct(finding.concern_probability),'small');
  if(finding.quote){const quote=el('details');quote.append(el('summary','Quoted statements'),el('pre',finding.quote));body.append(quote)}
