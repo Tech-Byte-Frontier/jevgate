@@ -1,16 +1,15 @@
 //! Test quality: one request per test for value checks and one per candidate
 //! redundant pair.
 use super::{
-    Asked, Detail, FileContext, FilePlan, Planned, Presence, TEST_PACK_ITEMS, UnitPlan, compact,
-    identity, pack, questions, unique_ids,
+    Asked, Detail, FileContext, FilePlan, Planned, Presence, Questions, TEST_PACK_ITEMS, UnitPlan,
+    compact, identity, pack, questions, unique_ids,
 };
 use crate::{
     analysis::test_map::{self, TestCase},
     catalog::{TEST_REDUNDANCY, TEST_VALUE},
     schema::Pass,
-    token_budget::TokenBudget,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 const SUBJECTS: usize = 16;
@@ -31,7 +30,6 @@ pub(super) fn plan_values(
     file: &FileContext<'_>,
     cases: &[TestCase],
     subjects: &BTreeMap<String, String>,
-    budget: &TokenBudget,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -60,7 +58,7 @@ pub(super) fn plan_values(
     }
     for group in pack(items, TEST_PACK_ITEMS, |(_, _, _, item)| item) {
         let (request, asked) = value_request(file, &group, subjects);
-        if budget.fits(&request) {
+        if file.budget.fits(&request) {
             requests.push(Planned {
                 owner: file.owner,
                 request,
@@ -80,8 +78,7 @@ fn value_request(
     group: &[(usize, String, &TestCase, Value)],
     subjects: &BTreeMap<String, String>,
 ) -> (Value, Asked) {
-    let mut questions = Map::new();
-    let mut asked = Asked::default();
+    let mut questions = Questions::default();
     for (index, (_, id, _, _)) in group.iter().enumerate() {
         let path = format!("tests[{index}].source");
         for (question, body) in [
@@ -90,8 +87,7 @@ fn value_request(
             ("mock_only", questions::test_mock_only(&path)),
             ("several", questions::test_several(&path)),
         ] {
-            asked.ask(
-                &mut questions,
+            questions.ask(
                 format!("t{index}_{question}"),
                 body,
                 id,
@@ -110,14 +106,13 @@ fn value_request(
         "tests": group.iter().map(|(_, _, _, item)| item.clone()).collect::<Vec<_>>(),
         "subjects": subject_state(&names, subjects),
     });
-    (file.request("tests", state, questions), asked)
+    file.request("tests", state, questions)
 }
 
 pub(super) fn plan_pairs(
     file: &FileContext<'_>,
     cases: &[TestCase],
     subjects: &BTreeMap<String, String>,
-    budget: &TokenBudget,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -126,15 +121,13 @@ pub(super) fn plan_pairs(
     for pair in pairs {
         let (a, b) = (&cases[pair.a], &cases[pair.b]);
         let id = format!("test-pair:{}|{}", a.name, b.name);
-        let mut questions = Map::new();
-        let mut asked = Asked::default();
+        let mut questions = Questions::default();
         for (question, body) in [
             ("overlap", questions::test_pair_overlap()),
             ("same_input", questions::test_pair_same_input()),
             ("same_outcome", questions::test_pair_same_outcome()),
         ] {
-            asked.ask(
-                &mut questions,
+            questions.ask(
                 question.into(),
                 body,
                 &id,
@@ -148,8 +141,8 @@ pub(super) fn plan_pairs(
             "test_b": {"name": b.name, "source": b.source(file.source)},
             "subject": subject_state(&[&pair.subject], subjects).remove(0),
         });
-        let request = file.request("test-pair", state, questions);
-        let fits = budget.fits(&request);
+        let (request, asked) = file.request("test-pair", state, questions);
+        let fits = file.budget.fits(&request);
         out.units.push(UnitPlan {
             rule: TEST_REDUNDANCY,
             id,

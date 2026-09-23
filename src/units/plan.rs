@@ -191,6 +191,7 @@ fn plan_file(
         source: input.source.as_deref().unwrap_or(""),
         source_hash: &input.result.source_hash,
         model: &args.model,
+        budget,
     };
     let mut file = FilePlan {
         path: input.result.path.clone(),
@@ -199,9 +200,7 @@ fn plan_file(
     let lines = scope.test_lines(owner);
     let cases = shared.cases.get(context.path).cloned().unwrap_or_default();
     if shared.enabled(catalog::FUNCTION_SIMPLIFICATION) {
-        plan_functions(
-            scope, &context, view, &lines, &cases, budget, &mut file, requests,
-        );
+        plan_functions(scope, &context, view, &lines, &cases, &mut file, requests);
     }
     if shared.enabled(catalog::FILE_ORGANIZATION) && view.application {
         let units = &scope.units[&owner].units;
@@ -212,9 +211,7 @@ fn plan_file(
         if members.len() >= 2 {
             let callers = callers(scope, &shared.imports, owner);
             let parsed = &scope.units[&owner];
-            outline::plan(
-                &context, parsed, &members, &callers, budget, &mut file, requests,
-            );
+            outline::plan(&context, parsed, &members, &callers, &mut file, requests);
         }
     }
     if shared.enabled(catalog::SHARED_LOGIC) {
@@ -226,27 +223,24 @@ fn plan_file(
             &shared.cases,
             &lines,
             &shared.hashes,
-            budget,
             &mut file,
             requests,
         );
     }
     if view.tests && args.include_tests {
-        plan_tests(shared, &context, cases, budget, &mut file, requests);
+        plan_tests(shared, &context, cases, &mut file, requests);
     }
     file
 }
 
 /// Callable units: application code with the application view, and test
 /// support (not test cases) with the test view.
-#[allow(clippy::too_many_arguments)]
 fn plan_functions(
     scope: &Scope<'_>,
     context: &FileContext<'_>,
     view: &View,
     lines: &[Range<usize>],
     cases: &[TestCase],
-    budget: &TokenBudget,
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -267,7 +261,7 @@ fn plan_functions(
         .collect();
     if view.application || !judged.is_empty() {
         file.rules.insert(catalog::FUNCTION_SIMPLIFICATION, 0);
-        functions::plan(context, &judged, scope, budget, file, requests);
+        functions::plan(context, &judged, scope, file, requests);
     }
 }
 
@@ -276,18 +270,17 @@ fn plan_tests(
     shared: &Shared<'_>,
     context: &FileContext<'_>,
     mut cases: Vec<TestCase>,
-    budget: &TokenBudget,
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
     test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
     if shared.enabled(catalog::TEST_VALUE) {
         file.rules.insert(catalog::TEST_VALUE, 0);
-        test_units::plan_values(context, &cases, &shared.subjects, budget, file, requests);
+        test_units::plan_values(context, &cases, &shared.subjects, file, requests);
     }
     if shared.enabled(catalog::TEST_REDUNDANCY) {
         file.rules.insert(catalog::TEST_REDUNDANCY, 0);
-        test_units::plan_pairs(context, &cases, &shared.subjects, budget, file, requests);
+        test_units::plan_pairs(context, &cases, &shared.subjects, file, requests);
     }
 }
 

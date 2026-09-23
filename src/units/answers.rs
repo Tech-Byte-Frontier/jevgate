@@ -21,11 +21,17 @@ pub struct AskedQuestion {
     pub pass: Pass,
 }
 
-impl Asked {
-    #[allow(clippy::too_many_arguments)]
+/// The questions of one request as they are built: the uploaded bodies and
+/// what each maps back to.
+#[derive(Default)]
+pub(super) struct Questions {
+    bodies: Map<String, Value>,
+    asked: Asked,
+}
+
+impl Questions {
     pub(super) fn ask(
         &mut self,
-        questions: &mut Map<String, Value>,
         key: String,
         body: Value,
         unit: &str,
@@ -33,14 +39,18 @@ impl Asked {
         question: &'static str,
         pass: Pass,
     ) {
-        questions.insert(key.clone(), body);
-        self.questions.push(AskedQuestion {
+        self.bodies.insert(key.clone(), body);
+        self.asked.questions.push(AskedQuestion {
             key,
             rule,
             unit: unit.into(),
             question,
             pass,
         });
+    }
+
+    pub(super) fn finish(self) -> (Map<String, Value>, Asked) {
+        (self.bodies, self.asked)
     }
 }
 
