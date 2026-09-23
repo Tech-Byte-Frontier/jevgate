@@ -46,12 +46,7 @@ impl Repository {
 
 pub fn scan(root: &Path) -> Result<Repository> {
     let found = discover::discover(root)?;
-    let sources: BTreeMap<PathBuf, String> = found
-        .agent
-        .iter()
-        .filter(|p| std::fs::metadata(root.join(p)).is_ok_and(|m| m.len() <= MAX_BYTES))
-        .filter_map(|p| Some((p.clone(), std::fs::read_to_string(root.join(p)).ok()?)))
-        .collect();
+    let sources = agent_sources(root, &found.agent);
     let generated_files: BTreeSet<PathBuf> = sources
         .iter()
         .filter(|(_, source)| generated(source))
@@ -61,17 +56,6 @@ pub fn scan(root: &Path) -> Result<Repository> {
     let files = load::files(sources, &found.links);
     let load = load::context_load(&files, &found.links, root);
     let links: BTreeSet<&PathBuf> = found.links.iter().map(|(p, _)| p).collect();
-    let docs = found
-        .project
-        .iter()
-        .filter(|p| {
-            let path = root.join(p);
-            path.symlink_metadata()
-                .is_ok_and(|m| m.is_file() && m.len() <= MAX_BYTES)
-                && std::fs::read_to_string(&path).is_ok_and(|s| !generated(&s))
-        })
-        .cloned()
-        .collect();
     Ok(Repository {
         project: project::read(root, &found.directories),
         readers: files
@@ -81,11 +65,35 @@ pub fn scan(root: &Path) -> Result<Repository> {
             .collect(),
         generated: generated_files,
         load,
-        docs,
+        docs: project_docs(root, &found.project),
         scripts: project::scripts(root, &history),
         history,
         root: root.to_path_buf(),
     })
+}
+
+/// The text of each instruction file small enough to read.
+fn agent_sources(root: &Path, paths: &BTreeSet<PathBuf>) -> BTreeMap<PathBuf, String> {
+    paths
+        .iter()
+        .filter(|p| std::fs::metadata(root.join(p)).is_ok_and(|m| m.len() <= MAX_BYTES))
+        .filter_map(|p| Some((p.clone(), std::fs::read_to_string(root.join(p)).ok()?)))
+        .collect()
+}
+
+/// Project documents that are regular files small enough to read and that
+/// no generator wrote.
+fn project_docs(root: &Path, paths: &BTreeSet<PathBuf>) -> BTreeSet<PathBuf> {
+    paths
+        .iter()
+        .filter(|p| {
+            let path = root.join(p);
+            path.symlink_metadata()
+                .is_ok_and(|m| m.is_file() && m.len() <= MAX_BYTES)
+                && std::fs::read_to_string(&path).is_ok_and(|s| !generated(&s))
+        })
+        .cloned()
+        .collect()
 }
 
 /// A generator's marker in the first lines, such as those sync tools write

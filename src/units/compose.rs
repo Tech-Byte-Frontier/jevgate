@@ -209,56 +209,23 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
     }
     for unit in &plan.units {
         let count = counts.entry(unit.rule).or_default();
-        match unit.presence {
-            Presence::TooSmall => {
-                count.too_small += 1;
-                continue;
-            }
-            Presence::NeedsContext => {
-                count.needs_context += 1;
-                continue;
-            }
-            Presence::Judged => {}
-        }
-        // A check left unasked because its document is a finished plan.
-        let cascaded = matches!(unit.detail, Detail::Stale { .. } | Detail::DocPair { .. });
-        if cascaded && answers(judgments, &unit.id, Pass::Trace).is_empty() {
-            count.covered += 1;
+        if !counted_as_judged(unit, judgments, count) {
             continue;
         }
-        count.judged += 1;
         let (outcome, answers) = resolved(unit, judgments);
         let top = concern.entry(unit.rule).or_default();
         *top = top.max(outcome.concern());
-        match outcome {
-            Outcome::Review(p) => {
-                count.review += 1;
-                findings.push(finding(
-                    plan,
-                    unit,
-                    Strength::Review,
-                    p,
-                    &answers,
-                    judgments,
-                ));
+        match strength_of(outcome) {
+            Some((strength, p)) => {
+                *match strength {
+                    Strength::Review => &mut count.review,
+                    Strength::Consider => &mut count.consider,
+                    Strength::Note => &mut count.note,
+                } += 1;
+                findings.push(finding(plan, unit, strength, p, &answers, judgments));
             }
-            Outcome::Consider(p) => {
-                count.consider += 1;
-                findings.push(finding(
-                    plan,
-                    unit,
-                    Strength::Consider,
-                    p,
-                    &answers,
-                    judgments,
-                ));
-            }
-            Outcome::Note(p) => {
-                count.note += 1;
-                findings.push(finding(plan, unit, Strength::Note, p, &answers, judgments));
-            }
-            Outcome::Clear => count.clear += 1,
-            Outcome::Uncertain(_) | Outcome::Missing => {
+            None if outcome == Outcome::Clear => count.clear += 1,
+            None => {
                 count.uncertain += 1;
                 undecided
                     .entry(unit.rule)
@@ -290,6 +257,37 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         dimensions,
         findings,
         status,
+    }
+}
+
+/// Counts a unit that is too small, needs context or was left unasked under
+/// a finished plan, and returns false for it; otherwise counts it as judged.
+fn counted_as_judged(unit: &UnitPlan, judgments: &[Judgment], count: &mut UnitCounts) -> bool {
+    match unit.presence {
+        Presence::TooSmall => count.too_small += 1,
+        Presence::NeedsContext => count.needs_context += 1,
+        // A check left unasked because its document is a finished plan.
+        Presence::Judged
+            if matches!(unit.detail, Detail::Stale { .. } | Detail::DocPair { .. })
+                && answers(judgments, &unit.id, Pass::Trace).is_empty() =>
+        {
+            count.covered += 1
+        }
+        Presence::Judged => {
+            count.judged += 1;
+            return true;
+        }
+    }
+    false
+}
+
+/// The finding strength and probability of an outcome that raises one.
+fn strength_of(outcome: Outcome) -> Option<(Strength, f64)> {
+    match outcome {
+        Outcome::Review(p) => Some((Strength::Review, p)),
+        Outcome::Consider(p) => Some((Strength::Consider, p)),
+        Outcome::Note(p) => Some((Strength::Note, p)),
+        _ => None,
     }
 }
 

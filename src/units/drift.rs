@@ -90,30 +90,18 @@ impl<'a> Shared<'a> {
                 facts,
             });
         }
-        let mut shared = Self {
+        let (pairs, omitted) = if duplication {
+            section_pairs(&docs)
+        } else {
+            (Vec::new(), 0)
+        };
+        Self {
             docs,
-            pairs: Vec::new(),
-            omitted: 0,
+            pairs,
+            omitted,
             staleness,
             duplication,
-        };
-        if duplication {
-            let mut keys = Vec::new();
-            let mut texts = Vec::new();
-            for (d, doc) in shared.docs.iter().enumerate() {
-                for (s, section) in doc.sections.iter().enumerate() {
-                    keys.push((d, s));
-                    texts.push(overlap::Text {
-                        file: d,
-                        text: &section.text,
-                    });
-                }
-            }
-            let (pairs, omitted) = overlap::pairs(&texts);
-            shared.pairs = pairs.iter().map(|(a, b, _)| (keys[*a], keys[*b])).collect();
-            shared.omitted = omitted;
         }
-        shared
     }
 
     /// Plan the staleness and duplication units of one document.
@@ -146,102 +134,15 @@ impl<'a> Shared<'a> {
     ) {
         let doc = &self.docs[d];
         if !doc.facts.is_empty() {
-            let mut questions = Questions::default();
-            questions.ask(
-                "plan".into(),
-                super::questions::document_plan(),
-                PLAN,
-                DOC_STALENESS,
-                "plan",
-                Pass::First,
-            );
-            let state = json!({"file": {"path": file.path}, "outline": super::documents::outline_of(file.source)});
-            let (request, asked) = file.request("docs", state, questions);
-            let fits = file.budget.fits(&request);
-            let lines = file.source.lines().count().max(1);
-            out.units.push(UnitPlan {
-                rule: DOC_STALENESS,
-                id: PLAN.into(),
-                name: file.path.display().to_string(),
-                presence: if fits {
-                    Presence::Judged
-                } else {
-                    Presence::NeedsContext
-                },
-                locations: vec![file.location(1, lines, None)],
-                quote: None,
-                lines,
-                identity: identity(&[PLAN, &doc.facts.join("|")]),
-                detail: Detail::Plan {
-                    facts: doc.facts.clone(),
-                },
-                recheck: None,
-            });
-            if fits {
-                requests.push(Planned {
-                    owner: file.owner,
-                    request,
-                    asked,
-                });
-            }
+            plan_unit(doc, file, out, requests);
         }
         let stale: Vec<usize> = (0..doc.sections.len())
             .filter(|&s| !doc.missing[s].is_empty())
             .collect();
         let ids = unique_ids("stale", stale.iter().map(|&s| heading(&doc.sections[s])));
         for (&s, id) in stale.iter().zip(ids) {
-            let section = &doc.sections[s];
-            let missing = &doc.missing[s];
-            let mut questions = Questions::default();
-            questions.ask(
-                "relies".into(),
-                super::questions::section_relies(),
-                &id,
-                DOC_STALENESS,
-                "relies",
-                Pass::Trace,
-            );
-            let listed: Vec<Value> = missing
-                .iter()
-                .map(|m| {
-                    let kind = if m.fate == Fate::NoScript {
-                        "script"
-                    } else {
-                        "path"
-                    };
-                    json!({kind: m.name, "status": m.status()})
-                })
-                .collect();
-            let state = json!({
-                "file": {"path": file.path},
-                "section": {"heading": section.heading, "text": section.text},
-                "missing": listed,
-            });
-            let (request, asked) = file.request("doc-checks", state, questions);
-            let fits = file.budget.fits(&request);
-            out.units.push(UnitPlan {
-                rule: DOC_STALENESS,
-                id,
-                name: heading(section).to_string(),
-                presence: if fits {
-                    Presence::Judged
-                } else {
-                    Presence::NeedsContext
-                },
-                locations: vec![file.location(
-                    section.start_line,
-                    section.end_line,
-                    Some(heading(section)),
-                )],
-                quote: None,
-                lines: section.end_line + 1 - section.start_line,
-                identity: identity(&[&section.heading, &compact(&section.text)]),
-                detail: Detail::Stale {
-                    missing: missing.iter().map(describe).collect(),
-                    check: fits.then_some((request, asked)),
-                },
-                recheck: None,
-            });
+            out.units
+                .push(stale_section(file, &doc.sections[s], &doc.missing[s], id));
         }
     }
 
@@ -336,6 +237,136 @@ impl<'a> Shared<'a> {
     fn owner_of(&self, a: (usize, usize), b: (usize, usize)) -> usize {
         let agent = |d: usize| self.docs[d].input.result.role == crate::inventory::INSTRUCTIONS;
         if agent(b.0) && !agent(a.0) { b.0 } else { a.0 }
+    }
+}
+
+/// Sections of different documents that share much of their wording, as
+/// (document, section) pairs, with the number of candidates over the caps.
+fn section_pairs(docs: &[Doc<'_>]) -> (Vec<SectionPair>, usize) {
+    let mut keys = Vec::new();
+    let mut texts = Vec::new();
+    for (d, doc) in docs.iter().enumerate() {
+        for (s, section) in doc.sections.iter().enumerate() {
+            keys.push((d, s));
+            texts.push(overlap::Text {
+                file: d,
+                text: &section.text,
+            });
+        }
+    }
+    let (pairs, omitted) = overlap::pairs(&texts);
+    (
+        pairs.iter().map(|(a, b, _)| (keys[*a], keys[*b])).collect(),
+        omitted,
+    )
+}
+
+/// The question whether a document with Git facts of finished work is a plan.
+fn plan_unit(
+    doc: &Doc<'_>,
+    file: &FileContext<'_>,
+    out: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let mut questions = Questions::default();
+    questions.ask(
+        "plan".into(),
+        super::questions::document_plan(),
+        PLAN,
+        DOC_STALENESS,
+        "plan",
+        Pass::First,
+    );
+    let state =
+        json!({"file": {"path": file.path}, "outline": super::documents::outline_of(file.source)});
+    let (request, asked) = file.request("docs", state, questions);
+    let fits = file.budget.fits(&request);
+    let lines = file.source.lines().count().max(1);
+    out.units.push(UnitPlan {
+        rule: DOC_STALENESS,
+        id: PLAN.into(),
+        name: file.path.display().to_string(),
+        presence: if fits {
+            Presence::Judged
+        } else {
+            Presence::NeedsContext
+        },
+        locations: vec![file.location(1, lines, None)],
+        quote: None,
+        lines,
+        identity: identity(&[PLAN, &doc.facts.join("|")]),
+        detail: Detail::Plan {
+            facts: doc.facts.clone(),
+        },
+        recheck: None,
+    });
+    if fits {
+        requests.push(Planned {
+            owner: file.owner,
+            request,
+            asked,
+        });
+    }
+}
+
+/// A section that names paths or scripts the repository lacks, with its
+/// check whether it relies on them, asked only when its document is not a
+/// finished plan.
+fn stale_section(
+    file: &FileContext<'_>,
+    section: &Section,
+    missing: &[Missing],
+    id: String,
+) -> UnitPlan {
+    let mut questions = Questions::default();
+    questions.ask(
+        "relies".into(),
+        super::questions::section_relies(),
+        &id,
+        DOC_STALENESS,
+        "relies",
+        Pass::Trace,
+    );
+    let listed: Vec<Value> = missing
+        .iter()
+        .map(|m| {
+            let kind = if m.fate == Fate::NoScript {
+                "script"
+            } else {
+                "path"
+            };
+            json!({kind: m.name, "status": m.status()})
+        })
+        .collect();
+    let state = json!({
+        "file": {"path": file.path},
+        "section": {"heading": section.heading, "text": section.text},
+        "missing": listed,
+    });
+    let (request, asked) = file.request("doc-checks", state, questions);
+    let fits = file.budget.fits(&request);
+    UnitPlan {
+        rule: DOC_STALENESS,
+        id,
+        name: heading(section).to_string(),
+        presence: if fits {
+            Presence::Judged
+        } else {
+            Presence::NeedsContext
+        },
+        locations: vec![file.location(
+            section.start_line,
+            section.end_line,
+            Some(heading(section)),
+        )],
+        quote: None,
+        lines: section.end_line + 1 - section.start_line,
+        identity: identity(&[&section.heading, &compact(&section.text)]),
+        detail: Detail::Stale {
+            missing: missing.iter().map(describe).collect(),
+            check: fits.then_some((request, asked)),
+        },
+        recheck: None,
     }
 }
 
