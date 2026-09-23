@@ -1,7 +1,7 @@
 //! File organization: an outline of member signatures and groups, without bodies.
 use super::{
-    Asked, Detail, FileContext, FilePlan, GroupInfo, Planned, Presence, UnitPlan, identity,
-    questions,
+    Asked, Detail, FileContext, FilePlan, GroupInfo, Planned, Presence, Questions, UnitPlan,
+    identity, questions,
 };
 use crate::{
     analysis::{
@@ -10,9 +10,8 @@ use crate::{
     },
     catalog::FILE_ORGANIZATION,
     schema::Pass,
-    token_budget::TokenBudget,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
@@ -28,7 +27,6 @@ pub(super) fn plan(
     parsed: &FileUnits,
     members: &[usize],
     callers: &BTreeMap<String, BTreeSet<PathBuf>>,
-    budget: &TokenBudget,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -43,7 +41,7 @@ pub(super) fn plan(
         ids: groups.iter().map(|g| g.id.clone()).collect(),
     };
     let (request, asked) = outline.request(file, None);
-    let fits = budget.fits(&request);
+    let fits = file.budget.fits(&request);
     // A short file is read in one pass; splitting it is not a maintainability gain.
     let small = member_code_lines(file.source, units, members) < MIN_FILE_LINES;
     let judged = fits && !small;
@@ -74,7 +72,7 @@ pub(super) fn plan(
         },
         recheck: judged
             .then(|| outline.request(file, Some(application_source(file.source, units, members))))
-            .filter(|(request, _)| budget.fits(request)),
+            .filter(|(request, _)| file.budget.fits(request)),
     });
     if judged {
         requests.push(Planned {
@@ -102,10 +100,8 @@ impl Outline {
         } else {
             Pass::First
         };
-        let mut questions = Map::new();
-        let mut asked = Asked::default();
-        asked.ask(
-            &mut questions,
+        let mut questions = Questions::default();
+        questions.ask(
             "split".into(),
             questions::outline_split(source.is_some()),
             ID,
@@ -115,8 +111,7 @@ impl Outline {
         );
         if self.ids.len() > 1 {
             // Speculative location: consumed only when the split Score raises a finding.
-            asked.ask(
-                &mut questions,
+            questions.ask(
                 "module".into(),
                 questions::outline_module(&self.ids),
                 ID,
@@ -137,7 +132,7 @@ impl Outline {
             }
             None => "outline",
         };
-        (file.request(stage, state, questions), asked)
+        file.request(stage, state, questions)
     }
 }
 

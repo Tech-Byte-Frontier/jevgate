@@ -3,14 +3,11 @@
 //! nesting or a long branch chain, a Score on whether flattening would help.
 //! A split finding is then located with one Choice among the body's blocks.
 use super::{
-    Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Scope, UnitPlan,
-    compact, identity, pack, questions, unique_ids,
+    Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, Scope,
+    UnitPlan, compact, identity, pack, questions, unique_ids,
 };
-use crate::{
-    analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, schema::Pass,
-    token_budget::TokenBudget,
-};
-use serde_json::{Map, Value, json};
+use crate::{analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, schema::Pass};
+use serde_json::{Value, json};
 
 const CALLEES: usize = 16;
 
@@ -18,7 +15,6 @@ pub(super) fn plan(
     file: &FileContext<'_>,
     units: &[&Unit],
     scope: &Scope<'_>,
-    budget: &TokenBudget,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -32,12 +28,12 @@ pub(super) fn plan(
             Presence::Judged
         };
         let recheck = (presence == Presence::Judged)
-            .then(|| recheck(file, unit, &id, scope, budget))
+            .then(|| recheck(file, unit, &id, scope))
             .flatten();
         let blocks = blocks(file, unit);
         let locate = (presence == Presence::Judged && !blocks.is_empty())
             .then(|| locate(file, unit, &id, &blocks))
-            .filter(|(request, _)| budget.fits(request));
+            .filter(|(request, _)| file.budget.fits(request));
         out.units.push(UnitPlan {
             rule: FUNCTION_SIMPLIFICATION,
             id: id.clone(),
@@ -61,7 +57,7 @@ pub(super) fn plan(
     }
     for group in pack(judged, PACK_ITEMS, |item| &item.state) {
         let (request, asked) = build(file, &group, None);
-        if budget.fits(&request) {
+        if file.budget.fits(&request) {
             requests.push(Planned {
                 owner: file.owner,
                 request,
@@ -72,7 +68,7 @@ pub(super) fn plan(
         // A pack that is too large is sent one function at a time.
         for item in group {
             let (request, asked) = build(file, std::slice::from_ref(&item), None);
-            if budget.fits(&request) {
+            if file.budget.fits(&request) {
                 requests.push(Planned {
                     owner: file.owner,
                     request,
@@ -106,8 +102,7 @@ fn build(file: &FileContext<'_>, items: &[Item], callees: Option<Vec<Value>>) ->
     } else {
         Pass::First
     };
-    let mut questions = Map::new();
-    let mut asked = Asked::default();
+    let mut questions = Questions::default();
     for (index, item) in items.iter().enumerate() {
         let path = format!("functions[{index}].source");
         let mut asked_here = vec![("split", questions::function_split(&path, callees.is_some()))];
@@ -115,8 +110,7 @@ fn build(file: &FileContext<'_>, items: &[Item], callees: Option<Vec<Value>>) ->
             asked_here.push(("flatten", questions::function_flatten(&path)));
         }
         for (question, body) in asked_here {
-            asked.ask(
-                &mut questions,
+            questions.ask(
                 format!("f{index}_{question}"),
                 body,
                 &item.id,
@@ -138,7 +132,7 @@ fn build(file: &FileContext<'_>, items: &[Item], callees: Option<Vec<Value>>) ->
     } else {
         "functions"
     };
-    (file.request(stage, state, questions), asked)
+    file.request(stage, state, questions)
 }
 
 /// The same questions about one function, with the signatures it calls.
@@ -147,7 +141,6 @@ fn recheck(
     unit: &Unit,
     id: &str,
     scope: &Scope<'_>,
-    budget: &TokenBudget,
 ) -> Option<(Value, Asked)> {
     let mut callees = Vec::new();
     for (_, callee) in scope.scope_units() {
@@ -171,7 +164,7 @@ fn recheck(
         state: json!({"name": unit.name, "source": unit.source(file.source)}),
     };
     let (request, asked) = build(file, &[item], Some(callees));
-    budget.fits(&request).then_some((request, asked))
+    file.budget.fits(&request).then_some((request, asked))
 }
 
 fn blocks(file: &FileContext<'_>, unit: &Unit) -> Vec<Block> {
@@ -192,10 +185,8 @@ fn blocks(file: &FileContext<'_>, unit: &Unit) -> Vec<Block> {
 /// Which block of one function to extract: its signature and its body as blocks.
 fn locate(file: &FileContext<'_>, unit: &Unit, id: &str, blocks: &[Block]) -> (Value, Asked) {
     let ids: Vec<String> = blocks.iter().map(|b| b.id.clone()).collect();
-    let mut questions = Map::new();
-    let mut asked = Asked::default();
-    asked.ask(
-        &mut questions,
+    let mut questions = Questions::default();
+    questions.ask(
         "block".into(),
         questions::function_block(&ids),
         id,
@@ -213,5 +204,5 @@ fn locate(file: &FileContext<'_>, unit: &Unit, id: &str, blocks: &[Block]) -> (V
             }).collect::<Vec<_>>(),
         },
     });
-    (file.request("locate", state, questions), asked)
+    file.request("locate", state, questions)
 }

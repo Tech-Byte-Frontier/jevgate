@@ -45,3 +45,16 @@ debug = 1
 [profile.release]
 strip = true
 lto = "thin"
+
+# Unused code is deleted and long parameter lists are grouped, never silenced
+# (tests/lint_policy.rs rejects suppressing them). Any other exception must use
+# `#[expect(lint, reason = "...")]`. `forbid` would reject the allows that
+# derive macros emit, so these are `deny`.
+[lints.rust]
+unused = { level = "deny", priority = -1 }
+dead_code = "deny"
+
+[lints.clippy]
+too_many_arguments = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"

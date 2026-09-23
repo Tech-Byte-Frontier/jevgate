@@ -1,6 +1,7 @@
 //! Shared logic: one candidate pair per request, entity-alignment style.
 use super::{
-    Asked, Detail, FileContext, FilePlan, Planned, Presence, UnitPlan, identity, questions, request,
+    Asked, Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, identity,
+    questions, request,
 };
 use crate::{
     analysis::{
@@ -9,19 +10,16 @@ use crate::{
     },
     catalog::SHARED_LOGIC,
     schema::{Location, Pass},
-    token_budget::TokenBudget,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn plan(
     file: &FileContext<'_>,
     candidates: &Candidates,
     cases: &BTreeMap<PathBuf, Vec<TestCase>>,
     test_lines: &[std::ops::Range<usize>],
     hashes: &BTreeMap<PathBuf, String>,
-    budget: &TokenBudget,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -36,7 +34,7 @@ pub(super) fn plan(
             pair.b.start_line
         );
         let (request, asked) = build(file, pair, hashes, &id, false);
-        let presence = if budget.fits(&request) {
+        let presence = if file.budget.fits(&request) {
             requests.push(Planned {
                 owner: file.owner,
                 request,
@@ -49,7 +47,7 @@ pub(super) fn plan(
         let recheck = (presence == Presence::Judged
             && (pair.a.function_source.is_some() || pair.b.function_source.is_some()))
         .then(|| build(file, pair, hashes, &id, true))
-        .filter(|(request, _)| budget.fits(request));
+        .filter(|(request, _)| file.budget.fits(request));
         let in_case = |site: &Site| {
             cases.get(&site.path).is_some_and(|cases| {
                 cases
@@ -138,22 +136,13 @@ fn build(
     recheck: bool,
 ) -> (Value, Asked) {
     let pass = if recheck { Pass::Recheck } else { Pass::First };
-    let mut questions = Map::new();
-    let mut asked = Asked::default();
+    let mut questions = Questions::default();
     for (question, body) in [
         ("same", questions::duplicate_same(recheck)),
         ("only_differences", questions::duplicate_only_differences()),
         ("required", questions::duplicate_required()),
     ] {
-        asked.ask(
-            &mut questions,
-            question.into(),
-            body,
-            id,
-            SHARED_LOGIC,
-            question,
-            pass,
-        );
+        questions.ask(question.into(), body, id, SHARED_LOGIC, question, pass);
     }
     let state = json!({
         "site_a": site_state(&pair.a, recheck),
@@ -167,6 +156,5 @@ fn build(
     {
         sources.push((pair.b.path.as_path(), hash.as_str()));
     }
-    let request = request(file.model, stage, &sources, state, questions);
-    (request, asked)
+    request(file.model, stage, &sources, state, questions)
 }

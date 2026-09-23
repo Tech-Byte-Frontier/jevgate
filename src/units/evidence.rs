@@ -1,7 +1,8 @@
 //! Request building shared by every planner: one file's facts, the request
 //! envelope, packing, and stable identities.
-use crate::schema::Location;
-use serde_json::{Map, Value, json};
+use super::{Asked, Questions};
+use crate::{schema::Location, token_budget::TokenBudget};
+use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 
 /// Packed requests stay well below the provider's state limit so each
@@ -17,6 +18,7 @@ pub(super) struct FileContext<'a> {
     pub source: &'a str,
     pub source_hash: &'a str,
     pub model: &'a str,
+    pub budget: &'a TokenBudget,
 }
 
 impl FileContext<'_> {
@@ -42,8 +44,8 @@ impl FileContext<'_> {
         &self,
         stage: &str,
         state: Value,
-        questions: Map<String, Value>,
-    ) -> Value {
+        questions: Questions,
+    ) -> (Value, Asked) {
         request(
             self.model,
             stage,
@@ -61,18 +63,20 @@ pub(super) fn request(
     stage: &str,
     sources: &[(&Path, &str)],
     state: Value,
-    questions: Map<String, Value>,
-) -> Value {
+    questions: Questions,
+) -> (Value, Asked) {
+    let (questions, asked) = questions.finish();
     let sources: Vec<_> = sources
         .iter()
         .map(|(path, hash)| json!({"path": path, "source_hash": hash}))
         .collect();
-    json!({
+    let request = json!({
         "model": model,
         "state": state,
         "questions": questions,
         "jevgate": {"stage": stage, "sources": sources},
-    })
+    });
+    (request, asked)
 }
 
 /// Greedy packing in order: at most `limit` items and `PACK_BYTES` of state.

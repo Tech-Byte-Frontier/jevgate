@@ -12,6 +12,7 @@ pub mod questions;
 mod test_units;
 mod wording;
 
+use answers::Questions;
 pub use answers::{Asked, locates, rechecks, record};
 use evidence::{FileContext, compact, identity, pack, request, unique_ids};
 use plan::Scope;

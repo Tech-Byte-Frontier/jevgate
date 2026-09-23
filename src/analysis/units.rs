@@ -141,7 +141,7 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                 children(body, source, &name, file);
             }
             if file.units.len() == before && !name.is_empty() {
-                push(node, node, None, &name, "", Kind::Type, source, file);
+                push(Definition::whole(node), &name, "", Kind::Type, source, file);
             }
         }
         "decorated_definition" => {
@@ -178,16 +178,12 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                     .child_by_field_name("name")
                     .map(|n| text(n, source).to_string())
                     .unwrap_or_default();
-                push(
-                    node,
-                    value,
-                    function.child_by_field_name("body"),
-                    &name,
-                    owner,
-                    Kind::Function,
-                    source,
-                    file,
-                );
+                let definition = Definition {
+                    outer: node,
+                    node: value,
+                    body: function.child_by_field_name("body"),
+                };
+                push(definition, &name, owner, Kind::Function, source, file);
             }
         }
         "struct_item"
@@ -200,7 +196,7 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         | "enum_declaration" => {
             let name = name_of(node, source);
             if !name.is_empty() {
-                push(node, node, None, &name, "", Kind::Type, source, file);
+                push(Definition::whole(node), &name, "", Kind::Type, source, file);
             }
         }
         _ => {}
@@ -250,16 +246,12 @@ fn function(outer: Node<'_>, node: Node<'_>, source: &str, owner: &str, file: &m
     } else {
         Kind::Method
     };
-    push(
+    let definition = Definition {
         outer,
         node,
-        node.child_by_field_name("body"),
-        &name,
-        owner,
-        kind,
-        source,
-        file,
-    );
+        body: node.child_by_field_name("body"),
+    };
+    push(definition, &name, owner, kind, source, file);
 }
 
 fn name_of(node: Node<'_>, source: &str) -> String {
@@ -281,11 +273,28 @@ fn base_type(text: &str) -> String {
         .to_string()
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The syntax of one definition: the outer node that carries its documentation
+/// (a declaration or decorator), the defining node, and its body if any.
+#[derive(Clone, Copy)]
+struct Definition<'t> {
+    outer: Node<'t>,
+    node: Node<'t>,
+    body: Option<Node<'t>>,
+}
+
+impl<'t> Definition<'t> {
+    /// A definition without a separate body, such as a type.
+    fn whole(node: Node<'t>) -> Self {
+        Self {
+            outer: node,
+            node,
+            body: None,
+        }
+    }
+}
+
 fn push(
-    outer: Node<'_>,
-    node: Node<'_>,
-    body: Option<Node<'_>>,
+    definition: Definition<'_>,
     short_name: &str,
     owner: &str,
     kind: Kind,
@@ -295,6 +304,7 @@ fn push(
     if short_name.is_empty() {
         return;
     }
+    let Definition { outer, node, body } = definition;
     let start = leading_start(outer);
     let signature_end = body.map_or(outer.end_byte(), |b| b.start_byte());
     let signature = clip(
