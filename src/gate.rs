@@ -61,17 +61,21 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
     });
 }
 
+/// Whether a finding fails the gate: new, not a note, and at its rule's level.
+/// Consider is the lower bar, so it also fails on review findings.
+pub fn fails(finding: &Finding, args: &CheckArgs) -> bool {
+    let levels = args.levels(&finding.rule);
+    !finding.baselined
+        && finding.strength != Strength::Note
+        && (levels.contains(&FailOn::Consider)
+            || (finding.strength == Strength::Review && levels.contains(&FailOn::Review)))
+}
+
 /// Why the gate fails: new findings at their rule's level, or undecided
 /// results of a rule whose level includes `uncertain`.
 fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> {
     let mut reasons = Vec::new();
-    // Consider is the lower bar, so it also fails on review findings.
-    let fails = |finding: &&&Finding| {
-        let levels = args.levels(&finding.rule);
-        levels.contains(&FailOn::Consider)
-            || (finding.strength == Strength::Review && levels.contains(&FailOn::Review))
-    };
-    let failing: Vec<&&Finding> = new.iter().filter(fails).collect();
+    let failing: Vec<&&Finding> = new.iter().filter(|f| fails(f, args)).collect();
     let review = failing
         .iter()
         .filter(|f| f.strength == Strength::Review)

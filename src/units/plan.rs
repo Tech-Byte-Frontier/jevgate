@@ -117,7 +117,7 @@ fn plan_document(
         language: "Markdown",
         source: input.source.as_deref().unwrap_or(""),
         source_hash: &input.result.source_hash,
-        model: &args.model,
+        model: args.model(),
         budget,
     };
     if input.result.role == crate::inventory::DOCS {
@@ -254,7 +254,7 @@ fn plan_file(
         language: crate::file_kind::language(&input.result.path),
         source: input.source.as_deref().unwrap_or(""),
         source_hash: &input.result.source_hash,
-        model: &args.model,
+        model: args.model(),
         budget,
     };
     let mut file = FilePlan {

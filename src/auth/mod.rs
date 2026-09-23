@@ -18,33 +18,45 @@ use store::{Backend, NativeBackend, SavedCredentials, StorageMode};
 
 #[derive(Subcommand)]
 pub enum AuthCommand {
-    /// Validate and save a TypeSafe API key for all repositories
+    /// Validate a TypeSafe API key and save it for every repository
+    ///
+    /// Prompts without echo, checks the key with TypeSafe (no source is sent),
+    /// and saves it in the OS credential store, or in an owner-only file where
+    /// no store is available. Create a key at
+    /// https://console.typesafe.ai/settings/keys.
     Login(LoginArgs),
-    /// Show the active credential source and verify the connection
+    /// Show which credential a check would use; exit 0 when it works, 2 otherwise
+    ///
+    /// Verifies the key with TypeSafe unless --offline. No source is sent and
+    /// the key is never printed.
     Status(StatusArgs),
-    /// Remove saved credentials; environment variables and repository files are preserved
+    /// Remove saved credentials; TYPESAFE_API_KEY and repository .env files are left alone
     Logout,
 }
 
 #[derive(Args)]
 pub struct LoginArgs {
-    /// Read one key from stdin instead of opening a hidden terminal prompt
+    /// Read one key from stdin instead of prompting, for scripts
     #[arg(long)]
     with_key: bool,
-    /// auto prefers the OS store, with a disclosed owner-only file fallback on Unix
+    /// Where to save the key [default: JEVGATE_CREDENTIAL_STORE, else auto]
+    ///
+    /// `auto` uses the OS credential store and, on Unix, falls back to an
+    /// owner-only file (and says so). `file` writes that file directly, under
+    /// JEVGATE_CONFIG_DIR when set.
     #[arg(long, value_enum)]
     storage: Option<StorageMode>,
 }
 
 #[derive(Args)]
 pub struct StatusArgs {
-    /// Inspect a specific credential file; TYPESAFE_API_KEY still takes precedence
-    #[arg(long)]
+    /// Inspect this credential file instead of the repository .env; TYPESAFE_API_KEY still wins
+    #[arg(long, value_name = "FILE")]
     env_file: Option<PathBuf>,
-    /// Show the source without contacting TypeSafe
+    /// Report the credential source without contacting TypeSafe
     #[arg(long)]
     offline: bool,
-    /// Emit machine-readable status (never the key)
+    /// Print source, configured, connection_checked, authenticated and error as JSON (never the key)
     #[arg(long)]
     json: bool,
 }

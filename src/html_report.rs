@@ -65,9 +65,13 @@ pub fn render(report: &Report) -> Result<String> {
     Ok(include_str!("report.html").replacen("__JEVGATE_DATA__", &data, 1))
 }
 
+/// Name the dashboard and open it in a browser, except in CI where none is.
 pub fn open(root: &Path) {
     let path = root.join(".jevgate/report.html");
     note!("JevGate report: {}", path.display());
+    if std::env::var_os("CI").is_some() {
+        return;
+    }
     #[cfg(target_os = "macos")]
     let program = "open";
     #[cfg(target_os = "windows")]

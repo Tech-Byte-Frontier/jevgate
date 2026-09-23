@@ -103,7 +103,7 @@ impl Session<'_> {
         requests: &[&'r Value],
         receipts: &mut [Receipt],
     ) -> Vec<(usize, &'r Value)> {
-        let ttl = cache_ttl(&self.args.model, self.args.cache_ttl_secs);
+        let ttl = cache_ttl(self.args.model(), self.args.cache_ttl_secs());
         let mut pending = Vec::new();
         for (i, request) in requests.iter().enumerate() {
             let cached = if self.args.refresh {
