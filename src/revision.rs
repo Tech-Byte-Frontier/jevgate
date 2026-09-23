@@ -84,6 +84,8 @@ fn tracked_changes(root: &Path, revision: &str) -> Result<ChangedPaths> {
     Ok((paths, deleted))
 }
 
+/// The commit to compare with: where `revision` and HEAD diverged, as a pull
+/// request diff does, so changes made only on the base branch are not reviewed.
 pub fn resolve(root: &Path, revision: &str) -> Result<String> {
     let bytes = git(
         root,
@@ -93,8 +95,21 @@ pub fn resolve(root: &Path, revision: &str) -> Result<String> {
             "--end-of-options",
             &format!("{revision}^{{commit}}"),
         ],
-    )?;
-    let commit = std::str::from_utf8(&bytes)?.trim();
+    )
+    .with_context(|| {
+        format!("Cannot find revision {revision}; in CI, fetch it (for example fetch-depth: 0)")
+    })?;
+    let commit = commit_id(&bytes)?;
+    let fork = git(root, &["merge-base", &commit, "HEAD"]).with_context(|| {
+        format!(
+            "{revision} and HEAD share no history; in a shallow clone, fetch full history (fetch-depth: 0)"
+        )
+    })?;
+    commit_id(&fork)
+}
+
+fn commit_id(bytes: &[u8]) -> Result<String> {
+    let commit = std::str::from_utf8(bytes)?.trim();
     ensure!(
         [40, 64].contains(&commit.len()) && commit.bytes().all(|b| b.is_ascii_hexdigit()),
         "Git did not resolve a commit"

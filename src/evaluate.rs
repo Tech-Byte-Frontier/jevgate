@@ -99,7 +99,7 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         acceptance_evaluated: false,
         dry_run: args.dry_run,
         initial_requests: Vec::new(),
-        requested_model: args.model.clone(),
+        requested_model: args.model().to_owned(),
         api_requests: current.requests,
         concurrency: args.concurrency,
         paid_input_tokens: 0,
@@ -381,7 +381,7 @@ impl Session<'_> {
             self.store.publish_html(report)?;
         }
         if self.args.output_format() == super::options::Format::Jsonl {
-            super::output::emit(report, super::options::Format::Jsonl, false)?;
+            super::output::emit(report, self.args)?;
         }
         Ok(())
     }

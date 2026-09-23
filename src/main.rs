@@ -29,6 +29,7 @@ mod docs;
 mod evaluate;
 mod file_kind;
 mod gate;
+mod github;
 mod html_report;
 mod init;
 mod inventory;
@@ -56,8 +57,19 @@ use clap::Parser;
 use config::ConfigContext;
 use options::{CheckArgs, Format, JevCommand};
 
+/// Code review gate that asks TypeSafe Jev small, literal questions about your code
+///
+/// JevGate parses the repository locally and builds small evidence units: a
+/// function, a file outline, a pair of copies, a test, a documentation
+/// section. It asks TypeSafe Jev short, typed questions about each one, and
+/// code, not a chat model, composes the answers into findings. Each finding
+/// has a location, a probability and a next step, and undecided answers are
+/// reported as uncertain instead of hidden.
+///
+/// Rule groups: maintainability (on by default), tests (with
+/// --include-tests), and the opt-in security and documentation groups.
 #[derive(Parser)]
-#[command(version, about = "Incremental advisory code review with TypeSafe Jev")]
+#[command(version, after_long_help = options::OVERVIEW)]
 struct Cli {
     #[command(subcommand)]
     command: JevCommand,
@@ -92,7 +104,11 @@ fn run(command: JevCommand) -> Result<u8> {
         say!("Next: jevgate auth login, then jevgate check --dry-run --show-requests");
         return Ok(0);
     }
-    let context = ConfigContext::discover()?;
+    let file = match &command {
+        JevCommand::Check(args) => args.config.clone(),
+        _ => None,
+    };
+    let context = ConfigContext::discover(file.as_deref())?;
     match command {
         JevCommand::Auth { .. } | JevCommand::Init { .. } => {
             unreachable!("handled before repository configuration")
@@ -136,7 +152,7 @@ fn validate_check(args: &CheckArgs) -> Result<()> {
         "--watch cannot be combined with --dry-run"
     );
     anyhow::ensure!(
-        !(args.watch && args.output_format() == Format::Json),
+        !(args.watch && matches!(args.output_format(), Format::Json | Format::Github)),
         "Use --format jsonl for watch snapshots"
     );
     Ok(())
@@ -189,7 +205,7 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         },
     );
     if args.dry_run {
-        output::emit(&report, args.output_format(), args.verbose)?;
+        output::emit(&report, args)?;
         return Ok(0);
     }
     let store = store.unwrap();
@@ -217,7 +233,7 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         html_report::open(&context.root);
     }
     if args.output_format() != Format::Jsonl {
-        output::emit(&report, args.output_format(), args.verbose)?;
+        output::emit(&report, args)?;
     }
     if args.watch {
         watch::run(&mut session, scope, inputs, report)?;

@@ -370,7 +370,8 @@ fn finish_tests(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Optio
     class.unresolved_units.clear();
     if !args.include_tests {
         class.gate = "excluded".into();
-        class.reason = "Test file. Pass --include-tests to judge tests.".into();
+        class.reason =
+            "Test file. Pass --include-tests or set include_tests = true to judge tests.".into();
         file.status = Status::NotApplicable;
         return None;
     }
@@ -390,7 +391,8 @@ fn tests_prepared(path: &Path, args: &CheckArgs) -> Prepared {
     );
     if !args.include_tests {
         class.gate = "excluded".into();
-        class.reason = "Test file. Pass --include-tests to judge tests.".into();
+        class.reason =
+            "Test file. Pass --include-tests or set include_tests = true to judge tests.".into();
     }
     let action = if args.include_tests {
         Action::Judge
@@ -475,7 +477,7 @@ fn purpose_request(input: &Input, args: &CheckArgs, class: &Classification) -> R
         );
     }
     Ok(json!({
-        "model": args.model,
+        "model": args.model(),
         "state": {
             "file": {
                 "path": input.result.path,

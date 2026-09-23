@@ -24,6 +24,12 @@ pub struct Config {
     pub max_context_bytes: Option<u64>,
     /// Default `--fail-on` values when none are passed.
     pub fail_on: Vec<String>,
+    /// The model when `--model` is not passed.
+    pub model: Option<String>,
+    /// Cache lifetime for model aliases when `--cache-ttl-secs` is not passed.
+    pub cache_ttl_secs: Option<u64>,
+    /// Judge tests as if `--include-tests` were passed.
+    pub include_tests: bool,
 }
 
 /// `rules = ["security"]` selects rules; a `[rules]` table sets each rule's or
@@ -81,12 +87,19 @@ pub struct ConfigContext {
 }
 
 impl ConfigContext {
-    pub fn discover() -> Result<Self> {
+    /// The repository around the working directory and its configuration:
+    /// `file` when given (it must exist), else the root's jevgate.toml if any.
+    pub fn discover(file: Option<&Path>) -> Result<Self> {
         let invocation_dir = std::env::current_dir()?.canonicalize()?;
         let root = repository_root(&invocation_dir);
-        let file = root.join("jevgate.toml");
-        let config = if file.exists() {
-            toml::from_str(&std::fs::read_to_string(file)?).context("Invalid jevgate.toml")?
+        let (file, required) = match file {
+            Some(file) => (invocation_dir.join(file), true),
+            None => (root.join(crate::init::CONFIG_FILE), false),
+        };
+        let config = if required || file.exists() {
+            let text = std::fs::read_to_string(&file)
+                .with_context(|| format!("Cannot read {}", file.display()))?;
+            toml::from_str(&text).with_context(|| format!("Invalid {}", file.display()))?
         } else {
             Config::default()
         };
@@ -109,6 +122,9 @@ impl ConfigContext {
         for path in &self.config.context {
             args.context.push(self.root.join(path));
         }
+        args.include_tests |= self.config.include_tests;
+        args.model = args.model.take().or_else(|| self.config.model.clone());
+        args.cache_ttl_secs = args.cache_ttl_secs.or(self.config.cache_ttl_secs);
         self.configure_rules(args)?;
         self.configure_gate(args)?;
         self.configure_budgets(args)
@@ -370,6 +386,28 @@ mod tests {
         assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Consider]);
         assert_eq!(args.levels(catalog::TEST_REDUNDANCY), [FailOn::Consider]);
         assert_eq!(args.levels(catalog::TEST_VALUE), [FailOn::Uncertain]);
+    }
+
+    #[test]
+    fn file_settings_apply_unless_a_flag_sets_them() {
+        let file = "model = \"jev-latest\"\ncache_ttl_secs = 60\ninclude_tests = true\n";
+        let args = configured(file, &[], &[]).unwrap();
+        assert_eq!(
+            (args.model(), args.cache_ttl_secs(), args.include_tests),
+            ("jev-latest", 60, true)
+        );
+        let context = ConfigContext {
+            invocation_dir: PathBuf::from("."),
+            root: PathBuf::from("."),
+            config: toml::from_str(file).unwrap(),
+        };
+        let mut args = crate::tests::args();
+        args.model = Some("jev-preview".into());
+        args.cache_ttl_secs = Some(5);
+        context.configure(&mut args).unwrap();
+        assert_eq!((args.model(), args.cache_ttl_secs()), ("jev-preview", 5));
+        let defaults = configured("", &[], &[]).unwrap();
+        assert_eq!(defaults.model(), crate::options::DEFAULT_MODEL);
     }
 
     #[test]

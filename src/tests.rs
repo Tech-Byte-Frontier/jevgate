@@ -185,13 +185,19 @@ fn unchanged_files_are_answered_from_cache_without_api_calls() {
 }
 
 #[test]
+fn command_line_definition_is_consistent() {
+    use clap::CommandFactory;
+    Cli::command().debug_assert();
+}
+
+#[test]
 fn model_and_refresh_invalidate_cache() {
     let project = Project::new();
     project.write("lib.rs", &function("f"));
     let mut options = args();
     let mut mock = Mock::default();
     run(&project, &options, &mut mock);
-    options.model = "other-version".into();
+    options.model = Some("other-version".into());
     run(&project, &options, &mut mock);
     options.refresh = true;
     run(&project, &options, &mut mock);

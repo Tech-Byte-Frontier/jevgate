@@ -103,7 +103,7 @@ pub fn run(
             fingerprint = inventory::fingerprint(&inputs);
             previous = super::evaluate::previous_judgments(Some(&report), false);
             if session.args.output_format() != Format::Jsonl {
-                output::emit(&report, session.args.output_format(), session.args.verbose)?;
+                output::emit(&report, session.args)?;
             }
             changed_at = None;
         }

@@ -247,7 +247,7 @@ fn pending_result(
                 crate::units::questions::VERSION,
                 crate::file_kind::VERSION,
                 args.include_tests,
-                &args.model,
+                args.model(),
                 &args.rules,
             ))
             .unwrap(),

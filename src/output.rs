@@ -1,5 +1,5 @@
 use crate::{
-    options::Format,
+    options::{CheckArgs, Format},
     schema::{FileResult, Finding, Report, Status, Strength},
 };
 use anyhow::Result;
@@ -22,16 +22,17 @@ pub fn estimated_usd(report: &Report) -> Option<f64> {
 /// Write the report to stdout. A reader that closes the pipe early (as with
 /// `| head`) ends the output without failing the run, so the exit code still
 /// reflects the gate.
-pub fn emit(report: &Report, format: Format, verbose: bool) -> Result<()> {
+pub fn emit(report: &Report, args: &CheckArgs) -> Result<()> {
     let mut out = std::io::stdout().lock();
-    let written = match format {
+    let written = match args.output_format() {
         Format::Json => serde_json::to_writer_pretty(&mut out, report)
             .map_err(anyhow::Error::from)
             .and_then(|()| Ok(writeln!(out)?)),
         Format::Jsonl => serde_json::to_writer(&mut out, report)
             .map_err(anyhow::Error::from)
             .and_then(|()| Ok(writeln!(out)?)),
-        Format::Agent => agent(&mut out, report, verbose),
+        Format::Agent => agent(&mut out, report, args.verbose),
+        Format::Github => crate::github::emit(&mut out, report, args),
     };
     match written {
         Err(error) if broken_pipe(&error) => Ok(()),
@@ -51,7 +52,7 @@ fn broken_pipe(error: &anyhow::Error) -> bool {
     })
 }
 
-fn label(value: &impl serde::Serialize) -> String {
+pub(crate) fn label(value: &impl serde::Serialize) -> String {
     serde_json::to_value(value)
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
@@ -74,31 +75,34 @@ pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Res
     Ok(())
 }
 
-/// One line: status, gate, scope and cost, then run errors.
-fn emit_header(out: &mut impl Write, report: &Report) -> Result<()> {
+/// Status, gate, scope and cost on one line.
+pub(crate) fn headline(report: &Report) -> String {
     let gate = match &report.gate {
         Some(gate) if gate.passed => "gate passed".to_string(),
         Some(gate) => format!("gate failed: {}", gate.reasons.join("; ")),
         None => "gate not evaluated".to_string(),
     };
     let cost = estimated_usd(report).map_or(String::new(), |usd| format!(" · ~${usd:.4}"));
-    writeln!(
-        out,
+    format!(
         "JevGate: {} · {gate} · {} files · {} API requests · {} input tokens{cost}",
         report.status,
         report.files.len(),
         report.api_requests,
         report.paid_input_tokens
-    )?;
+    )
+}
+
+/// The headline, then run errors.
+fn emit_header(out: &mut impl Write, report: &Report) -> Result<()> {
+    writeln!(out, "{}", headline(report))?;
     for error in &report.errors {
         writeln!(out, "Error: {error}")?;
     }
     Ok(())
 }
 
-/// Every review, then the top-ranked considers (all with `verbose`). Notes
-/// are listed only with `verbose`; otherwise just counted.
-fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
+/// Every finding with its file's path, highest rank first.
+pub(crate) fn ranked(report: &Report) -> Vec<(&Path, &Finding)> {
     let mut findings: Vec<(&Path, &Finding)> = report
         .files
         .iter()
@@ -109,6 +113,13 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result
         })
         .collect();
     findings.sort_by(|a, b| b.1.rank.total_cmp(&a.1.rank));
+    findings
+}
+
+/// Every review, then the top-ranked considers (all with `verbose`). Notes
+/// are listed only with `verbose`; otherwise just counted.
+fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
+    let findings = ranked(report);
     let of = |strength: Strength| -> Vec<(&Path, &Finding)> {
         findings
             .iter()

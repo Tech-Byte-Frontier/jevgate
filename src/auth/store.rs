@@ -5,8 +5,11 @@ use std::{io::IsTerminal, path::PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum StorageMode {
+    /// The OS credential store, else an owner-only file on Unix
     Auto,
+    /// Only the OS credential store (Keychain, Credential Manager, Secret Service)
     Keyring,
+    /// An owner-only file in the user configuration directory
     File,
 }
 impl StorageMode {

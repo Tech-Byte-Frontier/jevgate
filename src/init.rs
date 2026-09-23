@@ -117,12 +117,23 @@ fn render(allow: &[String]) -> String {
 {allow}# Never uploaded, even when allowed above.
 upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 
+# Also judge tests (test value and redundancy), as --include-tests does.
+# include_tests = true
+
+# The model, pinned so results stay repeatable; --model overrides it.
+# model = "{model}"
+
+# Budgets for one invocation; flags can only lower them.
+# max_requests = 200
+# concurrency = 4
+
 # Each group or rule ID set to a level is judged and fails the check at that
 # level: "review", "consider" (also fails on review), "uncertain", "report"
 # (judge, never fail) or "off". A rule's own entry wins over its group's.
-# Test rules also need `jevgate check --include-tests`.
+# Test rules also need include_tests or --include-tests.
 [rules]
-{rules}"#
+{rules}"#,
+        model = crate::options::DEFAULT_MODEL
     )
 }
 
