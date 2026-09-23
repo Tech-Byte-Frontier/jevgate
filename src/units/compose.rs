@@ -3,8 +3,8 @@
 use super::{
     Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, benefit, checks, choice, noul, origin_outcome, score, split_has_users,
-        unit_outcome, value_signals,
+        Answers, Outcome, benefit, checks, choice, noul, open, origin_outcome, score,
+        split_has_users, unit_outcome, value_signals,
     },
     wording::{
         doc_pair_wording, document_wording, function_wording, outline_wording, pair_wording,
@@ -38,25 +38,29 @@ fn security(rule: &str) -> bool {
     catalog::SECURITY.contains(&rule)
 }
 
-/// A security unit's first-pass and trace answers, with each decisive
-/// recheck answer (the origin or a check, seen with callers) in place of the
-/// traced one.
+/// A security unit's first-pass and trace answers, with each recheck answer
+/// (the origin or a check, seen with callers) in place of the traced one,
+/// unless the traced answer is decisive and the recheck is not: an undecided
+/// traced answer is replaced even by an undecided recheck, whose lean saw
+/// more evidence.
 fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'a> {
     let mut merged = answers(judgments, &unit.id, Pass::First);
     merged.extend(answers(judgments, &unit.id, Pass::Trace));
+    let judged = |question: &str, answer: &Answer| match question {
+        "origin" => origin_outcome(answer),
+        _ => noul(answer),
+    };
     for (question, answer) in answers(judgments, &unit.id, Pass::Recheck) {
-        let outcome = match question {
-            "origin" => origin_outcome(answer),
-            _ => noul(answer),
-        };
-        if outcome.decisive() {
+        let traced = merged.get(question).map(|a| judged(question, a));
+        if judged(question, answer).decisive() || !traced.is_some_and(Outcome::decisive) {
             merged.insert(question, answer);
         }
     }
     merged
 }
 
-/// The first-pass outcome, replaced by a decisive recheck when one exists.
+/// The first-pass outcome, replaced by a decisive recheck when the first pass
+/// called for one.
 fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers<'a>) {
     if security(unit.rule) {
         let merged = security_answers(unit, judgments);
@@ -79,7 +83,7 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
     let first = answers(judgments, &unit.id, Pass::First);
     let outcome = unit_outcome(unit, &first);
     let recheck = answers(judgments, &unit.id, Pass::Recheck);
-    if !outcome.decisive() && !recheck.is_empty() {
+    if open(unit, &first, outcome) && !recheck.is_empty() {
         let second = unit_outcome(unit, &recheck);
         if second.decisive() {
             return (second, recheck);
@@ -117,8 +121,9 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
         .collect()
 }
 
-/// Judged units whose first pass stayed undecided and that have no recheck
-/// yet; for injection, units whose traced origin stayed unclear or was the
+/// Judged units whose first pass stayed undecided, or became a note from a
+/// torn function or file-organization answer, and that have no recheck yet;
+/// for injection, units whose traced origin stayed unclear or was the
 /// function's parameters, so callers can settle it.
 pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
@@ -144,10 +149,8 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                         .any(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
                 })
             } else {
-                matches!(
-                    unit_outcome(u, &answers(judgments, &u.id, Pass::First)),
-                    Outcome::Uncertain(_)
-                )
+                let first = answers(judgments, &u.id, Pass::First);
+                open(u, &first, unit_outcome(u, &first))
             }
         })
         .map(|u| u.id.clone())

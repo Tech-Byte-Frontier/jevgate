@@ -118,6 +118,7 @@ fn small_functions_are_too_small_and_never_clear() {
 struct Scripted {
     level: usize,
     overrides: Vec<(&'static str, Value)>,
+    recheck_overrides: Vec<(&'static str, Value)>,
     recheck_level: Option<usize>,
     stages: Vec<String>,
 }
@@ -133,21 +134,21 @@ impl crate::transport::Evaluator for Scripted {
             self.level
         };
         let mut body = answer(request, level);
-        if !recheck {
-            self.apply_overrides(&mut body);
+        if recheck {
+            apply(&self.recheck_overrides, &mut body);
+        } else {
+            apply(&self.overrides, &mut body);
         }
         Ok(body)
     }
 }
 
-impl Scripted {
-    /// Replace every first-pass answer whose key ends with an override's suffix.
-    fn apply_overrides(&self, body: &mut Value) {
-        for (suffix, value) in &self.overrides {
-            for (key, slot) in body["answers"].as_object_mut().unwrap() {
-                if key.ends_with(suffix) {
-                    *slot = value.clone();
-                }
+/// Replace every answer whose key ends with an override's suffix.
+fn apply(overrides: &[(&'static str, Value)], body: &mut Value) {
+    for (suffix, value) in overrides {
+        for (key, slot) in body["answers"].as_object_mut().unwrap() {
+            if key.ends_with(suffix) {
+                *slot = value.clone();
             }
         }
     }
@@ -166,6 +167,7 @@ fn scripted(level: usize) -> Scripted {
     Scripted {
         level,
         overrides: Vec::new(),
+        recheck_overrides: Vec::new(),
         recheck_level: None,
         stages: Vec::new(),
     }
@@ -307,6 +309,48 @@ fn uncertain_units_get_one_recheck_that_replaces_them_only_when_decisive() {
     let report = run(&project, &options, &mut still);
     assert_eq!(report.files[0].status, Status::Uncertain);
     assert!(report.files[0].findings.is_empty());
+}
+
+#[test]
+fn a_torn_note_gets_the_recheck_and_takes_its_decisive_answer() {
+    let project = Project::new();
+    project.write(
+        "lib.rs",
+        &format!(
+            "{}{}",
+            function("helper"),
+            function("caller").replace(
+                "let doubled = total * 2;",
+                "let doubled = helper(&[total]);"
+            )
+        ),
+    );
+    let mut options = args();
+    only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
+    let mut eval = scripted(0);
+    eval.overrides.push(("split", spread(0.1, 0.45, 0.45)));
+    eval.recheck_level = Some(2);
+    let report = run(&project, &options, &mut eval);
+    let file = &report.files[0];
+    let strengths: Vec<_> = file
+        .findings
+        .iter()
+        .map(|f| (f.symbol.as_deref(), f.strength))
+        .collect();
+    assert!(strengths.contains(&(Some("caller"), Strength::Review)));
+    assert!(
+        strengths.contains(&(Some("helper"), Strength::Note)),
+        "no callees, so no recheck"
+    );
+    options.refresh = true;
+    let mut eval = scripted(0);
+    eval.overrides.push(("split", spread(0.1, 0.6, 0.3)));
+    eval.recheck_level = Some(2);
+    run(&project, &options, &mut eval);
+    assert!(
+        !eval.stages.iter().any(|s| s == "recheck"),
+        "a note whose middle level leads is settled"
+    );
 }
 
 fn two_concerns() -> String {
@@ -1040,6 +1084,7 @@ fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
     eval.overrides = vec![
         ("error_details", noul_at(0.6)),
         ("exception_to_client", noul_at(0.3)),
+        ("own_messages", noul_at(0.5)),
     ];
     let report = run(&project, &options, &mut eval);
     let note = &report.files[0].findings[0];
@@ -1052,6 +1097,57 @@ fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
     assert_eq!(
         note.category.as_deref(),
         Some("CWE-209 error details exposed")
+    );
+}
+
+#[test]
+fn a_foreign_error_message_confirms_an_error_detail_lean_as_a_consider() {
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("error_details", noul_at(0.3)),
+        ("exception_to_client", noul_at(0.6)),
+        ("own_messages", noul_at(0.1)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Consider);
+    assert!(
+        finding
+            .message
+            .contains("text of a library or database error"),
+        "{}",
+        finding.message
+    );
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-209 error details exposed")
+    );
+}
+
+#[test]
+fn an_undecided_caller_recheck_replaces_an_undecided_traced_lean() {
+    let caller = format!(
+        "{QUERY}\nfn handler(conn: &Connection, dir: &Path) -> Result<Row> {{\n    find(conn, &dir.join(\"cache\"))\n}}\n"
+    );
+    let (project, options) = security_project(&caller);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("resource", noul_at(0.95)),
+        ("path", noul_at(0.6)),
+        ("origin", spread(0.0, 0.9, 0.1)),
+    ];
+    eval.recheck_level = Some(0);
+    eval.recheck_overrides = vec![("path", noul_at(0.3)), ("origin", spread(0.1, 0.9, 0.0))];
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(eval.stages.last().unwrap(), "recheck");
+    let file = &report.files[0];
+    assert!(
+        !file
+            .findings
+            .iter()
+            .any(|f| f.rule == "security/injection" && f.symbol.as_deref() == Some("find")),
+        "the callers' answer leans away, so no note"
     );
 }
 

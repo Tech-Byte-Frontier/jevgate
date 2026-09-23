@@ -837,10 +837,18 @@ fn exposure_wording(
     } else {
         ""
     };
+    let foreign = category.starts_with("CWE-209")
+        && matches!(
+            answers.get("own_messages").map(|a| noul(a)),
+            Some(Outcome::Clear)
+        );
     let message = match strength {
         Strength::Note => format!(
             "{subject} may {}; the answer was split ({p:.2}).{where_}",
             base_form(what)
+        ),
+        Strength::Consider if foreign => format!(
+            "{subject} puts the text of a library or database error into its error messages, which likely reach a remote client ({p:.2}).{where_}"
         ),
         Strength::Consider => format!("{subject} likely {what} ({p:.2}).{where_}"),
         Strength::Review => format!("{subject} {what} ({p:.2}).{where_}"),
