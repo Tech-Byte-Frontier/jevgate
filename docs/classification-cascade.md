@@ -29,6 +29,13 @@ signatures, or one candidate pair.
    enclosing functions or the file's application source; a decisive recheck
    replaces the first answer and both are kept. Hardcoded values have no recheck.
    Then one locate Choice per split finding picks the body block to extract.
+   Security units whose presence answers are not clear get one trace before the
+   rechecks: specific literal checks per kind, a Choice among the unit's sites,
+   and the origin of its values (or whether it runs only in development). One
+   broad "is every value bound, escaped or checked?" stayed undecided even for
+   `eval` of model output; a check per kind decides and names the kind. An
+   injection whose origin stays unclear or is the function's parameters is
+   rechecked with up to three callers.
 5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise

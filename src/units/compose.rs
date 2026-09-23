@@ -8,8 +8,8 @@
 use super::{
     Block, Detail, FilePlan, GroupInfo, Presence, UnitPlan,
     wording::{
-        function_wording, outline_wording, pair_wording, question_label, test_pair_wording,
-        test_wording, values_wording,
+        function_wording, outline_wording, pair_wording, question_label, security_wording,
+        test_pair_wording, test_wording, values_wording,
     },
 };
 use crate::{
@@ -157,6 +157,11 @@ fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => get("overlap").map(score),
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
+        catalog::INJECTION => injection_outcome(&get),
+        catalog::SENSITIVE_DATA => {
+            exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
+        }
+        catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
@@ -201,6 +206,132 @@ fn values_outcome<'a>(
         outcomes.push(noul(get("special")?));
     }
     Some(strongest(&outcomes))
+}
+
+/// Where an injection's values come from: another party (top) is a review;
+/// parameters of unknown origin (middle) are a concern a caller settles, so
+/// middle-or-top mass is a consider; the program itself (bottom) is clear.
+pub(super) fn origin_outcome(answer: &Answer) -> Outcome {
+    let Some([bottom, middle, top]) = levels(answer) else {
+        return Outcome::Missing;
+    };
+    if at_least(top) {
+        Outcome::Review(top)
+    } else if at_least(middle + top) {
+        Outcome::Consider(middle + top)
+    } else if at_least(bottom) {
+        Outcome::Clear
+    } else {
+        Outcome::Uncertain(top)
+    }
+}
+
+/// The outcomes of a rule's specific trace checks that were answered.
+fn checks<'a>(rule: &str, get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<Outcome> {
+    super::security::checks(rule)
+        .iter()
+        .filter_map(|check| get(check.id).map(noul))
+        .collect()
+}
+
+/// Kinds where a variable is a concern only when another party controls it:
+/// helpers that build a path or URL from their parameters are everywhere.
+const RESOURCE_CHECKS: [&str; 2] = ["path", "url"];
+
+/// Presence alone never raises an injection: it only decides whether the
+/// trace is asked. When every specific check clears the unit, it is clear;
+/// otherwise the origin of its values decides. Only a check that finds a
+/// variable placed unhandled raises a consider or review, so a finding names
+/// its kind; without one, values from another party are a note and
+/// parameters stay undecided. Parameters spliced into SQL, a
+/// shell command, code or markup are a consider (bind, quote or escape them);
+/// parameters in a path or URL are a note until a caller shows another party
+/// controls them.
+fn injection_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
+    let presence = [noul(get("interpreted")?), noul(get("resource")?)];
+    if presence.iter().all(|o| *o == Outcome::Clear) {
+        return Some(Outcome::Clear);
+    }
+    let unhandled = checks(catalog::INJECTION, get);
+    let (Some(origin), false) = (get("origin"), unhandled.is_empty()) else {
+        return Some(Outcome::Uncertain(
+            presence.iter().map(|o| o.concern()).fold(0.0, f64::max),
+        ));
+    };
+    if unhandled.iter().all(|o| *o == Outcome::Clear) {
+        return Some(Outcome::Clear);
+    }
+    let outcome = origin_outcome(origin);
+    let found: Vec<&str> = super::security::checks(catalog::INJECTION)
+        .iter()
+        .filter(|check| {
+            get(check.id)
+                .map(noul)
+                .is_some_and(|o| matches!(o, Outcome::Review(_)))
+        })
+        .map(|check| check.id)
+        .collect();
+    let resource_only = found.iter().all(|id| RESOURCE_CHECKS.contains(id));
+    Some(match outcome {
+        Outcome::Review(p) if found.is_empty() => Outcome::Note(p),
+        Outcome::Consider(p) if found.is_empty() => Outcome::Uncertain(p),
+        Outcome::Consider(_) if resource_only => lowered(outcome),
+        _ => outcome,
+    })
+}
+
+/// Logged secrets, exposed error details and weak settings: a presence
+/// question or a specific check at review raises it, one level lower for
+/// code that runs only in development; clear when presence or every check
+/// rules it out.
+fn exposure_outcome<'a>(
+    rule: &str,
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    questions: &[&str],
+) -> Option<Outcome> {
+    let presence: Vec<Outcome> = questions
+        .iter()
+        .map(|q| get(q).map(noul))
+        .collect::<Option<_>>()?;
+    let specific = checks(rule, get);
+    let ruled_out = presence.iter().all(|o| *o == Outcome::Clear)
+        || (!specific.is_empty() && specific.iter().all(|o| *o == Outcome::Clear));
+    let found: Vec<Outcome> = presence
+        .into_iter()
+        .chain(specific)
+        .filter(|o| matches!(o, Outcome::Review(_)))
+        .collect();
+    let outcome = if !found.is_empty() {
+        strongest(&found)
+    } else if ruled_out {
+        Outcome::Clear
+    } else {
+        Outcome::Uncertain(0.0)
+    };
+    Some(
+        if matches!(get("dev_only").map(noul), Some(Outcome::Review(_))) {
+            lowered(outcome)
+        } else {
+            outcome
+        },
+    )
+}
+
+fn security(rule: &str) -> bool {
+    catalog::SECURITY.contains(&rule)
+}
+
+/// A security unit's first-pass and trace answers, with a decisive recheck
+/// of the origin in place of the traced one.
+fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'a> {
+    let mut merged = answers(judgments, &unit.id, Pass::First);
+    merged.extend(answers(judgments, &unit.id, Pass::Trace));
+    if let Some(origin) = answers(judgments, &unit.id, Pass::Recheck).get("origin")
+        && origin_outcome(origin).decisive()
+    {
+        merged.insert("origin", origin);
+    }
+    merged
 }
 
 /// A split is suggested only when the proposed group has users of its own in
@@ -289,6 +420,10 @@ fn test_value_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<O
 
 /// The first-pass outcome, replaced by a decisive recheck when one exists.
 fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers<'a>) {
+    if security(unit.rule) {
+        let merged = security_answers(unit, judgments);
+        return (unit_outcome(unit, &merged), merged);
+    }
     let first = answers(judgments, &unit.id, Pass::First);
     let outcome = unit_outcome(unit, &first);
     let recheck = answers(judgments, &unit.id, Pass::Recheck);
@@ -327,16 +462,51 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
         .collect()
 }
 
-/// Judged units whose first pass stayed undecided and that have no recheck yet.
+/// Judged units whose first pass stayed undecided and that have no recheck
+/// yet; for injection, units whose traced origin stayed unclear or was the
+/// function's parameters, so callers can settle it.
 pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
         .iter()
         .filter(|u| u.presence == Presence::Judged)
+        .filter(|u| answers(judgments, &u.id, Pass::Recheck).is_empty())
         .filter(|u| {
-            matches!(
-                unit_outcome(u, &answers(judgments, &u.id, Pass::First)),
-                Outcome::Uncertain(_)
-            ) && answers(judgments, &u.id, Pass::Recheck).is_empty()
+            if security(u.rule) {
+                let merged = security_answers(u, judgments);
+                let get = |q: &str| merged.get(q).copied();
+                u.rule == catalog::INJECTION
+                    && !checks(u.rule, &get).iter().all(|o| *o == Outcome::Clear)
+                    && matches!(
+                        merged.get("origin").map(|a| origin_outcome(a)),
+                        Some(Outcome::Uncertain(_) | Outcome::Consider(_))
+                    )
+            } else {
+                matches!(
+                    unit_outcome(u, &answers(judgments, &u.id, Pass::First)),
+                    Outcome::Uncertain(_)
+                )
+            }
+        })
+        .map(|u| u.id.clone())
+        .collect()
+}
+
+/// Security units whose presence is not clear, to trace.
+pub fn untraced_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    plan.units
+        .iter()
+        .filter(|u| u.presence == Presence::Judged && security(u.rule))
+        .filter(|u| answers(judgments, &u.id, Pass::Trace).is_empty())
+        .filter(|u| {
+            let first = answers(judgments, &u.id, Pass::First);
+            let presence: Vec<Outcome> = super::security::presence_questions(u.rule)
+                .iter()
+                .filter_map(|q| first.get(q).map(|a| noul(a)))
+                .collect();
+            if presence.is_empty() {
+                return false;
+            }
+            presence.iter().any(|o| *o != Outcome::Clear)
         })
         .map(|u| u.id.clone())
         .collect()
@@ -439,6 +609,24 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
         catalog::SHARED_LOGIC => &["same"],
         catalog::HARDCODED_VALUES => &["environment", "magic", "special"],
         catalog::TEST_VALUE => &["own_logic", "mock_only"],
+        catalog::INJECTION => &[
+            "interpreted",
+            "resource",
+            "origin",
+            "sql",
+            "shell",
+            "code",
+            "markup",
+            "path",
+            "url",
+        ],
+        catalog::SENSITIVE_DATA => &[
+            "logs_secret",
+            "error_details",
+            "logs_object_secret",
+            "exception_to_client",
+        ],
+        catalog::UNSAFE_SETTINGS => &["weakened", "tls", "hash", "random", "cors", "cookie"],
         _ => &["overlap"],
     }
 }
@@ -455,6 +643,7 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
             answers.get(*q).is_some_and(|a| {
                 let outcome = match a {
                     Answer::Noul { .. } => noul(a),
+                    _ if **q == "origin" => origin_outcome(a),
                     _ => score(a),
                 };
                 matches!(outcome, Outcome::Uncertain(_))
@@ -540,6 +729,7 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::SHARED_LOGIC => "candidate pair",
         catalog::TEST_VALUE => "test",
         catalog::HARDCODED_VALUES => "value unit",
+        catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::UNSAFE_SETTINGS => "security unit",
         _ => "test pair",
     };
     let plural = |n: usize| if n == 1 { "" } else { "s" };
@@ -621,6 +811,7 @@ fn finding(
     let mut locations = unit.locations.clone();
     let mut symbol = Some(name.clone());
     let mut block = None;
+    let mut category = None;
     let (message, action) = match &unit.detail {
         Detail::Function { blocks, .. } => {
             block = located_block(unit, blocks, judgments);
@@ -651,6 +842,14 @@ fn finding(
         Detail::Values { .. } | Detail::Constants { .. } => {
             values_wording(name, strength, p, answers)
         }
+        Detail::Security { sites, .. } => {
+            let site = choice(answers.get("site").copied())
+                .and_then(|(id, _)| sites.iter().find(|s| s.id == id));
+            block = site;
+            let (wording, named) = security_wording(unit.rule, name, strength, p, answers);
+            category = Some(named);
+            wording
+        }
         Detail::Test => test_wording(name, strength == Strength::Review, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;
@@ -677,6 +876,7 @@ fn finding(
         concern_probability: p,
         locations,
         quote: unit.quote.clone(),
+        category,
         fingerprint: fingerprint(unit.rule, plan, &unit.identity),
         rank: rank(p, lines),
         baselined: false,
@@ -740,6 +940,7 @@ fn over_tested(
                 concern_probability: p,
                 locations,
                 quote: None,
+                category: None,
                 fingerprint: fingerprint(
                     catalog::TEST_REDUNDANCY,
                     plan,

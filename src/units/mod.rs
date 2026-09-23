@@ -5,17 +5,20 @@ mod answers;
 pub mod compose;
 mod duplicates;
 mod evidence;
+mod follow_ups;
 mod functions;
 mod hardcoded;
 pub(crate) mod outline;
 mod plan;
 pub mod questions;
+mod security;
 mod test_units;
 mod wording;
 
 use answers::Questions;
-pub use answers::{Asked, locates, rechecks, record};
+pub use answers::{Asked, record};
 use evidence::{FileContext, compact, identity, pack, request, unique_ids};
+pub use follow_ups::{locates, rechecks, traces};
 use plan::Scope;
 pub use plan::plan;
 
@@ -90,6 +93,12 @@ pub enum Detail {
     /// A file's module-level constants and the literal values they hold.
     Constants {
         values: Vec<String>,
+    },
+    /// A security unit: its statements as sites for locating a finding, and
+    /// the trace follow-up sent when presence is not clear.
+    Security {
+        sites: Vec<Block>,
+        trace: Option<(Value, Asked)>,
     },
     Test,
     TestPair {

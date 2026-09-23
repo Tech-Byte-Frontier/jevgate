@@ -167,9 +167,14 @@ impl Session<'_> {
         self.dispatch(report, first, |file, asked, body| {
             crate::units::record(file, &asked, body)
         })?;
-        // Rechecks settle uncertain units; locate follow-ups then point split
-        // findings at a block. Each depends on the answers before it.
-        for follow_up in [crate::units::rechecks, crate::units::locates] {
+        // Traces judge where a security concern's values come from; rechecks
+        // settle uncertain units; locate follow-ups then point split findings
+        // at a block. Each depends on the answers before it.
+        for follow_up in [
+            crate::units::traces,
+            crate::units::rechecks,
+            crate::units::locates,
+        ] {
             let tasks: Vec<_> = follow_up(&plan, &report.files)
                 .iter()
                 .map(Task::unit)

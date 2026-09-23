@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub const RUBRIC: &str = "jevgate-units-v1";
 /// Changes how saved answers become a status. Included in the report identity
 /// and not in the judgment cache, so unchanged questions are not sent again.
-pub const COMPOSITION: &str = "unit-composition-v5";
+pub const COMPOSITION: &str = "unit-composition-v6";
 pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -74,6 +74,8 @@ pub enum Pass {
     Recheck,
     /// A follow-up that locates the part of a finding to act on.
     Locate,
+    /// A follow-up that judges where a security concern's values come from.
+    Trace,
 }
 
 /// A raw typed answer, kept exactly as the provider returned it.
@@ -160,6 +162,9 @@ pub struct Finding {
     /// Whole statements from the first location, when the evidence is a quote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote: Option<String>,
+    /// The weakness a security finding names, such as "CWE-89 SQL injection".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     /// Rule, path, unit and normalized evidence; stable across unrelated edits.
     pub fingerprint: String,
     /// Probability times the log of the lines involved; orders findings.

@@ -39,6 +39,8 @@ pub struct Unit {
     pub blocks: Vec<Range<usize>>,
     /// Eligible literal values in the body, for hardcoded-value questions.
     pub literals: Vec<super::literals::Literal>,
+    /// Calls, built text and field assignments, for locating security findings.
+    pub sites: Vec<super::sites::Site>,
     pub calls: BTreeSet<String>,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
@@ -80,6 +82,8 @@ pub struct FileUnits {
     pub imports: BTreeSet<String>,
     /// Top-level constants and bindings whose values hold literals.
     pub constants: Vec<super::literals::Constant>,
+    /// Top-level statements that run when the module loads.
+    pub setup: super::sites::Setup,
     /// False when no parser supports this language.
     pub parsed: bool,
 }
@@ -96,6 +100,8 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     };
     walk(tree.root_node(), source, "", &mut file);
     file.constants = super::literals::constants(tree.root_node(), source);
+    let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
+    file.setup = super::sites::setup(tree.root_node(), source, &spans);
     // A function passed by name, such as `map(parse)`, is used like a call.
     let names: BTreeSet<String> = file.units.iter().map(|u| u.short_name.clone()).collect();
     for unit in &mut file.units {
@@ -349,6 +355,7 @@ fn push(
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
         literals: body.map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
+        sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source)),
         calls: facts.calls,
         refs,
         mentions: facts.idents,

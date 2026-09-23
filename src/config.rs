@@ -151,35 +151,9 @@ impl ConfigContext {
     /// within each, a rule's own entry wins over its group's, then over the
     /// levels for every rule, then `review`.
     fn configure_gate(&self, args: &mut CheckArgs) -> Result<()> {
-        let mut cli_global = Vec::new();
-        let mut cli_targets = BTreeMap::<String, Vec<FailOn>>::new();
-        for spec in &args.fail_on_specs {
-            match &spec.target {
-                Some(target) => {
-                    expand(std::slice::from_ref(target))?;
-                    cli_targets
-                        .entry(target.clone())
-                        .or_default()
-                        .push(spec.level);
-                }
-                None => cli_global.push(spec.level),
-            }
-        }
-        let mut file_global = Vec::new();
-        for name in &self.config.fail_on {
-            file_global
-                .push(FailOn::parse(name).ok_or_else(|| anyhow!("Unknown fail_on value: {name}"))?);
-        }
-        let mut file_targets = BTreeMap::new();
-        if let Rules::Levels(levels) = &self.config.rules {
-            for (target, level) in levels {
-                expand(std::slice::from_ref(target))?;
-                if !level.off() {
-                    file_targets.insert(target.clone(), level.levels(target)?);
-                }
-            }
-        }
-        let fallback = [&cli_global, &file_global]
+        let cli = Levels::from_cli(&args.fail_on_specs)?;
+        let file = self.file_levels()?;
+        let fallback = [&cli.global, &file.global]
             .into_iter()
             .find(|levels| !levels.is_empty())
             .cloned()
@@ -190,16 +164,35 @@ impl ConfigContext {
             if !args.rules.iter().any(|r| r == rule.key) {
                 continue;
             }
-            let levels = most_specific(&cli_targets, &rule)
-                .cloned()
-                .or_else(|| (!cli_global.is_empty()).then(|| cli_global.clone()))
-                .or_else(|| most_specific(&file_targets, &rule).cloned())
+            let levels = cli
+                .target(&rule)
+                .or_else(|| (!cli.global.is_empty()).then(|| cli.global.clone()))
+                .or_else(|| file.target(&rule))
                 .unwrap_or_else(|| fallback.clone());
             if levels != fallback {
                 args.rule_fail_on.insert(rule.key.into(), levels);
             }
         }
         Ok(())
+    }
+
+    /// `fail_on` and the levels of the `[rules]` table.
+    fn file_levels(&self) -> Result<Levels> {
+        let mut levels = Levels::default();
+        for name in &self.config.fail_on {
+            levels
+                .global
+                .push(FailOn::parse(name).ok_or_else(|| anyhow!("Unknown fail_on value: {name}"))?);
+        }
+        if let Rules::Levels(entries) = &self.config.rules {
+            for (target, level) in entries {
+                expand(std::slice::from_ref(target))?;
+                if !level.off() {
+                    levels.targets.insert(target.clone(), level.levels(target)?);
+                }
+            }
+        }
+        Ok(levels)
     }
 
     /// Configuration is a ceiling; CLI flags may narrow but cannot bypass upload budgets.
@@ -226,6 +219,38 @@ impl ConfigContext {
             "Budgets must be positive"
         );
         Ok(())
+    }
+}
+
+/// Gate levels from one source: for every rule, and by rule or group name.
+#[derive(Default)]
+struct Levels {
+    global: Vec<FailOn>,
+    targets: BTreeMap<String, Vec<FailOn>>,
+}
+
+impl Levels {
+    fn from_cli(specs: &[crate::options::FailOnSpec]) -> Result<Self> {
+        let mut levels = Self::default();
+        for spec in specs {
+            match &spec.target {
+                Some(target) => {
+                    expand(std::slice::from_ref(target))?;
+                    levels
+                        .targets
+                        .entry(target.clone())
+                        .or_default()
+                        .push(spec.level);
+                }
+                None => levels.global.push(spec.level),
+            }
+        }
+        Ok(levels)
+    }
+
+    /// The levels of the entry that addresses `rule` most specifically.
+    fn target(&self, rule: &catalog::Rule) -> Option<Vec<FailOn>> {
+        most_specific(&self.targets, rule).cloned()
     }
 }
 

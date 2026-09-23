@@ -1,6 +1,6 @@
 # JevGate
 
-Code review with TypeSafe Jev over small evidence units. Six rules:
+Code review with TypeSafe Jev over small evidence units. Six rules by default:
 
 - **File organization:** would moving some members into a separate module make the file easier to understand?
 - **Function simplification:** would splitting a function into named functions make it easier to understand, or, for deeply nested code, would flattening it help?
@@ -8,6 +8,12 @@ Code review with TypeSafe Jev over small evidence units. Six rules:
 - **Hardcoded values:** does a value fixed in code need to change in another environment, need a descriptive name, or special-case one user, account or record?
 - **Test value** (`--include-tests`): does a test only check its mocks, recompute its expected value, assert internal details or mix unrelated behaviors?
 - **Test redundancy** (`--include-tests`): do similar tests of one function check the same behavior?
+
+Three opt-in security rules (`--rule security`):
+
+- **Injection:** does a variable another party controls reach SQL, a shell command, evaluated code, markup, a file path or a URL without being bound, escaped or checked?
+- **Sensitive data:** does code log a password, token, key or personal data, or send internal error details to a remote client?
+- **Unsafe settings:** does code turn off certificate verification, hash passwords weakly, make secrets with a non-cryptographic random generator, allow credentialed requests from any origin, or set session cookies without Secure or HttpOnly?
 
 ## Use
 
@@ -59,6 +65,20 @@ the code reads well as it is (splitting, flattening, moving members), a
 optional `note`. A split function finding gets one follow-up Choice among the
 body's top-level blocks, and the chosen block becomes its first location.
 Every `review` carries a finding. Raw answers are kept under `files[].judgments`.
+
+Security units are the application functions that call something, build text
+or assign a field, plus each file's top-level setup statements for unsafe
+settings. The parser lists each unit's statements as sites (calls, built text,
+field assignments) only so a finding can be located. A packed first pass asks
+whether the code places a variable into interpreted text or a path or URL,
+logs secrets or exposes error details, or weakens a setting; a unit whose
+answer is not clear gets one trace with specific checks per kind (SQL, shell,
+code, markup, path, URL; TLS, hashing, randomness, CORS, cookies; logged
+secrets, exception text in responses), the site, and where the values come
+from or whether the code runs only in development. Values from another party
+are a review; parameters of unknown origin are a consider for SQL, shell, code
+and markup and a note for paths and URLs, and get one recheck with up to three
+callers. Findings name a CWE in `category`.
 
 Test files are judged only with `--include-tests`. A file that mixes code and
 tests keeps them apart: application rules judge the code, test rules the tests.
@@ -118,7 +138,11 @@ never count as clear; files under 100 lines of member code are too small to
 split. A unit too large for one request is `needs-context`. Clone candidates
 need three or more statements and 120 non-whitespace bytes; at most 64 groups
 per run and 8 per file are judged, and omissions are counted.
+Security rules judge one function and at most one hop of callers: there is no
+whole-program data flow, and SQL files, row-level policies and access control
+are not judged. Secrets in source are out of scope; use a local secret
+scanner, since judging them would upload them.
 Probabilities are model judgments, not measured accuracy. Run linting,
-formatting, tests and type checks separately.
+formatting, tests, type checks and security scanners separately.
 
 Licensed under MIT OR Apache-2.0.

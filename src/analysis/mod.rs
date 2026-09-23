@@ -7,6 +7,7 @@ pub mod groups;
 pub mod imports;
 pub mod literals;
 pub mod nesting;
+pub mod sites;
 mod summary;
 pub mod test_map;
 pub mod units;

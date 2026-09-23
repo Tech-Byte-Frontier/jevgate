@@ -584,6 +584,9 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "function_simplification",
             "shared_logic",
             "hardcoded_values",
+            "injection",
+            "sensitive_data",
+            "unsafe_settings",
             "test_value",
             "test_redundancy"
         ]
@@ -605,7 +608,11 @@ fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
     let output = project.command().arg("rules").output().unwrap();
     let table = String::from_utf8(output.stdout).unwrap();
     assert!(table.starts_with("RULE") && table.contains("maintainability/shared-logic"));
-    assert!(table.contains("Groups: maintainability, tests"), "{table}");
+    assert!(
+        table.contains("Groups: maintainability, security, tests"),
+        "{table}"
+    );
+    assert!(table.contains("security/injection") && table.contains("opt-in"));
     std::fs::write(
         project.0.join("lib.rs"),
         JUDGED_RS.replace("total * 2", "total * 86400"),
@@ -625,6 +632,24 @@ fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
         "{:?}",
         stages(&all)
     );
+    assert!(
+        !stages(&all).contains(&"security".to_string()),
+        "security is opt-in"
+    );
+    std::fs::write(
+        project.0.join("store.rs"),
+        "fn load(conn: &Connection, table: &str) {\n    conn.execute(&format!(\"DELETE FROM {table}\"), []).unwrap();\n}\n",
+    )
+    .unwrap();
+    let security = project.preview(&[
+        "check",
+        "--rule",
+        "security",
+        "--dry-run",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(stages(&security), ["security"]);
     let preview = project.preview(&[
         "check",
         "--rule",

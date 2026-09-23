@@ -152,6 +152,7 @@ mod tests {
             concern_probability: 0.9,
             locations: Vec::new(),
             quote: None,
+            category: None,
             fingerprint: fingerprint.into(),
             rank: 1.0,
             baselined: false,
