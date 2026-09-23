@@ -62,16 +62,18 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
         let merged = security_answers(unit, judgments);
         return (unit_outcome(unit, &merged), merged);
     }
-    if [catalog::DOC_STALENESS, catalog::DOC_DUPLICATION].contains(&unit.rule) {
-        // Section and pair checks are follow-ups beside a document's question.
+    // Follow-ups whose questions sit beside the first answers under their own
+    // ids: document section and pair checks, and benign-kind value checks.
+    let beside = if [catalog::DOC_STALENESS, catalog::DOC_DUPLICATION].contains(&unit.rule) {
+        Some(Pass::Trace)
+    } else if unit.rule == catalog::HARDCODED_VALUES {
+        Some(Pass::Recheck)
+    } else {
+        None
+    };
+    if let Some(pass) = beside {
         let mut merged = answers(judgments, &unit.id, Pass::First);
-        merged.extend(answers(judgments, &unit.id, Pass::Trace));
-        return (unit_outcome(unit, &merged), merged);
-    }
-    if unit.rule == catalog::HARDCODED_VALUES {
-        // Benign-kind checks have their own ids beside the first answers.
-        let mut merged = answers(judgments, &unit.id, Pass::First);
-        merged.extend(answers(judgments, &unit.id, Pass::Recheck));
+        merged.extend(answers(judgments, &unit.id, pass));
         return (unit_outcome(unit, &merged), merged);
     }
     let first = answers(judgments, &unit.id, Pass::First);

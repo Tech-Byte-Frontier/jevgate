@@ -607,7 +607,7 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
 }
 
 #[test]
-fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
+fn rules_table_names_rules_groups_and_opt_in_rules() {
     let project = Project::new();
     let output = project.command().arg("rules").output().unwrap();
     let table = String::from_utf8(output.stdout).unwrap();
@@ -617,61 +617,50 @@ fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
         "{table}"
     );
     assert!(table.contains("security/injection") && table.contains("opt-in"));
-    std::fs::write(
-        project.0.join("lib.rs"),
-        JUDGED_RS.replace("total * 2", "total * 86400"),
-    )
-    .unwrap();
-    let stages = |preview: &serde_json::Value| -> Vec<String> {
-        preview["stages"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect()
-    };
-    let all = project.preview(&["check", "--dry-run", "--format", "json"]);
-    assert!(
-        stages(&all).contains(&"values".to_string()),
-        "{:?}",
-        stages(&all)
-    );
-    assert!(
-        !stages(&all).contains(&"security".to_string()),
-        "security is opt-in"
-    );
+}
+
+/// The stages a dry-run preview plans.
+fn stages(preview: &serde_json::Value) -> Vec<String> {
+    preview["stages"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect()
+}
+
+fn dry_run(project: &Project, rules: &[&str]) -> serde_json::Value {
+    let mut arguments = vec!["check", "--dry-run", "--format", "json"];
+    arguments.extend_from_slice(rules);
+    project.preview(&arguments)
+}
+
+#[test]
+fn security_runs_only_when_selected() {
+    let project = Project::new();
     std::fs::write(
         project.0.join("store.rs"),
         "fn load(conn: &Connection, table: &str) {\n    conn.execute(&format!(\"DELETE FROM {table}\"), []).unwrap();\n}\n",
     )
     .unwrap();
-    let security = project.preview(&[
-        "check",
-        "--rule",
-        "security",
-        "--dry-run",
-        "--format",
-        "json",
-    ]);
-    assert_eq!(stages(&security), ["security"]);
+    assert!(!stages(&dry_run(&project, &[])).contains(&"security".to_string()));
+    assert_eq!(
+        stages(&dry_run(&project, &["--rule", "security"])),
+        ["security"]
+    );
+}
+
+#[test]
+fn documentation_runs_only_when_selected_and_reports_what_harnesses_load() {
+    let project = Project::new();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
     std::fs::write(
         project.0.join("AGENTS.md"),
         "# Build\nRun `cargo test` before a commit.\n",
     )
     .unwrap();
-    assert!(
-        !stages(&project.preview(&["check", "--dry-run", "--format", "json"]))
-            .contains(&"instructions".to_string()),
-        "documentation is opt-in"
-    );
-    let documentation = project.preview(&[
-        "check",
-        "--rule",
-        "documentation",
-        "--dry-run",
-        "--format",
-        "json",
-    ]);
+    assert!(!stages(&dry_run(&project, &[])).contains(&"instructions".to_string()));
+    let documentation = dry_run(&project, &["--rule", "documentation"]);
     assert_eq!(stages(&documentation), ["instructions"]);
     let codex = &documentation["context_load"]["harnesses"]
         .as_array()
@@ -680,24 +669,39 @@ fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
         .find(|h| h["harness"] == "Codex")
         .unwrap()["files"];
     assert_eq!(codex, &serde_json::json!(["AGENTS.md"]));
-    let preview = project.preview(&[
-        "check",
-        "--rule",
-        "maintainability",
-        "--skip-rule",
-        "hardcoded_values",
-        "--fail-on",
-        "maintainability/shared-logic=consider",
-        "--dry-run",
-        "--format",
-        "json",
-    ]);
+}
+
+#[test]
+fn skipped_rules_and_rule_levels_shape_the_run() {
+    let project = Project::new();
+    std::fs::write(
+        project.0.join("lib.rs"),
+        JUDGED_RS.replace("total * 2", "total * 86400"),
+    )
+    .unwrap();
+    assert!(stages(&dry_run(&project, &[])).contains(&"values".to_string()));
+    let preview = dry_run(
+        &project,
+        &[
+            "--rule",
+            "maintainability",
+            "--skip-rule",
+            "hardcoded_values",
+            "--fail-on",
+            "maintainability/shared-logic=consider",
+        ],
+    );
     assert_eq!(stages(&preview), ["functions"]);
     assert_eq!(preview["fail_on"], serde_json::json!(["review"]));
     assert_eq!(
         preview["fail_on_rules"],
         serde_json::json!({"maintainability/shared-logic": ["consider"]})
     );
+}
+
+#[test]
+fn unknown_rules_and_levels_are_rejected() {
+    let project = Project::new();
     for arguments in [
         vec!["check", "--rule", "securty", "--dry-run"],
         vec!["check", "--fail-on", "tests=sometimes", "--dry-run"],

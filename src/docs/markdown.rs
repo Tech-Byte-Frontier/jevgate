@@ -157,15 +157,20 @@ fn list_item(line: &str) -> bool {
         || (digits > 0 && line[digits..].starts_with(". "))
 }
 
+/// Markdown's deepest heading level.
+pub const DEEPEST_HEADING: usize = 6;
+/// More leading spaces than this make a line code, not a heading.
+const HEADING_INDENT: usize = 3;
+
 /// An ATX heading's text: one to six `#` then a space.
 fn heading(line: &str) -> Option<String> {
     let trimmed = line.trim_start();
-    if line.len() - trimmed.len() > 3 {
+    if line.len() - trimmed.len() > HEADING_INDENT {
         return None;
     }
     let hashes = trimmed.chars().take_while(|c| *c == '#').count();
     let rest = &trimmed[hashes..];
-    ((1..=6).contains(&hashes) && (rest.is_empty() || rest.starts_with([' ', '\t'])))
+    ((1..=DEEPEST_HEADING).contains(&hashes) && (rest.is_empty() || rest.starts_with([' ', '\t'])))
         .then(|| rest.trim().trim_end_matches('#').trim().to_string())
 }
 
@@ -267,18 +272,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sections_split_on_headings_outside_code() {
-        let source = "---\nalwaysApply: true\nglobs: [\"src/**\", 'web/**']\n---\nIntro line.\n\n# Build\nRun `make`.\n```sh\n# not a heading\n```\n## Empty\n### Test\n<!-- hidden -->\nRun tests.\n";
+    fn frontmatter_keys_join_inline_and_dash_lists() {
+        let inline = parse("---\nalwaysApply: true\nglobs: [\"src/**\", 'web/**']\n---\n# A\nx\n");
+        assert_eq!(inline.frontmatter["alwaysApply"], "true");
+        assert_eq!(inline.frontmatter["globs"], "src/**,web/**");
+        let dashed = parse("---\npaths:\n  - \"src/**\"\n  - tests/**\n---\n# A\nx\n");
+        assert_eq!(dashed.frontmatter["paths"], "src/**,tests/**");
+    }
+
+    #[test]
+    fn sections_split_on_headings_outside_code_and_drop_empty_ones() {
+        let source = "Intro line.\n\n# Build\nRun `make`.\n```sh\n# not a heading\n```\n## Empty\n### Test\nRun tests.\n";
         let doc = parse(source);
-        assert_eq!(doc.frontmatter["alwaysApply"], "true");
-        assert_eq!(doc.frontmatter["globs"], "src/**,web/**");
-        let headings: Vec<&str> = doc.sections.iter().map(|s| s.heading.as_str()).collect();
-        assert_eq!(headings, ["", "Build", "Test"]);
-        assert_eq!(doc.sections[0].start_line, 5);
-        assert!(doc.sections[1].text.contains("# not a heading"));
-        assert_eq!(doc.sections[1].start_line, 7);
-        assert_eq!(doc.sections[1].end_line, 11);
-        assert_eq!(doc.sections[2].text, "Run tests.");
+        let spans: Vec<(&str, usize, usize)> = doc
+            .sections
+            .iter()
+            .map(|s| (s.heading.as_str(), s.start_line, s.end_line))
+            .collect();
+        assert_eq!(spans, [("", 1, 2), ("Build", 3, 7), ("Test", 9, 10)]);
+    }
+
+    #[test]
+    fn section_text_leaves_out_html_comments() {
+        let doc = parse("# Test\n<!-- note for people -->\nRun tests.\n");
+        assert_eq!(doc.sections[0].text, "Run tests.");
     }
 
     #[test]
@@ -314,9 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn frontmatter_lists_and_imports() {
-        let doc = parse("---\npaths:\n  - \"src/**\"\n  - tests/**\n---\n# A\nx\n");
-        assert_eq!(doc.frontmatter["paths"], "src/**,tests/**");
+    fn imports_are_file_paths_outside_code() {
         let found = imports(
             "See @AGENTS.md and @docs/git.md.\nEmail a@b.c, `npm i @types/node`, @posthog/browser\n```\n@skip.md\n```\n",
         );
@@ -327,9 +342,12 @@ mod tests {
     }
 
     #[test]
-    fn comments_are_stripped_and_tokens_estimated() {
+    fn an_unclosed_comment_drops_the_rest() {
         assert_eq!(strip_comments("a<!-- b -->c<!-- d"), "ac");
-        assert_eq!(tokens("abcdefgh"), 2);
-        assert_eq!(tokens("abcdefghi"), 3);
+    }
+
+    #[test]
+    fn tokens_round_up_at_four_bytes_each() {
+        assert_eq!((tokens("abcdefgh"), tokens("abcdefghi")), (2, 3));
     }
 }

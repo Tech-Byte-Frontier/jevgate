@@ -2,6 +2,7 @@
 //! each one loads them, and what the repository's own files already show.
 //! Parsers find and scope these files; Jev judges their sections.
 pub mod discover;
+pub mod history;
 pub mod load;
 pub mod markdown;
 pub mod overlap;
@@ -30,7 +31,7 @@ pub struct Repository {
     pub docs: BTreeSet<PathBuf>,
     pub root: PathBuf,
     /// Tracked, tagged and removed paths, for staleness candidates.
-    pub history: crate::revision::History,
+    pub history: history::History,
     /// Scripts and targets every tracked manifest declares.
     pub scripts: BTreeSet<String>,
 }
@@ -56,7 +57,7 @@ pub fn scan(root: &Path) -> Result<Repository> {
         .filter(|(_, source)| generated(source))
         .map(|(p, _)| p.clone())
         .collect();
-    let history = crate::revision::history(root);
+    let history = history::history(root);
     let files = load::files(sources, &found.links);
     let load = load::context_load(&files, &found.links, root);
     let links: BTreeSet<&PathBuf> = found.links.iter().map(|(p, _)| p).collect();

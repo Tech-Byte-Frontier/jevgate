@@ -190,11 +190,14 @@ fn walk_doc_dir(root: &Path, dir: &Path, found: &mut Found) -> Result<()> {
     Ok(())
 }
 
+/// Rule folders nest a few levels at most; deeper trees are not rules.
+const AGENT_DIR_DEPTH: usize = 6;
+
 fn walk_agent_dir(root: &Path, dir: &Path, found: &mut Found) -> Result<()> {
     for entry in ignore::WalkBuilder::new(dir)
         .standard_filters(false)
         .follow_links(false)
-        .max_depth(Some(6))
+        .max_depth(Some(AGENT_DIR_DEPTH))
         .build()
     {
         let entry = entry.context("Failed while discovering agent instructions")?;
@@ -246,19 +249,27 @@ mod tests {
             assert!(agent_file(Path::new(path)), "{path}");
         }
         assert!(!agent_file(Path::new(".github/workflows/ci.md")));
-        assert!(project_doc(Path::new("README.md")));
-        assert!(project_doc(Path::new("docs/guide.md")));
-        assert!(!project_doc(Path::new("CHANGELOG.md")));
-        assert!(!project_doc(Path::new("CLAUDE.md")));
-        assert!(!project_doc(Path::new(".github/ISSUE_TEMPLATE/bug.md")));
-        assert!(!project_doc(Path::new("tests/fixtures/readme.md")));
-        assert!(project_doc(Path::new("web/README.md")));
-        assert!(project_doc(Path::new("doc/api/errors.mdx")));
-        assert!(!project_doc(Path::new("docs/changelog/v1.md")));
-        assert!(!project_doc(Path::new("docs/archive/plan.md")));
-        assert!(!project_doc(Path::new("config/notes/SAUD3.md")));
-        assert!(project_doc(Path::new("ROADMAP.md")));
-        assert!(!project_doc(Path::new("src/NOTES.md")));
+    }
+
+    #[test]
+    fn project_docs_are_root_readme_and_doc_folders_without_records() {
+        for (path, expected) in [
+            ("README.md", true),
+            ("ROADMAP.md", true),
+            ("web/README.md", true),
+            ("docs/guide.md", true),
+            ("doc/api/errors.mdx", true),
+            ("CHANGELOG.md", false),
+            ("CLAUDE.md", false),
+            ("src/NOTES.md", false),
+            ("config/notes/SAUD3.md", false),
+            (".github/ISSUE_TEMPLATE/bug.md", false),
+            ("tests/fixtures/readme.md", false),
+            ("docs/changelog/v1.md", false),
+            ("docs/archive/plan.md", false),
+        ] {
+            assert_eq!(project_doc(Path::new(path)), expected, "{path}");
+        }
     }
 
     #[test]

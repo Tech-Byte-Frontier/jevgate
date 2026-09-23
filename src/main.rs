@@ -32,6 +32,7 @@ mod gate;
 mod html_report;
 mod init;
 mod inventory;
+mod line_ranges;
 mod locations;
 mod options;
 mod output;

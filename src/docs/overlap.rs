@@ -28,50 +28,61 @@ fn shingles(text: &str) -> BTreeSet<String> {
     words.windows(3).map(|w| w.join(" ")).collect()
 }
 
+/// A candidate pair: two indexes into the texts and their share.
+type Pair = (usize, usize, f64);
+
 /// Candidate pairs as indexes into `texts`, most shared first, with the
 /// number omitted by the caps.
-pub fn pairs(texts: &[Text<'_>]) -> (Vec<(usize, usize, f64)>, usize) {
+pub fn pairs(texts: &[Text<'_>]) -> (Vec<Pair>, usize) {
     let sets: Vec<BTreeSet<String>> = texts.iter().map(|t| shingles(t.text)).collect();
-    let mut index = BTreeMap::<&str, Vec<usize>>::new();
-    for (i, set) in sets.iter().enumerate() {
-        if set.len() >= MIN_SHINGLES {
-            for s in set {
-                index.entry(s).or_default().push(i);
-            }
-        }
-    }
-    let mut shared = BTreeMap::<(usize, usize), usize>::new();
-    for owners in index.values() {
-        for (n, &a) in owners.iter().enumerate() {
-            for &b in &owners[n + 1..] {
-                if texts[a].file != texts[b].file {
-                    *shared.entry((a, b)).or_default() += 1;
-                }
-            }
-        }
-    }
-    let mut found: Vec<(usize, usize, f64)> = shared
+    let mut found: Vec<Pair> = shared_counts(texts, &sets)
         .into_iter()
         .map(|((a, b), n)| (a, b, n as f64 / sets[a].len().min(sets[b].len()) as f64))
         .filter(|(_, _, share)| *share >= MIN_SHARE)
         .collect();
     found.sort_by(|x, y| y.2.total_cmp(&x.2).then((x.0, x.1).cmp(&(y.0, y.1))));
+    capped(texts, found)
+}
+
+/// How many sequences each pair of sections from different files shares.
+fn shared_counts(texts: &[Text<'_>], sets: &[BTreeSet<String>]) -> BTreeMap<(usize, usize), usize> {
+    let mut index = BTreeMap::<&str, Vec<usize>>::new();
+    for (i, set) in sets
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.len() >= MIN_SHINGLES)
+    {
+        for s in set {
+            index.entry(s).or_default().push(i);
+        }
+    }
+    let mut shared = BTreeMap::new();
+    for owners in index.values() {
+        for (n, &a) in owners.iter().enumerate() {
+            for &b in owners[n + 1..]
+                .iter()
+                .filter(|&&b| texts[a].file != texts[b].file)
+            {
+                *shared.entry((a, b)).or_default() += 1;
+            }
+        }
+    }
+    shared
+}
+
+/// The pairs kept under the run cap and the cap per pair of files.
+fn capped(texts: &[Text<'_>], found: Vec<Pair>) -> (Vec<Pair>, usize) {
     let mut per_files = BTreeMap::<(usize, usize), usize>::new();
     let mut kept = Vec::new();
     let mut omitted = 0;
     for pair in found {
         let (fa, fb) = (texts[pair.0].file, texts[pair.1].file);
-        let full = kept.len() >= RUN_CAP
-            || per_files
-                .get(&(fa.min(fb), fa.max(fb)))
-                .copied()
-                .unwrap_or(0)
-                >= FILE_PAIR_CAP;
-        if full {
+        let files = per_files.entry((fa.min(fb), fa.max(fb))).or_default();
+        if kept.len() >= RUN_CAP || *files >= FILE_PAIR_CAP {
             omitted += 1;
             continue;
         }
-        *per_files.entry((fa.min(fb), fa.max(fb))).or_default() += 1;
+        *files += 1;
         kept.push(pair);
     }
     (kept, omitted)

@@ -84,40 +84,59 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
         .map(|file| load(file, args, context, &extra))
         .collect::<Result<_>>()?;
     if args.documentation() {
-        let repository = std::sync::Arc::new(crate::docs::scan(&context.root)?);
-        let instructions = repository
-            .readers
-            .keys()
-            .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT) || cross_document(args))
-            .map(|p| (p, INSTRUCTIONS));
-        let docs = repository
-            .docs
-            .iter()
-            .filter(|_| args.enabled(crate::catalog::LARGE_DOCS) || cross_document(args))
-            .map(|p| (p, DOCS));
-        for (relative, role) in instructions.chain(docs) {
+        let selected = |relative: &std::path::Path| {
             let path = context.root.join(relative);
-            let selected = (scope.is_empty() || scope.iter().any(|s| path.starts_with(s)))
+            (scope.is_empty() || scope.iter().any(|s| path.starts_with(s)))
                 && changes
                     .as_ref()
                     .is_none_or(|c| c.paths.contains_key(relative))
-                && (role == DOCS || repository.judged(relative))
-                && !inputs.iter().any(|i| i.result.path == *relative);
-            if selected && !boundary.permits(relative) {
-                // Named, so an allow list that leaves them out is visible.
-                let mut result = pending_result(relative, role, args, &[]);
-                result.status = Status::Skipped;
-                result.error =
-                    Some("Documentation outside upload_allow/upload_deny; not judged.".into());
-                inputs.push(bare_input(result));
-            } else if selected {
-                let mut input = load_document(relative, role, args, &path)?;
-                input.repository = Some(repository.clone());
-                inputs.push(input);
-            }
-        }
+        };
+        add_documents(args, context, &boundary, &selected, &mut inputs)?;
     }
     Ok(inputs)
+}
+
+/// Agent instruction files and project docs the selected rules judge;
+/// files outside the upload boundary are listed as skipped.
+fn add_documents(
+    args: &CheckArgs,
+    context: &ConfigContext,
+    boundary: &Boundary,
+    selected: &dyn Fn(&std::path::Path) -> bool,
+    inputs: &mut Vec<Input>,
+) -> Result<()> {
+    let repository = std::sync::Arc::new(crate::docs::scan(&context.root)?);
+    let instructions = repository
+        .readers
+        .keys()
+        .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT) || cross_document(args))
+        .map(|p| (p, INSTRUCTIONS));
+    let docs = repository
+        .docs
+        .iter()
+        .filter(|_| args.enabled(crate::catalog::LARGE_DOCS) || cross_document(args))
+        .map(|p| (p, DOCS));
+    for (relative, role) in instructions.chain(docs) {
+        let wanted = selected(relative)
+            && (role == DOCS || repository.judged(relative))
+            && !inputs.iter().any(|i| i.result.path == *relative);
+        if !wanted {
+            continue;
+        }
+        if boundary.permits(relative) {
+            let mut input = load_document(relative, role, args, &context.root.join(relative))?;
+            input.repository = Some(repository.clone());
+            inputs.push(input);
+        } else {
+            // Named, so an allow list that leaves them out is visible.
+            let mut result = pending_result(relative, role, args, &[]);
+            result.status = Status::Skipped;
+            result.error =
+                Some("Documentation outside upload_allow/upload_deny; not judged.".into());
+            inputs.push(bare_input(result));
+        }
+    }
+    Ok(())
 }
 
 /// A documentation file, read whole; hidden and ignored paths are allowed.

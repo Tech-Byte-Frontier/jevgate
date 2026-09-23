@@ -75,7 +75,7 @@ pub(super) fn outline_of(source: &str) -> Vec<Value> {
 /// The headings shown: every level while the outline stays short enough,
 /// else only the shallowest levels.
 fn shallow(headings: &[Heading]) -> Vec<&Heading> {
-    let mut depth = 6;
+    let mut depth = markdown::DEEPEST_HEADING;
     while depth > 1 && headings.iter().filter(|h| h.level <= depth).count() > OUTLINE_HEADINGS {
         depth -= 1;
     }

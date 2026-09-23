@@ -382,8 +382,16 @@ pub(super) fn injection_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -
     if unhandled.iter().all(|o| *o == Outcome::Clear) {
         return Some(Outcome::Clear);
     }
-    let outcome = origin_outcome(origin);
-    let found: Vec<&str> = super::security::checks(catalog::INJECTION)
+    Some(by_origin(
+        origin_outcome(origin),
+        &found_injections(get),
+        get,
+    ))
+}
+
+/// The injection checks that found a variable placed unhandled.
+fn found_injections<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<&'static str> {
+    super::security::checks(catalog::INJECTION)
         .iter()
         .filter(|check| {
             get(check.id)
@@ -391,9 +399,19 @@ pub(super) fn injection_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -
                 .is_some_and(|o| matches!(o, Outcome::Review(_)))
         })
         .map(|check| check.id)
-        .collect();
+        .collect()
+}
+
+/// The origin's outcome given the checks that found something: with none,
+/// another party's values are a note and parameters a note only when a
+/// check leans toward a concern; parameters only in paths or URLs are lower.
+fn by_origin<'a>(
+    outcome: Outcome,
+    found: &[&str],
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Outcome {
     let resource_only = found.iter().all(|id| RESOURCE_CHECKS.contains(id));
-    Some(match outcome {
+    match outcome {
         Outcome::Review(p) if found.is_empty() => Outcome::Note(p),
         Outcome::Consider(p) if found.is_empty() => {
             let leaning = super::security::checks(catalog::INJECTION)
@@ -409,7 +427,7 @@ pub(super) fn injection_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -
         }
         Outcome::Consider(_) if resource_only => lowered(outcome),
         _ => outcome,
-    })
+    }
 }
 
 /// Error-detail signals that the "own messages" check clears.
