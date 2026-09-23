@@ -73,7 +73,7 @@ pub fn snapshot(
     }
     report.update_status();
     if args.dry_run {
-        preview(inputs, args, &TokenBudget::load(current.root), &mut report);
+        preview(inputs, args, current.root, &mut report);
         report.update_status();
     }
     report
@@ -111,6 +111,7 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         decision_policy: crate::catalog::policy(),
         fail_on: args.fail_on_names(),
         fail_on_rules: args.rule_fail_on_names(),
+        fail_on_paths: args.path_fail_on_names(),
         gate: None,
         rules: crate::catalog::rules()
             .into_iter()
@@ -121,10 +122,12 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
     }
 }
 
-/// Planned first-pass requests, without credentials, network or state.
-/// Requests that depend on answers (after file purpose, rechecks, locating
-/// blocks) are not known yet.
-fn preview(inputs: &[Input], args: &CheckArgs, budget: &TokenBudget, report: &mut Report) {
+/// Planned first-pass requests, without credentials, network or writes; the
+/// cache is read so answered requests are not counted as cost. Requests that
+/// depend on answers (after file purpose, rechecks, locating blocks) are not
+/// known yet.
+fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &mut Report) {
+    let budget = &TokenBudget::load(root);
     let mut planned = Vec::new();
     let mut views = BTreeMap::new();
     for (owner, input) in inputs.iter().enumerate() {
@@ -152,7 +155,11 @@ fn preview(inputs: &[Input], args: &CheckArgs, budget: &TokenBudget, report: &mu
             .or_default();
         stage.planned_requests += 1;
         stage.planned_evidence_bytes += crate::requests::evidence_bytes(&request);
-        stage.planned_tokens += budget.request_tokens(&request) as u64;
+        if crate::requests::answered(root, args, &request) {
+            stage.planned_cached += 1;
+        } else {
+            stage.planned_tokens += budget.request_tokens(&request) as u64;
+        }
         if args.show_requests {
             report
                 .initial_requests
@@ -446,7 +453,7 @@ fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
         file.findings = composed.findings;
         file.status = composed.status;
     }
-    crate::units::grouping::group_repeated_values(&mut report.files);
+    crate::units::grouping::group_repeats(&mut report.files);
 }
 
 fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {

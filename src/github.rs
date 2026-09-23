@@ -35,7 +35,7 @@ pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<(
         writeln!(
             out,
             "{}",
-            annotation(path, finding, crate::gate::fails(finding, args))
+            annotation(path, finding, crate::gate::fails(finding, path, args))
         )?;
     }
     if let Some(file) = std::env::var_os("GITHUB_STEP_SUMMARY") {
@@ -93,7 +93,7 @@ fn summary(report: &Report, shown: &[(&Path, &Finding)], args: &CheckArgs) -> St
     }
     text.push_str("| | Location | Rule | Finding |\n|---|---|---|---|\n");
     for (path, finding) in shown.iter().take(SUMMARY_ROWS) {
-        let level = if crate::gate::fails(finding, args) {
+        let level = if crate::gate::fails(finding, path, args) {
             format!("**{}**", label(finding))
         } else {
             label(finding)

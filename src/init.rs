@@ -132,7 +132,13 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # (judge, never fail) or "off". A rule's own entry wins over its group's.
 # Test rules also need include_tests or --include-tests.
 [rules]
-{rules}"#,
+{rules}
+# Levels for the files some paths match, such as report-only tooling. The last
+# scope that matches a file and names a rule wins; flags win over scopes.
+# [[scope]]
+# paths = ["scripts/**", "tools/**"]
+# fail_on = ["report"]
+"#,
         model = crate::options::DEFAULT_MODEL
     )
 }

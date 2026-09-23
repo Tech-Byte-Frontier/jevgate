@@ -1,4 +1,4 @@
-use crate::provider_error::{ProviderError, Unsent, provider_error};
+use crate::provider_error::{Interrupted, ProviderError, Unsent, provider_error, retryable};
 use anyhow::{Result, bail};
 use serde_json::Value;
 use std::{
@@ -12,6 +12,9 @@ use std::{
 
 /// Attempts per request, including the first send.
 const ATTEMPTS: u32 = 4;
+/// Attempts after a timeout or dropped connection: the provider may have run
+/// (and billed) the first send, so it is repeated only once.
+const INTERRUPTED_ATTEMPTS: u32 = 2;
 /// Longest provider-requested pause that is honored before a retry.
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 
@@ -125,7 +128,7 @@ impl Client {
     pub fn new(key_file: &Path, explicit_file: bool) -> Self {
         Self {
             agent: ureq::Agent::config_builder()
-                .timeout_global(Some(Duration::from_secs(30)))
+                .timeout_global(Some(Duration::from_secs(60)))
                 .max_redirects(0)
                 .http_status_as_error(false)
                 .build()
@@ -322,13 +325,13 @@ impl ProviderAccess {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| send(request)))
                 .unwrap_or_else(|_| Err(anyhow::anyhow!("TypeSafe request worker failed")));
             self.observe(&result);
-            let Some(delay) = result.as_ref().err().and_then(retry_delay) else {
+            let Some((delay, attempts)) = result.as_ref().err().and_then(retry_delay) else {
                 return (result, retry);
             };
-            if retry + 1 >= ATTEMPTS {
+            if retry + 1 >= attempts {
                 return (
                     result.map_err(|error| {
-                        anyhow::anyhow!("{error}; gave up after {ATTEMPTS} attempts")
+                        anyhow::anyhow!("{error}; gave up after {attempts} attempts")
                     }),
                     retry,
                 );
@@ -380,18 +383,24 @@ impl ProviderAccess {
     }
 }
 
-/// `Some(pause)` for a failure worth retrying: rate limits, overload, gateway
-/// errors and connections that failed before the request was sent. Timeouts,
-/// validation and account errors are never retried; the request may have run.
-fn retry_delay(error: &anyhow::Error) -> Option<Option<Duration>> {
+/// The pause and the attempt limit for a failure worth retrying: rate limits,
+/// overload, server and gateway errors, and connections that failed before
+/// the request was sent. A timeout or dropped connection is retried once,
+/// since the request may have run. Validation and account errors are never
+/// retried.
+fn retry_delay(error: &anyhow::Error) -> Option<(Option<Duration>, u32)> {
     if let Some(error) = error.downcast_ref::<ProviderError>() {
-        return matches!(error.status, 429 | 502 | 503 | 504 | 529).then(|| {
-            error
+        return retryable(error.status).then(|| {
+            let pause = error
                 .retry_after
-                .map(|s| Duration::from_secs(s).min(RETRY_AFTER_CAP))
+                .map(|s| Duration::from_secs(s).min(RETRY_AFTER_CAP));
+            (pause, ATTEMPTS)
         });
     }
-    error.downcast_ref::<Unsent>().map(|_| None)
+    if error.downcast_ref::<Interrupted>().is_some() {
+        return Some((None, INTERRUPTED_ATTEMPTS));
+    }
+    error.downcast_ref::<Unsent>().map(|_| (None, ATTEMPTS))
 }
 
 impl Outcome {
@@ -447,7 +456,8 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
         Err(ureq::Error::HostNotFound | ureq::Error::ConnectionFailed) => {
             return Err(Unsent.into());
         }
-        Err(_) => bail!("TypeSafe transport failure or timeout; request was not retried"),
+        Err(ureq::Error::Timeout(_) | ureq::Error::Io(_)) => return Err(Interrupted.into()),
+        Err(_) => bail!("TypeSafe transport failure; request was not retried"),
     };
     if !response.status().is_success() {
         let status = response.status().as_u16();
@@ -470,7 +480,10 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
         .with_config()
         .limit(1_048_576)
         .read_json()
-        .map_err(|_| anyhow::anyhow!("TypeSafe returned invalid or oversized JSON"))
+        .map_err(|error| match error {
+            ureq::Error::Timeout(_) | ureq::Error::Io(_) => Interrupted.into(),
+            _ => anyhow::anyhow!("TypeSafe returned invalid or oversized JSON"),
+        })
 }
 
 #[cfg(test)]
@@ -538,17 +551,40 @@ mod tests {
         assert_eq!((calls, outcome.retries), (2, 1), "connection never opened");
         assert_eq!(
             retry_delay(&provider_error(429, None, Some(3600)).into()),
-            Some(Some(RETRY_AFTER_CAP))
+            Some((Some(RETRY_AFTER_CAP), ATTEMPTS))
         );
     }
 
     #[test]
-    fn validation_timeouts_and_account_errors_are_sent_once() {
+    fn server_errors_retry_and_an_interrupted_request_is_sent_twice_at_most() {
+        for status in [500, 520, 522, 524] {
+            let (outcome, calls) = sends(
+                &fast(),
+                vec![
+                    Err(provider_error(status, None, None).into()),
+                    Ok(json!({})),
+                ],
+            );
+            assert!(outcome.result.is_ok(), "{status}");
+            assert_eq!((calls, outcome.retries), (2, 1), "{status}");
+        }
+        let (outcome, calls) = sends(&fast(), vec![Err(Interrupted.into()), Ok(json!({}))]);
+        assert!(outcome.result.is_ok());
+        assert_eq!(calls, 2, "a timeout passes on its second send");
+        let failures = (0..4).map(|_| Err(Interrupted.into())).collect();
+        let (outcome, calls) = sends(&fast(), failures);
+        assert_eq!(calls, INTERRUPTED_ATTEMPTS as usize);
+        let message = outcome.result.unwrap_err().to_string();
+        assert!(message.contains("timed out") && message.contains("gave up after 2 attempts"));
+    }
+
+    #[test]
+    fn validation_transport_and_account_errors_are_sent_once() {
         for error in [
             anyhow::Error::from(provider_error(422, None, None)),
             provider_error(400, None, Some(1)).into(),
             provider_error(401, None, None).into(),
-            anyhow::anyhow!("TypeSafe transport failure or timeout; request was not retried"),
+            anyhow::anyhow!("TypeSafe transport failure; request was not retried"),
         ] {
             let text = error.to_string();
             let (outcome, calls) = sends(&fast(), vec![Err(error), Ok(json!({}))]);

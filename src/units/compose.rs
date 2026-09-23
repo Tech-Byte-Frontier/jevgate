@@ -3,13 +3,14 @@
 use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, benefit, checks, choice, noul, open, origin_outcome, score,
+        Answers, Outcome, benefit, checks, choice, lowered, noul, open, origin_outcome, score,
         split_has_users, unit_outcome, value_signals,
     },
     wording::{
-        doc_pair_wording, document_wording, function_wording, outline_wording, pair_wording,
-        plan_wording, privilege_wording, question_label, section_wording, security_wording,
-        stale_wording, test_pair_wording, test_wording, values_wording,
+        doc_pair_wording, document_wording, function_wording, handler_wording, module_wording,
+        outline_wording, pair_wording, plan_wording, privilege_wording, question_label,
+        section_wording, security_wording, stale_wording, test_pair_wording, test_wording,
+        values_wording,
     },
 };
 use crate::{
@@ -78,6 +79,19 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
     if let Some(pass) = beside {
         let mut merged = answers(judgments, &unit.id, Pass::First);
         merged.extend(answers(judgments, &unit.id, pass));
+        return (unit_outcome(unit, &merged), merged);
+    }
+    // A test recheck asks the hollow-test questions again with the code under
+    // test and the setup; each answer replaces the first one unless only the
+    // first is decisive.
+    if unit.rule == catalog::TEST_VALUE {
+        let mut merged = answers(judgments, &unit.id, Pass::First);
+        for (question, answer) in answers(judgments, &unit.id, Pass::Recheck) {
+            let first = merged.get(question).map(|a| noul(a));
+            if noul(answer).decisive() || !first.is_some_and(Outcome::decisive) {
+                merged.insert(question, answer);
+            }
+        }
         return (unit_outcome(unit, &merged), merged);
     }
     let first = answers(judgments, &unit.id, Pass::First);
@@ -213,6 +227,11 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
             continue;
         }
         let (outcome, answers) = resolved(unit, judgments);
+        let outcome = if unnamed_value(unit, judgments) {
+            lowered(outcome)
+        } else {
+            outcome
+        };
         let top = concern.entry(unit.rule).or_default();
         *top = top.max(outcome.concern());
         match strength_of(outcome) {
@@ -316,9 +335,23 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "error_details",
             "logs_object_secret",
             "exception_to_client",
+            "handler_leaks",
         ],
         catalog::UNSAFE_SETTINGS => &["weakened", "tls", "hash", "random", "cors", "cookie"],
-        catalog::ACCESS_CONTROL => &["others", "editable", "search_path", "unchecked", "broad"],
+        catalog::ACCESS_CONTROL => &[
+            "others",
+            "editable",
+            "search_path",
+            "unchecked",
+            "broad",
+            "data",
+            "exposed",
+            "rows",
+            "returns_others",
+            "reach",
+            "argument_rows",
+            "operator_only",
+        ],
         catalog::WORKFLOWS => &["outside", "untrusted"],
         catalog::LARGE_DOCS => &["split", "history"],
         catalog::DOC_STALENESS => &["plan", "relies"],
@@ -384,6 +417,9 @@ fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<String> {
                 let outcome = match a {
                     Answer::Noul { .. } => noul(a),
                     _ if **q == "origin" => origin_outcome(a),
+                    _ if ["data", "rows", "reach"].contains(q) => {
+                        super::outcome::acceptable_levels(a)
+                    }
                     _ => score(a),
                 };
                 matches!(outcome, Outcome::Uncertain(_))
@@ -579,23 +615,36 @@ fn finding(
             p,
         ),
         Detail::Values { .. } | Detail::Constants { .. } => {
-            let (message, action) = values_wording(name, &unit.detail, strength, p, answers);
+            let unnamed = unnamed_value(unit, judgments);
+            let (message, action) =
+                values_wording(name, &unit.detail, (strength, unnamed), p, answers);
             match located_value(unit, judgments) {
                 Some(value) => (format!("{message} The value is {value}."), action),
                 None => (message, action),
             }
         }
-        Detail::Security { sites, .. } => {
+        Detail::Security {
+            sites, messages, ..
+        } => {
             let site = choice(answers.get("site").copied())
                 .and_then(|(id, _)| sites.iter().find(|s| s.id == id));
             block = site;
-            let (wording, named) = security_wording(unit.rule, name, strength, p, answers);
+            let ((message, action), named) =
+                security_wording(unit.rule, name, strength, p, answers);
+            // The error message the Choice found carrying another error's text.
+            let carried = choice(answers.get("messages").copied())
+                .and_then(|(id, _)| messages.get(id.strip_prefix('m')?.parse::<usize>().ok()?))
+                .filter(|_| named.starts_with("CWE-209") && strength != Strength::Note);
             category = Some(named);
-            wording
+            match carried {
+                Some(text) => (format!("{message} The message is {text}."), action),
+                None => (message, action),
+            }
         }
         Detail::Section { .. } => section_wording(name, &unit.detail, strength, p, answers),
         Detail::Plan { facts } => {
             symbol = None;
+            category = Some(super::grouping::FINISHED_PLAN.into());
             plan_wording(name, facts, p)
         }
         Detail::Stale { missing, .. } => stale_wording(name, missing, p),
@@ -611,11 +660,20 @@ fn finding(
             block = located_block(unit, parts, judgments, "part");
             document_wording(name, strength, p, answers, block)
         }
+        Detail::Handler { registered } => {
+            category = Some("CWE-209 error details exposed".into());
+            handler_wording(name, registered, strength, p)
+        }
+        Detail::Access(access @ (Access::Table | Access::View | Access::Reducer)) => {
+            let (wording, named) = module_wording(access, name, strength, p, answers);
+            category = Some(named);
+            wording
+        }
         Detail::Access(access) => {
             let subject = match access {
                 Access::Policy { table } => format!("Policy `{name}` on `{table}`"),
                 Access::Definer => format!("SECURITY DEFINER function `{name}`"),
-                Access::Grant => format!("A grant on `{name}`"),
+                _ => format!("A grant on `{name}`"),
             };
             let (wording, named) = privilege_wording(&subject, strength, p, answers);
             category = Some(named);
@@ -643,7 +701,7 @@ fn finding(
                 (message, action)
             }
         }
-        Detail::Test => test_wording(name, strength == Strength::Review, p, answers),
+        Detail::Test => test_wording(name, strength, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;
             test_pair_wording(name, strength == Strength::Review, p)
@@ -685,6 +743,19 @@ fn finding(
         rank: rank(p, lines),
         baselined: false,
     }
+}
+
+/// A function's hardcoded-value review or consider whose value was not
+/// named: the locate Choice picked none clearly, or there were too many
+/// values to offer. Its finding is one level lower, since a reader cannot
+/// tell what to change.
+fn unnamed_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    matches!(unit.detail, Detail::Values { .. })
+        && located_value(unit, judgments).is_none()
+        && matches!(
+            resolved(unit, judgments).0,
+            Outcome::Review(_) | Outcome::Consider(_)
+        )
 }
 
 /// The value a hardcoded-value finding is about, when the locate choice is clear.

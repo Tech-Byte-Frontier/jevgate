@@ -1,12 +1,15 @@
 //! The configurable quality gate: which results fail a check, and a baseline
 //! of accepted findings. Classification never depends on this policy.
 use crate::{
-    options::{CheckArgs, FailOn},
+    options::{CheckArgs, Disposition, FailOn},
     schema::{Finding, Report, Status, Strength},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 pub const BASELINE_FILE: &str = "jevgate-baseline.json";
 
@@ -31,7 +34,14 @@ struct Accepted {
     fingerprint: String,
     rule: String,
     path: std::path::PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    strength: Option<Strength>,
     message: String,
+    /// Why it was accepted, when someone said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<Disposition>,
 }
 
 /// Exit 0 when the gate passes, 1 when it fails, 2 when the run is incomplete.
@@ -48,10 +58,10 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
     let findings = report
         .files
         .iter()
-        .flat_map(|f| &f.findings)
-        .filter(|f| f.strength != Strength::Note);
-    let baselined = findings.clone().filter(|f| f.baselined).count();
-    let new: Vec<_> = findings.filter(|f| !f.baselined).collect();
+        .flat_map(|f| f.findings.iter().map(|finding| (f.path.as_path(), finding)))
+        .filter(|(_, f)| f.strength != Strength::Note);
+    let baselined = findings.clone().filter(|(_, f)| f.baselined).count();
+    let new: Vec<_> = findings.filter(|(_, f)| !f.baselined).collect();
     let reasons = failures(report, &new, args);
     report.gate = report.complete.then_some(Gate {
         passed: reasons.is_empty(),
@@ -61,10 +71,11 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
     });
 }
 
-/// Whether a finding fails the gate: new, not a note, and at its rule's level.
-/// Consider is the lower bar, so it also fails on review findings.
-pub fn fails(finding: &Finding, args: &CheckArgs) -> bool {
-    let levels = args.levels(&finding.rule);
+/// Whether a finding in `path` fails the gate: new, not a note, and at its
+/// rule's level for that path. Consider is the lower bar, so it also fails
+/// on review findings.
+pub fn fails(finding: &Finding, path: &Path, args: &CheckArgs) -> bool {
+    let levels = args.levels_at(&finding.rule, path);
     !finding.baselined
         && finding.strength != Strength::Note
         && (levels.contains(&FailOn::Consider)
@@ -73,12 +84,15 @@ pub fn fails(finding: &Finding, args: &CheckArgs) -> bool {
 
 /// Why the gate fails: new findings at their rule's level, or undecided
 /// results of a rule whose level includes `uncertain`.
-fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> {
+fn failures(report: &Report, new: &[(&Path, &Finding)], args: &CheckArgs) -> Vec<String> {
     let mut reasons = Vec::new();
-    let failing: Vec<&&Finding> = new.iter().filter(|f| fails(f, args)).collect();
+    let failing: Vec<_> = new
+        .iter()
+        .filter(|(path, f)| fails(f, path, args))
+        .collect();
     let review = failing
         .iter()
-        .filter(|f| f.strength == Strength::Review)
+        .filter(|(_, f)| f.strength == Strength::Review)
         .count();
     let consider = failing.len() - review;
     if review > 0 {
@@ -87,18 +101,18 @@ fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> 
     if consider > 0 {
         reasons.push(format!("{consider} new consider finding(s)"));
     }
-    let uncertain = |rule: &str| args.levels(rule).contains(&FailOn::Uncertain);
-    let any_uncertain = args.fail_on.contains(&FailOn::Uncertain)
-        || args
-            .rule_fail_on
-            .values()
-            .any(|levels| levels.contains(&FailOn::Uncertain));
+    let uncertain =
+        |rule: &str, path: &Path| args.levels_at(rule, path).contains(&FailOn::Uncertain);
     let undecided = report
         .files
         .iter()
         .filter(|f| {
+            // A file that needs context has no dimensions; any rule that
+            // fails on uncertain results for it counts it.
+            let any_uncertain = args.rules.iter().any(|rule| uncertain(rule, &f.path));
             f.dimensions.iter().any(|(rule, d)| {
-                uncertain(rule) && matches!(d.status, Status::Uncertain | Status::NeedsContext)
+                uncertain(rule, &f.path)
+                    && matches!(d.status, Status::Uncertain | Status::NeedsContext)
             }) || (any_uncertain && f.status == Status::NeedsContext)
         })
         .count();
@@ -158,8 +172,9 @@ pub struct Written {
 /// Accept every finding of the last complete check. No source is read or sent.
 /// With `merge`, earlier entries stay for files the check did not cover, such
 /// as unchanged files of a `--base` run; entries for checked or deleted files
-/// are replaced by what the check found.
-pub fn write_baseline(root: &Path, merge: bool) -> Result<Written> {
+/// are replaced by what the check found. A finding accepted before keeps its
+/// reason; the others get `reason`.
+pub fn write_baseline(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Written> {
     let report = crate::storage::read_latest(root)
         .context("No compatible .jevgate/latest.json; run jevgate check first")?;
     ensure!(
@@ -174,13 +189,29 @@ pub fn write_baseline(root: &Path, merge: bool) -> Result<Written> {
                 fingerprint: f.fingerprint.clone(),
                 rule: f.rule.clone(),
                 path: file.path.clone(),
+                line: Some(f.line),
+                strength: Some(f.strength),
                 message: f.message.clone(),
+                reason,
             })
         })
         .collect();
     let accepted = findings.len();
     let mut kept = 0;
-    if merge && let Some(previous) = read_baseline(root)? {
+    let previous = read_baseline(root)?;
+    if let Some(previous) = &previous {
+        let reasons: BTreeMap<&str, Disposition> = previous
+            .findings
+            .iter()
+            .filter_map(|f| Some((f.fingerprint.as_str(), f.reason?)))
+            .collect();
+        for finding in &mut findings {
+            if let Some(earlier) = reasons.get(finding.fingerprint.as_str()) {
+                finding.reason = Some(*earlier);
+            }
+        }
+    }
+    if merge && let Some(previous) = previous {
         let covered: BTreeSet<&Path> = report
             .files
             .iter()
@@ -197,18 +228,119 @@ pub fn write_baseline(root: &Path, merge: bool) -> Result<Written> {
     }
     findings.sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
     findings.dedup_by(|a, b| a.fingerprint == b.fingerprint);
-    let path = root.join(BASELINE_FILE);
-    let baseline = Baseline {
-        version: 1,
-        created_at: crate::schema::now(),
-        findings,
-    };
-    let mut bytes = serde_json::to_vec_pretty(&baseline)?;
-    bytes.push(b'\n');
-    std::fs::write(&path, bytes).with_context(|| format!("Cannot write {}", path.display()))?;
+    let path = save_baseline(
+        root,
+        &Baseline {
+            version: 1,
+            created_at: crate::schema::now(),
+            findings,
+        },
+    )?;
     Ok(Written {
         path,
         accepted,
         kept,
     })
+}
+
+fn save_baseline(root: &Path, baseline: &Baseline) -> Result<std::path::PathBuf> {
+    let path = root.join(BASELINE_FILE);
+    let mut bytes = serde_json::to_vec_pretty(baseline)?;
+    bytes.push(b'\n');
+    std::fs::write(&path, bytes).with_context(|| format!("Cannot write {}", path.display()))?;
+    Ok(path)
+}
+
+/// Record `reason` on the accepted findings a target names and whose rule is
+/// among `rules` (every rule when empty); returns how many were marked.
+/// A target is a path or directory, `PATH:LINE`, or a fingerprint prefix of
+/// at least 8 characters.
+pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]) -> Result<usize> {
+    let mut baseline = read_baseline(root)?
+        .with_context(|| format!("No {BASELINE_FILE}; run jevgate baseline first"))?;
+    let mut marked = 0;
+    for finding in &mut baseline.findings {
+        let rule = crate::catalog::find(&finding.rule).map(|r| r.key);
+        if (rules.is_empty() || rule.is_some_and(|key| rules.contains(&key)))
+            && targets.iter().any(|t| names(t, finding))
+        {
+            finding.reason = Some(reason);
+            marked += 1;
+        }
+    }
+    ensure!(
+        marked > 0,
+        "No accepted finding matches {}",
+        targets.join(", ")
+    );
+    save_baseline(root, &baseline)?;
+    Ok(marked)
+}
+
+/// Whether a `mark` target names an accepted finding.
+fn names(target: &str, finding: &Accepted) -> bool {
+    const FINGERPRINT_PREFIX: usize = 8;
+    if target.len() >= FINGERPRINT_PREFIX && finding.fingerprint.starts_with(target) {
+        return true;
+    }
+    if let Some((path, line)) = target.rsplit_once(':')
+        && let Ok(line) = line.parse::<usize>()
+    {
+        return finding.path == Path::new(path) && finding.line == Some(line);
+    }
+    let target = Path::new(target.trim_end_matches('/'));
+    finding.path.starts_with(target)
+}
+
+/// Accepted findings of one rule by reason.
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct ReasonCounts {
+    pub accepted: usize,
+    pub intended: usize,
+    pub later: usize,
+    pub wrong: usize,
+    pub without_reason: usize,
+    /// `wrong` among the findings with a reason; none when no finding has one.
+    pub wrong_rate: Option<f64>,
+}
+
+/// Accepted findings by rule ID and reason.
+pub fn stats(root: &Path) -> Result<BTreeMap<String, ReasonCounts>> {
+    let baseline = read_baseline(root)?
+        .with_context(|| format!("No {BASELINE_FILE}; run jevgate baseline first"))?;
+    let mut counts = BTreeMap::<String, ReasonCounts>::new();
+    for finding in &baseline.findings {
+        let count = counts.entry(finding.rule.clone()).or_default();
+        count.accepted += 1;
+        *match finding.reason {
+            Some(Disposition::Intended) => &mut count.intended,
+            Some(Disposition::Later) => &mut count.later,
+            Some(Disposition::Wrong) => &mut count.wrong,
+            None => &mut count.without_reason,
+        } += 1;
+    }
+    for count in counts.values_mut() {
+        let reasoned = count.accepted - count.without_reason;
+        count.wrong_rate = (reasoned > 0).then(|| count.wrong as f64 / reasoned as f64);
+    }
+    Ok(counts)
+}
+
+/// The stats as a table for people.
+pub fn stats_table(counts: &BTreeMap<String, ReasonCounts>) -> String {
+    let width = counts.keys().map(String::len).max().unwrap_or(0).max(4);
+    let mut lines = vec![format!(
+        "{:<width$} {:>8} {:>8} {:>6} {:>6} {:>9} {:>6}",
+        "rule", "accepted", "intended", "later", "wrong", "no reason", "wrong%"
+    )];
+    for (rule, c) in counts {
+        let rate = c
+            .wrong_rate
+            .map_or("-".to_string(), |r| format!("{:.0}%", r * 100.0));
+        lines.push(format!(
+            "{rule:<width$} {:>8} {:>8} {:>6} {:>6} {:>9} {rate:>6}",
+            c.accepted, c.intended, c.later, c.wrong, c.without_reason
+        ));
+    }
+    lines.join("\n")
 }

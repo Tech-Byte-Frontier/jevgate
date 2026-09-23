@@ -14,6 +14,25 @@ impl std::fmt::Display for Unsent {
     }
 }
 
+/// The request was sent but no answer arrived: it timed out or the connection
+/// dropped. The provider may have run it, so it is retried only once.
+#[derive(Debug)]
+pub(crate) struct Interrupted;
+
+impl std::error::Error for Interrupted {}
+impl std::fmt::Display for Interrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TypeSafe request timed out or its connection dropped")
+    }
+}
+
+/// Statuses worth another attempt: rate limits, overload, and server or
+/// gateway errors (including the edge's 520–524 origin errors), which pass
+/// on a later send.
+pub(crate) fn retryable(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 520..=524 | 529)
+}
+
 #[derive(Debug)]
 pub(crate) struct ProviderError {
     pub status: u16,
@@ -33,7 +52,7 @@ impl std::fmt::Display for ProviderError {
         } else {
             ""
         };
-        let retried = if matches!(self.status, 429 | 502 | 503 | 504 | 529) {
+        let retried = if retryable(self.status) {
             ""
         } else {
             "; request was not retried"

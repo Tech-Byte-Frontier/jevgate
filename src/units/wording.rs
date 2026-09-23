@@ -1,15 +1,23 @@
 //! The message and recommended action of each kind of finding.
 use super::{
     Block, Detail, GroupInfo,
-    outcome::{
-        Answers, Outcome, benefit, levels, noul, origin_outcome, section_signals, value_signals,
-    },
+    outcome::{Answers, Outcome, benefit, noul, origin_outcome, section_signals, value_signals},
 };
 use crate::catalog;
 use crate::schema::{Answer, Strength};
 
 /// A finding's message and the action it recommends.
 pub(super) type Wording = (String, &'static str);
+
+/// The probability a message shows: the one that set its review or consider.
+/// A note shows none, since its concern stayed below the level that acts on
+/// it; the report keeps the raw value.
+pub(super) fn shown(strength: Strength, p: f64) -> String {
+    match strength {
+        Strength::Note => String::new(),
+        _ => format!(" ({p:.2})"),
+    }
+}
 
 /// Splitting, or flattening when only the flatten Score reached this strength,
 /// naming the located block when there is one.
@@ -53,32 +61,26 @@ pub(super) fn function_wording(
             format!("`{name}` has nested or repeated branches that hide its main path ({p:.2})."),
             "Flatten the control flow with guard clauses, early returns or a lookup table",
         ),
-        (Strength::Consider, false) => {
-            let top = answers
-                .get("split")
-                .and_then(|a| levels(a))
-                .map_or(p, |[_, _, top]| top);
-            (
-                format!(
-                    "`{name}` likely mixes separate jobs ({top:.2}); splitting it may make it easier to understand.{located}"
-                ),
-                if block.is_some() {
-                    "Consider extracting the located block into a named function"
-                } else {
-                    "Consider extracting each separate job into its own named function"
-                },
-            )
-        }
+        (Strength::Consider, false) => (
+            format!(
+                "`{name}` likely mixes separate jobs; splitting it may make it easier to understand ({p:.2}).{located}"
+            ),
+            if block.is_some() {
+                "Consider extracting the located block into a named function"
+            } else {
+                "Consider extracting each separate job into its own named function"
+            },
+        ),
         (Strength::Consider, true) => (
             format!("`{name}` has branching that likely hides its main path ({p:.2})."),
             "Consider guard clauses, early returns or a lookup table",
         ),
         (Strength::Note, false) => (
-            format!("`{name}` reads well as it is; one block could be named as a helper ({p:.2})."),
+            format!("`{name}` reads well as it is; one block could be named as a helper."),
             "Optional: extract that block if it grows",
         ),
         (Strength::Note, true) => (
-            format!("`{name}` is easy to follow; one condition could return early ({p:.2})."),
+            format!("`{name}` is easy to follow; one condition could return early."),
             "Optional: a guard clause or early return",
         ),
     }
@@ -115,13 +117,13 @@ pub(super) fn outline_wording(
     match strength {
         Strength::Note if !own_users => (
             format!(
-                "Some members of this file could live in a separate module ({p:.2}), but no other file uses them apart from the rest, so a module would gain little.{detail}"
+                "Some members of this file could live in a separate module, but no other file uses them apart from the rest, so a module would gain little.{detail}"
             ),
             "Optional: keep the file whole until another file needs that group alone",
         ),
         Strength::Note => (
             format!(
-                "This file is coherent as it is; a small set of members could live elsewhere ({p:.2}).{detail}"
+                "This file is coherent as it is; a small set of members could live elsewhere.{detail}"
             ),
             "Optional: move that set of members if it grows",
         ),
@@ -167,7 +169,7 @@ pub(super) fn pair_wording(
     match strength {
         Strength::Note => (
             format!(
-                "{name} repeat steps {place}; writing each case out is common in tests ({p:.2}).{renamed}"
+                "{name} repeat steps {place}; writing each case out is common in tests.{renamed}"
             ),
             "Optional: a fixture, helper or table of cases if the steps grow",
         ),
@@ -210,6 +212,12 @@ pub(super) fn question_label(question: &str) -> &str {
         "origin" => "origin of values",
         "handled" => "values bound or checked",
         "logs_secret" => "secret in logs",
+        "handler_leaks" => "error handler sends details",
+        "data" | "exposed" => "public table of players' data",
+        "rows" | "returns_others" => "other players' rows",
+        "reach" => "whose state it changes",
+        "argument_rows" => "rows its arguments choose",
+        "operator_only" => "operator-only change",
         "error_details" => "error details to clients",
         "weakened" => "weak setting",
         "own_logic" => "recomputed expected value",
@@ -335,21 +343,28 @@ const VALUE_SIGNALS: [ValueSignal; 3] = [
 
 /// Each hardcoded-value signal that reached this strength, in plain words; the
 /// first one's remedy is the action. A note from an undecided answer that
-/// leans toward the concern says the answer was split.
+/// leans toward the concern says the answer was split. `unnamed` marks a
+/// finding one level lower because its value was not named; its signals
+/// reached the level above.
 pub(super) fn values_wording(
     name: &str,
     detail: &Detail,
-    strength: Strength,
+    (strength, unnamed): (Strength, bool),
     p: f64,
     answers: &Answers<'_>,
 ) -> Wording {
     let get = |q: &str| answers.get(q).copied();
     let signals = value_signals(&get, detail, true).unwrap_or_default();
+    let reached_at = match (strength, unnamed) {
+        (Strength::Consider, true) => Strength::Review,
+        (Strength::Note, true) => Strength::Consider,
+        _ => strength,
+    };
     let reached: Vec<(&ValueSignal, bool)> = signals
         .iter()
         .filter(|(_, outcome, _)| {
             matches!(
-                (strength, outcome),
+                (reached_at, outcome),
                 (Strength::Review, Outcome::Review(_))
                     | (Strength::Consider, Outcome::Consider(_))
                     | (Strength::Note, Outcome::Note(_))
@@ -364,7 +379,7 @@ pub(super) fn values_wording(
         .collect();
     let reasons: Vec<String> = reached
         .iter()
-        .map(|(signal, leaned)| match (strength, leaned) {
+        .map(|(signal, leaned)| match (reached_at, leaned) {
             (Strength::Note, true) => {
                 format!("may {}; the answer was split", base_form(signal.finding))
             }
@@ -377,13 +392,22 @@ pub(super) fn values_wording(
     } else {
         format!("`{name}`")
     };
-    let likely = if strength == Strength::Consider {
+    let likely = if reached_at == Strength::Consider {
         " likely"
     } else {
         ""
     };
+    let unnamed = if unnamed {
+        " Which value it means was not found, so it is one level lower."
+    } else {
+        ""
+    };
     (
-        format!("{subject}{likely} {} ({p:.2}).", reasons.join("; ")),
+        format!(
+            "{subject}{likely} {}{}.{unnamed}",
+            reasons.join("; "),
+            shown(strength, p)
+        ),
         match (strength, reached.first()) {
             (Strength::Note, _) => "Optional: name or configure the value if it changes",
             (_, Some((signal, _))) => signal.action,
@@ -493,7 +517,11 @@ pub(super) fn section_wording(
         _ => String::new(),
     };
     (
-        format!("{subject} {} ({p:.2}).{load}", reasons.join("; ")),
+        format!(
+            "{subject} {}{}.{load}",
+            reasons.join("; "),
+            shown(strength, p)
+        ),
         match (strength, reached.first()) {
             (Strength::Note, Some(signal)) if signal.question == "scope" => signal.action,
             (Strength::Note, _) => "Optional: trim what agents learn from the code",
@@ -532,7 +560,7 @@ pub(super) fn document_wording(
             });
         return if strength == Strength::Note {
             (
-                format!("`{name}` has a section that could live elsewhere ({p:.2}){part}."),
+                format!("`{name}` has a section that could live elsewhere{part}."),
                 "Optional: move that section to its own document",
             )
         } else {
@@ -549,7 +577,8 @@ pub(super) fn document_wording(
     };
     (
         format!(
-            "`{name}`{likely} mainly records past work, such as dated plans, completed tasks or logs ({p:.2})."
+            "`{name}`{likely} mainly records past work, such as dated plans, completed tasks or logs{}.",
+            shown(strength, p)
         ),
         "Remove finished plans and logs, or move them out of the living documentation",
     )
@@ -628,7 +657,12 @@ fn capitalized(text: &str) -> String {
 }
 
 /// Each test-value signal that reached review, in plain words.
-pub(super) fn test_wording(name: &str, review: bool, p: f64, answers: &Answers<'_>) -> Wording {
+pub(super) fn test_wording(
+    name: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> Wording {
     let reasons: Vec<&str> = [
         (
             "own_logic",
@@ -649,8 +683,8 @@ pub(super) fn test_wording(name: &str, review: bool, p: f64, answers: &Answers<'
     .map(|(_, text)| text)
     .collect();
     (
-        format!("`{name}` {} ({p:.2}).", reasons.join("; ")),
-        if review {
+        format!("`{name}` {}{}.", reasons.join("; "), shown(strength, p)),
+        if strength == Strength::Review {
             "Assert on the behavior of the code under test with an independent expected value"
         } else {
             "Assert on observable results, one behavior per test"
@@ -851,10 +885,10 @@ fn injection_wording(
             "{subject} places its parameters into {noun} without binding, escaping or checking them; a caller passing outside input would make it exploitable ({p:.2})."
         ),
         (Strength::Note, true) => format!(
-            "{subject} places values from another party into {noun}, but no check found one placed unhandled ({p:.2})."
+            "{subject} places values from another party into {noun}, but no check found one placed unhandled."
         ),
         (Strength::Note, false) => format!(
-            "{subject} places a parameter into {noun}; it may already be bound or checked, or its callers may pass only the program's own values ({p:.2})."
+            "{subject} places a parameter into {noun}; it may already be bound or checked, or its callers may pass only the program's own values."
         ),
     };
     let action = if strength == Strength::Note {
@@ -912,23 +946,96 @@ fn exposure_wording(
     } else {
         ""
     };
+    let get = |q: &str| answers.get(q).copied();
     let foreign = category.starts_with("CWE-209")
         && matches!(
-            answers.get("own_messages").map(|a| noul(a)),
-            Some(Outcome::Clear)
+            super::outcome::messages(&get),
+            Some(super::outcome::Messages::Foreign(_))
         );
     let message = match strength {
         Strength::Note => format!(
-            "{subject} may {}; the answer was split ({p:.2}).{where_}",
+            "{subject} may {}; the answer was split.{where_}",
             base_form(what)
         ),
         Strength::Consider if foreign => format!(
-            "{subject} puts the text of a library or database error into its error messages, which likely reach a remote client ({p:.2}).{where_}"
+            "{subject} puts the text of a library or database error into an error message ({p:.2}), which likely reaches a remote client.{where_}"
         ),
         Strength::Consider => format!("{subject} likely {what} ({p:.2}).{where_}"),
         Strength::Review => format!("{subject} {what} ({p:.2}).{where_}"),
     };
     ((message, action), category.to_string())
+}
+
+/// A SpacetimeDB table, view or reducer: what it lets a client do, the
+/// weakness it names and the next step, from the check that reached review.
+pub(super) fn module_wording(
+    access: &super::Access,
+    name: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> (Wording, String) {
+    let reached = |q: &str| matches!(answers.get(q).map(|a| noul(a)), Some(Outcome::Review(_)));
+    let (subject, what, category, action) = match access {
+        super::Access::Table => (
+            format!("Public table `{name}`"),
+            "lets every client read rows that hold individual players' data",
+            "CWE-359 exposure of private personal information",
+            "Make the table private and give each player their own rows through a view that filters by `ctx.sender`",
+        ),
+        super::Access::View => (
+            format!("View `{name}`"),
+            "returns rows of other players or accounts without limiting them to the caller",
+            "CWE-863 incorrect authorization",
+            "Limit the rows to the caller through `ctx.sender`, or return only data meant for every player",
+        ),
+        _ if reached("argument_rows") => (
+            format!("Reducer `{name}`"),
+            "reads or changes a row its arguments choose without confirming the row belongs to the caller",
+            "CWE-639 authorization through a user-controlled key",
+            "Find the row through `ctx.sender`, or check that it belongs to the caller before using it",
+        ),
+        _ if reached("operator_only") => (
+            format!("Reducer `{name}`"),
+            "changes settings, world content or another account without requiring an operator",
+            "CWE-862 missing authorization",
+            "Require the operator identity before the change",
+        ),
+        _ => (
+            format!("Reducer `{name}`"),
+            "lets a client change other players' state or operator-only settings",
+            "CWE-862 missing authorization",
+            "Check the caller before the change",
+        ),
+    };
+    let likely = if strength == Strength::Review {
+        ""
+    } else {
+        " likely"
+    };
+    (
+        (
+            format!("{subject}{likely} {what}{}.", shown(strength, p)),
+            action,
+        ),
+        category.to_string(),
+    )
+}
+
+/// An error handler that sends clients more than the program's own messages.
+pub(super) fn handler_wording(name: &str, registered: &str, strength: Strength, p: f64) -> Wording {
+    let likely = if strength == Strength::Review {
+        ""
+    } else {
+        " likely"
+    };
+    (
+        format!(
+            "`{name}`, the error handler registered by {registered},{likely} sends clients more than the program's own error messages and codes, such as another error's text, its cause or its stack{}.",
+            shown(strength, p)
+        ),
+        "Send only the program's own messages and codes, and a fixed message for any other error; keep details in server logs",
+    )
 }
 
 /// A phrase whose first word is a present-tense verb, after "may":

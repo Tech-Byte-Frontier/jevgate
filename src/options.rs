@@ -39,6 +39,12 @@ pub enum JevCommand {
     /// `.jevgate/latest.json`. Commit the file. Findings are matched by a
     /// fingerprint of rule, path, unit and evidence, so unrelated edits keep
     /// them accepted. Offline: no source is read or sent.
+    ///
+    /// Each accepted finding can record why it was accepted: `intended` (right
+    /// about the code, which is meant to be this way), `later` (right, to fix
+    /// later) or `wrong` (the finding is mistaken). `baseline stats` turns
+    /// these reasons into each rule's rate of wrong findings.
+    #[command(args_conflicts_with_subcommands = true, after_long_help = BASELINE_EXAMPLES)]
     Baseline {
         /// Keep earlier accepted findings for files the last check did not cover
         ///
@@ -48,6 +54,13 @@ pub enum JevCommand {
         /// by what the check found, and the rest are kept.
         #[arg(long)]
         merge: bool,
+        /// Record this reason on findings accepted now without one
+        ///
+        /// Findings already accepted keep the reason they have.
+        #[arg(long, value_enum)]
+        reason: Option<Disposition>,
+        #[command(subcommand)]
+        action: Option<BaselineAction>,
     },
     /// List every rule with its group, default and the question it asks
     ///
@@ -83,6 +96,55 @@ pub enum JevCommand {
     },
 }
 
+/// Why a finding was accepted into the baseline.
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Disposition {
+    /// The finding is right; the code is meant to be this way
+    Intended,
+    /// The finding is right; it will be fixed later
+    Later,
+    /// The finding is mistaken
+    Wrong,
+}
+
+#[derive(Subcommand)]
+pub enum BaselineAction {
+    /// Record why accepted findings were accepted
+    ///
+    /// Each target is a path or directory as the check output prints it, a
+    /// `PATH:LINE`, or a fingerprint (at least its first 8 characters) from
+    /// the JSON report. `--rule` narrows the match to rules or groups.
+    Mark {
+        /// intended, later or wrong
+        #[arg(value_enum)]
+        reason: Disposition,
+        #[arg(required = true, value_name = "TARGET")]
+        targets: Vec<String>,
+        /// Only findings of this rule ID, key or group (repeatable)
+        #[arg(long = "rule", value_name = "RULE")]
+        rules: Vec<String>,
+    },
+    /// Count accepted findings by rule and reason, with each rule's rate of wrong findings
+    ///
+    /// The rate is `wrong` among the findings that have a reason; findings
+    /// without one are counted apart. These are labels people gave in daily
+    /// use, the accuracy evidence a model's probabilities are not.
+    Stats {
+        /// `table` for people; `json` for scripts
+        #[arg(long, value_enum, default_value_t = RulesFormat::Table)]
+        format: RulesFormat,
+    },
+}
+
+const BASELINE_EXAMPLES: &str = "\
+Examples:
+  jevgate baseline                                  Accept every finding of the last check
+  jevgate baseline --merge --reason later           Accept a partial check's findings as known debt
+  jevgate baseline mark wrong src/api/search.ts:41  A mistaken finding
+  jevgate baseline mark intended scripts --rule maintainability/hardcoded-values
+  jevgate baseline stats                            Wrong findings per rule";
+
 /// Overview, workflow, exit codes and files, shown by `jevgate --help`.
 pub const OVERVIEW: &str = "\
 Workflow:
@@ -92,6 +154,7 @@ Workflow:
   jevgate check                             Review and apply the gate
   jevgate baseline                          Accept current findings; later checks fail only on new ones
   jevgate baseline --merge                  Accept a partial check's findings, keeping the rest
+  jevgate baseline mark wrong PATH[:LINE]   Record why a finding was accepted; `baseline stats` counts them
 
 For agents and CI:
   jevgate check --base origin/main                   Only files changed since a revision
@@ -300,6 +363,9 @@ pub struct CheckArgs {
     /// Resolved levels of each enabled rule key that differ from `fail_on`.
     #[arg(skip)]
     pub rule_fail_on: BTreeMap<String, Vec<FailOn>>,
+    /// Levels for the files `[[scope]]` entries match, in configuration order.
+    #[arg(skip)]
+    pub path_fail_on: Vec<PathLevels>,
     /// Output format [default: agent; jsonl with --watch; json with --show-requests]
     #[arg(long, value_enum, help_heading = OUTPUT)]
     pub format: Option<Format>,
@@ -309,7 +375,10 @@ pub struct CheckArgs {
     /// Also write .jevgate/report.html and open it in a browser (not opened when CI is set)
     #[arg(long, conflicts_with = "dry_run", help_heading = OUTPUT)]
     pub report: bool,
-    /// List the selected files and rules without credentials, network or saved state
+    /// List the selected files, rules and planned requests without credentials, network or writes
+    ///
+    /// Planned first-pass requests the cache already answers are counted apart
+    /// and cost nothing; follow-ups depend on the answers and are not known.
     #[arg(long, help_heading = OUTPUT)]
     pub dry_run: bool,
     /// With --dry-run, include every initial request body (the exact source and questions)
@@ -373,6 +442,16 @@ pub struct CheckArgs {
     pub quick: bool,
 }
 
+/// Gate levels of one `[[scope]]`: the rules it addresses for the files its
+/// paths match.
+#[derive(Clone, Debug)]
+pub struct PathLevels {
+    pub paths: Vec<String>,
+    pub matcher: globset::GlobSet,
+    /// Levels by rule key.
+    pub rules: BTreeMap<String, Vec<FailOn>>,
+}
+
 /// Upper bound on simultaneous requests; rate-limit retries share one cooldown.
 pub const MAX_CONCURRENCY: u32 = 8;
 
@@ -400,15 +479,17 @@ impl CheckArgs {
             .any(|r| r == key || r == crate::catalog::id(key))
     }
 
-    /// Whether a rule that judges application source is selected.
+    /// Whether a rule that judges application source is selected. Access
+    /// control judges SpacetimeDB modules as well as SQL.
     pub fn code_rules(&self) -> bool {
-        self.rules.iter().any(|r| {
-            crate::catalog::find(r).is_some_and(|rule| {
-                !crate::catalog::DOCUMENTATION.contains(&rule.key)
-                    && ![crate::catalog::ACCESS_CONTROL, crate::catalog::WORKFLOWS]
-                        .contains(&rule.key)
-            })
-        })
+        self.rules
+            .iter()
+            .any(|r| crate::catalog::find(r).is_some_and(|rule| self.code_rules_include(rule.key)))
+    }
+
+    /// Whether rule `key` judges application source.
+    pub fn code_rules_include(&self, key: &str) -> bool {
+        !crate::catalog::DOCUMENTATION.contains(&key) && key != crate::catalog::WORKFLOWS
     }
 
     /// Whether any documentation rule is selected, so instruction files are found.
@@ -430,11 +511,40 @@ impl CheckArgs {
             .collect()
     }
 
-    /// The gate levels of a rule, by ID or key.
+    /// The gate levels of a rule, by ID or key, outside any scope.
     pub fn levels(&self, rule: &str) -> &[FailOn] {
         crate::catalog::find(rule)
             .and_then(|r| self.rule_fail_on.get(r.key))
             .unwrap_or(&self.fail_on)
+    }
+
+    /// The gate levels of a rule for one file: the last scope that matches
+    /// the file and addresses the rule, else [`Self::levels`].
+    pub fn levels_at(&self, rule: &str, path: &std::path::Path) -> &[FailOn] {
+        crate::catalog::find(rule)
+            .and_then(|r| {
+                self.path_fail_on
+                    .iter()
+                    .rev()
+                    .filter(|scope| scope.matcher.is_match(path))
+                    .find_map(|scope| scope.rules.get(r.key))
+            })
+            .map_or_else(|| self.levels(rule), Vec::as_slice)
+    }
+
+    /// Scope levels that differ from the rest, by rule ID, for the report.
+    pub fn path_fail_on_names(&self) -> Vec<crate::schema::PathFailOn> {
+        self.path_fail_on
+            .iter()
+            .map(|scope| crate::schema::PathFailOn {
+                paths: scope.paths.clone(),
+                rules: scope
+                    .rules
+                    .iter()
+                    .map(|(key, levels)| (crate::catalog::id(key).to_string(), names(levels)))
+                    .collect(),
+            })
+            .collect()
     }
 
     /// The model to ask: `--model`, else configuration, else [`DEFAULT_MODEL`].

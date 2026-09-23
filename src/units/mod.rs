@@ -11,6 +11,7 @@ mod evidence;
 mod follow_ups;
 mod functions;
 pub mod grouping;
+mod handlers;
 mod hardcoded;
 mod instructions;
 mod outcome;
@@ -18,6 +19,7 @@ pub(crate) mod outline;
 mod plan;
 pub mod questions;
 mod security;
+mod spacetimedb;
 mod test_units;
 mod wording;
 mod workflows;
@@ -28,6 +30,7 @@ use evidence::{FileContext, compact, identity, pack, request, unique_ids};
 pub use follow_ups::{doc_checks, locates, rechecks, traces};
 use plan::Scope;
 pub use plan::plan;
+pub use spacetimedb::spacetimedb_module;
 
 use crate::schema::Location;
 use serde_json::Value;
@@ -109,6 +112,9 @@ pub enum Detail {
     /// the trace follow-up sent when presence is not clear.
     Security {
         sites: Vec<Block>,
+        /// The message argument of each error it creates, by position (`m0`…),
+        /// for sensitive-data units.
+        messages: Vec<String>,
         trace: Option<(Value, Asked)>,
     },
     /// A large document judged by its outline, with its top-level parts
@@ -141,6 +147,10 @@ pub enum Detail {
         /// Which harnesses load the file and when.
         loaded: String,
     },
+    /// A web framework's error handler and how the program registers it.
+    Handler {
+        registered: String,
+    },
     /// A policy, SECURITY DEFINER function or grant in its final state.
     Access(Access),
     /// A workflow job and the expressions its `run` scripts hold.
@@ -157,9 +167,17 @@ pub enum Detail {
 /// What an access-control unit holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Access {
-    Policy { table: String },
+    Policy {
+        table: String,
+    },
     Definer,
     Grant,
+    /// A SpacetimeDB public table.
+    Table,
+    /// A SpacetimeDB view.
+    View,
+    /// A SpacetimeDB reducer.
+    Reducer,
 }
 
 #[derive(Clone, Debug)]

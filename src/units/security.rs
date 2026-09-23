@@ -9,7 +9,7 @@ use super::{
     UnitPlan, compact, identity, pack, questions, unique_ids,
 };
 use crate::{
-    analysis::{sites::Site, units::Unit},
+    analysis::{errors::CreatedError, sites::Site, units::Unit},
     catalog::{INJECTION, SENSITIVE_DATA, UNSAFE_SETTINGS},
     schema::Pass,
 };
@@ -32,6 +32,8 @@ pub(super) struct Subject<'a> {
     pub kind: &'static str,
     pub source: String,
     pub sites: &'a [Site],
+    /// Errors it creates, with their message arguments.
+    pub errors: &'a [CreatedError],
     pub lines: (usize, usize),
     /// Functions that call it, as (name, source), for the injection recheck.
     pub callers: Vec<(String, String)>,
@@ -53,6 +55,7 @@ pub(super) fn function_subject<'a>(
         kind: "function",
         source: unit.source(file.source).to_string(),
         sites: &unit.sites,
+        errors: &unit.errors,
         lines: (unit.line, unit.end_line),
         callers,
     }
@@ -74,6 +77,7 @@ pub(super) fn setup_subject<'a>(
         kind: "module",
         source: source.join("\n"),
         sites: &setup.sites,
+        errors: &[],
         lines: (first.1, last.2),
         callers: Vec::new(),
     })
@@ -152,6 +156,11 @@ fn push_unit(
         identity: identity(&[&subject.name, &compact(&subject.source)]),
         detail: Detail::Security {
             sites: sites(file, subject),
+            messages: if rule == SENSITIVE_DATA {
+                subject.errors.iter().map(|e| e.message.clone()).collect()
+            } else {
+                Vec::new()
+            },
             trace,
         },
         recheck,
@@ -285,17 +294,33 @@ fn trace(
     } else {
         ask("dev_only", questions::security_dev_only(&code));
     }
-    if rule == SENSITIVE_DATA {
+    // With the errors it creates listed, each message is asked about; a
+    // function that creates none is asked about its messages as a whole.
+    let messages: Vec<Value> = subject
+        .errors
+        .iter()
+        .enumerate()
+        .map(|(i, e)| json!({"id": format!("m{i}"), "error": e.error, "message": e.message}))
+        .collect();
+    if rule == SENSITIVE_DATA && messages.is_empty() {
         ask("own_messages", questions::security_own_messages(&code));
+    } else if rule == SENSITIVE_DATA {
+        let ids: Vec<String> = (0..messages.len()).map(|i| format!("m{i}")).collect();
+        ask("messages", questions::security_message_origin(&ids));
     }
     for check in checks(rule) {
         ask(check.id, check.body(&code));
     }
-    let state = json!({
+    let mut state = json!({
         "file": file.file_state(),
         subject.kind: {"name": subject.name, "source": subject.source},
         "sites": subject.sites.iter().map(|s| json!({"id": s.id, "source": s.text})).collect::<Vec<_>>(),
     });
+
+    if rule == SENSITIVE_DATA && !messages.is_empty() {
+        state["messages"] = json!(messages);
+    }
+
     file.request("trace", state, questions)
 }
 

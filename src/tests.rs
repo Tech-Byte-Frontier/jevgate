@@ -133,15 +133,12 @@ pub(super) fn session<'a>(
     }
 }
 
-pub(super) fn run(
-    project: &Project,
-    options: &CheckArgs,
-    mock: &mut impl transport::Evaluator,
-) -> schema::Report {
+/// The selected inputs and the first snapshot of a check, before evaluation.
+fn snapshot(project: &Project, options: &CheckArgs) -> (Vec<inventory::Input>, schema::Report) {
     let context = project.context();
     let scope = inventory::scope(options, &context).unwrap();
     let inputs = inventory::collect(options, &context, &scope).unwrap();
-    let mut report = evaluate::snapshot(
+    let report = evaluate::snapshot(
         &inputs,
         &Default::default(),
         options,
@@ -151,6 +148,16 @@ pub(super) fn run(
             requests: 0,
         },
     );
+    (inputs, report)
+}
+
+pub(super) fn run(
+    project: &Project,
+    options: &CheckArgs,
+    mock: &mut impl transport::Evaluator,
+) -> schema::Report {
+    let context = project.context();
+    let (inputs, mut report) = snapshot(project, options);
     let store = storage::Store::open(&project.0).unwrap();
     session(options, &context, &store, mock)
         .evaluate(&inputs, &mut report)
@@ -182,6 +189,30 @@ fn unchanged_files_are_answered_from_cache_without_api_calls() {
     project.write("b.rs", &function("b_changed"));
     let third = run(&project, &options, &mut mock);
     assert_eq!(third.api_requests, 1, "only the changed unit is sent again");
+}
+
+#[test]
+fn a_dry_run_counts_cached_requests_as_free() {
+    let project = Project::new();
+    project.write("a.rs", &function("a"));
+    let preview = |options: &CheckArgs| snapshot(&project, options).1.stages["functions"].clone();
+    let mut options = args();
+    options.dry_run = true;
+    let cold = preview(&options);
+    assert_eq!((cold.planned_requests, cold.planned_cached), (1, 0));
+    assert!(cold.planned_tokens > 0);
+    assert!(
+        !project.0.join(".jevgate").exists(),
+        "a dry run writes no state"
+    );
+    options.dry_run = false;
+    run(&project, &options, &mut Mock::default());
+    options.dry_run = true;
+    let warm = preview(&options);
+    assert_eq!((warm.planned_requests, warm.planned_cached), (1, 1));
+    assert_eq!(warm.planned_tokens, 0, "answered requests cost nothing");
+    options.refresh = true;
+    assert_eq!(preview(&options).planned_cached, 0);
 }
 
 #[test]
@@ -263,6 +294,47 @@ fn a_rule_level_fails_the_gate_only_for_that_rule() {
     }
 }
 
+#[test]
+fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
+    let project = Project::new();
+    project.write("src/lib.rs", &function("f"));
+    project.write("scripts/tool.rs", &function("g"));
+    let mut options = args();
+    options.fail_on = vec![options::FailOn::Consider];
+    let mut mock = Mock {
+        level: 4,
+        ..Default::default()
+    };
+    let scripts = |levels: Vec<options::FailOn>| options::PathLevels {
+        paths: vec!["scripts/**".into()],
+        matcher: crate::boundary::globs(&["scripts/**".into()]).unwrap(),
+        rules: crate::catalog::keys()
+            .into_iter()
+            .map(|key| (key.to_string(), levels.clone()))
+            .collect(),
+    };
+    options.path_fail_on = vec![scripts(vec![options::FailOn::None])];
+    let report = run(&project, &options, &mut mock);
+    let gate = report.gate.as_ref().unwrap();
+    assert_eq!(
+        gate.reasons,
+        ["1 new consider finding(s)"],
+        "only src/lib.rs"
+    );
+    options.paths = vec!["scripts".into()];
+    let report = run(&project, &options, &mut mock);
+    assert_eq!(gate::exit_code(&report), 0, "tooling findings only report");
+    options.path_fail_on = vec![scripts(vec![options::FailOn::Uncertain])];
+    mock.level = 3;
+    options.refresh = true;
+    let report = run(&project, &options, &mut mock);
+    assert_eq!(
+        gate::exit_code(&report),
+        1,
+        "uncertain fails inside the scope"
+    );
+}
+
 /// A project with two judged functions, `a.rs` and `b.rs`.
 fn two_files() -> Project {
     let project = Project::new();
@@ -289,7 +361,7 @@ fn baselined_findings_do_not_fail_the_gate_but_new_ones_do() {
         ..Default::default()
     };
     publish(&project, &run(&project, &options, &mut review));
-    let written = gate::write_baseline(&project.0, false).unwrap();
+    let written = gate::write_baseline(&project.0, false, None).unwrap();
     assert_eq!(
         (written.path, written.accepted),
         (project.0.join(gate::BASELINE_FILE), 1)
@@ -312,12 +384,17 @@ fn a_merged_baseline_keeps_accepted_findings_for_files_the_check_did_not_cover()
         ..Default::default()
     };
     publish(&project, &run(&project, &options, &mut review));
-    assert_eq!(gate::write_baseline(&project.0, false).unwrap().accepted, 2);
+    assert_eq!(
+        gate::write_baseline(&project.0, false, None)
+            .unwrap()
+            .accepted,
+        2
+    );
     // A check of `a.rs` alone, as a `--base` run that only changed it.
     project.write("a.rs", &function("a2"));
     options.paths = vec!["a.rs".into()];
     publish(&project, &run(&project, &options, &mut review));
-    let merged = gate::write_baseline(&project.0, true).unwrap();
+    let merged = gate::write_baseline(&project.0, true, None).unwrap();
     assert_eq!((merged.accepted, merged.kept), (1, 1));
     options.paths.clear();
     let report = run(&project, &options, &mut review);
@@ -326,9 +403,55 @@ fn a_merged_baseline_keeps_accepted_findings_for_files_the_check_did_not_cover()
     // Without merge the same partial check drops `b.rs`.
     options.paths = vec!["a.rs".into()];
     publish(&project, &run(&project, &options, &mut review));
-    assert_eq!(gate::write_baseline(&project.0, false).unwrap().accepted, 1);
+    assert_eq!(
+        gate::write_baseline(&project.0, false, None)
+            .unwrap()
+            .accepted,
+        1
+    );
     options.paths.clear();
     assert_eq!(gate::exit_code(&run(&project, &options, &mut review)), 1);
+}
+
+#[test]
+fn baseline_reasons_are_marked_counted_and_kept_across_rewrites() {
+    use options::Disposition::{Later, Wrong};
+    let project = two_files();
+    let options = args();
+    let mut review = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    publish(&project, &run(&project, &options, &mut review));
+    gate::write_baseline(&project.0, false, Some(Later)).unwrap();
+    let rule = "maintainability/function-simplification";
+    let counts = gate::stats(&project.0).unwrap();
+    assert_eq!(
+        (counts[rule].later, counts[rule].wrong_rate),
+        (2, Some(0.0))
+    );
+    assert_eq!(
+        gate::mark(&project.0, Wrong, &["b.rs:1".into()], &[]).unwrap(),
+        1
+    );
+    assert!(gate::mark(&project.0, Wrong, &["c.rs".into()], &[]).is_err());
+    assert!(
+        gate::mark(
+            &project.0,
+            Wrong,
+            &["a.rs".into()],
+            &[crate::catalog::INJECTION]
+        )
+        .is_err(),
+        "the rule filter excludes it"
+    );
+    let counts = gate::stats(&project.0).unwrap();
+    assert_eq!((counts[rule].later, counts[rule].wrong), (1, 1));
+    assert_eq!(counts[rule].wrong_rate, Some(0.5));
+    // Rewriting the baseline keeps each accepted finding's reason.
+    gate::write_baseline(&project.0, false, None).unwrap();
+    assert_eq!(gate::stats(&project.0).unwrap()[rule].wrong, 1);
+    assert!(gate::stats_table(&counts).contains("50%"));
 }
 
 #[test]

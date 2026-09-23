@@ -30,6 +30,22 @@ pub struct Config {
     pub cache_ttl_secs: Option<u64>,
     /// Judge tests as if `--include-tests` were passed.
     pub include_tests: bool,
+    /// Gate levels for the files some paths match, such as report-only tooling.
+    pub scope: Vec<Scope>,
+}
+
+/// `[[scope]]`: gate levels for the files `paths` match. `fail_on` applies to
+/// every rule there, and `rules` to single rules or groups. The last scope
+/// that matches a file and addresses a rule wins; other files and rules keep
+/// the levels set outside scopes.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Scope {
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub fail_on: Vec<String>,
+    #[serde(default)]
+    pub rules: BTreeMap<String, Level>,
 }
 
 /// `rules = ["security"]` selects rules; a `[rules]` table sets each rule's or
@@ -189,6 +205,32 @@ impl ConfigContext {
                 args.rule_fail_on.insert(rule.key.into(), levels);
             }
         }
+        self.configure_scopes(args, &cli)
+    }
+
+    /// The levels each `[[scope]]` sets for the enabled rules. A flag that
+    /// addresses a rule wins over every scope, as over the rest of the file.
+    fn configure_scopes(&self, args: &mut CheckArgs, cli: &Levels) -> Result<()> {
+        args.path_fail_on.clear();
+        for scope in &self.config.scope {
+            let levels = scope_levels(scope)?;
+            let rules = catalog::rules()
+                .into_iter()
+                .filter(|rule| args.rules.iter().any(|r| r == rule.key))
+                .filter(|rule| cli.global.is_empty() && cli.target(rule).is_none())
+                .filter_map(|rule| {
+                    let own = levels.target(&rule);
+                    let every = (!levels.global.is_empty()).then(|| levels.global.clone());
+                    own.or(every).map(|l| (rule.key.to_string(), l))
+                })
+                .collect();
+            args.path_fail_on.push(crate::options::PathLevels {
+                matcher: crate::boundary::globs(&scope.paths)
+                    .with_context(|| format!("Invalid scope paths {:?}", scope.paths))?,
+                paths: scope.paths.clone(),
+                rules,
+            });
+        }
         Ok(())
     }
 
@@ -236,6 +278,27 @@ impl ConfigContext {
         );
         Ok(())
     }
+}
+
+/// The levels one `[[scope]]` sets. `off` is not a gate level there: a rule
+/// is judged for every file or none, and `upload_deny` keeps files out.
+fn scope_levels(scope: &Scope) -> Result<Levels> {
+    ensure!(!scope.paths.is_empty(), "Each [[scope]] needs paths");
+    let mut levels = Levels::default();
+    for name in &scope.fail_on {
+        levels
+            .global
+            .push(FailOn::parse(name).ok_or_else(|| anyhow!("Unknown fail_on value: {name}"))?);
+    }
+    for (target, level) in &scope.rules {
+        expand(std::slice::from_ref(target))?;
+        ensure!(
+            !level.off(),
+            "A [[scope]] cannot turn {target} off; use report, or upload_deny to skip the paths"
+        );
+        levels.targets.insert(target.clone(), level.levels(target)?);
+    }
+    Ok(levels)
 }
 
 /// Gate levels from one source: for every rule, and by rule or group name.
@@ -386,6 +449,60 @@ mod tests {
         assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Consider]);
         assert_eq!(args.levels(catalog::TEST_REDUNDANCY), [FailOn::Consider]);
         assert_eq!(args.levels(catalog::TEST_VALUE), [FailOn::Uncertain]);
+    }
+
+    #[test]
+    fn a_scope_sets_levels_for_its_paths_and_flags_win_over_it() {
+        let file = r#"
+            fail_on = ["consider"]
+            [[scope]]
+            paths = ["scripts/**", "tools/**"]
+            fail_on = ["report"]
+            [[scope]]
+            paths = ["scripts/deploy/**"]
+            rules = { security = "review" }
+        "#;
+        let rules = ["default", "security"];
+        let args = configured(file, &rules, &[]).unwrap();
+        let at = |args: &CheckArgs, rule: &str, path: &str| {
+            args.levels_at(rule, Path::new(path)).to_vec()
+        };
+        assert_eq!(
+            at(&args, catalog::SHARED_LOGIC, "src/a.ts"),
+            [FailOn::Consider]
+        );
+        assert_eq!(
+            at(&args, catalog::SHARED_LOGIC, "tools/a.ts"),
+            [FailOn::None]
+        );
+        assert_eq!(
+            at(&args, catalog::SHARED_LOGIC, "scripts/deploy/a.ts"),
+            [FailOn::None],
+            "the later scope does not address this rule"
+        );
+        assert_eq!(
+            at(&args, "security/injection", "scripts/deploy/a.ts"),
+            [FailOn::Review]
+        );
+        assert_eq!(
+            at(&args, catalog::INJECTION, "scripts/a.ts"),
+            [FailOn::None]
+        );
+        assert_eq!(args.path_fail_on_names()[1].rules.len(), 5);
+        let flagged = configured(file, &rules, &[(None, FailOn::Consider)]).unwrap();
+        assert_eq!(
+            at(&flagged, catalog::SHARED_LOGIC, "scripts/a.ts"),
+            [FailOn::Consider],
+            "a flag wins over scopes as over the file"
+        );
+        for invalid in [
+            "[[scope]]\npaths = []\nfail_on = [\"report\"]\n",
+            "[[scope]]\npaths = [\"x/**\"]\nrules = { security = \"off\" }\n",
+            "[[scope]]\npaths = [\"x/**\"]\nrules = { nothing = \"review\" }\n",
+            "[[scope]]\npaths = [\"x/**\"]\nlevel = \"review\"\n",
+        ] {
+            assert!(configured(invalid, &[], &[]).is_err(), "{invalid}");
+        }
     }
 
     #[test]

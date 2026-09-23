@@ -15,8 +15,12 @@ pub const PRICE_CHECKED: &str = "2026-09-18";
 
 /// Estimated dollars for this invocation's paid input tokens, for a priced model.
 pub fn estimated_usd(report: &Report) -> Option<f64> {
-    (report.requested_model == "jev-1.13.0")
-        .then(|| report.paid_input_tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
+    usd(&report.requested_model, report.paid_input_tokens)
+}
+
+/// Estimated dollars for `tokens` input tokens of `model`, when it is priced.
+fn usd(model: &str, tokens: u64) -> Option<f64> {
+    (model == "jev-1.13.0").then(|| tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
 }
 
 /// Write the report to stdout. A reader that closes the pipe early (as with
@@ -75,8 +79,21 @@ pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Res
     Ok(())
 }
 
-/// Status, gate, scope and cost on one line.
+/// Status, gate, scope and cost on one line; for a dry run, the planned
+/// requests and the cost of those the cache does not answer.
 pub(crate) fn headline(report: &Report) -> String {
+    if report.dry_run {
+        let stages = report.stages.values();
+        let planned: u64 = stages.clone().map(|s| s.planned_requests).sum();
+        let cached: u64 = stages.clone().map(|s| s.planned_cached).sum();
+        let tokens: u64 = stages.map(|s| s.planned_tokens).sum();
+        let cost = usd(&report.requested_model, tokens)
+            .map_or(String::new(), |usd| format!(" · ~${usd:.4}"));
+        return format!(
+            "JevGate: dry run · {} files · {planned} first-pass requests, {cached} answered by the cache · ~{tokens} new input tokens{cost}; follow-ups depend on the answers",
+            report.files.len()
+        );
+    }
     let gate = match &report.gate {
         Some(gate) if gate.passed => "gate passed".to_string(),
         Some(gate) => format!("gate failed: {}", gate.reasons.join("; ")),

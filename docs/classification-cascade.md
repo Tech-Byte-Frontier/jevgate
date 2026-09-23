@@ -34,6 +34,12 @@ signatures, or one candidate pair.
    value "explains itself", it cleared none, even of field names.
    A function or file-organization note whose middle and top levels both
    stay under 0.50 gets the same recheck, and a decisive answer replaces it.
+   A test left undecided on whether it re-implements the code or checks only
+   its mocks is asked again with the bodies of the functions it calls and its
+   file's imports, mocks and setup hooks (a part too long is left out, never
+   cut); each answer replaces the first unless only the first is decisive.
+   The first pass names a literal worked out by hand, even with the
+   arithmetic in a comment, as not re-implementing the code.
    Then one locate Choice per split finding picks the body block to extract,
    and one per hardcoded-value review or consider names the value it is about.
    Special-case findings in different files that name the same identity
@@ -48,6 +54,16 @@ signatures, or one candidate pair.
    injection whose origin stays unclear or is the function's parameters is
    asked its origin and checks again with up to three callers; its answer
    replaces the traced one unless only the traced one is decisive.
+   The markup check names text shown as a JSX child and CSS values or class
+   names as escaped or inert; sending where each built string goes did not
+   settle React units, the examples did. A sensitive-data trace lists the
+   message argument of each error the function creates and asks which one,
+   if any, carries another error's text: the response is often written by an
+   error handler in another file, and adding the handler to every unit also
+   cleared real leaks. Each registered error handler (`.onError(…)`,
+   `.setErrorHandler(…)`, Flask and FastAPI decorators) is asked once whether
+   it sends clients more than the program's own messages and codes, with the
+   program's `…Error` classes.
    Agent instruction files (`src/docs/`) are found by name even when hidden
    or ignored. Each file's heading sections, or the top-level blocks of a long
    section, are sent packed beside the nearest manifests, the configured
@@ -81,6 +97,18 @@ signatures, or one candidate pair.
    revokes of EXECUTE; a grant with whether its table has row-level security.
    The criteria name role checks, service roles, restrictive policies and
    trigger functions, which a literal "other users' rows" question flagged.
+   SpacetimeDB TypeScript modules (files that import `spacetimedb/server`)
+   are read for access control too: each public table with the columns that
+   name players, and each view and reducer with up to six functions it calls
+   (two deep, in the module's package). The framework version comes from the
+   package's `package.json`, since scheduled reducers are private in 2.x and
+   callable by clients in 1.x. Each definition gets a Score whose two lower
+   levels are acceptable (the caller's own data; data meant for every player)
+   and concern Nouls: for a reducer, two literal checks (a row chosen by an
+   argument without an ownership check; an operator-only change without an
+   operator check). One broad Noul left most real definitions undecided and
+   most broken reducers under 0.80. When access control is the only code
+   rule, only the files of module packages are collected.
    Workflow jobs (`security/workflows`) are split by indentation. The parser
    lists the `${{ }}` expressions inside `run` scripts, and Jev is asked
    whether one can hold text outside people write: one question over the
@@ -103,14 +131,24 @@ signatures, or one candidate pair.
    A large document's undecided history answer does lean into a note. Policies,
    grants and an open `search_path` are at most a consider, since a policy
    may cover data meant for everyone; an unchecked SECURITY DEFINER function
-   and workflow findings can be reviews. On its
+   and workflow findings can be reviews. A SpacetimeDB definition is a review
+   when a concern Noul or the Score's top level reaches 0.80, and clear when
+   the Score's acceptable levels do and nothing is at review; public tables
+   and views are at most a consider, reducers can be reviews. A
+   hardcoded-value review or consider whose value the locate Choice could not
+   name is one level lower. Messages show the probability that set a finding's
+   level (a consider shows the middle-or-top mass, not the top level); notes
+   show none. Finished plans in one directory become one finding identified by
+   the directory, and the others become notes pointing at it. On its
    labeled set, no living document leaned past 0.50. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
    Jev does not count reliably and reads "tasks" literally. Copies inside test
    cases are one level lower. A test that checks several unrelated behaviors is at
    most a note: on labeled tests, tables of inputs and browser journeys rated
    as high as tests that really mix behaviors. A review always carries a finding.
-6. **Gate.** `--fail-on` and the baseline act on composed findings only.
+6. **Gate.** `--fail-on`, `[[scope]]` levels per path and the baseline act on
+   composed findings only. Baseline entries can carry a reason (`intended`,
+   `later`, `wrong`) that survives rewrites; `baseline stats` counts them.
 
 ## Constraints
 

@@ -108,6 +108,40 @@ pub fn security_own_messages(code: &str) -> Value {
     )
 }
 
+/// Which created error's message carries another error's text. Asking per
+/// message decided error details the response path left open: on MyOasis
+/// units whose handler is in another file, 21 of 25 chose `none` decisively
+/// while real leaks (`error.message` in the message) were picked.
+pub fn security_message_origin(ids: &[String]) -> Value {
+    choose_id(
+        "Which entry in `messages` puts the text of an error the program did not create, such as a database or library error message, into the message?",
+        format!(
+            "Options are the `id` values in `messages`, each the message argument of an error the function creates. {EVIDENCE}"
+        ),
+        ids,
+        "Every message is text the program writes itself; an error may only be attached as a cause.",
+    )
+}
+
+/// Whether the error handler a web framework calls for every thrown error
+/// sends clients more than the program's own messages and codes. One
+/// question per handler in place of an undecided answer in each function
+/// whose response it writes: on labeled handlers a safe one scored 0.19 and
+/// leaking ones 0.96.
+pub fn security_handler_leaks() -> Value {
+    json!({
+        "type": "noul",
+        "instructions": {
+            "question": "Does the error handler in `error_handler.source` send a remote client anything besides the message and code of errors the program raises itself?",
+            "note": format!("`error_classes` defines the program's own errors, when found. {EVIDENCE}"),
+        },
+        "criteria": {
+            "true": "It sends an error's cause, its stack trace, or the message of an error the program did not create, such as a database or library error.",
+            "false": "It sends only the message and code of the program's own errors, and a fixed message for any other error; causes and stacks go to logs.",
+        },
+    })
+}
+
 pub fn security_dev_only(code: &str) -> Value {
     noul(
         format!(
@@ -137,11 +171,17 @@ pub struct Check {
     question: &'static str,
     yes: &'static str,
     no: &'static str,
+    /// Examples of the "false" answer, when the plain criterion is not enough.
+    no_examples: &'static [&'static str],
 }
 
 impl Check {
     pub fn body(&self, code: &str) -> Value {
-        noul(self.question.replace("{code}", code), self.yes, self.no)
+        let mut body = noul(self.question.replace("{code}", code), self.yes, self.no);
+        if !self.no_examples.is_empty() {
+            body["criteria"]["false"] = json!({"what": self.no, "examples": self.no_examples});
+        }
+        body
     }
 
     /// The same check with the functions that call the code in `callers`.
@@ -155,6 +195,9 @@ impl Check {
 const CALLERS: &str = "`callers` holds functions that call it.";
 
 /// Whether a variable reaches each kind of interpreted text unhandled. The
+/// markup check names text shown as a JSX child and CSS values as escaped or
+/// inert: without them, template strings in JSX left most React units
+/// undecided. The
 /// path check names the program's own directories as safe: without them, a
 /// third of injection units stayed undecided on paths the program builds from
 /// its project root. One
@@ -167,36 +210,45 @@ pub const UNHANDLED: [Check; 6] = [
         question: "Does `{code}` put a variable into the text of an SQL query instead of passing it as a bound parameter?",
         yes: "A variable is joined, formatted or interpolated into SQL text that is then run.",
         no: "Values are passed as bound parameters or placeholders, identifiers come from a fixed list or are quoted by the database library, or it runs no SQL.",
+        no_examples: &[],
     },
     Check {
         id: "shell",
         question: "Does `{code}` run a shell command string that holds a variable?",
         yes: "A command line built with a variable is run through a shell, such as with exec, execSync, os.system, subprocess with shell=True, or sh -c.",
         no: "It runs programs with a list of arguments and no shell, quotes each variable for the shell, or runs no command.",
+        no_examples: &[],
     },
     Check {
         id: "code",
         question: "Does `{code}` evaluate text that holds a variable as code or as a template?",
         yes: "It passes text that holds a variable to eval, exec, new Function, a template compiler or a similar evaluator.",
         no: "It parses data with a data-only parser such as JSON or a literal parser, or evaluates only fixed code.",
+        no_examples: &[],
     },
     Check {
         id: "markup",
         question: "Does `{code}` put a variable into HTML or SVG markup without escaping it?",
         yes: "A variable is joined into HTML or SVG text, or assigned to innerHTML or a similar raw-markup property, without an escaping function.",
         no: "Values go through an escaping function or a template or component that escapes them, or it builds no markup.",
+        no_examples: &[
+            "Text shown as a JSX child, such as {`Total: ${count}`} inside an element, which React escapes",
+            "A CSS value or class name built from a variable, such as a `style` property or `className`",
+        ],
     },
     Check {
         id: "path",
         question: "Does `{code}` open, write or delete a file at a path built from a variable without checking that it stays inside a directory?",
         yes: "A path is built from a variable that can hold a name or path from outside the program, such as a request, upload, archive entry or user input, and is used without reducing it to a base name, rejecting parent-directory parts, or checking that the resolved path stays under a base directory.",
         no: "Such paths are checked; are built from the program's own directories, such as its project root, data or cache directory, joined with names the program chooses; come from the program's configuration or the command line of the person running it; or it uses no such path.",
+        no_examples: &[],
     },
     Check {
         id: "url",
         question: "Does `{code}` request a URL or host taken from a variable without checking the host?",
         yes: "It sends a request to a URL or host that comes from a variable, without checking the host against an allowed list or rejecting private addresses.",
         no: "The host is fixed, comes from the program's configuration, or is checked, or it requests no URL.",
+        no_examples: &[],
     },
 ];
 
@@ -207,30 +259,35 @@ pub const WEAK_SETTINGS: [Check; 5] = [
         question: "Does `{code}` turn off certificate or host name verification?",
         yes: "It turns off certificate or host name checks, or accepts invalid certificates or host names.",
         no: "It keeps verification on, or makes no TLS connection.",
+        no_examples: &[],
     },
     Check {
         id: "hash",
         question: "Does `{code}` hash passwords or derive keys from them with a fast or broken hash, or with few iterations?",
         yes: "It hashes passwords or derives keys from them with MD5, SHA-1, a single round of SHA-256, or a key derivation function with few iterations.",
         no: "It uses bcrypt, scrypt, Argon2 or a key derivation function with many iterations, or it does not handle passwords.",
+        no_examples: &[],
     },
     Check {
         id: "random",
         question: "Does `{code}` make a token, code, password or identifier that must be unguessable with a non-cryptographic random generator?",
         yes: "It uses a generator such as Math.random or Python's random module for a secret value, such as a session token, reset or verification code, or random password.",
         no: "It uses a cryptographic generator such as crypto.randomUUID, secrets or OsRng, or the random value is not a secret.",
+        no_examples: &[],
     },
     Check {
         id: "cors",
         question: "Does `{code}` let pages from origins it does not fully check read its responses with credentials?",
         yes: "It allows any origin, reflects the request's origin, or matches origins loosely, such as by suffix or substring, while allowing credentials.",
         no: "It allows only listed origins by exact match, allows no credentials, or sets no cross-origin rules.",
+        no_examples: &[],
     },
     Check {
         id: "cookie",
         question: "Does `{code}` set or configure a session or authentication cookie without the Secure or HttpOnly flag?",
         yes: "A cookie that holds a session or token is set or configured without Secure or without HttpOnly.",
         no: "Such cookies have both flags, the cookie holds no session or token, or the code sets no cookie.",
+        no_examples: &[],
     },
 ];
 
@@ -243,11 +300,13 @@ pub const EXPOSURES: [Check; 2] = [
         question: "Does `{code}` log an object, configuration, request, command or list of arguments that holds a password, token or key?",
         yes: "It logs a whole object, configuration, request, command line or argument list, and that value holds a password, token, key or secret.",
         no: "It logs only values that hold no secret, masks secrets before logging, or logs nothing.",
+        no_examples: &[],
     },
     Check {
         id: "exception_to_client",
         question: "Does `{code}` send an exception's message, stack trace or a database error to a remote client in a response?",
         yes: "The text of an exception it did not raise itself to explain bad input, or a stack trace, is put into the response to a request.",
         no: "Responses carry fixed messages or codes, or only messages the program wrote to explain invalid input; details stay in server logs.",
+        no_examples: &[],
     },
 ];

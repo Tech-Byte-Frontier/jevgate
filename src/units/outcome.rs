@@ -163,6 +163,9 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         catalog::TEST_REDUNDANCY => get("overlap").map(score),
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         catalog::INJECTION => injection_outcome(&get),
+        catalog::SENSITIVE_DATA if matches!(unit.detail, Detail::Handler { .. }) => {
+            get("handler_leaks").map(noul)
+        }
         catalog::SENSITIVE_DATA => {
             exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
         }
@@ -216,7 +219,48 @@ fn access_outcome<'a>(
             strongest(&[noul(get("unchecked")?), cleanup(noul(get("search_path")?))])
         }
         Access::Grant => cleanup(noul(get("broad")?)),
+        Access::Table => cleanup(module_outcome(get("data")?, &[get("exposed")?])),
+        Access::View => cleanup(module_outcome(get("rows")?, &[get("returns_others")?])),
+        Access::Reducer => module_outcome(
+            get("reach")?,
+            &[get("argument_rows")?, get("operator_only")?],
+        ),
     })
+}
+
+/// A Score whose two lower levels are acceptable: review at its top level,
+/// clear when the two lower levels reach the threshold, otherwise uncertain.
+pub(super) fn acceptable_levels(answer: &Answer) -> Outcome {
+    let Some([bottom, middle, top]) = levels(answer) else {
+        return Outcome::Missing;
+    };
+    if at_least(top) {
+        Outcome::Review(top)
+    } else if at_least(bottom + middle) {
+        Outcome::Clear
+    } else {
+        Outcome::Uncertain(top)
+    }
+}
+
+/// A SpacetimeDB definition: review when a concern Noul or the Score's top
+/// level reaches the threshold, clear when the Score's acceptable levels do
+/// and nothing is at review, otherwise uncertain. On a probe of real module
+/// code and mutants with a check removed, no real definition reached review
+/// and no mutant cleared.
+fn module_outcome(score: &Answer, checks: &[&Answer]) -> Outcome {
+    let mut signals: Vec<Outcome> = checks.iter().map(|a| noul(a)).collect();
+    signals.push(acceptable_levels(score));
+    let review = signals
+        .iter()
+        .filter(|o| matches!(o, Outcome::Review(_)))
+        .map(|o| o.concern())
+        .reduce(f64::max);
+    match (review, acceptable_levels(score)) {
+        (Some(p), _) => Outcome::Review(p),
+        (None, Outcome::Clear) => Outcome::Clear,
+        _ => Outcome::Uncertain(signals.iter().map(|o| o.concern()).fold(0.0, f64::max)),
+    }
 }
 
 /// Documentation findings are cleanups, never defects: at most a consider.
@@ -491,6 +535,44 @@ fn by_origin<'a>(
 /// Error-detail signals that the "own messages" check clears.
 pub(super) const ERROR_SIGNALS: [&str; 2] = ["error_details", "exception_to_client"];
 
+/// Whether a function's error messages are the program's own text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Messages {
+    /// Every message is the program's own text.
+    Own,
+    /// A message carries another error's text, at this probability.
+    Foreign(f64),
+    Undecided,
+}
+
+/// From the Choice over the errors a function creates, when it creates
+/// any: `none` at the threshold is its own text, a message chosen at the
+/// threshold carries another error's; else from the own-messages Noul.
+pub(super) fn messages<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Messages> {
+    let Some(answer) = get("messages") else {
+        return get("own_messages").map(|a| match noul(a) {
+            Outcome::Review(_) => Messages::Own,
+            Outcome::Clear => Messages::Foreign(1.0 - lean(a)),
+            _ => Messages::Undecided,
+        });
+    };
+    let Answer::Choice {
+        choice,
+        probabilities,
+        ..
+    } = answer
+    else {
+        return None;
+    };
+    let mass = probabilities.values().sum::<f64>().max(f64::MIN_POSITIVE);
+    let p = probabilities.get(choice).copied().unwrap_or(0.0) / mass;
+    Some(match (choice.as_str(), at_least(p)) {
+        ("none", true) => Messages::Own,
+        (_, true) => Messages::Foreign(p),
+        _ => Messages::Undecided,
+    })
+}
+
 /// Logged secrets, exposed error details and weak settings: a presence
 /// question or a specific check at review raises it, one level lower for
 /// code that runs only in development; clear when presence or every check
@@ -506,7 +588,7 @@ pub(super) fn exposure_outcome<'a>(
     questions: &[&str],
 ) -> Option<Outcome> {
     let own = (rule == catalog::SENSITIVE_DATA)
-        .then(|| get("own_messages").map(noul))
+        .then(|| messages(get))
         .flatten();
     let judge = |question: &str, answer: &Answer| exposure_signal(question, answer, own);
     let presence: Vec<(Outcome, f64)> = questions
@@ -552,19 +634,19 @@ pub(super) fn exposure_outcome<'a>(
 /// One exposure answer with its lean. The own-messages check (`own`) settles
 /// error-detail signals: all messages the program's own clears them; a
 /// message carrying another's error text makes a lean toward a client a
-/// consider.
-fn exposure_signal(question: &str, answer: &Answer, own: Option<Outcome>) -> (Outcome, f64) {
+/// consider, at the probability that the message carries it.
+fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>) -> (Outcome, f64) {
     let outcome = noul(answer);
     let lean = lean(answer);
     if !ERROR_SIGNALS.contains(&question) {
         return (outcome, lean);
     }
     match (own, outcome) {
-        (Some(Outcome::Review(_)), _) => (Outcome::Clear, 0.0),
-        (Some(Outcome::Clear), Outcome::Uncertain(_))
+        (Some(Messages::Own), _) => (Outcome::Clear, 0.0),
+        (Some(Messages::Foreign(p)), Outcome::Uncertain(_))
             if probability_at_least(lean, LEADING_PROBABILITY) =>
         {
-            (Outcome::Consider(lean), lean)
+            (Outcome::Consider(p), lean)
         }
         _ => (outcome, lean),
     }

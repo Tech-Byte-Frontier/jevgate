@@ -55,9 +55,9 @@ Consider (2):
 | Rule | Covers |
 |---|---|
 | Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths or outbound URLs without binding, escaping or checks |
-| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients |
+| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per registered error handler (`app.onError`, `setErrorHandler`, Flask and FastAPI handlers) |
 | Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly` |
-| Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user |
+| Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user. SpacetimeDB TypeScript modules: public tables of players' data, views that return other players' rows, reducers that change rows their arguments choose or operator-only settings without checking the caller |
 | Workflows | GitHub Actions `run` scripts that execute text outside people write (`${{ github.event.pull_request.title }}`); `pull_request_target` or `workflow_run` jobs that run pull request code with secrets |
 
 **Documentation** (opt-in with `--rule documentation`)
@@ -101,6 +101,8 @@ jevgate check --include-tests                     # also judge tests
 jevgate check --base origin/main --format json    # changed files only, for agents and scripts
 jevgate check --watch                             # re-check on save
 jevgate baseline --merge                          # after a --base or path check: accept its findings, keep the rest
+jevgate baseline mark wrong src/api/search.ts:41  # record why an accepted finding was accepted
+jevgate baseline stats                            # each rule's rate of findings marked wrong
 ```
 
 Every command documents itself: `jevgate --help` gives the workflow, exit codes, files and environment, and `jevgate check --help` explains each flag and the JSON report. `-h` prints a short summary.
@@ -151,7 +153,9 @@ jobs:
   ```
 
 - **Forks:** GitHub withholds secrets from pull requests opened from forks, so there the run exits 2 with "No API key configured". Skip the job for forks, or run it only on branches of the repository.
-- **Budgets:** `max_requests` caps the API attempts of one run. Reaching it leaves the run incomplete instead of passing on partial evidence.
+- **Budgets:** `max_requests` caps the API attempts of one run. Reaching it leaves the run incomplete instead of passing on partial evidence. `--dry-run` counts the planned requests the cache already answers, so its estimate covers only what the cache lacks; follow-ups depend on answers and are not counted.
+- **Transient failures:** rate limits, overload and server or edge errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts; a timeout or dropped connection is retried once, since the first send may have run.
+- **Report-only paths:** give tooling its own level with `[[scope]]` (below), so scripts are reported while product code gates.
 
 Other CI systems work the same way: set `TYPESAFE_API_KEY`, keep `.jevgate/cache` between runs, and read the exit code or the JSON report.
 
@@ -170,6 +174,11 @@ maintainability = "review"               # judge, and fail the gate on review fi
 tests = "consider"
 security = "consider"                    # opt-in group, enabled by naming it
 "maintainability/hardcoded-values" = "report"   # judge but never fail; "off" skips it
+
+[[scope]]                                # levels for the files these paths match
+paths = ["scripts/**", "tools/**"]
+fail_on = ["report"]                     # every rule: judge, never fail
+rules = { security = "consider" }        # except these
 ```
 
 | Key | Default | Meaning |
@@ -180,6 +189,7 @@ security = "consider"                    # opt-in group, enabled by naming it
 | `tests` | built-in conventions | Globs of additional test files |
 | `context` | none | Files always sent as related evidence, like `--context` |
 | `rules` | the `default` group | A list selects rules. A table gives each group or rule a level: `review`, `consider`, `uncertain`, `report` (judge, never fail) or `off` |
+| `[[scope]]` | none | `paths` (globs), with `fail_on` for every rule and `rules` for rules or groups, as above; `off` is not accepted (use `upload_deny`). The last scope that matches a file and addresses a rule wins; flags win over scopes |
 | `fail_on` | `["review"]` | The level for rules without their own, like `--fail-on` |
 | `include_tests` | `false` | Judge tests, like `--include-tests` |
 | `model` | `jev-1.13.0` | TypeSafe model; a pinned version keeps results repeatable |
@@ -200,7 +210,7 @@ Rules are named by ID (`maintainability/shared-logic`), key (`shared_logic`) or 
 | `jsonl` | One compact report per line; one per evaluation with `--watch` |
 | `github` | GitHub Actions annotations and job summary, then the agent text |
 
-Findings are `review` (act on it), `consider` (worth a look) or `note` (optional, shown with `--verbose`, never failing the gate). A file whose answers stay undecided is `uncertain`, and one that cannot be judged without more evidence is `needs-context`; neither is hidden or counted as clear.
+Findings are `review` (act on it), `consider` (worth a look) or `note` (optional, shown with `--verbose`, never failing the gate). A file whose answers stay undecided is `uncertain`, and one that cannot be judged without more evidence is `needs-context`; neither is hidden or counted as clear. A finding's message shows the probability that set its level; a note shows none, and the JSON report keeps every raw value. Finished plans that share a directory are one finding. A hardcoded-value finding that cannot name its value is one level lower.
 
 | Exit code | Meaning |
 |---|---|
@@ -209,6 +219,8 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 | 2 | Run incomplete, invalid configuration or invalid usage |
 
 `--fail-on review|consider|uncertain|none` sets what fails the gate; `--fail-on security=consider` sets it for one group or rule. Baselined findings and notes never fail it.
+
+`jevgate baseline` can record why each finding was accepted: `intended` (right, and meant to be so), `later` (right, to fix later) or `wrong` (mistaken), with `--reason` or `jevgate baseline mark`. Reasons survive later rewrites of the baseline, and `jevgate baseline stats` reports each rule's share of findings marked wrong: labels from daily use, not the model's own probabilities.
 
 ## How it works
 
@@ -229,7 +241,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 ## Limits
 
-- **Languages:** Rust, Python, JavaScript and TypeScript. The access-control rule reads SQL files and the workflow rule reads `.github/workflows`. Other files are listed as skipped, with the reason.
+- **Languages:** Rust, Python, JavaScript and TypeScript. The access-control rule reads SQL files and SpacetimeDB TypeScript modules (files that import `spacetimedb/server`; Rust modules are not read), and the workflow rule reads `.github/workflows`. Other files are listed as skipped, with the reason.
 - **Security scope:** one function plus at most one hop of callers. This is not whole-program data-flow analysis. Access control reads the final state of policies, SECURITY DEFINER functions and grants across a project's SQL files in path order; with `--base`, unchanged migrations are read for that state but not judged. It does not judge application-level authorization or dynamic SQL inside database functions.
 - **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates. Code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
