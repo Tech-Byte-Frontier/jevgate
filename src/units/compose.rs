@@ -321,15 +321,20 @@ fn security(rule: &str) -> bool {
     catalog::SECURITY.contains(&rule)
 }
 
-/// A security unit's first-pass and trace answers, with a decisive recheck
-/// of the origin in place of the traced one.
+/// A security unit's first-pass and trace answers, with each decisive
+/// recheck answer (the origin or a check, seen with callers) in place of the
+/// traced one.
 fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'a> {
     let mut merged = answers(judgments, &unit.id, Pass::First);
     merged.extend(answers(judgments, &unit.id, Pass::Trace));
-    if let Some(origin) = answers(judgments, &unit.id, Pass::Recheck).get("origin")
-        && origin_outcome(origin).decisive()
-    {
-        merged.insert("origin", origin);
+    for (question, answer) in answers(judgments, &unit.id, Pass::Recheck) {
+        let outcome = match question {
+            "origin" => origin_outcome(answer),
+            _ => noul(answer),
+        };
+        if outcome.decisive() {
+            merged.insert(question, answer);
+        }
     }
     merged
 }

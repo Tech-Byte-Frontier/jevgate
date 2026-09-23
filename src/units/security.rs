@@ -296,7 +296,9 @@ fn trace(
     file.request("trace", state, questions)
 }
 
-/// The origin question again with the functions that call it.
+/// The origin question and the injection checks again, with the functions
+/// that call it: callers show both where values come from and whether the
+/// paths or text they pass are the program's own.
 fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(Value, Asked)> {
     if subject.callers.is_empty() {
         return None;
@@ -311,6 +313,16 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
         "origin",
         Pass::Recheck,
     );
+    for check in &questions::UNHANDLED {
+        questions.ask(
+            check.id.into(),
+            check.with_callers(&code),
+            id,
+            INJECTION,
+            check.id,
+            Pass::Recheck,
+        );
+    }
     let state = json!({
         "file": file.file_state(),
         subject.kind: {"name": subject.name, "source": subject.source},

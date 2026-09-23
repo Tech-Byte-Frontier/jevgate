@@ -861,6 +861,33 @@ fn a_parameter_origin_is_a_consider_that_callers_can_settle() {
 }
 
 #[test]
+fn a_check_left_undecided_is_decided_again_with_callers() {
+    let caller = format!(
+        "{QUERY}\nfn handler(conn: &Connection, request: &Request) -> Result<Row> {{\n    find(conn, &request.query[\"name\"])\n}}\n"
+    );
+    let (project, options) = security_project(&caller);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("resource", noul_at(0.95)),
+        ("path", noul_at(0.5)),
+        ("origin", spread(0.0, 0.9, 0.1)),
+    ];
+    eval.recheck_level = Some(2);
+    let report = run(&project, &options, &mut eval);
+    let finding = report.files[0]
+        .findings
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("find") && f.rule == "security/injection")
+        .expect("the recheck decides the path check and the origin");
+    assert_eq!(
+        finding.strength,
+        Strength::Review,
+        "undecided without the recheck"
+    );
+    assert!(finding.category.is_some());
+}
+
+#[test]
 fn a_parameter_in_a_path_or_url_is_a_note_until_callers_show_another_party() {
     let (project, options) = security_project(QUERY);
     let mut eval = scripted(0);
