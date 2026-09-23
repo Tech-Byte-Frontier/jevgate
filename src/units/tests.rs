@@ -727,6 +727,7 @@ fn undecided_units_are_listed_with_the_questions_left_undecided() {
             unit: "borderline".into(),
             line: 1,
             questions: vec!["splitting".into()],
+            values: Vec::new(),
         }]
     );
     options.refresh = true;
@@ -736,4 +737,19 @@ fn undecided_units_are_listed_with_the_questions_left_undecided() {
             .undecided
             .is_empty()
     );
+}
+
+#[test]
+fn undecided_hardcoded_units_name_their_few_candidate_values() {
+    let (project, options) = hardcoded_project();
+    let report = run(&project, &options, &mut scripted(3));
+    let undecided = &report.files[0].dimensions["hardcoded_values"].undecided;
+    let connect = undecided.iter().find(|u| u.unit == "connect").unwrap();
+    assert_eq!(connect.values, ["\"db.internal:5432\"", "30_000"]);
+    assert_eq!(connect.questions.len(), 3);
+    let constants = undecided
+        .iter()
+        .find(|u| u.unit == "module constants")
+        .unwrap();
+    assert_eq!(constants.values, ["\"eu-west-1\""]);
 }

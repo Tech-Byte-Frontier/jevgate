@@ -38,7 +38,9 @@ pub(super) fn plan(
             quote: None,
             lines: unit.lines(),
             identity: identity(&[&unit.name, &compact(source)]),
-            detail: Detail::Values,
+            detail: Detail::Values {
+                values: unit.literals.iter().map(|l| l.text.clone()).collect(),
+            },
             recheck: None,
         });
         let values: Vec<&str> = unit.literals.iter().map(|l| l.text.as_str()).collect();
@@ -165,7 +167,9 @@ fn plan_constants(
         quote: None,
         lines: constants.iter().map(|c| c.end_line + 1 - c.line).sum(),
         identity: identity(&names),
-        detail: Detail::Constants,
+        detail: Detail::Constants {
+            values: constants.iter().flat_map(|c| c.values.clone()).collect(),
+        },
         recheck: None,
     });
     if fits {

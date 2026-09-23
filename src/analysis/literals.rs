@@ -108,6 +108,9 @@ fn eligible(kind: &str, value: &str) -> bool {
     content.trim().chars().count() > 1 && !single_escape(content)
 }
 
+/// The longest Unicode escape body: braces around six hex digits.
+const MAX_UNICODE_ESCAPE: usize = "{10FFFF}".len();
+
 /// One character written as an escape, such as `\n`, `\0`, `\x1b` or `\u{0}`.
 fn single_escape(content: &str) -> bool {
     let Some(rest) = content.strip_prefix('\\') else {
@@ -118,9 +121,9 @@ fn single_escape(content: &str) -> bool {
         || rest
             .strip_prefix('x')
             .is_some_and(|d| d.len() == 2 && hex(d))
-        || rest
-            .strip_prefix('u')
-            .is_some_and(|d| hex(d.trim_start_matches('{').trim_end_matches('}')) && d.len() <= 8)
+        || rest.strip_prefix('u').is_some_and(|d| {
+            hex(d.trim_start_matches('{').trim_end_matches('}')) && d.len() <= MAX_UNICODE_ESCAPE
+        })
 }
 
 fn clip(value: &str) -> String {

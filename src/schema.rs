@@ -45,6 +45,9 @@ pub struct Undecided {
     pub unit: String,
     pub line: usize,
     pub questions: Vec<String>,
+    /// The candidate values, for a hardcoded-value unit with only a few.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
