@@ -61,6 +61,18 @@ pub fn function_flatten(path: &str) -> Value {
     )
 }
 
+/// Asked only after the split question raised a finding, to locate it.
+pub fn function_block(blocks: &[String]) -> Value {
+    choose_id(
+        "Which block in `function.blocks` would be most useful as its own named function?",
+        format!(
+            "`function.blocks` holds the body in order. Options are the `id` values in `function.blocks`. {EVIDENCE}"
+        ),
+        blocks,
+        "No single block would be clearer as its own function.",
+    )
+}
+
 pub fn outline_split(source: bool) -> Value {
     score(
         "Would moving some of the members in `members` into a separate module make this file easier to understand and maintain?".into(),
@@ -78,20 +90,24 @@ pub fn outline_split(source: bool) -> Value {
 }
 
 pub fn outline_module(groups: &[String]) -> Value {
+    choose_id(
+        "Which group in `groups` would be most useful as its own module?",
+        "Options are the `id` values in `groups`.".into(),
+        groups,
+        "No group would be more useful as its own module.",
+    )
+}
+
+/// A Choice among evidence ids, or `none`.
+fn choose_id(question: &str, note: String, ids: &[String], none: &str) -> Value {
     let mut criteria = Map::new();
-    for id in groups {
+    for id in ids {
         criteria.insert(id.clone(), Value::Null);
     }
-    criteria.insert(
-        "none".into(),
-        json!("No group would be more useful as its own module."),
-    );
+    criteria.insert("none".into(), json!(none));
     json!({
         "type": "choice",
-        "instructions": {
-            "question": "Which group in `groups` would be most useful as its own module?",
-            "note": "Options are the `id` values in `groups`.",
-        },
+        "instructions": {"question": question, "note": note},
         "criteria": criteria,
     })
 }
@@ -257,6 +273,7 @@ mod tests {
             function_split("functions[0].source", false),
             function_split("functions[0].source", true),
             function_flatten("functions[0].source"),
+            function_block(&["B1".into(), "B2".into()]),
             outline_split(false),
             outline_split(true),
             outline_module(&["G1".into(), "G2".into()]),
@@ -285,20 +302,33 @@ mod tests {
         }
     }
 
+    fn of_type(kind: &str) -> Vec<Value> {
+        all().into_iter().filter(|q| q["type"] == kind).collect()
+    }
+
     #[test]
-    fn criteria_match_each_question_type() {
-        for question in all() {
-            match question["type"].as_str().unwrap() {
-                "score" => assert_eq!(question["criteria"].as_array().unwrap().len(), 3),
-                "noul" => {
-                    assert!(!question["criteria"]["true"].is_null());
-                    assert!(!question["criteria"]["false"].is_null());
-                }
-                "choice" => assert!(question["criteria"].as_object().unwrap().len() >= 3),
-                other => panic!("{other}"),
-            }
+    fn scores_have_three_levels() {
+        for question in of_type("score") {
+            assert_eq!(question["criteria"].as_array().unwrap().len(), 3);
         }
-        assert!(outline_module(&["G1".into()])["criteria"]["G1"].is_null());
+    }
+
+    #[test]
+    fn nouls_describe_both_answers() {
+        for question in of_type("noul") {
+            assert!(!question["criteria"]["true"].is_null());
+            assert!(!question["criteria"]["false"].is_null());
+        }
+    }
+
+    #[test]
+    fn choices_offer_each_id_and_none() {
+        for question in of_type("choice") {
+            assert!(question["criteria"].as_object().unwrap().len() >= 3);
+        }
+        let module = outline_module(&["G1".into()]);
+        assert!(module["criteria"]["G1"].is_null());
+        assert!(module["criteria"]["none"].is_string());
     }
 
     #[test]

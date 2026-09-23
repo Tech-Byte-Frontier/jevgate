@@ -1,9 +1,10 @@
 //! Function simplification: packed function sources. Per function, a Score on
 //! whether splitting would help a reader and, only where the parser finds deep
 //! nesting or a long branch chain, a Score on whether flattening would help.
+//! A split finding is then located with one Choice among the body's blocks.
 use super::{
-    Asked, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Scope, UnitPlan, compact,
-    identity, pack, questions, unique_ids,
+    Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Scope, UnitPlan,
+    compact, identity, pack, questions, unique_ids,
 };
 use crate::{
     analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, schema::Pass,
@@ -33,6 +34,10 @@ pub(super) fn plan(
         let recheck = (presence == Presence::Judged)
             .then(|| recheck(file, unit, &id, scope, budget))
             .flatten();
+        let blocks = blocks(file, unit);
+        let locate = (presence == Presence::Judged && !blocks.is_empty())
+            .then(|| locate(file, unit, &id, &blocks))
+            .filter(|(request, _)| budget.fits(request));
         out.units.push(UnitPlan {
             rule: FUNCTION_SIMPLIFICATION,
             id: id.clone(),
@@ -42,7 +47,7 @@ pub(super) fn plan(
             quote: None,
             lines: unit.lines(),
             identity: identity(&[&unit.name, &compact(source)]),
-            detail: Detail::Function,
+            detail: Detail::Function { blocks, locate },
             recheck,
         });
         if presence == Presence::Judged {
@@ -74,8 +79,13 @@ pub(super) fn plan(
                     asked,
                 });
             } else {
-                out.units[item.index].presence = Presence::NeedsContext;
-                out.units[item.index].recheck = None;
+                let unit = &mut out.units[item.index];
+                unit.presence = Presence::NeedsContext;
+                unit.recheck = None;
+                unit.detail = Detail::Function {
+                    blocks: Vec::new(),
+                    locate: None,
+                };
             }
         }
     }
@@ -162,4 +172,46 @@ fn recheck(
     };
     let (request, asked) = build(file, &[item], Some(callees));
     budget.fits(&request).then_some((request, asked))
+}
+
+fn blocks(file: &FileContext<'_>, unit: &Unit) -> Vec<Block> {
+    unit.blocks
+        .iter()
+        .enumerate()
+        .map(|(i, range)| Block {
+            id: format!("B{}", i + 1),
+            location: file.location(
+                crate::analysis::line_of(file.source, range.start),
+                crate::analysis::line_of(file.source, range.end.saturating_sub(1)),
+                Some(&unit.name),
+            ),
+        })
+        .collect()
+}
+
+/// Which block of one function to extract: its signature and its body as blocks.
+fn locate(file: &FileContext<'_>, unit: &Unit, id: &str, blocks: &[Block]) -> (Value, Asked) {
+    let ids: Vec<String> = blocks.iter().map(|b| b.id.clone()).collect();
+    let mut questions = Map::new();
+    let mut asked = Asked::default();
+    asked.ask(
+        &mut questions,
+        "block".into(),
+        questions::function_block(&ids),
+        id,
+        FUNCTION_SIMPLIFICATION,
+        "block",
+        Pass::Locate,
+    );
+    let state = json!({
+        "file": file.file_state(),
+        "function": {
+            "name": unit.name,
+            "signature": unit.signature,
+            "blocks": ids.iter().zip(&unit.blocks).map(|(id, range)| {
+                json!({"id": id, "source": &file.source[range.clone()]})
+            }).collect::<Vec<_>>(),
+        },
+    });
+    (file.request("locate", state, questions), asked)
 }

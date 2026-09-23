@@ -18,7 +18,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 pub(super) fn plan(
     file: &FileContext<'_>,
     candidates: &Candidates,
-    cases: &[TestCase],
+    cases: &BTreeMap<PathBuf, Vec<TestCase>>,
     test_lines: &[std::ops::Range<usize>],
     hashes: &BTreeMap<PathBuf, String>,
     budget: &TokenBudget,
@@ -50,6 +50,14 @@ pub(super) fn plan(
             && (pair.a.function_source.is_some() || pair.b.function_source.is_some()))
         .then(|| build(file, pair, hashes, &id, true))
         .filter(|(request, _)| budget.fits(request));
+        let in_case = |site: &Site| {
+            cases.get(&site.path).is_some_and(|cases| {
+                cases
+                    .iter()
+                    .any(|case| case.line <= site.start_line && site.end_line <= case.end_line)
+            })
+        };
+        let own_cases = cases.get(file.path).map_or(&[][..], Vec::as_slice);
         out.units.push(UnitPlan {
             rule: SHARED_LOGIC,
             name: match pair.copies.len() {
@@ -79,12 +87,16 @@ pub(super) fn plan(
             detail: Detail::Pair {
                 differences: pair.differences.clone(),
                 within_test: pair.b.path == file.path
-                    && cases.iter().any(|case| {
+                    && own_cases.iter().any(|case| {
                         [&pair.a, &pair.b].iter().all(|site| {
                             case.line <= site.start_line && site.end_line <= case.end_line
                         })
                     }),
                 in_tests: test_lines.iter().any(|l| l.contains(&pair.a.start_line)),
+                in_cases: [&pair.a, &pair.b]
+                    .into_iter()
+                    .chain(&pair.copies)
+                    .all(in_case),
             },
             recheck,
         });

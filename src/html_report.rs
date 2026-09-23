@@ -41,20 +41,6 @@ pub fn render(report: &Report) -> Result<String> {
             })})
         })
         .collect();
-    let mut ranked: Vec<_> = report
-        .files
-        .iter()
-        .flat_map(|file| file.findings.iter().map(move |f| (file, f)))
-        .collect();
-    ranked.sort_by(|a, b| b.1.rank.total_cmp(&a.1.rank));
-    let ranked: Vec<_> = ranked
-        .into_iter()
-        .map(|(file, finding)| {
-            let mut value = json!(finding);
-            value["path"] = json!(file.path);
-            value
-        })
-        .collect();
     let rules: Vec<_> = crate::catalog::rules()
         .into_iter()
         .map(|r| json!({"key":r.key,"id":r.id,"description":r.inspection}))
@@ -64,7 +50,7 @@ pub fn render(report: &Report) -> Result<String> {
         "refresh":report.watcher_pid.is_some(),"model":report.requested_model,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
         "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
-        "errors":report.errors,"deleted":report.deleted_files,"files":files,"findings":ranked,"rules":rules});
+        "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules});
     // Even a filename or analyzer message may contain </script>. Never let data
     // terminate the JSON element, and insert all displayed strings with textContent.
     let data = serde_json::to_string(&data)?
@@ -147,7 +133,12 @@ mod tests {
             report.files[0].error.as_deref().unwrap()
         );
         assert!(decoded.get("initial_requests").is_none());
-        assert!(decoded["findings"].as_array().unwrap().is_empty());
+        assert!(
+            decoded["files"][0]["findings"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(decoded["fail_on"], serde_json::json!(["review"]));
         assert!(!html.contains("id=\"root\""));
         report.paid_input_tokens = 1_000_000;

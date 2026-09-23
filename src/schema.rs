@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub const RUBRIC: &str = "jevgate-units-v1";
 /// Changes how saved answers become a status. Included in the report identity
 /// and not in the judgment cache, so unchanged questions are not sent again.
-pub const COMPOSITION: &str = "unit-composition-v4";
+pub const COMPOSITION: &str = "unit-composition-v5";
 pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -16,6 +16,8 @@ pub enum Status {
     Clear,
     Consider,
     Review,
+    /// Only optional improvements: the code reads well as it is.
+    Note,
     Uncertain,
     NeedsContext,
     Error,
@@ -38,6 +40,9 @@ pub struct UnitCounts {
     pub judged: usize,
     pub review: usize,
     pub consider: usize,
+    /// Optional improvements: shown with `--verbose`, never failing the gate.
+    #[serde(default)]
+    pub note: usize,
     pub clear: usize,
     pub uncertain: usize,
     pub needs_context: usize,
@@ -52,6 +57,8 @@ pub struct UnitCounts {
 pub enum Pass {
     First,
     Recheck,
+    /// A follow-up that locates the part of a finding to act on.
+    Locate,
 }
 
 /// A raw typed answer, kept exactly as the provider returned it.
@@ -96,6 +103,9 @@ pub struct Location {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 pub enum Strength {
+    /// Optional: the code reads well as it is. Hidden unless `--verbose` and
+    /// never counted by the gate.
+    Note,
     Consider,
     Review,
 }
@@ -260,6 +270,7 @@ impl Report {
                     f.status,
                     Status::Clear
                         | Status::Consider
+                        | Status::Note
                         | Status::Review
                         | Status::Uncertain
                         | Status::NeedsContext
@@ -271,7 +282,11 @@ impl Report {
                 f.dimensions.values().all(|d| {
                     matches!(
                         d.status,
-                        Status::Clear | Status::Consider | Status::Review | Status::NotApplicable
+                        Status::Clear
+                            | Status::Note
+                            | Status::Consider
+                            | Status::Review
+                            | Status::NotApplicable
                     )
                 })
             });
@@ -295,6 +310,8 @@ impl Report {
             "needs-context"
         } else if !self.judgments_complete {
             "uncertain"
+        } else if any(Status::Note) {
+            "note"
         } else {
             "clear"
         }

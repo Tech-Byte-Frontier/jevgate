@@ -70,7 +70,7 @@ pub(super) fn plan(
         lines: file.source.lines().count(),
         identity: identity(&member_names),
         detail: Detail::Outline {
-            groups: group_info(file, units, &groups),
+            groups: group_info(file, units, &groups, callers),
         },
         recheck: judged
             .then(|| outline.request(file, Some(application_source(file.source, units, members))))
@@ -208,12 +208,25 @@ fn member_code_lines(source: &str, units: &[Unit], members: &[usize]) -> usize {
         .count()
 }
 
-fn group_info(file: &FileContext<'_>, units: &[Unit], groups: &[groups::Group]) -> Vec<GroupInfo> {
+fn group_info(
+    file: &FileContext<'_>,
+    units: &[Unit],
+    groups: &[groups::Group],
+    callers: &BTreeMap<String, BTreeSet<PathBuf>>,
+) -> Vec<GroupInfo> {
     groups
         .iter()
         .map(|g| GroupInfo {
             id: g.id.clone(),
             names: g.members.iter().map(|&m| units[m].name.clone()).collect(),
+            users: g
+                .members
+                .iter()
+                .filter_map(|&m| callers.get(&units[m].short_name))
+                .flatten()
+                .filter(|path| path.as_path() != file.path)
+                .cloned()
+                .collect(),
             locations: g
                 .members
                 .iter()

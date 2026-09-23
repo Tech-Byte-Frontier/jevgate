@@ -91,9 +91,9 @@ pub fn rules() -> Vec<Rule> {
 
 pub fn rule_version(key: &str) -> &'static str {
     match key {
-        FILE_ORGANIZATION => "14",
-        FUNCTION_SIMPLIFICATION => "12",
-        SHARED_LOGIC => "18",
+        FILE_ORGANIZATION => "15",
+        FUNCTION_SIMPLIFICATION => "13",
+        SHARED_LOGIC => "19",
         TEST_VALUE => "3",
         _ => "1",
     }
@@ -118,6 +118,10 @@ pub fn policy() -> BTreeMap<String, f64> {
         ("review_probability".into(), REVIEW_PROBABILITY),
         ("clear_probability".into(), REVIEW_PROBABILITY),
         ("consider_probability".into(), REVIEW_PROBABILITY),
+        (
+            "consider_leading_probability".into(),
+            crate::policy::LEADING_PROBABILITY,
+        ),
         (
             "location_probability".into(),
             crate::policy::LOCATION_PROBABILITY,

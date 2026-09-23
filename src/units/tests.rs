@@ -7,6 +7,8 @@ use crate::{
     tests::{Mock, Project, answer, args, function, run},
     token_budget::TokenBudget,
 };
+use anyhow::Result;
+use serde_json::json;
 
 fn planned(project: &Project, options: &CheckArgs) -> (Vec<Input>, Plan) {
     let inputs = crate::inventory::collect(options, &project.context(), &[]).unwrap();
@@ -181,14 +183,19 @@ fn only(options: &mut CheckArgs, rule: &str) {
     options.rules = vec![rule.into()];
 }
 
-#[test]
-fn a_review_function_carries_a_located_finding() {
+/// A project whose `lib.rs` holds `source`, checked for function simplification only.
+fn function_rule_project(source: &str) -> (Project, CheckArgs) {
     let project = Project::new();
-    project.write("lib.rs", &function("busy"));
+    project.write("lib.rs", source);
     let mut options = args();
     only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
-    let mut eval = scripted(2);
-    let report = run(&project, &options, &mut eval);
+    (project, options)
+}
+
+#[test]
+fn a_review_function_carries_a_located_finding() {
+    let (project, options) = function_rule_project(&function("busy"));
+    let report = run(&project, &options, &mut scripted(2));
     let file = &report.files[0];
     assert_eq!(file.status, Status::Review);
     assert_eq!(file.findings.len(), 1);
@@ -205,10 +212,7 @@ const NESTED: &str = "fn nested(rows: &[Vec<i32>]) -> i32 {\n    let mut total =
 
 #[test]
 fn flatten_is_asked_only_for_deep_nesting_and_can_raise_a_finding_alone() {
-    let project = Project::new();
-    project.write("lib.rs", &format!("{NESTED}{}", function("flat")));
-    let mut options = args();
-    only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
+    let (project, mut options) = function_rule_project(&format!("{NESTED}{}", function("flat")));
     let mut eval = scripted(0);
     eval.overrides.push(("flatten", spread(0.0, 0.05, 0.95)));
     let report = run(&project, &options, &mut eval);
@@ -228,8 +232,40 @@ fn flatten_is_asked_only_for_deep_nesting_and_can_raise_a_finding_alone() {
     );
     options.refresh = true;
     let report = run(&project, &options, &mut scripted(1));
-    assert_eq!(report.files[0].status, Status::Consider);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Consider);
+    assert_eq!(report.files[0].status, Status::Note);
+    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    assert_eq!(crate::gate::exit_code(&report), 0);
+}
+
+#[test]
+fn a_split_finding_is_located_at_the_chosen_block() {
+    let (project, mut options) = function_rule_project(&function("busy"));
+    let mut eval = scripted(2);
+    eval.overrides.push((
+        "block",
+        json!({"type":"choice","choice":"B2","confidence":0.9,
+            "probabilities":{"B1":0.1,"B2":0.9,"none":0.0}}),
+    ));
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(report.stages["locate"].successful_requests, 1);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(
+        (finding.line, finding.locations[0].end_line),
+        (6, 7),
+        "the second block, then the function"
+    );
+    assert_eq!(finding.locations[1].start_line, 1);
+    assert!(finding.message.contains("Lines 6–7"), "{}", finding.message);
+    assert!(
+        (finding.rank - (1.0 + 8.0f64).ln()).abs() < 1e-9,
+        "rank ignores the block"
+    );
+    options.refresh = true;
+    let report = run(&project, &options, &mut scripted(1));
+    assert!(
+        !report.stages.contains_key("locate"),
+        "a note is not located"
+    );
 }
 
 #[test]
@@ -254,13 +290,12 @@ fn uncertain_units_get_one_recheck_that_replaces_them_only_when_decisive() {
     let file = &report.files[0];
     let dimension = &file.dimensions["function_simplification"];
     assert_eq!((dimension.units.review, dimension.units.uncertain), (1, 1));
-    assert!(file.judgments.iter().any(|j| j.pass == Pass::Recheck));
-    assert!(
-        file.judgments
-            .iter()
-            .any(|j| j.unit == "function:caller" && j.pass == Pass::First)
+    let reviewed: Vec<_> = file.findings.iter().map(|f| f.symbol.as_deref()).collect();
+    assert_eq!(
+        reviewed,
+        [Some("caller")],
+        "the decisive recheck replaced it"
     );
-    assert_eq!(report.stages["recheck"].successful_requests, 1);
     options.refresh = true;
     let mut still = scripted(3);
     let report = run(&project, &options, &mut still);
@@ -360,6 +395,71 @@ fn copies_inside_one_test_raise_at_most_a_consider() {
         "{}",
         finding.message
     );
+    options.refresh = true;
+    let mut related = scripted(1);
+    related
+        .overrides
+        .push(("required", json!({"type":"noul","noul":0.05})));
+    let report = run(&project, &options, &mut related);
+    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+}
+
+#[test]
+fn copies_across_test_cases_are_one_level_lower_than_copies_in_support_code() {
+    let block = "    let text = std::fs::read_to_string(path).unwrap();\n    let value: Value = serde_json::from_str(&text).unwrap();\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n";
+    let second = block.replace("text", "body").replace("value", "parsed");
+    let cases = format!(
+        "#[test]\nfn reads_a() {{\n    let path = \"a.json\";\n{block}    assert_eq!(name, \"a\");\n}}\n\n#[test]\nfn reads_b() {{\n    let path = \"b.json\";\n{second}    assert_eq!(name, \"b\");\n}}\n"
+    );
+    let support = format!(
+        "#[test]\nfn loads() {{\n    assert_eq!(load_a(\"a.json\"), load_b(\"b.json\"));\n}}\n\nfn load_a(path: &str) -> String {{\n{block}    name\n}}\n\nfn load_b(path: &str) -> String {{\n{second}    name\n}}\n"
+    );
+    let mut options = args();
+    options.include_tests = true;
+    only(&mut options, catalog::SHARED_LOGIC);
+    let strength = |source: &str| {
+        let project = Project::new();
+        project.write("tests/cases.rs", source);
+        let mut same = scripted(2);
+        same.overrides
+            .push(("required", json!({"type":"noul","noul":0.05})));
+        let report = run(&project, &options, &mut same);
+        let finding = report.files[0].findings[0].clone();
+        (finding.strength, finding.message)
+    };
+    let (in_cases, message) = strength(&cases);
+    assert_eq!(in_cases, Strength::Consider);
+    assert!(message.contains("across test cases"), "{message}");
+    assert_eq!(strength(&support).0, Strength::Review);
+}
+
+fn group(id: &str, users: &[&str]) -> GroupInfo {
+    GroupInfo {
+        id: id.into(),
+        names: vec![format!("{id}_member")],
+        locations: Vec::new(),
+        users: users.iter().map(PathBuf::from).collect(),
+    }
+}
+
+#[test]
+fn a_split_needs_a_group_with_users_of_its_own_when_users_are_known() {
+    let chosen = |id: &str| crate::schema::Answer::Choice {
+        choice: id.into(),
+        confidence: 1.0,
+        probabilities: BTreeMap::from([(id.to_string(), 1.0)]),
+    };
+    let unknown = [group("G1", &[]), group("G2", &[])];
+    assert!(
+        compose::split_has_users(&unknown, None),
+        "missing evidence stands"
+    );
+    let shared = [group("G1", &["a.rs"]), group("G2", &["a.rs"])];
+    assert!(!compose::split_has_users(&shared, None));
+    let own = [group("G1", &["a.rs", "b.rs"]), group("G2", &["a.rs"])];
+    assert!(compose::split_has_users(&own, None));
+    assert!(compose::split_has_users(&own, Some(&chosen("G1"))));
+    assert!(!compose::split_has_users(&own, Some(&chosen("G2"))));
 }
 
 #[test]
@@ -508,7 +608,12 @@ fn a_function_clears_when_the_split_level_is_ruled_out() {
         run(&project, &options, &mut eval).files[0].status.clone()
     };
     assert_eq!(status(spread(0.5, 0.35, 0.15)), Status::Clear);
-    assert_eq!(status(spread(0.1, 0.5, 0.4)), Status::Consider);
+    assert_eq!(status(spread(0.1, 0.3, 0.6)), Status::Consider);
+    assert_eq!(
+        status(spread(0.1, 0.5, 0.4)),
+        Status::Note,
+        "the middle level says the function reads well as it is"
+    );
     assert_eq!(status(spread(0.35, 0.05, 0.6)), Status::Uncertain);
 }
 
