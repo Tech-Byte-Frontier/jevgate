@@ -53,7 +53,9 @@ functions, one file outline (signatures, callers and groups, no bodies), one clo
 group's representative pair, one test, or one pair of tests. Hardcoded values are
 asked per function with the literal values it uses (0, 1, 2, one-character strings,
 documentation and attributes are skipped) and per file for its module-level
-constants; they get no recheck, because per-value rechecks added false findings. Flattening is asked
+constants; a question left undecided is asked once more whether every value is
+of an acceptable kind (messages, field names, protocol codes, the program's own
+identifiers), which can only clear it. Flattening is asked
 only for control flow nested four deep or four-branch chains. A unit that stays
 uncertain gets one recheck with more evidence (callee signatures, the enclosing
 functions, or the file's source for an outline).
@@ -62,7 +64,9 @@ Code composes the answers at a 0.80 threshold into `review` (top level),
 and ranks findings by probability × ln(1 + lines). Where the middle level says
 the code reads well as it is (splitting, flattening, moving members), a
 `consider` also needs the top level at 0.50 or more; middle mass alone is an
-optional `note`. A split function finding gets one follow-up Choice among the
+optional `note`. For hardcoded values and security, an answer still undecided
+after its follow-up is a `note` when it leans toward the concern (0.50 or more)
+and stays `uncertain` otherwise. A split function finding gets one follow-up Choice among the
 body's top-level blocks, and the chosen block becomes its first location.
 Every `review` carries a finding. Raw answers are kept under `files[].judgments`.
 

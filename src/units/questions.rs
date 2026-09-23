@@ -155,6 +155,35 @@ pub fn hardcoded_special(code: &str) -> Value {
     )
 }
 
+/// Asked only when a hardcoded-value question stayed undecided: whether every
+/// value is one of the kinds its criteria already call acceptable. It can only
+/// clear. Undecided answers were mostly field names, messages, protocol codes
+/// and the program's own identifiers; re-asking whether each value needs a
+/// name added false findings instead.
+pub fn hardcoded_benign(question: &str, values: &str, code: &str) -> Value {
+    match question {
+        "environment" => noul(
+            format!(
+                "Is every value in `{values}` of a kind that stays the same in every environment?"
+            ),
+            "Every value is a message, a format, a field, key or column name, an environment variable name, one of the program's own routes or file names, a path relative to the project, or a public address such as a documentation link.",
+            "At least one value names a specific server, host, port, database, account or credential, or is an absolute path on one machine.",
+        ),
+        "magic" => noul(
+            format!("Does every value in `{values}` explain itself where `{code}` uses it?"),
+            "Every value is a message, a format, a field, key or column name, a name defined by a protocol, grammar or file format, a status or error code, or a number whose meaning a name, parameter, key or comment next to it states.",
+            "At least one number or string is unexplained: a reader must guess what it means or why it has that value.",
+        ),
+        _ => noul(
+            format!(
+                "Is every literal identifier that `{code}` compares against or looks up a name the program defines or a protocol uses?"
+            ),
+            "Each is part of the program's own vocabulary or a protocol, such as a state, command, role, key, service or credential name, not a particular user, account, tenant, customer or record.",
+            "At least one names a particular user, account, tenant, customer or record.",
+        ),
+    }
+}
+
 /// Whether a function places a variable into text another program runs or
 /// renders. Presence only: the trace questions decide whether it is a concern.
 pub fn security_interpreted(code: &str) -> Value {
@@ -241,6 +270,21 @@ pub fn security_origin(code: &str, callers: bool) -> Value {
             "From the function's parameters or other data whose origin this code does not show.",
             "From another party: a network request, message, uploaded file, or a record other users can edit, used as received.",
         ],
+    )
+}
+
+/// Asked in the sensitive-data trace: whether every error message is the
+/// program's own. It can only clear the error-detail signals; functions that
+/// throw the program's typed errors otherwise stayed undecided, since the
+/// response is written elsewhere. A database error attached as the cause is
+/// not message text: the error handler that writes responses is judged itself.
+pub fn security_own_messages(code: &str) -> Value {
+    noul(
+        format!(
+            "Is the message of every error that `{code}` throws, returns or sends text the program writes itself?"
+        ),
+        "Each message is the program's own fixed or formatted text, or it raises no errors. An exception may be attached as the cause of the program's own error.",
+        "An exception's stack trace, a database or library error message, a query or a server path is part of an error message or of a response.",
     )
 }
 
@@ -554,6 +598,9 @@ mod tests {
             hardcoded_environment("functions[0].values", "`functions[0].source`"),
             hardcoded_magic("functions[0].values", "functions[0].source"),
             hardcoded_special("functions[0].source"),
+            hardcoded_benign("environment", "functions[0].values", "functions[0].source"),
+            hardcoded_benign("magic", "functions[0].values", "functions[0].source"),
+            hardcoded_benign("special", "functions[0].values", "functions[0].source"),
             outline_split(false),
             outline_split(true),
             outline_module(&["G1".into(), "G2".into()]),
@@ -578,6 +625,7 @@ mod tests {
             security_origin("function.source", false),
             security_origin("function.source", true),
             security_dev_only("function.source"),
+            security_own_messages("function.source"),
             security_site("logs that value", &["S1".into(), "S2".into()]),
         ];
         all.extend(checks.map(|c| c.body("function.source")));

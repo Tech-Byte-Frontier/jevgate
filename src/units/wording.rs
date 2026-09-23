@@ -1,7 +1,7 @@
 //! The message and recommended action of each kind of finding.
 use super::{
-    Block, GroupInfo,
-    compose::{Answers, Outcome, benefit, levels, noul, origin_outcome},
+    Block, Detail, GroupInfo,
+    outcome::{Answers, Outcome, benefit, levels, noul, origin_outcome, value_signals},
 };
 use crate::catalog;
 use crate::schema::{Answer, Strength};
@@ -217,10 +217,9 @@ pub(super) fn question_label(question: &str) -> &str {
     }
 }
 
-/// One hardcoded-value question, how it composes, and its words.
+/// One hardcoded-value question and its words.
 struct ValueSignal {
     question: &'static str,
-    outcome: fn(&Answer) -> Outcome,
     finding: &'static str,
     note: &'static str,
     action: &'static str,
@@ -229,21 +228,18 @@ struct ValueSignal {
 const VALUE_SIGNALS: [ValueSignal; 3] = [
     ValueSignal {
         question: "environment",
-        outcome: benefit,
         finding: "fixes a value that differs between deployments",
         note: "has a local default that configuration could own",
         action: "Read the value from configuration or the environment",
     },
     ValueSignal {
         question: "magic",
-        outcome: benefit,
         finding: "uses a value whose meaning a reader must guess",
         note: "has a value that could be named, though its context explains it",
         action: "Give the value a descriptive constant name",
     },
     ValueSignal {
         question: "special",
-        outcome: noul,
         finding: "special-cases one specific identity",
         note: "special-cases one specific identity",
         action: "Move the special case into data or configuration",
@@ -251,31 +247,42 @@ const VALUE_SIGNALS: [ValueSignal; 3] = [
 ];
 
 /// Each hardcoded-value signal that reached this strength, in plain words; the
-/// first one's remedy is the action.
+/// first one's remedy is the action. A note from an undecided answer that
+/// leans toward the concern says the answer was split.
 pub(super) fn values_wording(
     name: &str,
+    detail: &Detail,
     strength: Strength,
     p: f64,
     answers: &Answers<'_>,
 ) -> Wording {
-    let reached: Vec<&ValueSignal> = VALUE_SIGNALS
+    let get = |q: &str| answers.get(q).copied();
+    let signals = value_signals(&get, detail, true).unwrap_or_default();
+    let reached: Vec<(&ValueSignal, bool)> = signals
         .iter()
-        .filter(|signal| {
-            answers.get(signal.question).is_some_and(|a| {
-                matches!(
-                    (strength, (signal.outcome)(a)),
-                    (Strength::Review, Outcome::Review(_))
-                        | (Strength::Consider, Outcome::Consider(_))
-                        | (Strength::Note, Outcome::Note(_))
-                )
-            })
+        .filter(|(_, outcome, _)| {
+            matches!(
+                (strength, outcome),
+                (Strength::Review, Outcome::Review(_))
+                    | (Strength::Consider, Outcome::Consider(_))
+                    | (Strength::Note, Outcome::Note(_))
+            )
+        })
+        .filter_map(|(question, _, leaned)| {
+            VALUE_SIGNALS
+                .iter()
+                .find(|s| s.question == *question)
+                .map(|s| (s, *leaned))
         })
         .collect();
-    let reasons: Vec<&str> = reached
+    let reasons: Vec<String> = reached
         .iter()
-        .map(|signal| match strength {
-            Strength::Note => signal.note,
-            _ => signal.finding,
+        .map(|(signal, leaned)| match (strength, leaned) {
+            (Strength::Note, true) => {
+                format!("may {}; the answer was split", base_form(signal.finding))
+            }
+            (Strength::Note, false) => signal.note.to_string(),
+            _ => signal.finding.to_string(),
         })
         .collect();
     let subject = if name == "module constants" {
@@ -292,7 +299,7 @@ pub(super) fn values_wording(
         format!("{subject}{likely} {} ({p:.2}).", reasons.join("; ")),
         match (strength, reached.first()) {
             (Strength::Note, _) => "Optional: name or configure the value if it changes",
-            (_, Some(signal)) => signal.action,
+            (_, Some((signal, _))) => signal.action,
             (_, None) => "Review the values",
         },
     )
@@ -440,6 +447,23 @@ fn found_check(rule: &str, answers: &Answers<'_>) -> &'static str {
             _ => None,
         })
         .max_by(|a, b| a.1.total_cmp(&b.1))
+        .or_else(|| {
+            // A note from a leaning check names the kind it leaned toward.
+            super::security::checks(rule)
+                .iter()
+                .filter_map(|check| match answers.get(check.id) {
+                    Some(Answer::Noul { noul })
+                        if crate::policy::probability_at_least(
+                            *noul,
+                            crate::policy::LEADING_PROBABILITY,
+                        ) =>
+                    {
+                        Some((check.id, *noul))
+                    }
+                    _ => None,
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+        })
         .map_or("", |(id, _)| id)
 }
 
@@ -457,12 +481,106 @@ pub(super) fn security_wording(
         format!("`{name}`")
     };
     let kind = found_check(rule, answers);
-    let find = |table: &'static [(&str, &str, &str, &str)]| {
-        table
-            .iter()
-            .find(|(id, ..)| *id == kind)
-            .unwrap_or(table.last().unwrap())
+    match rule {
+        catalog::INJECTION => injection_wording(&subject, kind, strength, p, answers),
+        catalog::SENSITIVE_DATA => {
+            let (what, category, action) = exposure_kind(answers);
+            exposure_wording(&subject, (what, category, action), strength, p, answers)
+        }
+        _ => {
+            let (_, what, category, action) = kind_row(&SETTINGS, kind);
+            exposure_wording(&subject, (what, category, action), strength, p, answers)
+        }
+    }
+}
+
+/// The row of a kind table for the check that found the concern; the last
+/// row is the general case.
+fn kind_row(
+    table: &'static [(&'static str, &'static str, &'static str, &'static str)],
+    kind: &str,
+) -> &'static (&'static str, &'static str, &'static str, &'static str) {
+    table
+        .iter()
+        .find(|(id, ..)| *id == kind)
+        .unwrap_or(table.last().unwrap())
+}
+
+fn injection_wording(
+    subject: &str,
+    kind: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> (Wording, String) {
+    let (_, noun, category, action) = kind_row(&INJECTIONS, kind);
+    let outside = matches!(
+        answers.get("origin").map(|a| origin_outcome(a)),
+        Some(Outcome::Review(_))
+    );
+    let message = match (strength, outside) {
+        (Strength::Review, _) => format!(
+            "{subject} places values from another party into {noun} without binding, escaping or checking them ({p:.2})."
+        ),
+        (Strength::Consider, true) => format!(
+            "{subject} places values from another party into {noun}; they may not be bound, escaped or checked ({p:.2})."
+        ),
+        (Strength::Consider, false) => format!(
+            "{subject} places its parameters into {noun} without binding, escaping or checking them; a caller passing outside input would make it exploitable ({p:.2})."
+        ),
+        (Strength::Note, true) => format!(
+            "{subject} places values from another party into {noun}, but no check found one placed unhandled ({p:.2})."
+        ),
+        (Strength::Note, false) => format!(
+            "{subject} places a parameter into {noun}; it may already be bound or checked, or its callers may pass only the program's own values ({p:.2})."
+        ),
     };
+    let action = if strength == Strength::Note {
+        "Optional: bind or check the value where it enters"
+    } else {
+        action
+    };
+    ((message, action), category.to_string())
+}
+
+/// Logging or error details, whichever signal is strongest.
+fn exposure_kind(answers: &Answers<'_>) -> (&'static str, &'static str, &'static str) {
+    let strongest = |questions: &[&str]| {
+        questions
+            .iter()
+            .filter_map(|q| match answers.get(q) {
+                Some(Answer::Noul { noul }) => Some(*noul),
+                _ => None,
+            })
+            .fold(0.0, f64::max)
+    };
+    if strongest(&["logs_secret", "logs_object_secret"])
+        >= strongest(&["error_details", "exception_to_client"])
+    {
+        (
+            "writes a password, token, key or personal data to a log",
+            "CWE-532 sensitive data in logs",
+            "Log an identifier instead of the secret or personal value",
+        )
+    } else {
+        (
+            "sends internal error details to a remote client",
+            "CWE-209 error details exposed",
+            "Return a generic message and keep the details in server logs",
+        )
+    }
+}
+
+/// A logged secret, exposed details or weak setting: one level lower and so
+/// marked when it runs only in development; a note comes from an answer that
+/// leaned toward the concern without deciding it.
+fn exposure_wording(
+    subject: &str,
+    (what, category, action): (&str, &'static str, &'static str),
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> (Wording, String) {
     let development = matches!(
         answers.get("dev_only").map(|a| noul(a)),
         Some(Outcome::Review(_))
@@ -472,78 +590,57 @@ pub(super) fn security_wording(
     } else {
         ""
     };
-    let likely = if strength == Strength::Consider {
-        " likely"
-    } else {
-        ""
+    let message = match strength {
+        Strength::Note => format!(
+            "{subject} may {}; the answer was split ({p:.2}).{where_}",
+            base_form(what)
+        ),
+        Strength::Consider => format!("{subject} likely {what} ({p:.2}).{where_}"),
+        Strength::Review => format!("{subject} {what} ({p:.2}).{where_}"),
     };
-    match rule {
-        catalog::INJECTION => {
-            let (_, noun, category, action) = find(&INJECTIONS);
-            let outside = matches!(
-                answers.get("origin").map(|a| origin_outcome(a)),
-                Some(Outcome::Review(_))
-            );
-            let message = match (strength, outside) {
-                (Strength::Review, _) => format!(
-                    "{subject} places values from another party into {noun} without binding, escaping or checking them ({p:.2})."
-                ),
-                (Strength::Consider, true) => format!(
-                    "{subject} places values from another party into {noun}; they may not be bound, escaped or checked ({p:.2})."
-                ),
-                (Strength::Consider, false) => format!(
-                    "{subject} places its parameters into {noun} without binding, escaping or checking them; a caller passing outside input would make it exploitable ({p:.2})."
-                ),
-                (Strength::Note, true) => format!(
-                    "{subject} places values from another party into {noun}, but no check found one placed unhandled ({p:.2})."
-                ),
-                (Strength::Note, false) => format!(
-                    "{subject} places a parameter into {noun}; it may already be bound or checked, or its callers may pass only the program's own values ({p:.2})."
-                ),
-            };
-            let action = if strength == Strength::Note {
-                "Optional: bind or check the value where it enters"
-            } else {
-                action
-            };
-            ((message, action), category.to_string())
-        }
-        catalog::SENSITIVE_DATA => {
-            let logs = ["logs_secret", "logs_object_secret"].iter().any(|q| {
-                answers
-                    .get(q)
-                    .is_some_and(|a| matches!(noul(a), Outcome::Review(_)))
-            });
-            let (what, category, action) = if logs {
-                (
-                    "writes a password, token, key or personal data to a log",
-                    "CWE-532 sensitive data in logs",
-                    "Log an identifier instead of the secret or personal value",
-                )
-            } else {
-                (
-                    "sends internal error details to a remote client",
-                    "CWE-209 error details exposed",
-                    "Return a generic message and keep the details in server logs",
-                )
-            };
+    ((message, action), category.to_string())
+}
+
+/// A phrase whose first word is a present-tense verb, after "may":
+/// "sends details" becomes "send details", "hashes passwords" "hash passwords".
+fn base_form(phrase: &str) -> String {
+    let (verb, rest) = phrase.split_once(' ').unwrap_or((phrase, ""));
+    let base = ["shes", "ches", "sses", "xes"]
+        .iter()
+        .find(|ending| verb.ends_with(*ending))
+        .map_or_else(
+            || verb.strip_suffix('s').unwrap_or(verb),
+            |_| &verb[..verb.len() - 2],
+        );
+    if rest.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base} {rest}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn verbs_after_may_take_their_base_form() {
+        for (phrase, expected) in [
             (
-                (
-                    format!("{subject}{likely} {what} ({p:.2}).{where_}"),
-                    action,
-                ),
-                category.to_string(),
-            )
-        }
-        _ => {
-            let (_, what, category, action) = find(&SETTINGS);
+                "sends internal error details",
+                "send internal error details",
+            ),
+            ("hashes passwords", "hash passwords"),
             (
-                (
-                    format!("{subject}{likely} {what} ({p:.2}).{where_}"),
-                    *action,
-                ),
-                category.to_string(),
-            )
+                "chooses a weak security setting",
+                "choose a weak security setting",
+            ),
+            ("fixes a value", "fix a value"),
+            ("uses a value", "use a value"),
+            (
+                "special-cases one specific identity",
+                "special-case one specific identity",
+            ),
+        ] {
+            assert_eq!(super::base_form(phrase), expected);
         }
     }
 }

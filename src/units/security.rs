@@ -285,6 +285,9 @@ fn trace(
     } else {
         ask("dev_only", questions::security_dev_only(&code));
     }
+    if rule == SENSITIVE_DATA {
+        ask("own_messages", questions::security_own_messages(&code));
+    }
     for check in checks(rule) {
         ask(check.id, check.body(&code));
     }
