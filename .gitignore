@@ -27,3 +27,4 @@ GEMINI.md
 /docs/*
 !/docs/classification-cascade.md
 *.log
+/video/

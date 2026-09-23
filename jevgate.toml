@@ -1,3 +1,4 @@
 # The report renderer's escaping test holds an XSS string that the provider's
 # edge firewall blocks; it is reviewed locally, not uploaded.
-upload_deny = ["src/html_report.rs"]
+# The promo video under video/ is local only and never judged.
+upload_deny = ["src/html_report.rs", "video/**"]
