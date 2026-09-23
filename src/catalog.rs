@@ -30,10 +30,10 @@ pub fn rules() -> Vec<Rule> {
             id: "maintainability/file-organization",
             key: FILE_ORGANIZATION,
             version: rule_version(FILE_ORGANIZATION),
-            scope: "application files with two or more members",
-            unit: "file outline: member signatures and groups, no bodies",
-            inspection: "Do the file's members serve one purpose, or groups with separate purposes that could be their own modules?",
-            acceptable_example: "Steps and helpers of one job kept together",
+            scope: "application files with two or more members and 100 or more lines of member code",
+            unit: "file outline: member signatures, callers that import the file, and groups; no bodies",
+            inspection: "Would moving some members into a separate module make the file easier to understand and maintain?",
+            acceptable_example: "One feature, one type and its helpers, or one set of related utilities",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,
@@ -44,8 +44,8 @@ pub fn rules() -> Vec<Rule> {
             version: rule_version(FUNCTION_SIMPLIFICATION),
             scope: "functions and methods with bodies of five or more lines",
             unit: "one function's source",
-            inspection: "Does the function perform two or more substantial tasks, or could its nesting or branching be flattened?",
-            acceptable_example: "One task, with every step serving it",
+            inspection: "Would splitting the function into named functions make it easier to understand? For control flow nested four deep or four-branch chains: would flattening it help?",
+            acceptable_example: "One job whose steps belong together or already call named functions",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,
@@ -55,7 +55,7 @@ pub fn rules() -> Vec<Rule> {
             key: SHARED_LOGIC,
             version: rule_version(SHARED_LOGIC),
             scope: "renamed or exact copies of two or more statements across selected files and explicit context",
-            unit: "one candidate pair with its renamed names and values",
+            unit: "one representative pair per clone group, with its renamed names and values",
             inspection: "Do the two sites perform the same steps for the same purpose, so one shared implementation would serve both?",
             acceptable_example: "Different work that only looks alike, or repetition the behavior requires",
             requires_tests: false,
@@ -91,10 +91,10 @@ pub fn rules() -> Vec<Rule> {
 
 pub fn rule_version(key: &str) -> &'static str {
     match key {
-        FILE_ORGANIZATION => "13",
-        FUNCTION_SIMPLIFICATION => "11",
-        SHARED_LOGIC => "17",
-        TEST_VALUE => "2",
+        FILE_ORGANIZATION => "14",
+        FUNCTION_SIMPLIFICATION => "12",
+        SHARED_LOGIC => "18",
+        TEST_VALUE => "3",
         _ => "1",
     }
 }
@@ -129,6 +129,22 @@ pub fn policy() -> BTreeMap<String, f64> {
         (
             "min_clone_bytes".into(),
             crate::analysis::clones::MIN_BYTES as f64,
+        ),
+        (
+            "min_clone_statements".into(),
+            crate::analysis::clones::MIN_CLONE_STATEMENTS as f64,
+        ),
+        (
+            "min_file_lines".into(),
+            crate::units::outline::MIN_FILE_LINES as f64,
+        ),
+        (
+            "deep_nesting".into(),
+            crate::analysis::units::DEEP_NESTING as f64,
+        ),
+        (
+            "long_branch_chain".into(),
+            crate::analysis::units::LONG_CHAIN as f64,
         ),
     ])
 }

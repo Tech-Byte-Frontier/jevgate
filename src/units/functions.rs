@@ -1,9 +1,9 @@
-//! Function simplification: packed function sources. Per function, a task Score
-//! that can raise a review, a one-job Score that can clear, a flatten Noul and a
-//! speculative task-kind Choice.
+//! Function simplification: packed function sources. Per function, a Score on
+//! whether splitting would help a reader and, only where the parser finds deep
+//! nesting or a long branch chain, a Score on whether flattening would help.
 use super::{
-    Asked, Detail, FileContext, FilePlan, Planned, Presence, Scope, UnitPlan, compact, identity,
-    pack, questions, unique_ids,
+    Asked, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Scope, UnitPlan, compact,
+    identity, pack, questions, unique_ids,
 };
 use crate::{
     analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, requests::TokenBudget, schema::Pass,
@@ -45,14 +45,15 @@ pub(super) fn plan(
             recheck,
         });
         if presence == Presence::Judged {
-            judged.push((
-                out.units.len() - 1,
+            judged.push(Item {
+                index: out.units.len() - 1,
                 id,
-                json!({"name": unit.name, "source": source}),
-            ));
+                nested: unit.deeply_nested(),
+                state: json!({"name": unit.name, "source": source}),
+            });
         }
     }
-    for group in pack(judged, |(_, _, item)| item) {
+    for group in pack(judged, PACK_ITEMS, |item| &item.state) {
         let (request, asked) = build(file, &group, None);
         if budget.fits(&request) {
             requests.push(Planned {
@@ -72,18 +73,23 @@ pub(super) fn plan(
                     asked,
                 });
             } else {
-                out.units[item.0].presence = Presence::NeedsContext;
-                out.units[item.0].recheck = None;
+                out.units[item.index].presence = Presence::NeedsContext;
+                out.units[item.index].recheck = None;
             }
         }
     }
 }
 
-fn build(
-    file: &FileContext<'_>,
-    items: &[(usize, String, Value)],
-    callees: Option<Vec<Value>>,
-) -> (Value, Asked) {
+#[derive(Clone)]
+struct Item {
+    index: usize,
+    id: String,
+    /// Deep nesting or a long branch chain: flattening is also asked.
+    nested: bool,
+    state: Value,
+}
+
+fn build(file: &FileContext<'_>, items: &[Item], callees: Option<Vec<Value>>) -> (Value, Asked) {
     let pass = if callees.is_some() {
         Pass::Recheck
     } else {
@@ -91,22 +97,18 @@ fn build(
     };
     let mut questions = Map::new();
     let mut asked = Asked::default();
-    for (index, (_, id, _)) in items.iter().enumerate() {
+    for (index, item) in items.iter().enumerate() {
         let path = format!("functions[{index}].source");
-        for (question, body) in [
-            ("tasks", questions::function_tasks(&path, callees.is_some())),
-            (
-                "one_job",
-                questions::function_one_job(&path, callees.is_some()),
-            ),
-            ("flatten", questions::function_flatten(&path)),
-            ("task_kind", questions::function_task_kind(&path)),
-        ] {
+        let mut asked_here = vec![("split", questions::function_split(&path, callees.is_some()))];
+        if item.nested {
+            asked_here.push(("flatten", questions::function_flatten(&path)));
+        }
+        for (question, body) in asked_here {
             asked.ask(
                 &mut questions,
                 format!("f{index}_{question}"),
                 body,
-                id,
+                &item.id,
                 FUNCTION_SIMPLIFICATION,
                 question,
                 pass,
@@ -115,7 +117,7 @@ fn build(
     }
     let mut state = json!({
         "file": file.file_state(),
-        "functions": items.iter().map(|(_, _, item)| item.clone()).collect::<Vec<_>>(),
+        "functions": items.iter().map(|item| item.state.clone()).collect::<Vec<_>>(),
     });
     if let Some(callees) = callees {
         state["callees"] = json!(callees);
@@ -151,11 +153,12 @@ fn recheck(
     if callees.is_empty() {
         return None;
     }
-    let item = (
-        0,
-        id.to_string(),
-        json!({"name": unit.name, "source": unit.source(file.source)}),
-    );
+    let item = Item {
+        index: 0,
+        id: id.to_string(),
+        nested: unit.deeply_nested(),
+        state: json!({"name": unit.name, "source": unit.source(file.source)}),
+    };
     let (request, asked) = build(file, &[item], Some(callees));
     budget.fits(&request).then_some((request, asked))
 }

@@ -75,7 +75,7 @@ fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<Test
             return;
         }
         "class_definition" => {
-            let test_class = name(node, source).starts_with("Test");
+            let test_class = crate::file_kind::python_test_class(node, source);
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
                 visit(child, source, test_class, found);

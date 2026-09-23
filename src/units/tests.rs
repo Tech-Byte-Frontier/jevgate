@@ -34,7 +34,8 @@ fn numbers_in(value: &Value) -> bool {
 fn requests_use_literal_paths_and_upload_no_numbers_hashes_or_local_metadata() {
     let project = Project::new();
     let mut source = String::new();
-    for i in 0..10 {
+    // Fourteen functions: two function packs, and enough lines for an outline.
+    for i in 0..14 {
         source.push_str(&function(&format!("f{i}")));
     }
     project.write("lib.rs", &source);
@@ -45,7 +46,11 @@ fn requests_use_literal_paths_and_upload_no_numbers_hashes_or_local_metadata() {
         .iter()
         .filter(|p| p.request["jevgate"]["stage"] == "functions")
         .collect();
-    assert_eq!(functions.len(), 2, "ten functions pack into two requests");
+    assert_eq!(
+        functions.len(),
+        2,
+        "fourteen functions pack into two requests"
+    );
     assert_eq!(
         functions[0].request["state"]["functions"]
             .as_array()
@@ -111,7 +116,8 @@ struct Scripted {
 impl crate::transport::Evaluator for Scripted {
     fn evaluate(&mut self, request: &Value) -> Result<Value> {
         let recheck = request["state"]["callees"].is_array()
-            || request["state"]["site_a"]["function_source"].is_string();
+            || request["state"]["site_a"]["function_source"].is_string()
+            || request["state"]["file"]["source"].is_string();
         self.stages
             .push(if recheck { "recheck" } else { "first" }.into());
         let level = if recheck {
@@ -147,19 +153,12 @@ fn only(options: &mut CheckArgs, rule: &str) {
 }
 
 #[test]
-fn a_review_function_always_carries_a_finding_even_without_a_task_kind() {
-    // A decisive review whose follow-up location is not decisive must never pass.
+fn a_review_function_carries_a_located_finding() {
     let project = Project::new();
     project.write("lib.rs", &function("busy"));
     let mut options = args();
     only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
     let mut eval = scripted(2);
-    eval.overrides.push((
-        "task_kind",
-        json!({"type":"choice","choice":"none","confidence":0.4,
-            "probabilities":{"validation":0.1,"parsing":0.1,"transformation":0.1,"io":0.1,
-            "formatting":0.1,"error_handling":0.1,"setup_cleanup":0.1,"coordination":0.1,"none":0.2}}),
-    ));
     let report = run(&project, &options, &mut eval);
     let file = &report.files[0];
     assert_eq!(file.status, Status::Review);
@@ -168,22 +167,36 @@ fn a_review_function_always_carries_a_finding_even_without_a_task_kind() {
     assert_eq!(finding.strength, Strength::Review);
     assert_eq!(finding.rule, "maintainability/function-simplification");
     assert_eq!(finding.locations[0].symbol.as_deref(), Some("busy"));
-    assert!(finding.message.contains("two or more substantial tasks"));
+    assert!(finding.message.contains("mixes separate jobs"));
     assert!((finding.rank - 1.0 * (1.0 + 8.0f64).ln()).abs() < 1e-9);
     assert_eq!(crate::gate::exit_code(&report), 1);
 }
 
+const NESTED: &str = "fn nested(rows: &[Vec<i32>]) -> i32 {\n    let mut total = 0;\n    for row in rows {\n        if !row.is_empty() {\n            for value in row {\n                if *value > 0 {\n                    total += value;\n                }\n            }\n        }\n    }\n    total\n}\n";
+
 #[test]
-fn flatten_alone_is_a_review_and_the_middle_level_is_consider() {
+fn flatten_is_asked_only_for_deep_nesting_and_can_raise_a_finding_alone() {
     let project = Project::new();
-    project.write("lib.rs", &function("nested"));
+    project.write("lib.rs", &format!("{NESTED}{}", function("flat")));
     let mut options = args();
     only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
     let mut eval = scripted(0);
-    eval.overrides
-        .push(("flatten", json!({"type":"noul","noul":0.9})));
+    eval.overrides.push(("flatten", spread(0.0, 0.05, 0.95)));
     let report = run(&project, &options, &mut eval);
-    assert!(report.files[0].findings[0].message.contains("flattened"));
+    let file = &report.files[0];
+    let flatten: Vec<_> = file
+        .judgments
+        .iter()
+        .filter(|j| j.question == "flatten")
+        .map(|j| j.unit.as_str())
+        .collect();
+    assert_eq!(flatten, ["function:nested"]);
+    assert_eq!(file.findings.len(), 1);
+    assert!(
+        file.findings[0]
+            .message
+            .contains("nested or repeated branches")
+    );
     options.refresh = true;
     let report = run(&project, &options, &mut scripted(1));
     assert_eq!(report.files[0].status, Status::Consider);
@@ -231,29 +244,102 @@ fn uncertain_units_get_one_recheck_that_replaces_them_only_when_decisive() {
     assert!(report.files[0].findings.is_empty());
 }
 
+fn two_concerns() -> String {
+    let mut source = String::from("struct Cache { entries: Vec<u8> }\n");
+    for i in 0..7 {
+        source.push_str(&function(&format!("warm{i}")));
+    }
+    source.push_str("struct Page { body: String }\n");
+    for i in 0..7 {
+        source.push_str(&function(&format!("render{i}")));
+    }
+    source
+}
+
 #[test]
 fn file_organization_review_without_a_module_choice_is_a_file_wide_finding() {
     let project = Project::new();
-    project.write(
-        "lib.rs",
-        &format!(
-            "struct Cache {{ entries: Vec<u8> }}\n{}struct Page {{ body: String }}\n{}",
-            function("warm"),
-            function("render")
-        ),
-    );
+    project.write("lib.rs", &two_concerns());
     let mut options = args();
     only(&mut options, catalog::FILE_ORGANIZATION);
     let report = run(&project, &options, &mut scripted(2));
     let file = &report.files[0];
     assert_eq!(file.status, Status::Review);
     let finding = &file.findings[0];
-    assert!(finding.message.contains("separate purposes"));
+    assert!(finding.message.contains("unrelated responsibilities"));
     assert_eq!(finding.locations[0].start_line, 1);
     assert!(finding.symbol.is_none());
 }
 
+#[test]
+fn an_uncertain_outline_is_rechecked_once_with_the_application_source() {
+    let project = Project::new();
+    let source = format!(
+        "{}#[cfg(test)]\nmod tests {{\n    #[test]\n    fn hidden_check() {{\n        assert_eq!(1, 1);\n    }}\n}}\n",
+        two_concerns()
+    );
+    project.write("lib.rs", &source);
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    let mut eval = scripted(3);
+    eval.recheck_level = Some(0);
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(eval.stages, ["first", "recheck"]);
+    assert_eq!(
+        report.files[0].dimensions["file_organization"].status,
+        Status::Clear
+    );
+    let (_, plan) = planned(&project, &options);
+    let (request, _) = plan.files.values().next().unwrap().units[0]
+        .recheck
+        .as_ref()
+        .unwrap();
+    let sent = request["state"]["file"]["source"].as_str().unwrap();
+    assert!(sent.contains("fn warm0") && !sent.contains("hidden_check"));
+}
+
+#[test]
+fn short_files_are_too_small_to_split_and_never_clear() {
+    let project = Project::new();
+    project.write(
+        "lib.rs",
+        &format!("{}{}", function("warm"), function("render")),
+    );
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    let mut mock = Mock::default();
+    let report = run(&project, &options, &mut mock);
+    let dimension = &report.files[0].dimensions["file_organization"];
+    assert_eq!((dimension.units.too_small, mock.calls), (1, 0));
+    assert_eq!(dimension.status, Status::NotApplicable);
+}
+
 const LOAD: &str = "fn load_user(path: &str) -> Result<User> {\n    let text = std::fs::read_to_string(path)?;\n    let value: Value = serde_json::from_str(&text)?;\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    Ok(User { name })\n}\n";
+
+#[test]
+fn copies_inside_one_test_raise_at_most_a_consider() {
+    let project = Project::new();
+    let block = "    let text = std::fs::read_to_string(path).unwrap();\n    let value: Value = serde_json::from_str(&text).unwrap();\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    assert_eq!(name, expected);\n";
+    let second = block.replace("text", "body").replace("value", "parsed");
+    project.write(
+        "tests/cases.rs",
+        &format!("#[test]\nfn reads_names() {{\n    let path = \"a.json\";\n    let expected = \"a\";\n{block}    let path = \"b.json\";\n{second}}}\n"),
+    );
+    let mut options = args();
+    options.include_tests = true;
+    only(&mut options, catalog::SHARED_LOGIC);
+    let mut same = scripted(2);
+    same.overrides
+        .push(("required", json!({"type":"noul","noul":0.05})));
+    let report = run(&project, &options, &mut same);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Consider);
+    assert!(
+        finding.message.contains("inside one test"),
+        "{}",
+        finding.message
+    );
+}
 
 #[test]
 fn duplicate_pairs_across_files_quote_both_sites_and_respect_required_repetition() {
@@ -394,25 +480,20 @@ fn spread(p0: f64, p1: f64, p2: f64) -> Value {
 }
 
 #[test]
-fn the_one_job_score_clears_only_when_the_task_score_does_not_lean_review() {
+fn a_function_clears_when_the_split_level_is_ruled_out() {
     let project = Project::new();
     project.write("lib.rs", &function("borderline"));
     let mut options = args();
-    only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
-    let status = |tasks: Value, options: &CheckArgs| {
-        let mut eval = scripted(0);
-        eval.overrides.push(("tasks", tasks));
-        eval.overrides
-            .push(("flatten", json!({"type":"noul","noul":0.5})));
-        run(&project, options, &mut eval).files[0].status.clone()
-    };
     options.refresh = true;
-    assert_eq!(status(spread(0.5, 0.3, 0.2), &options), Status::Clear);
-    assert_eq!(
-        status(spread(0.35, 0.05, 0.6), &options),
-        Status::Uncertain,
-        "a task Score leaning toward several tasks is never cleared"
-    );
+    only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
+    let status = |split: Value| {
+        let mut eval = scripted(0);
+        eval.overrides.push(("split", split));
+        run(&project, &options, &mut eval).files[0].status.clone()
+    };
+    assert_eq!(status(spread(0.5, 0.35, 0.15)), Status::Clear);
+    assert_eq!(status(spread(0.1, 0.5, 0.4)), Status::Consider);
+    assert_eq!(status(spread(0.35, 0.05, 0.6)), Status::Uncertain);
 }
 
 #[test]

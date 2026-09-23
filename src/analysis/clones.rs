@@ -10,7 +10,10 @@ use std::{
 use tree_sitter::Node;
 
 pub const MIN_BYTES: usize = 120;
+/// Consecutive matching statements that seed a candidate window.
 pub const MIN_STATEMENTS: usize = 2;
+/// Statements a reported copy needs.
+pub const MIN_CLONE_STATEMENTS: usize = 3;
 pub const RUN_CAP: usize = 64;
 pub const FILE_CAP: usize = 8;
 const DIFFERENCES: usize = 12;
@@ -53,8 +56,10 @@ pub struct Pair {
     pub differences: Vec<Difference>,
     /// Non-whitespace bytes of the shorter site.
     pub size: usize,
-    /// Distinct sites that repeat the same normalized statements.
+    /// Distinct sites in this pair's clone group, including `a` and `b`.
     pub occurrences: usize,
+    /// The group's other copies, reported with the judged pair.
+    pub copies: Vec<Site>,
     /// Hash of the normalized statements; stable across renames and moves.
     pub normalized: String,
 }
@@ -177,7 +182,8 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         let span_y = y[0].span.start..y[n - 1].span.end;
         let size = compact(&files[fx].source[span_x.clone()])
             .min(compact(&files[fy].source[span_y.clone()]));
-        if size < MIN_BYTES {
+        // A repeated pair of statements is usually an idiom, such as a call and its check.
+        if n < MIN_CLONE_STATEMENTS || size < MIN_BYTES {
             continue;
         }
         let normalized = crate::schema::hash(
@@ -209,7 +215,8 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
             b,
             differences,
             size,
-            occurrences: 0,
+            occurrences: 2,
+            copies: Vec::new(),
             normalized,
         });
     }
@@ -223,44 +230,11 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
                     || (contains(&q.a, &p.b) && contains(&q.b, &p.a)))
         })
     });
-    let mut sites = BTreeMap::<&str, BTreeSet<(PathBuf, usize)>>::new();
-    for pair in &pairs {
-        let entry = sites.entry(pair.normalized.as_str()).or_default();
-        entry.insert((pair.a.path.clone(), pair.a.span.start));
-        entry.insert((pair.b.path.clone(), pair.b.span.start));
-    }
-    let occurrences: BTreeMap<String, usize> = sites
-        .into_iter()
-        .map(|(key, set)| (key.to_string(), set.len()))
-        .collect();
-    for pair in &mut pairs {
-        pair.occurrences = occurrences[&pair.normalized];
-    }
-    // One representative per repeated site: pair each copy with the first one.
-    let mut first = BTreeMap::<String, (PathBuf, usize)>::new();
-    for pair in &pairs {
-        let key = (pair.a.path.clone(), pair.a.span.start);
-        first
-            .entry(pair.normalized.clone())
-            .and_modify(|current| {
-                if key < *current {
-                    *current = key.clone();
-                }
-            })
-            .or_insert(key);
-    }
+    pairs.sort_by(by_rank);
+    let mut pairs = representatives(pairs);
+    // Groups rank by size times their number of copies.
+    pairs.sort_by(by_rank);
     let mut omitted = BTreeMap::<PathBuf, usize>::new();
-    pairs.retain(|p| {
-        let anchor = &first[&p.normalized];
-        (&p.a.path, p.a.span.start) == (&anchor.0, anchor.1)
-            || (&p.b.path, p.b.span.start) == (&anchor.0, anchor.1)
-    });
-    pairs.sort_by(|p, q| {
-        q.rank()
-            .cmp(&p.rank())
-            .then_with(|| (&p.a.path, p.a.start_line).cmp(&(&q.a.path, q.a.start_line)))
-            .then_with(|| (&p.b.path, p.b.start_line).cmp(&(&q.b.path, q.b.start_line)))
-    });
     let mut per_file = BTreeMap::<PathBuf, usize>::new();
     let mut kept = Vec::new();
     for pair in pairs {
@@ -276,6 +250,82 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         pairs: kept,
         omitted,
     }
+}
+
+fn by_rank(p: &Pair, q: &Pair) -> std::cmp::Ordering {
+    q.rank()
+        .cmp(&p.rank())
+        .then_with(|| (&p.a.path, p.a.start_line).cmp(&(&q.a.path, q.a.start_line)))
+        .then_with(|| (&p.b.path, p.b.start_line).cmp(&(&q.b.path, q.b.start_line)))
+}
+
+fn overlaps(x: &Site, y: &Site) -> bool {
+    x.path == y.path && x.span.start < y.span.end && y.span.start < x.span.end
+}
+
+/// Sites that cover at least half of each other describe the same code.
+fn same_code(x: &Site, y: &Site) -> bool {
+    if x.path != y.path {
+        return false;
+    }
+    let shared = x
+        .span
+        .end
+        .min(y.span.end)
+        .saturating_sub(x.span.start.max(y.span.start));
+    2 * shared >= x.span.len() && 2 * shared >= y.span.len()
+}
+
+/// One judged pair per clone group. Pairs whose sites repeat the same code
+/// (mutual half overlap) are linked; the first pair of each group in rank
+/// order represents it and carries the other copies. Linking on plain overlap
+/// let short idioms inside a larger copy chain unrelated code together.
+fn representatives(pairs: Vec<Pair>) -> Vec<Pair> {
+    let mut parent: Vec<usize> = (0..pairs.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for i in 0..pairs.len() {
+        for j in i + 1..pairs.len() {
+            let (p, q) = (&pairs[i], &pairs[j]);
+            let linked = [&p.a, &p.b]
+                .iter()
+                .any(|x| same_code(x, &q.a) || same_code(x, &q.b));
+            if linked {
+                let (ri, rj) = (root(&mut parent, i), root(&mut parent, j));
+                parent[ri.max(rj)] = ri.min(rj);
+            }
+        }
+    }
+    let mut sites = BTreeMap::<usize, Vec<Site>>::new();
+    for (i, pair) in pairs.iter().enumerate() {
+        let group = sites.entry(root(&mut parent, i)).or_default();
+        for site in [&pair.a, &pair.b] {
+            if !group.iter().any(|known| overlaps(known, site)) {
+                group.push(site.clone());
+            }
+        }
+    }
+    let mut kept = Vec::new();
+    for (i, mut pair) in pairs.into_iter().enumerate() {
+        if root(&mut parent, i) != i {
+            continue;
+        }
+        pair.copies = sites[&i]
+            .iter()
+            .filter(|s| !overlaps(s, &pair.a) && !overlaps(s, &pair.b))
+            .cloned()
+            .collect();
+        pair.copies
+            .sort_by(|x, y| (&x.path, x.start_line).cmp(&(&y.path, y.start_line)));
+        pair.occurrences = 2 + pair.copies.len();
+        kept.push(pair);
+    }
+    kept
 }
 
 fn contains(outer: &Site, inner: &Site) -> bool {
@@ -523,6 +573,27 @@ mod tests {
     }
 
     #[test]
+    fn a_short_idiom_inside_a_larger_copy_forms_its_own_group() {
+        let head = "    let text = std::fs::read_to_string(path).expect(\"reading the configured user file failed\");\n    let value: Value = serde_json::from_str(&text).expect(\"parsing the configured user file failed\");\n    let root = value.as_object().expect(\"the configured user file holds an object\");\n";
+        let tail = "    let name = root[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    let age = root[\"age\"].as_u64().unwrap_or(0).min(150) as u32;\n    let city = root[\"city\"].as_str().unwrap_or(\"unknown\").trim().to_string();\n    let email = root[\"email\"].as_str().unwrap_or(\"\").trim().to_lowercase();\n    Ok(User { name, age, city, email })\n";
+        let full = format!("fn load(path: &str) -> Result<User> {{\n{head}{tail}}}\n");
+        let other = full.replace("fn load", "fn again");
+        let short = format!("fn count(path: &str) -> usize {{\n{head}    root.len()\n}}\n");
+        let found = run(&[
+            ("a.rs", &full, true),
+            ("b.rs", &other, true),
+            ("c.rs", &short, true),
+        ]);
+        let largest = found.pairs.iter().max_by_key(|p| p.size).unwrap();
+        assert_eq!(
+            (largest.a.path.as_path(), largest.b.path.as_path()),
+            (Path::new("a.rs"), Path::new("b.rs"))
+        );
+        assert!(largest.copies.is_empty(), "{:?}", largest.copies);
+        assert_eq!(found.pairs.len(), 2);
+    }
+
+    #[test]
     fn context_only_pairs_are_excluded_but_selected_to_context_pairs_are_kept() {
         let copy = LOAD.replace("load_user", "load_again");
         assert!(
@@ -537,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_copies_in_one_file_count_occurrences_and_keep_one_anchor() {
+    fn repeated_copies_form_one_group_judged_through_one_pair() {
         let three = [
             LOAD,
             &LOAD.replace("load_user", "second"),
@@ -545,13 +616,34 @@ mod tests {
         ]
         .concat();
         let found = run(&[("three.rs", &three, true)]);
-        assert_eq!(found.pairs.len(), 2);
-        assert!(
+        assert_eq!(found.pairs.len(), 1);
+        let pair = &found.pairs[0];
+        assert_eq!((pair.occurrences, pair.a.start_line), (3, 2));
+        assert_eq!(pair.copies.len(), 1);
+        let lines = [pair.b.start_line, pair.copies[0].start_line];
+        assert!(lines.contains(&8) && lines.contains(&14), "{lines:?}");
+
+        // Copies of different lengths still share a group through overlapping sites.
+        let longer = LOAD.replace(
+            "    Ok(User { name })",
+            "    let checked = name.trim().to_string();\n    Ok(User { name: checked })",
+        );
+        let found = run(&[
+            ("a.rs", LOAD, true),
+            ("b.rs", &LOAD.replace("load_user", "other"), true),
+            ("c.rs", &longer.replace("load_user", "third"), true),
+        ]);
+        assert_eq!(
+            found.pairs.len(),
+            1,
+            "{:?}",
             found
                 .pairs
                 .iter()
-                .all(|p| p.occurrences == 3 && p.a.start_line == 2)
+                .map(|p| (&p.a.path, &p.b.path))
+                .collect::<Vec<_>>()
         );
+        assert_eq!(found.pairs[0].occurrences, 3);
         let body = "    total = decimal.Decimal(\"0\")\n    for row in rows:\n        total += row.amount * row.exchange_rate - row.discount_amount\n    return total.quantize(decimal.Decimal(\"0.01\"), rounding=decimal.ROUND_HALF_UP)\n";
         let python = format!(
             "def a(rows):\n{body}\ndef b(items):\n{}",

@@ -7,6 +7,9 @@ use tree_sitter::Node;
 
 /// Bodies with fewer non-brace lines are too small to judge. They are never clear.
 pub const MIN_BODY_LINES: usize = 5;
+/// Control flow nested this deep, or a branch chain this long, is a flattening candidate.
+pub const DEEP_NESTING: usize = 4;
+pub const LONG_CHAIN: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -30,6 +33,10 @@ pub struct Unit {
     pub signature: String,
     pub doc: String,
     pub body_lines: usize,
+    /// Deepest nesting of control flow in the body, and the longest chain of
+    /// `else if`, `elif` or nested conditional-expression branches.
+    pub nesting: usize,
+    pub branch_chain: usize,
     pub calls: BTreeSet<String>,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
@@ -48,6 +55,11 @@ impl Unit {
 
     pub fn too_small(&self) -> bool {
         self.body_lines < MIN_BODY_LINES
+    }
+
+    /// Control flow deep or long enough that flattening it is worth asking about.
+    pub fn deeply_nested(&self) -> bool {
+        self.nesting >= DEEP_NESTING || self.branch_chain >= LONG_CHAIN
     }
 
     pub fn lines(&self) -> usize {
@@ -150,31 +162,31 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         "lexical_declaration" | "variable_declaration" => {
             let mut cursor = node.walk();
             for declarator in node.named_children(&mut cursor) {
-                let value = declarator.child_by_field_name("value");
-                if declarator.kind() == "variable_declarator"
-                    && value.is_some_and(|v| {
-                        matches!(
-                            v.kind(),
-                            "arrow_function" | "function_expression" | "function"
-                        )
-                    })
-                {
-                    let name = declarator
-                        .child_by_field_name("name")
-                        .map(|n| text(n, source).to_string())
-                        .unwrap_or_default();
-                    let value = value.unwrap();
-                    push(
-                        node,
-                        value,
-                        value.child_by_field_name("body"),
-                        &name,
-                        owner,
-                        Kind::Function,
-                        source,
-                        file,
-                    );
+                if declarator.kind() != "variable_declarator" {
+                    continue;
                 }
+                let Some(value) = declarator.child_by_field_name("value") else {
+                    continue;
+                };
+                // `const f = () => …`, or a callback registered through a call such as
+                // `const view = database.view(options, (ctx) => …)` or `memo(forwardRef(…))`.
+                let Some(function) = callback(value, 2) else {
+                    continue;
+                };
+                let name = declarator
+                    .child_by_field_name("name")
+                    .map(|n| text(n, source).to_string())
+                    .unwrap_or_default();
+                push(
+                    node,
+                    value,
+                    function.child_by_field_name("body"),
+                    &name,
+                    owner,
+                    Kind::Function,
+                    source,
+                    file,
+                );
             }
         }
         "struct_item"
@@ -191,6 +203,35 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
             }
         }
         _ => {}
+    }
+}
+
+/// The function a declaration defines: the value itself, or the last function
+/// argument of a call (as in `useCallback(fn, deps)`), looking through up to
+/// `depth` nested calls.
+fn callback(value: Node<'_>, depth: usize) -> Option<Node<'_>> {
+    match value.kind() {
+        "arrow_function" | "function_expression" | "function" => Some(value),
+        "call_expression" if depth > 0 => {
+            let arguments = value.child_by_field_name("arguments")?;
+            let mut cursor = arguments.walk();
+            let arguments: Vec<Node<'_>> = arguments.named_children(&mut cursor).collect();
+            let function = |n: &&Node<'_>| {
+                matches!(
+                    n.kind(),
+                    "arrow_function" | "function_expression" | "function"
+                )
+            };
+            match arguments.iter().rev().find(function) {
+                Some(found) => Some(*found),
+                None => arguments
+                    .iter()
+                    .rev()
+                    .filter(|n| n.kind() == "call_expression")
+                    .find_map(|n| callback(*n, depth - 1)),
+            }
+        }
+        _ => None,
     }
 }
 
@@ -301,10 +342,104 @@ fn push(
         signature,
         doc: doc_line(&source[start..outer.start_byte()], outer, source),
         body_lines: body.map_or(0, |b| body_lines(text(b, source))),
+        nesting: body.map_or(0, |b| control(b).0),
+        branch_chain: body.map_or(0, |b| control(b).1),
         calls: facts.calls,
         refs,
         mentions: facts.idents,
     });
+}
+
+const CONTROL: &[&str] = &[
+    "if_statement",
+    "if_expression",
+    "for_statement",
+    "for_in_statement",
+    "for_expression",
+    "while_statement",
+    "while_expression",
+    "loop_expression",
+    "do_statement",
+    "match_expression",
+    "match_statement",
+    "switch_statement",
+    "try_statement",
+    "with_statement",
+    "conditional_expression",
+    "ternary_expression",
+];
+
+/// Maximum control-flow depth and longest branch chain under `node`. An `if`
+/// that is the `else` branch of another `if` continues its chain instead of nesting.
+fn control(node: Node<'_>) -> (usize, usize) {
+    fn chained(node: Node<'_>) -> bool {
+        let parent = node.parent();
+        match node.kind() {
+            "if_statement" | "if_expression" => parent.is_some_and(|p| {
+                p.kind() == "else_clause"
+                    || (p.kind() == "if_expression"
+                        && p.child_by_field_name("alternative") == Some(node))
+            }),
+            "conditional_expression" | "ternary_expression" => parent.is_some_and(|p| {
+                p.kind() == node.kind() && p.child_by_field_name("alternative") == Some(node)
+            }),
+            _ => false,
+        }
+    }
+    fn chain(node: Node<'_>) -> usize {
+        // Python lists `elif` and `else` clauses as children of one `if_statement`.
+        let clauses = node
+            .named_children(&mut node.walk())
+            .filter(|c| matches!(c.kind(), "elif_clause"))
+            .count();
+        if clauses > 0 {
+            let otherwise = node
+                .named_children(&mut node.walk())
+                .any(|c| c.kind() == "else_clause");
+            return 1 + clauses + usize::from(otherwise);
+        }
+        let mut length = 1;
+        let mut current = node;
+        loop {
+            let alternative = current.child_by_field_name("alternative").map(|a| {
+                if a.kind() == "else_clause" {
+                    a.named_child(0).unwrap_or(a)
+                } else {
+                    a
+                }
+            });
+            match alternative {
+                Some(next) if next.kind() == current.kind() => {
+                    length += 1;
+                    current = next;
+                }
+                Some(_) => return length + 1,
+                None => return length,
+            }
+        }
+    }
+    fn walk(node: Node<'_>, depth: usize, result: &mut (usize, usize)) {
+        let control = CONTROL.contains(&node.kind());
+        let depth = if control && !chained(node) {
+            if matches!(
+                node.kind(),
+                "if_statement" | "if_expression" | "conditional_expression" | "ternary_expression"
+            ) {
+                result.1 = result.1.max(chain(node));
+            }
+            depth + 1
+        } else {
+            depth
+        };
+        result.0 = result.0.max(depth);
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            walk(child, depth, result);
+        }
+    }
+    let mut result = (0, 0);
+    walk(node, 0, &mut result);
+    result
 }
 
 /// Include documentation, comments and attributes directly above the definition.
@@ -399,6 +534,15 @@ impl Facts {
                     self.calls.insert(name);
                 }
             }
+            "new_expression" => {
+                if let Some(name) = node
+                    .child_by_field_name("constructor")
+                    .and_then(|c| callee_name(c, source))
+                {
+                    self.refs.insert(name.clone());
+                    self.calls.insert(name);
+                }
+            }
             "jsx_opening_element" | "jsx_self_closing_element" => {
                 if let Some(name) = node.child_by_field_name("name") {
                     self.calls.insert(text(name, source).to_string());
@@ -460,6 +604,39 @@ mod tests {
             .into_iter()
             .map(|u| (u.name, u.kind))
             .collect()
+    }
+
+    #[test]
+    fn callbacks_registered_through_calls_are_units_named_by_their_declaration() {
+        let source = "export const myJourney = database.view({ public: true }, t.array(row), (ctx) => {\n  const account = activeAccount(ctx)\n  if (!account) return []\n  return [account]\n})\nconst save = useCallback(async () => {\n  await store.save()\n}, [store])\nconst Panel = memo(forwardRef((props, ref) => {\n  return render(props, ref)\n}))\nconst table = database.table({ name: 'x' })\n";
+        let units = parse(Path::new("views.ts"), source).unwrap().units;
+        let named: Vec<(&str, bool)> = units
+            .iter()
+            .map(|u| (u.name.as_str(), u.body.is_some()))
+            .collect();
+        assert_eq!(
+            named,
+            [("myJourney", true), ("save", true), ("Panel", true)]
+        );
+        assert!(units[0].calls.contains("activeAccount"));
+    }
+
+    #[test]
+    fn nesting_and_branch_chains_are_measured_without_counting_else_if_as_depth() {
+        let facts = |path: &str, source: &str| {
+            let unit = parse(Path::new(path), source).unwrap().units.remove(0);
+            (unit.nesting, unit.branch_chain, unit.deeply_nested())
+        };
+        let ternary = "function icon(kind) {\n  const name = kind === 'a' ? 'x' : kind === 'b' ? 'y' : kind === 'c' ? 'z' : kind === 'd' ? 'w' : 'v'\n  return name\n}\n";
+        assert_eq!(facts("a.ts", ternary), (1, 5, true));
+        let chain = "function f(x) {\n  if (x === 1) return 1\n  else if (x === 2) return 2\n  else return 3\n}\n";
+        assert_eq!(facts("b.ts", chain), (1, 3, false));
+        let deep = "fn f(xs: &[Vec<u8>]) {\n    for x in xs {\n        if x.len() > 1 {\n            for y in x {\n                if *y > 2 {\n                    println!(\"{y}\");\n                }\n            }\n        }\n    }\n}\n";
+        assert_eq!(facts("c.rs", deep), (4, 1, true));
+        let python = "def f(x):\n    if x == 1:\n        return 1\n    elif x == 2:\n        return 2\n    elif x == 3:\n        return 3\n    else:\n        return 4\n";
+        assert_eq!(facts("d.py", python), (1, 4, true));
+        let open = "def f(x):\n    if x == 1:\n        return 1\n    elif x == 2:\n        return 2\n    return 3\n";
+        assert_eq!(facts("e.py", open), (1, 2, false));
     }
 
     #[test]

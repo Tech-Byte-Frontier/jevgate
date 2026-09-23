@@ -200,11 +200,19 @@ impl Evaluator for Client {
     }
 }
 
+/// Consecutive edge blocks that stop further uploads.
+const EDGE_BLOCKS: u16 = 3;
+
 /// Reject further uploads in this review only after a typed account/access failure.
 /// Completed and in-flight requests keep their individual results; caches bypass this gate.
 /// Rate-limit and overload responses pause every worker through one shared cooldown.
 struct ProviderAccess {
     rejected: AtomicU16,
+    /// The rejection came from the provider's edge protection, not the account.
+    edge: std::sync::atomic::AtomicBool,
+    /// Consecutive edge blocks: a request whose content trips a firewall rule
+    /// fails alone; blocks with no success between them stop further uploads.
+    edge_blocks: AtomicU16,
     cooldown: Mutex<Option<Instant>>,
     backoff: Duration,
 }
@@ -213,6 +221,8 @@ impl Default for ProviderAccess {
     fn default() -> Self {
         Self {
             rejected: AtomicU16::new(0),
+            edge: std::sync::atomic::AtomicBool::new(false),
+            edge_blocks: AtomicU16::new(0),
             cooldown: Mutex::new(None),
             backoff: Duration::from_millis(500),
         }
@@ -222,11 +232,18 @@ impl Default for ProviderAccess {
 impl ProviderAccess {
     fn reset(&mut self) -> bool {
         *self.cooldown.lock().unwrap() = None;
+        self.edge_blocks.store(0, Ordering::Release);
+        self.edge.store(false, Ordering::Release);
         self.rejected.swap(0, Ordering::AcqRel) != 0
     }
 
     fn check(&self) -> Result<()> {
         let status = self.rejected.load(Ordering::Acquire);
+        if status != 0 && self.edge.load(Ordering::Acquire) {
+            bail!(
+                "TypeSafe request not sent after HTTP {status} from the provider's edge protection; wait before rerunning, and contact TypeSafe if it persists"
+            );
+        }
         if status != 0 {
             bail!(
                 "TypeSafe request not sent after HTTP {status}; restore account access and rerun the review"
@@ -236,10 +253,19 @@ impl ProviderAccess {
     }
 
     fn observe(&self, result: &Result<Value>) {
+        if result.is_ok() {
+            self.edge_blocks.store(0, Ordering::Release);
+        }
         if let Err(error) = result
             && let Some(error) = error.downcast_ref::<ProviderError>()
             && matches!(error.status, 401..=403)
         {
+            if error.edge_block {
+                if self.edge_blocks.fetch_add(1, Ordering::AcqRel) + 1 < EDGE_BLOCKS {
+                    return;
+                }
+                self.edge.store(true, Ordering::Release);
+            }
             let _ = self.rejected.compare_exchange(
                 0,
                 error.status,
@@ -385,6 +411,14 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
     let response = agent
         .post("https://api.typesafe.ai/v1/systemone")
         .header("Authorization", format!("Bearer {key}"))
+        .header(
+            "User-Agent",
+            concat!(
+                "jevgate/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/Tech-Byte-Frontier/jevgate)"
+            ),
+        )
         .send_json(crate::requests::provider_request(request).as_ref());
     let mut response = match response {
         Ok(response) => response,
@@ -407,9 +441,9 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
             .body_mut()
             .with_config()
             .limit(65_536)
-            .read_json::<Value>()
+            .read_to_string()
             .ok();
-        return Err(provider_error(status, body.as_ref(), retry_after).into());
+        return Err(provider_error(status, body.as_deref(), retry_after).into());
     }
     // Error bodies and headers may echo credentials or source; never render them.
     response
@@ -435,6 +469,8 @@ impl std::fmt::Display for Unsent {
 struct ProviderError {
     status: u16,
     context_limit: bool,
+    /// A Cloudflare `error code: 10xx` page: the edge refused the client.
+    edge_block: bool,
     retry_after: Option<u64>,
 }
 
@@ -443,6 +479,8 @@ impl std::fmt::Display for ProviderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let detail = if self.context_limit {
             " (model context limit exceeded)"
+        } else if self.edge_block {
+            " (blocked by the provider's edge protection)"
         } else {
             ""
         };
@@ -455,12 +493,18 @@ impl std::fmt::Display for ProviderError {
     }
 }
 
-fn provider_error(status: u16, body: Option<&Value>, retry_after: Option<u64>) -> ProviderError {
-    // Recognize only a verified machine code; do not echo arbitrary provider text.
+fn provider_error(status: u16, body: Option<&str>, retry_after: Option<u64>) -> ProviderError {
+    // Recognize only verified machine codes; do not echo arbitrary provider text.
+    let json = body.and_then(|text| serde_json::from_str::<Value>(text).ok());
     ProviderError {
         status,
         context_limit: status == 400
-            && body.is_some_and(|body| body["detail"]["error_type"] == "max_tokens_exceeded"),
+            && json.is_some_and(|body| body["detail"]["error_type"] == "max_tokens_exceeded"),
+        edge_block: status == 403
+            && body.is_some_and(|text| {
+                text.trim_start().starts_with("error code: 10")
+                    || text.contains("<title>Attention Required! | Cloudflare</title>")
+            }),
         retry_after,
     }
 }
@@ -789,7 +833,7 @@ mod tests {
     fn provider_errors_explain_known_limits_without_echoing_private_text() {
         let body = json!({"detail":{"error_type":"max_tokens_exceeded","message":"private source and credentials"}});
         assert_eq!(
-            provider_error(400, Some(&body), None).to_string(),
+            provider_error(400, Some(&body.to_string()), None).to_string(),
             "TypeSafe HTTP 400 (model context limit exceeded); request was not retried"
         );
         for body in [
@@ -797,10 +841,36 @@ mod tests {
             json!({"detail":{"error_type":"private credentials"}}),
         ] {
             assert_eq!(
-                provider_error(400, Some(&body), None).to_string(),
+                provider_error(400, Some(&body.to_string()), None).to_string(),
                 "TypeSafe HTTP 400; request was not retried"
             );
         }
+        let edge = provider_error(403, Some("error code: 1010\n"), None);
+        assert!(edge.edge_block);
+        assert_eq!(
+            edge.to_string(),
+            "TypeSafe HTTP 403 (blocked by the provider's edge protection); request was not retried"
+        );
+        assert!(!provider_error(403, Some("{\"detail\":\"forbidden\"}"), None).edge_block);
+        let page = "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head></html>";
+        assert!(provider_error(403, Some(page), None).edge_block);
+        // Isolated firewall blocks fail alone; consecutive blocks stop further uploads.
+        let access = ProviderAccess::default();
+        let blocked: Result<Value> = Err(provider_error(403, Some(page), None).into());
+        access.observe(&blocked);
+        access.observe(&blocked);
+        access.observe(&Ok(json!({})));
+        access.observe(&blocked);
+        assert!(access.check().is_ok(), "a success resets the count");
+        access.observe(&blocked);
+        access.observe(&blocked);
+        assert!(
+            access
+                .check()
+                .unwrap_err()
+                .to_string()
+                .contains("edge protection")
+        );
         assert_eq!(
             provider_error(503, None, None).to_string(),
             "TypeSafe HTTP 503"

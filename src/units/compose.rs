@@ -1,7 +1,8 @@
 //! Pure composition from typed judgments to unit outcomes, rule dimensions,
-//! findings and a file status. Thresholds are the shared 0.80 policy:
-//! review at the top level, clear at the bottom level, consider when the
-//! middle-or-top mass reaches the threshold, otherwise uncertain.
+//! findings and a file status. Thresholds are the shared 0.80 policy on a
+//! Score whose top level is the actionable concern: review when the top level
+//! reaches it, consider when the middle-or-top mass does, clear when the top
+//! level is ruled out (its complement reaches it), otherwise uncertain.
 use super::{Detail, FilePlan, Presence, UnitPlan};
 use crate::{
     catalog,
@@ -62,10 +63,10 @@ pub fn score(answer: &Answer) -> Outcome {
     };
     if at_least(top) {
         Outcome::Review(top)
-    } else if at_least(bottom) {
-        Outcome::Clear
     } else if at_least(middle + top) {
         Outcome::Consider(middle + top)
+    } else if at_least(bottom + middle) {
+        Outcome::Clear
     } else {
         Outcome::Uncertain(top)
     }
@@ -112,27 +113,35 @@ fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     let get = |q: &str| answers.get(q).copied();
     let result = match unit.rule {
         catalog::FUNCTION_SIMPLIFICATION => (|| {
-            let tasks = score(get("tasks")?);
-            let flatten = noul(get("flatten")?);
-            let [_, _, leans_review] = levels(get("tasks")?)?;
-            // Review comes from the task Score (or flatten); clear from the one-job
-            // Score while the task Score does not lean toward two or more tasks.
-            Some(match (tasks, flatten) {
-                (Outcome::Review(p), _) | (_, Outcome::Review(p)) => Outcome::Review(p),
-                _ if score(get("one_job")?) == Outcome::Clear && leans_review < 0.5 => {
-                    Outcome::Clear
+            let split = score(get("split")?);
+            // Flattening is asked only for deeply nested functions.
+            let flatten = get("flatten").map(score);
+            Some(match (split, flatten) {
+                (Outcome::Review(p), _) | (_, Some(Outcome::Review(p))) => Outcome::Review(p),
+                (Outcome::Consider(p), _) | (_, Some(Outcome::Consider(p))) => Outcome::Consider(p),
+                (Outcome::Clear, None | Some(Outcome::Clear)) => Outcome::Clear,
+                (split, flatten) => {
+                    Outcome::Uncertain(split.concern().max(flatten.map_or(0.0, Outcome::concern)))
                 }
-                (Outcome::Consider(p), _) => Outcome::Consider(p),
-                (tasks, _) => Outcome::Uncertain(tasks.concern()),
             })
         })(),
-        catalog::FILE_ORGANIZATION => get("purpose").map(score),
+        catalog::FILE_ORGANIZATION => get("split").map(score),
         catalog::SHARED_LOGIC => (|| {
             // Repetition the behavior requires is not a shared-logic concern.
             if matches!(noul(get("required")?), Outcome::Review(_)) {
                 return Some(Outcome::Clear);
             }
-            Some(score(get("same")?))
+            let same = score(get("same")?);
+            // Cases written out in one test are a style choice, never a required change.
+            Some(match (same, &unit.detail) {
+                (
+                    Outcome::Review(p),
+                    Detail::Pair {
+                        within_test: true, ..
+                    },
+                ) => Outcome::Consider(p),
+                (same, _) => same,
+            })
         })(),
         catalog::TEST_VALUE => (|| {
             let hollow = [noul(get("own_logic")?), noul(get("mock_only")?)];
@@ -219,25 +228,11 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         match outcome {
             Outcome::Review(p) => {
                 count.review += 1;
-                findings.push(finding(
-                    plan,
-                    unit,
-                    Strength::Review,
-                    p,
-                    &answers,
-                    judgments,
-                ));
+                findings.push(finding(plan, unit, Strength::Review, p, &answers));
             }
             Outcome::Consider(p) => {
                 count.consider += 1;
-                findings.push(finding(
-                    plan,
-                    unit,
-                    Strength::Consider,
-                    p,
-                    &answers,
-                    judgments,
-                ));
+                findings.push(finding(plan, unit, Strength::Consider, p, &answers));
             }
             Outcome::Clear => count.clear += 1,
             Outcome::Uncertain(_) | Outcome::Missing => count.uncertain += 1,
@@ -378,7 +373,6 @@ fn finding(
     strength: Strength,
     p: f64,
     answers: &Answers<'_>,
-    judgments: &[Judgment],
 ) -> Finding {
     let review = strength == Strength::Review;
     let name = &unit.name;
@@ -386,27 +380,53 @@ fn finding(
     let mut symbol = Some(name.clone());
     let (message, action) = match (&unit.detail, unit.rule) {
         (Detail::Function, _) => {
-            let tasks = answers.get("tasks").map(|a| score(a));
-            if review && matches!(tasks, Some(Outcome::Review(_))) {
-                let kind = choice(answers.get("task_kind").copied())
-                    .map(|(kind, _)| format!(" The second task looks like {}.", kind_label(kind)))
-                    .unwrap_or_default();
-                (
-                    format!("`{name}` performs two or more substantial tasks ({p:.2}).{kind}"),
-                    "Extract the second task into its own function",
-                )
-            } else if review {
-                (
-                    format!("`{name}` has nesting or branching that could be flattened ({p:.2})."),
-                    "Flatten the control flow with guard clauses, early returns or a lookup table",
-                )
-            } else {
-                (
+            let flatten = answers.get("flatten").map(|a| score(a));
+            let flattening = match strength {
+                Strength::Review => {
+                    matches!(flatten, Some(Outcome::Review(_)))
+                        && !matches!(
+                            answers.get("split").map(|a| score(a)),
+                            Some(Outcome::Review(_))
+                        )
+                }
+                Strength::Consider => {
+                    matches!(flatten, Some(Outcome::Consider(_)))
+                        && !matches!(
+                            answers.get("split").map(|a| score(a)),
+                            Some(Outcome::Consider(_))
+                        )
+                }
+            };
+            match (review, flattening) {
+                (true, false) => (
                     format!(
-                        "`{name}` performs one task plus a small step that could be named ({p:.2})."
+                        "`{name}` mixes separate jobs in long blocks; splitting it would make it easier to understand ({p:.2})."
                     ),
-                    "Consider naming the small step as its own function",
-                )
+                    "Extract each separate job into its own named function",
+                ),
+                (true, true) => (
+                    format!(
+                        "`{name}` has nested or repeated branches that hide its main path ({p:.2})."
+                    ),
+                    "Flatten the control flow with guard clauses, early returns or a lookup table",
+                ),
+                (false, false) => match answers.get("split").and_then(|a| levels(a)) {
+                    // The top level leads without reaching review: say so, with its probability.
+                    Some([_, _, top]) if top >= 0.5 => (
+                        format!(
+                            "`{name}` likely mixes separate jobs ({top:.2}); splitting it may make it easier to understand."
+                        ),
+                        "Consider extracting each separate job into its own named function",
+                    ),
+                    _ => (
+                        format!("`{name}` has a block that could be named as a helper ({p:.2})."),
+                        "Consider extracting that block into a named function",
+                    ),
+                },
+                (false, true) => (
+                    format!("`{name}` has branching that could return early ({p:.2})."),
+                    "Consider guard clauses or early returns",
+                ),
             }
         }
         (Detail::Outline { groups }, _) => {
@@ -435,26 +455,11 @@ fn finding(
                         String::new()
                     }
                 );
-                let independent: Vec<&str> = groups
-                    .iter()
-                    .filter(|other| other.id != group.id)
-                    .filter(|other| {
-                        let unit = format!("{}:{}:{}", unit.id, group.id, other.id);
-                        judgments
-                            .iter()
-                            .find(|j| j.unit == unit && j.question == "independent")
-                            .is_some_and(|j| matches!(noul(&j.answer), Outcome::Review(_)))
-                    })
-                    .map(|other| other.id.as_str())
-                    .collect();
-                if !independent.is_empty() {
-                    detail.push_str(&format!(" It does not need {}.", independent.join(" or ")));
-                }
             }
             if review {
                 (
                     format!(
-                        "This file's members serve two or more separate purposes ({p:.2}).{detail}"
+                        "This file holds two or more unrelated responsibilities ({p:.2}).{detail}"
                     ),
                     if chosen.is_some() {
                         "Move that group into its own module"
@@ -465,13 +470,20 @@ fn finding(
             } else {
                 (
                     format!(
-                        "This file serves mostly one purpose plus a set of helpers ({p:.2}).{detail}"
+                        "Some members of this file could live in a separate module ({p:.2}).{detail}"
                     ),
-                    "Consider moving the helper set into its own module",
+                    "Consider moving that set of members into its own module",
                 )
             }
         }
-        (Detail::Pair { differences, .. }, _) => {
+        (
+            Detail::Pair {
+                differences,
+                within_test,
+                in_tests,
+            },
+            _,
+        ) => {
             let renamed = if differences.is_empty() {
                 String::new()
             } else {
@@ -482,12 +494,21 @@ fn finding(
                     .collect();
                 format!(" Differences: {}.", shown.join(", "))
             };
-            if review {
+            if *within_test {
+                (
+                    format!("{name} repeat the same steps inside one test ({p:.2}).{renamed}"),
+                    "Consider a table of cases or a local helper for the repeated steps",
+                )
+            } else if review {
                 (
                     format!(
                         "{name} perform the same steps for the same purpose ({p:.2}).{renamed}"
                     ),
-                    "Move the shared steps into one implementation",
+                    if *in_tests {
+                        "Share the steps through a fixture, helper or parameterized test"
+                    } else {
+                        "Move the shared steps into one implementation"
+                    },
                 )
             } else {
                 (
@@ -563,15 +584,6 @@ fn finding(
         fingerprint: fingerprint(unit.rule, plan, &unit.identity),
         rank: rank(p, lines),
         baselined: false,
-    }
-}
-
-fn kind_label(kind: &str) -> &str {
-    match kind {
-        "io" => "input or output",
-        "error_handling" => "error handling",
-        "setup_cleanup" => "setup or cleanup",
-        other => other,
     }
 }
 

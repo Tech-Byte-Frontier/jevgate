@@ -161,7 +161,11 @@ fn weights(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> Vec
         for j in i + 1..n {
             let (a, b) = (&units[members[i]], &units[members[j]]);
             let mut weight = 0;
-            if a.calls.contains(&b.short_name) || b.calls.contains(&a.short_name) {
+            // Calling a function, or constructing the type that owns a method.
+            let calls = |x: &Unit, y: &Unit| {
+                x.calls.contains(&y.short_name) || !y.owner.is_empty() && x.calls.contains(&y.owner)
+            };
+            if calls(a, b) || calls(b, a) {
                 weight += 3;
             }
             if !a.owner.is_empty() && a.owner == b.owner {
@@ -209,6 +213,14 @@ mod tests {
         for _ in 0..5 {
             assert_eq!(grouped(TWO_CONCERNS), first);
         }
+    }
+
+    #[test]
+    fn constructing_a_class_links_to_its_methods() {
+        let source = "export class GatewayError extends Error {\n  constructor(code: string) {\n    super(code)\n  }\n}\nexport function requireLive(at: number) {\n  if (Date.now() >= at) throw new GatewayError('EXPIRED')\n}\n";
+        let file = super::super::units::parse(Path::new("errors.ts"), source).unwrap();
+        let members: Vec<usize> = (0..file.units.len()).collect();
+        assert_eq!(groups(&file.units, &members, &file.imports).len(), 1);
     }
 
     #[test]

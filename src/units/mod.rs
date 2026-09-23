@@ -4,13 +4,14 @@
 pub mod compose;
 mod duplicates;
 mod functions;
-mod outline;
+pub(crate) mod outline;
 pub mod questions;
 mod test_units;
 
 use crate::{
     analysis::{
         clones::{self, SourceFile},
+        imports::Imports,
         test_map,
         units::{self as parsed, FileUnits, Unit},
     },
@@ -34,6 +35,9 @@ use std::{
 /// bytes, not calibrated tokens, so packing and cache identity stay stable.
 const PACK_BYTES: usize = 18_000;
 const PACK_ITEMS: usize = 8;
+/// Tests are sent one per request: seven unrelated tests in the same state
+/// left about 40% more test-value questions undecided.
+const TEST_PACK_ITEMS: usize = 1;
 
 /// The questions one request asks, mapped back to units.
 #[derive(Clone, Debug, Default)]
@@ -103,6 +107,11 @@ pub enum Detail {
     },
     Pair {
         differences: Vec<clones::Difference>,
+        /// Both copies sit in one test case: the remedy is a table of cases,
+        /// not a shared implementation.
+        within_test: bool,
+        /// The owning copy is test code: shared steps belong in a fixture or helper.
+        in_tests: bool,
     },
     Test,
     TestPair {
@@ -291,7 +300,7 @@ pub fn plan(
     } else {
         clones::Candidates::default()
     };
-    let callers = callers(&scope);
+    let imports = imports(&scope);
     let mut subjects = BTreeMap::<String, String>::new();
     for (_, unit) in scope.scope_units() {
         subjects
@@ -375,7 +384,7 @@ pub fn plan(
                     &context,
                     &scope.units[&owner],
                     &members,
-                    &callers,
+                    &callers(&scope, &imports, owner),
                     budget,
                     &mut file,
                     &mut result.requests,
@@ -387,6 +396,8 @@ pub fn plan(
             duplicates::plan(
                 &context,
                 &pairs,
+                &cases,
+                &lines,
                 &hashes,
                 budget,
                 &mut file,
@@ -463,10 +474,31 @@ fn duplicate_candidates(scope: &Scope<'_>) -> clones::Candidates {
     clones::find(&files)
 }
 
-/// Short callee name to the other selected files that call it.
-fn callers(scope: &Scope<'_>) -> BTreeMap<String, BTreeSet<PathBuf>> {
+/// Import lines of every selected file, for caller lookups.
+fn imports(scope: &Scope<'_>) -> BTreeMap<usize, Imports> {
+    scope
+        .owners
+        .iter()
+        .map(|&owner| {
+            let input = &scope.inputs[owner];
+            let source = input.source.as_deref().unwrap_or("");
+            (owner, Imports::new(&input.result.path, source))
+        })
+        .collect()
+}
+
+/// Short callee name to the other selected files that import `target` and call it.
+fn callers(
+    scope: &Scope<'_>,
+    imports: &BTreeMap<usize, Imports>,
+    target: usize,
+) -> BTreeMap<String, BTreeSet<PathBuf>> {
+    let path = &scope.inputs[target].result.path;
     let mut callers = BTreeMap::<String, BTreeSet<PathBuf>>::new();
     for &owner in &scope.owners {
+        if owner == target || !imports[&owner].reach(path) {
+            continue;
+        }
         for unit in &scope.units[&owner].units {
             for call in &unit.calls {
                 callers
@@ -479,14 +511,14 @@ fn callers(scope: &Scope<'_>) -> BTreeMap<String, BTreeSet<PathBuf>> {
     callers
 }
 
-/// Greedy packing in order: at most `PACK_ITEMS` items and `PACK_BYTES` of state.
-fn pack<T>(items: Vec<T>, state: impl Fn(&T) -> &Value) -> Vec<Vec<T>> {
+/// Greedy packing in order: at most `limit` items and `PACK_BYTES` of state.
+fn pack<T>(items: Vec<T>, limit: usize, state: impl Fn(&T) -> &Value) -> Vec<Vec<T>> {
     let mut packs: Vec<Vec<T>> = Vec::new();
     let mut used = 0;
     for item in items {
         let size = serde_json::to_vec(state(&item)).map_or(0, |v| v.len());
         match packs.last_mut() {
-            Some(pack) if pack.len() < PACK_ITEMS && used + size <= PACK_BYTES => {
+            Some(pack) if pack.len() < limit && used + size <= PACK_BYTES => {
                 used += size;
                 pack.push(item);
             }

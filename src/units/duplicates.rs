@@ -3,7 +3,10 @@ use super::{
     Asked, Detail, FileContext, FilePlan, Planned, Presence, UnitPlan, identity, questions, request,
 };
 use crate::{
-    analysis::clones::{Candidates, Pair, Site},
+    analysis::{
+        clones::{Candidates, Pair, Site},
+        test_map::TestCase,
+    },
     catalog::SHARED_LOGIC,
     requests::TokenBudget,
     schema::{Location, Pass},
@@ -11,9 +14,12 @@ use crate::{
 use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn plan(
     file: &FileContext<'_>,
     candidates: &Candidates,
+    cases: &[TestCase],
+    test_lines: &[std::ops::Range<usize>],
     hashes: &BTreeMap<PathBuf, String>,
     budget: &TokenBudget,
     out: &mut FilePlan,
@@ -46,10 +52,22 @@ pub(super) fn plan(
         .filter(|(request, _)| budget.fits(request));
         out.units.push(UnitPlan {
             rule: SHARED_LOGIC,
-            name: format!("{} and {}", site_label(&pair.a), site_label(&pair.b)),
+            name: match pair.copies.len() {
+                0 => format!("{} and {}", site_label(&pair.a), site_label(&pair.b)),
+                n => format!(
+                    "{}, {} and {n} more cop{}",
+                    site_label(&pair.a),
+                    site_label(&pair.b),
+                    if n == 1 { "y" } else { "ies" }
+                ),
+            },
             id,
             presence,
-            locations: vec![location(&pair.a), location(&pair.b)],
+            locations: [&pair.a, &pair.b]
+                .into_iter()
+                .chain(&pair.copies)
+                .map(location)
+                .collect(),
             quote: Some(pair.a.quote.clone()),
             lines: pair.a.end_line + 1 - pair.a.start_line,
             identity: identity(&[
@@ -60,6 +78,13 @@ pub(super) fn plan(
             ]),
             detail: Detail::Pair {
                 differences: pair.differences.clone(),
+                within_test: pair.b.path == file.path
+                    && cases.iter().any(|case| {
+                        [&pair.a, &pair.b].iter().all(|site| {
+                            case.line <= site.start_line && site.end_line <= case.end_line
+                        })
+                    }),
+                in_tests: test_lines.iter().any(|l| l.contains(&pair.a.start_line)),
             },
             recheck,
         });
