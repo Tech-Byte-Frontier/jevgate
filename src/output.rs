@@ -226,6 +226,15 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
             d.concern_probability * 100.0,
             d.decision_basis
         )?;
+        for unit in &d.undecided {
+            writeln!(
+                out,
+                "    undecided: {} (line {}) · {}",
+                unit.unit,
+                unit.line,
+                unit.questions.join(", ")
+            )?;
+        }
     }
     Ok(())
 }

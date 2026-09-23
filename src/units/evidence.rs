@@ -100,7 +100,7 @@ pub(super) fn pack<T>(items: Vec<T>, limit: usize, state: impl Fn(&T) -> &Value)
 }
 
 pub(super) fn identity(parts: &[&str]) -> String {
-    crate::schema::hash(parts.join("\u{0}").as_bytes())
+    crate::schema::hash(parts.join(crate::schema::HASH_SEPARATOR).as_bytes())
 }
 
 pub(super) fn compact(text: &str) -> String {

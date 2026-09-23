@@ -9,7 +9,7 @@ use std::{
 
 fn dimension(rule: &str, d: &Dimension) -> Value {
     json!({"rule":rule,"status":d.status,"detail":d.decision_basis,
-        "probability":d.concern_probability,"units":d.units})
+        "probability":d.concern_probability,"units":d.units,"undecided":d.undecided})
 }
 
 fn batch_cost(report: &Report) -> Option<Value> {

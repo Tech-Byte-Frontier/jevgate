@@ -714,3 +714,26 @@ fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
     );
     assert!(finding.action.contains("data or configuration"));
 }
+
+#[test]
+fn undecided_units_are_listed_with_the_questions_left_undecided() {
+    let (project, mut options) = function_rule_project(&function("borderline"));
+    let report = run(&project, &options, &mut scripted(3));
+    let dimension = &report.files[0].dimensions["function_simplification"];
+    assert_eq!(dimension.status, Status::Uncertain);
+    assert_eq!(
+        dimension.undecided,
+        [crate::schema::Undecided {
+            unit: "borderline".into(),
+            line: 1,
+            questions: vec!["splitting".into()],
+        }]
+    );
+    options.refresh = true;
+    let report = run(&project, &options, &mut scripted(0));
+    assert!(
+        report.files[0].dimensions["function_simplification"]
+            .undecided
+            .is_empty()
+    );
+}

@@ -238,7 +238,7 @@ fn pair(
         tx.iter()
             .map(Token::normal)
             .collect::<Vec<_>>()
-            .join("\u{0}")
+            .join(crate::schema::HASH_SEPARATOR)
             .as_bytes(),
     );
     let a = site(files, fx, span_x);
@@ -537,7 +537,7 @@ fn block_statements(
             .iter()
             .map(Token::normal)
             .collect::<Vec<_>>()
-            .join("\u{0}");
+            .join(crate::schema::HASH_SEPARATOR);
         statements.push(Some(Statement {
             span: child.byte_range(),
             tokens: start..end,
