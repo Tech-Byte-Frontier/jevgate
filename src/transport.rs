@@ -1,3 +1,4 @@
+use crate::provider_error::{ProviderError, Unsent, provider_error};
 use anyhow::{Result, bail};
 use serde_json::Value;
 use std::{
@@ -452,61 +453,6 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
         .limit(1_048_576)
         .read_json()
         .map_err(|_| anyhow::anyhow!("TypeSafe returned invalid or oversized JSON"))
-}
-
-/// The connection failed before any request bytes were sent.
-#[derive(Debug)]
-struct Unsent;
-
-impl std::error::Error for Unsent {}
-impl std::fmt::Display for Unsent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cannot connect to TypeSafe; request was not sent")
-    }
-}
-
-#[derive(Debug)]
-struct ProviderError {
-    status: u16,
-    context_limit: bool,
-    /// A Cloudflare `error code: 10xx` page: the edge refused the client.
-    edge_block: bool,
-    retry_after: Option<u64>,
-}
-
-impl std::error::Error for ProviderError {}
-impl std::fmt::Display for ProviderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let detail = if self.context_limit {
-            " (model context limit exceeded)"
-        } else if self.edge_block {
-            " (blocked by the provider's edge protection)"
-        } else {
-            ""
-        };
-        let retried = if matches!(self.status, 429 | 502 | 503 | 504 | 529) {
-            ""
-        } else {
-            "; request was not retried"
-        };
-        write!(f, "TypeSafe HTTP {}{detail}{retried}", self.status)
-    }
-}
-
-fn provider_error(status: u16, body: Option<&str>, retry_after: Option<u64>) -> ProviderError {
-    // Recognize only verified machine codes; do not echo arbitrary provider text.
-    let json = body.and_then(|text| serde_json::from_str::<Value>(text).ok());
-    ProviderError {
-        status,
-        context_limit: status == 400
-            && json.is_some_and(|body| body["detail"]["error_type"] == "max_tokens_exceeded"),
-        edge_block: status == 403
-            && body.is_some_and(|text| {
-                text.trim_start().starts_with("error code: 10")
-                    || text.contains("<title>Attention Required! | Cloudflare</title>")
-            }),
-        retry_after,
-    }
 }
 
 #[cfg(test)]

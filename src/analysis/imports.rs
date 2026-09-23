@@ -82,26 +82,34 @@ mod tests {
 
     #[test]
     fn callers_need_an_import_of_the_module_in_the_same_language() {
-        let ts = Imports::new(
-            Path::new("src/game/view.ts"),
-            "import { durationLabel } from './travel-presentation'\nconst x = update()\n",
-        );
-        assert!(ts.reach(Path::new("src/game/travel-presentation.ts")));
-        assert!(!ts.reach(Path::new("src/game/travel.ts")));
-        assert!(!ts.reach(Path::new("scripts/travel-presentation.py")));
-        let py = Imports::new(
-            Path::new("scripts/sync.py"),
-            "from project import items\nfrom .fields import canonical_value\n",
-        );
-        assert!(py.reach(Path::new("scripts/project.py")));
-        assert!(py.reach(Path::new("scripts/fields.py")));
-        assert!(!py.reach(Path::new("scripts/project_tools.py")));
-        let rs = Imports::new(
-            Path::new("src/main.rs"),
-            "use crate::units::{self, compose};\nmod gate;\n",
-        );
-        assert!(rs.reach(Path::new("src/units/mod.rs")));
-        assert!(rs.reach(Path::new("src/gate.rs")));
-        assert!(!rs.reach(Path::new("src/units/questions.rs")));
+        let cases: [(&str, &str, &[&str], &[&str]); 3] = [
+            (
+                "src/game/view.ts",
+                "import { durationLabel } from './travel-presentation'\nconst x = update()\n",
+                &["src/game/travel-presentation.ts"],
+                &["src/game/travel.ts", "scripts/travel-presentation.py"],
+            ),
+            (
+                "scripts/sync.py",
+                "from project import items\nfrom .fields import canonical_value\n",
+                &["scripts/project.py", "scripts/fields.py"],
+                &["scripts/project_tools.py"],
+            ),
+            (
+                "src/main.rs",
+                "use crate::units::{self, compose};\nmod gate;\n",
+                &["src/units/mod.rs", "src/gate.rs"],
+                &["src/units/questions.rs"],
+            ),
+        ];
+        for (caller, source, reached, unreached) in cases {
+            let imports = Imports::new(Path::new(caller), source);
+            for target in reached {
+                assert!(imports.reach(Path::new(target)), "{caller} → {target}");
+            }
+            for target in unreached {
+                assert!(!imports.reach(Path::new(target)), "{caller} ↛ {target}");
+            }
+        }
     }
 }

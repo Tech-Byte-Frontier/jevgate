@@ -76,7 +76,7 @@ pub fn render(report: &Report) -> Result<String> {
 
 pub fn open(root: &Path) {
     let path = root.join(".jevgate/report.html");
-    eprintln!("JevGate report: {}", path.display());
+    note!("JevGate report: {}", path.display());
     #[cfg(target_os = "macos")]
     let program = "open";
     #[cfg(target_os = "windows")]
@@ -93,14 +93,14 @@ pub fn open(root: &Path) {
         Ok(mut child) => {
             std::thread::spawn(move || {
                 if !child.wait().is_ok_and(|s| s.success()) {
-                    eprintln!(
+                    note!(
                         "Could not open the browser. Open {} manually.",
                         path.display()
                     );
                 }
             });
         }
-        Err(_) => eprintln!(
+        Err(_) => note!(
             "Could not open the browser. Open {} manually.",
             path.display()
         ),

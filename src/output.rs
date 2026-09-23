@@ -19,20 +19,36 @@ pub fn estimated_usd(report: &Report) -> Option<f64> {
         .then(|| report.paid_input_tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
 }
 
+/// Write the report to stdout. A reader that closes the pipe early (as with
+/// `| head`) ends the output without failing the run, so the exit code still
+/// reflects the gate.
 pub fn emit(report: &Report, format: Format, verbose: bool) -> Result<()> {
     let mut out = std::io::stdout().lock();
-    match format {
-        Format::Json => {
-            serde_json::to_writer_pretty(&mut out, report)?;
-            writeln!(out)?;
-        }
-        Format::Jsonl => {
-            serde_json::to_writer(&mut out, report)?;
-            writeln!(out)?;
-        }
-        Format::Agent => agent(&mut out, report, verbose)?,
+    let written = match format {
+        Format::Json => serde_json::to_writer_pretty(&mut out, report)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| Ok(writeln!(out)?)),
+        Format::Jsonl => serde_json::to_writer(&mut out, report)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| Ok(writeln!(out)?)),
+        Format::Agent => agent(&mut out, report, verbose),
+    };
+    match written {
+        Err(error) if broken_pipe(&error) => Ok(()),
+        other => other,
     }
-    Ok(())
+}
+
+fn broken_pipe(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+            || cause
+                .downcast_ref::<serde_json::Error>()
+                .and_then(|json| json.io_error_kind())
+                == Some(std::io::ErrorKind::BrokenPipe)
+    })
 }
 
 fn label(value: &impl serde::Serialize) -> String {
@@ -43,6 +59,20 @@ fn label(value: &impl serde::Serialize) -> String {
 }
 
 pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
+    emit_header(out, report)?;
+    emit_findings(out, report, verbose)?;
+    emit_summary(out, report)?;
+    if verbose {
+        writeln!(out)?;
+        for file in &report.files {
+            emit_file(out, file)?;
+        }
+    }
+    Ok(())
+}
+
+/// One line: status, gate, scope and cost, then run errors.
+fn emit_header(out: &mut impl Write, report: &Report) -> Result<()> {
     let gate = match &report.gate {
         Some(gate) if gate.passed => "gate passed".to_string(),
         Some(gate) => format!("gate failed: {}", gate.reasons.join("; ")),
@@ -60,6 +90,11 @@ pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Res
     for error in &report.errors {
         writeln!(out, "Error: {error}")?;
     }
+    Ok(())
+}
+
+/// Every review, then the top-ranked considers (all with `verbose`).
+fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
     let mut findings: Vec<(&Path, &Finding)> = report
         .files
         .iter()
@@ -70,40 +105,37 @@ pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Res
         })
         .collect();
     findings.sort_by(|a, b| b.1.rank.total_cmp(&a.1.rank));
-    let review: Vec<_> = findings
+    let (review, consider): (Vec<_>, Vec<_>) = findings
         .iter()
-        .filter(|(_, f)| f.strength == Strength::Review)
-        .collect();
-    let consider: Vec<_> = findings
-        .iter()
-        .filter(|(_, f)| f.strength == Strength::Consider)
-        .collect();
+        .partition(|(_, f)| f.strength == Strength::Review);
     if !review.is_empty() {
         writeln!(out, "\nReview ({}):", review.len())?;
         for (path, finding) in &review {
             emit_finding(out, path, finding)?;
         }
     }
-    if !consider.is_empty() {
-        let shown = if verbose {
-            consider.len()
-        } else {
-            TOP_CONSIDER
-        };
-        writeln!(
-            out,
-            "\nConsider ({}{}):",
-            consider.len(),
-            if consider.len() > shown {
-                format!(", top {shown}; --verbose shows all")
-            } else {
-                String::new()
-            }
-        )?;
-        for (path, finding) in consider.iter().take(shown) {
-            emit_finding(out, path, finding)?;
-        }
+    if consider.is_empty() {
+        return Ok(());
     }
+    let shown = if verbose {
+        consider.len()
+    } else {
+        TOP_CONSIDER
+    };
+    let more = if consider.len() > shown {
+        format!(", top {shown}; --verbose shows all")
+    } else {
+        String::new()
+    };
+    writeln!(out, "\nConsider ({}{more}):", consider.len())?;
+    for (path, finding) in consider.iter().take(shown) {
+        emit_finding(out, path, finding)?;
+    }
+    Ok(())
+}
+
+/// Counts of undecided, unsent and failed files, and skip reasons.
+fn emit_summary(out: &mut impl Write, report: &Report) -> Result<()> {
     let count = |status: Status| report.files.iter().filter(|f| f.status == status).count();
     let undecided = report
         .files
@@ -131,12 +163,6 @@ pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Res
     }
     for (reason, n) in skipped {
         writeln!(out, "Skipped {n}: {reason}")?;
-    }
-    if verbose {
-        writeln!(out)?;
-        for file in &report.files {
-            emit_file(out, file)?;
-        }
     }
     Ok(())
 }

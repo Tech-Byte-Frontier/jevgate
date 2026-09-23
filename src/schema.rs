@@ -246,7 +246,7 @@ pub struct Report {
 
 impl Report {
     pub fn update_status(&mut self) {
-        let selected: Vec<_> = self
+        let selected: Vec<&FileResult> = self
             .files
             .iter()
             .filter(|f| f.status != Status::Skipped)
@@ -275,24 +275,29 @@ impl Report {
                     )
                 })
             });
-        self.status = if !self.complete {
+        self.status = self.status_label(&selected).into();
+    }
+
+    /// The most severe outcome across the selected files.
+    fn status_label(&self, selected: &[&FileResult]) -> &'static str {
+        let any = |status: Status| selected.iter().any(|f| f.status == status);
+        if !self.complete {
             "incomplete"
         } else if self.files.is_empty() && self.base_revision.is_some() {
             "no-changed-source"
         } else if selected.iter().all(|f| f.status == Status::NotApplicable) {
             "not-applicable"
-        } else if selected.iter().any(|f| f.status == Status::Review) {
+        } else if any(Status::Review) {
             "review"
-        } else if selected.iter().any(|f| f.status == Status::Consider) {
+        } else if any(Status::Consider) {
             "consider"
-        } else if selected.iter().any(|f| f.status == Status::NeedsContext) {
+        } else if any(Status::NeedsContext) {
             "needs-context"
         } else if !self.judgments_complete {
             "uncertain"
         } else {
             "clear"
         }
-        .into();
     }
 }
 

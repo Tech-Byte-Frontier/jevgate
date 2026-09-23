@@ -1,7 +1,11 @@
 use super::*;
 use crate::{
+    catalog,
+    inventory::Input,
+    options::CheckArgs,
     schema::{Report, Status, Strength},
     tests::{Mock, Project, answer, args, function, run},
+    token_budget::TokenBudget,
 };
 
 fn planned(project: &Project, options: &CheckArgs) -> (Vec<Input>, Plan) {
@@ -21,6 +25,14 @@ fn planned(project: &Project, options: &CheckArgs) -> (Vec<Input>, Plan) {
     (inputs, plan)
 }
 
+/// A `lib.rs` holding `count` judged functions `f0`, `f1`…
+fn functions_project(count: usize) -> Project {
+    let project = Project::new();
+    let source: String = (0..count).map(|i| function(&format!("f{i}"))).collect();
+    project.write("lib.rs", &source);
+    project
+}
+
 fn numbers_in(value: &Value) -> bool {
     match value {
         Value::Number(_) => true,
@@ -32,13 +44,8 @@ fn numbers_in(value: &Value) -> bool {
 
 #[test]
 fn requests_use_literal_paths_and_upload_no_numbers_hashes_or_local_metadata() {
-    let project = Project::new();
-    let mut source = String::new();
     // Fourteen functions: two function packs, and enough lines for an outline.
-    for i in 0..14 {
-        source.push_str(&function(&format!("f{i}")));
-    }
-    project.write("lib.rs", &source);
+    let project = functions_project(14);
     let options = args();
     let (inputs, plan) = planned(&project, &options);
     let functions: Vec<_> = plan
@@ -115,9 +122,7 @@ struct Scripted {
 
 impl crate::transport::Evaluator for Scripted {
     fn evaluate(&mut self, request: &Value) -> Result<Value> {
-        let recheck = request["state"]["callees"].is_array()
-            || request["state"]["site_a"]["function_source"].is_string()
-            || request["state"]["file"]["source"].is_string();
+        let recheck = is_recheck(request);
         self.stages
             .push(if recheck { "recheck" } else { "first" }.into());
         let level = if recheck {
@@ -127,16 +132,30 @@ impl crate::transport::Evaluator for Scripted {
         };
         let mut body = answer(request, level);
         if !recheck {
-            for (suffix, value) in &self.overrides {
-                for (key, slot) in body["answers"].as_object_mut().unwrap() {
-                    if key.ends_with(suffix) {
-                        *slot = value.clone();
-                    }
-                }
-            }
+            self.apply_overrides(&mut body);
         }
         Ok(body)
     }
+}
+
+impl Scripted {
+    /// Replace every first-pass answer whose key ends with an override's suffix.
+    fn apply_overrides(&self, body: &mut Value) {
+        for (suffix, value) in &self.overrides {
+            for (key, slot) in body["answers"].as_object_mut().unwrap() {
+                if key.ends_with(suffix) {
+                    *slot = value.clone();
+                }
+            }
+        }
+    }
+}
+
+/// Rechecks carry more evidence: callees, enclosing functions or file source.
+fn is_recheck(request: &Value) -> bool {
+    request["state"]["callees"].is_array()
+        || request["state"]["site_a"]["function_source"].is_string()
+        || request["state"]["file"]["source"].is_string()
 }
 
 fn scripted(level: usize) -> Scripted {
@@ -146,6 +165,16 @@ fn scripted(level: usize) -> Scripted {
         recheck_level: None,
         stages: Vec::new(),
     }
+}
+
+/// Run one rule with an undecided first pass and a recheck answered at `level`.
+fn run_rechecked(project: &Project, rule: &str, level: usize) -> (CheckArgs, Report) {
+    let mut options = args();
+    only(&mut options, rule);
+    let mut eval = scripted(3);
+    eval.recheck_level = Some(level);
+    let report = run(project, &options, &mut eval);
+    (options, report)
 }
 
 fn only(options: &mut CheckArgs, rule: &str) {
@@ -217,14 +246,9 @@ fn uncertain_units_get_one_recheck_that_replaces_them_only_when_decisive() {
             )
         ),
     );
-    let mut options = args();
-    only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
-    let mut eval = scripted(3);
-    eval.recheck_level = Some(2);
-    let report = run(&project, &options, &mut eval);
+    let (mut options, report) = run_rechecked(&project, catalog::FUNCTION_SIMPLIFICATION, 2);
     assert_eq!(
-        eval.stages,
-        ["first", "recheck"],
+        report.stages["recheck"].successful_requests, 1,
         "only the caller has callees"
     );
     let file = &report.files[0];
@@ -279,12 +303,9 @@ fn an_uncertain_outline_is_rechecked_once_with_the_application_source() {
         two_concerns()
     );
     project.write("lib.rs", &source);
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
-    let mut eval = scripted(3);
-    eval.recheck_level = Some(0);
-    let report = run(&project, &options, &mut eval);
-    assert_eq!(eval.stages, ["first", "recheck"]);
+    let (options, report) = run_rechecked(&project, catalog::FILE_ORGANIZATION, 0);
+    assert_eq!(report.stages["outline"].successful_requests, 1);
+    assert_eq!(report.stages["recheck"].successful_requests, 1);
     assert_eq!(
         report.files[0].dimensions["file_organization"].status,
         Status::Clear
@@ -448,12 +469,7 @@ fn composition_is_pure_and_repeatable_from_saved_judgments() {
 
 #[test]
 fn packing_and_cache_identity_do_not_depend_on_token_calibration() {
-    let project = Project::new();
-    let mut source = String::new();
-    for i in 0..12 {
-        source.push_str(&function(&format!("f{i}")));
-    }
-    project.write("lib.rs", &source);
+    let project = functions_project(12);
     let options = args();
     let inputs = crate::inventory::collect(&options, &project.context(), &[]).unwrap();
     let keys = |bytes_per_token: f64| {

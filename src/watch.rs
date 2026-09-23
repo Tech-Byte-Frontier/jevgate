@@ -24,6 +24,30 @@ fn stop_watcher(
     Err(error)
 }
 
+/// Evaluate a debounced change, compare it with the last settled snapshot, gate
+/// and publish it. A failure stops the watcher with its reason recorded.
+fn settle(
+    session: &mut Session<'_>,
+    inputs: &[Input],
+    report: &mut Report,
+    baseline: &Report,
+) -> std::result::Result<(), Result<()>> {
+    if let Err(error) = session.evaluate(inputs, report) {
+        return Err(stop_watcher(
+            session,
+            report,
+            "Watcher stopped during evaluation",
+            error,
+        ));
+    }
+    super::changes::compare(Some(baseline), report);
+    if let Err(error) = crate::gate::settle(&session.context.root, report, &session.args.fail_on) {
+        return Err(stop_watcher(session, report, error.to_string(), error));
+    }
+    report.settled = true;
+    session.publish(report).map_err(Err)
+}
+
 pub fn run(
     session: &mut Session<'_>,
     scope: Vec<PathBuf>,
@@ -72,22 +96,9 @@ pub fn run(
         if changed_at
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(session.args.debounce_ms))
         {
-            if let Err(error) = session.evaluate(&inputs, &mut report) {
-                return stop_watcher(
-                    session,
-                    &mut report,
-                    "Watcher stopped during evaluation",
-                    error,
-                );
+            if let Err(stopped) = settle(session, &inputs, &mut report, &baseline) {
+                return stopped;
             }
-            super::changes::compare(Some(&baseline), &mut report);
-            if let Err(error) =
-                crate::gate::settle(&session.context.root, &mut report, &session.args.fail_on)
-            {
-                return stop_watcher(session, &mut report, error.to_string(), error);
-            }
-            report.settled = true;
-            session.publish(&report)?;
             baseline = report.clone();
             fingerprint = inventory::fingerprint(&inputs);
             previous = super::evaluate::previous_judgments(Some(&report), false);

@@ -3,7 +3,7 @@ use super::{
     options::CheckArgs,
     schema::{ContextFile, hash},
 };
-use crate::config::{Boundary, ConfigContext};
+use crate::{boundary::Boundary, config::ConfigContext};
 use anyhow::{Context, Result, ensure};
 use std::path::{Component, Path};
 

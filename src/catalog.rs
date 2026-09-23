@@ -113,14 +113,14 @@ pub fn id(key: &str) -> &'static str {
 }
 
 pub fn policy() -> BTreeMap<String, f64> {
-    use crate::response::REVIEW_PROBABILITY;
+    use crate::policy::REVIEW_PROBABILITY;
     BTreeMap::from([
         ("review_probability".into(), REVIEW_PROBABILITY),
         ("clear_probability".into(), REVIEW_PROBABILITY),
         ("consider_probability".into(), REVIEW_PROBABILITY),
         (
             "location_probability".into(),
-            crate::response::LOCATION_PROBABILITY,
+            crate::policy::LOCATION_PROBABILITY,
         ),
         (
             "min_body_lines".into(),
@@ -140,11 +140,11 @@ pub fn policy() -> BTreeMap<String, f64> {
         ),
         (
             "deep_nesting".into(),
-            crate::analysis::units::DEEP_NESTING as f64,
+            crate::analysis::nesting::DEEP_NESTING as f64,
         ),
         (
             "long_branch_chain".into(),
-            crate::analysis::units::LONG_CHAIN as f64,
+            crate::analysis::nesting::LONG_CHAIN as f64,
         ),
     ])
 }

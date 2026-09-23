@@ -28,21 +28,40 @@ struct Cache {
     response: Value,
 }
 
+/// Create `path` as a directory, or accept an existing real (non-symlink) one.
+fn real_directory(path: &Path, message: &'static str) -> Result<()> {
+    if path.exists() || path.is_symlink() {
+        ensure!(!path.is_symlink() && path.is_dir(), message);
+    } else {
+        fs::create_dir(path)?;
+    }
+    Ok(())
+}
+
+/// Hold the session lock for the life of the store, recording this process.
+fn lock_session(path: &Path) -> Result<fs::File> {
+    ensure!(!path.is_symlink(), "Session lock must not be a symlink");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .read(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock()
+        .context("Another JevGate session owns latest.json")?;
+    file.set_len(0)?;
+    writeln!(file, "{}", std::process::id())?;
+    Ok(file)
+}
+
 impl Store {
     pub fn open(root: &Path) -> Result<Self> {
-        let mut directory = root.to_path_buf();
-        for part in [".jevgate", "cache"] {
-            directory.push(part);
-            if directory.exists() || directory.is_symlink() {
-                ensure!(
-                    !directory.is_symlink() && directory.is_dir(),
-                    "Jev storage must be a real directory"
-                );
-            } else {
-                fs::create_dir(&directory)?;
-            }
-        }
-        directory.pop();
+        let directory = root.join(".jevgate");
+        real_directory(&directory, "Jev storage must be a real directory")?;
+        real_directory(
+            &directory.join("cache"),
+            "Jev storage must be a real directory",
+        )?;
         let ignore = directory.join(".gitignore");
         if !ignore.exists() {
             let mut file = OpenOptions::new()
@@ -51,31 +70,15 @@ impl Store {
                 .open(ignore)?;
             file.write_all(b"*\n")?;
         }
-        let lock = directory.join("session.lock");
-        ensure!(!lock.is_symlink(), "Session lock must not be a symlink");
-        let mut file = OpenOptions::new()
-            .write(true)
-            .read(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock)?;
-        file.try_lock()
-            .context("Another JevGate session owns latest.json")?;
-        file.set_len(0)?;
-        writeln!(file, "{}", std::process::id())?;
-        let history = directory.join("history");
-        if !history.exists() {
-            fs::create_dir(&history)?;
-        }
-        ensure!(
-            !history.is_symlink() && history.is_dir(),
-            "History must be a real directory"
-        );
-        let store = Self {
+        let lock = lock_session(&directory.join("session.lock"))?;
+        real_directory(
+            &directory.join("history"),
+            "History must be a real directory",
+        )?;
+        Ok(Self {
             directory,
-            _lock: file,
-        };
-        Ok(store)
+            _lock: lock,
+        })
     }
 
     /// `ttl` is `None` for answers that never expire (a pinned model version).

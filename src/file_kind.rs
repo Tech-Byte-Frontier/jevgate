@@ -2,21 +2,21 @@
 //! test path still contains other code. Parsers locate structural tests; they
 //! do not decide maintainability. The result is a gate view: which code the
 //! application rules and the test rules judge.
+use crate::test_locations::locate_tests;
 use crate::{
     inventory::Input,
     options::CheckArgs,
-    requests::TokenBudget,
-    response,
+    policy,
     schema::{FileResult, SourceRange, Status},
+    token_budget::TokenBudget,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::Path;
-use tree_sitter::Node;
 
 pub const VERSION: &str = "file-kind-v5";
-const PORTION_PRESENT: f64 = response::REVIEW_PROBABILITY;
+const PORTION_PRESENT: f64 = policy::REVIEW_PROBABILITY;
 const PORTION_ABSENT: f64 = 0.20;
 const PURPOSE_UNITS: usize = 24;
 
@@ -211,107 +211,128 @@ pub(crate) fn decide_after_purpose(
     args: &CheckArgs,
     file: &mut FileResult,
 ) -> Result<Option<View>> {
-    let answers = file
-        .classification
-        .as_ref()
-        .and_then(|class| class.purpose.clone())
-        .context("Missing file-purpose answer")?;
-    let units = file
-        .classification
-        .as_ref()
-        .map(|class| class.units.clone())
-        .unwrap_or(Value::Null);
-    let structural = file
-        .classification
-        .as_ref()
-        .map(|class| class.separated_tests.clone())
-        .unwrap_or_default();
+    let (answers, units, structural) = take_purpose(file)?;
     let choice = &answers["file_purpose"];
     let tests = probability(choice, "tests");
     let mixed = probability(choice, "mixed");
     let application = probability(choice, "application");
     let original = input.source.as_deref().unwrap_or("");
-    let confident = |value| response::probability_at_least(value, PORTION_PRESENT);
-    file.contains_tests = true;
-    {
-        let class = file
-            .classification
-            .as_mut()
-            .context("Missing file classification")?;
-        class.basis = "model".into();
-        class.purpose = Some(choice.clone());
-        class.units = Value::Null;
-        class.stage.clear();
-    }
-
+    let confident = |value| policy::probability_at_least(value, PORTION_PRESENT);
     if confident(tests) {
         return Ok(finish_tests(input, args, file));
     }
-    let mut separated = structural;
-    let mut unresolved = Vec::new();
     if confident(mixed) {
         // Portion answers are speculative. Use them only on the mixed branch.
-        let listed = units.as_array().map(|items| items.len()).unwrap_or(0);
-        for index in 0..listed {
-            let unit = &units[index];
-            let name = unit["name"].as_str().unwrap_or("unit");
-            let noul = answers[&format!("test_portion_{index}")]["noul"]
-                .as_f64()
-                .context("Missing test-portion probability")?;
-            if response::probability_at_least(noul, PORTION_PRESENT) {
-                separated.push(SourceRange {
-                    start_line: unit["start_line"].as_u64().unwrap_or(1) as usize,
-                    end_line: unit["end_line"].as_u64().unwrap_or(1) as usize,
-                });
-            } else if noul > PORTION_ABSENT {
-                unresolved.push(name.to_string());
-            }
-        }
-        separated = merge_ranges(separated);
+        let (portions, unresolved) = test_portions(&units, &answers)?;
+        let separated = merge_ranges(structural.into_iter().chain(portions).collect());
         if !has_implementation(&input.result.path, &blank_lines(original, &separated)) {
             return Ok(finish_tests(input, args, file));
         }
-        let class = file.classification.as_mut().unwrap();
-        class.kind = "mixed".into();
-        class.gate = "application".into();
-        class.separated_tests = separated;
-        class.unresolved_units = unresolved;
-        class.reason = separated_reason(&class.separated_tests);
-        return Ok(Some(view(input, args, class.clone())));
+        return Ok(Some(settle(
+            input, args, file, "mixed", separated, unresolved, None,
+        )));
     }
-
-    if confident(application) && separated.is_empty() {
-        let class = file.classification.as_mut().unwrap();
-        class.kind = "application".into();
-        class.gate = "application".into();
-        class.separated_tests.clear();
-        class.reason = "Classified as application or library code.".into();
-        return Ok(Some(view(input, args, class.clone())));
+    if confident(application) && structural.is_empty() {
+        let reason = "Classified as application or library code.".to_string();
+        return Ok(Some(settle(
+            input,
+            args,
+            file,
+            "application",
+            Vec::new(),
+            Vec::new(),
+            Some(reason),
+        )));
     }
-    if !has_implementation(&input.result.path, &blank_lines(original, &separated)) {
+    if !has_implementation(&input.result.path, &blank_lines(original, &structural)) {
         return Ok(finish_tests(input, args, file));
     }
-    let class = file.classification.as_mut().unwrap();
-    class.kind = if !separated.is_empty() && confident(application) {
-        "mixed"
-    } else {
-        "unresolved"
+    if !structural.is_empty() && confident(application) {
+        return Ok(Some(settle(
+            input,
+            args,
+            file,
+            "mixed",
+            structural,
+            Vec::new(),
+            None,
+        )));
     }
-    .into();
-    class.gate = "application".into();
-    class.separated_tests = separated;
-    class.unresolved_units = unresolved;
-    class.reason = if class.kind == "mixed" {
-        separated_reason(&class.separated_tests)
-    } else if units.as_array().is_none_or(|items| items.is_empty())
+    let reason = if units.as_array().is_none_or(|items| items.is_empty())
         && mixed > application
         && mixed > tests
     {
-        "The file looks mixed, but it has no separable test boundaries, so the rules judge the whole file.".into()
+        "The file looks mixed, but it has no separable test boundaries, so the rules judge the whole file."
     } else {
-        "File purpose stayed below 0.80, so the rules judge the source without dropping unresolved regions.".into()
+        "File purpose stayed below 0.80, so the rules judge the source without dropping unresolved regions."
     };
-    Ok(Some(view(input, args, class.clone())))
+    Ok(Some(settle(
+        input,
+        args,
+        file,
+        "unresolved",
+        structural,
+        Vec::new(),
+        Some(reason.into()),
+    )))
+}
+
+/// The recorded purpose answers, the units they cover and the structural test
+/// ranges; the file is marked as classified by the model.
+fn take_purpose(file: &mut FileResult) -> Result<(Value, Value, Vec<SourceRange>)> {
+    file.contains_tests = true;
+    let class = file
+        .classification
+        .as_mut()
+        .context("Missing file classification")?;
+    let answers = class
+        .purpose
+        .clone()
+        .context("Missing file-purpose answer")?;
+    let units = std::mem::replace(&mut class.units, Value::Null);
+    class.basis = "model".into();
+    class.purpose = Some(answers["file_purpose"].clone());
+    class.stage.clear();
+    Ok((answers, units, class.separated_tests.clone()))
+}
+
+/// Units the purpose answer marks as tests, and units it leaves undecided.
+fn test_portions(units: &Value, answers: &Value) -> Result<(Vec<SourceRange>, Vec<String>)> {
+    let mut portions = Vec::new();
+    let mut unresolved = Vec::new();
+    for (index, unit) in units.as_array().into_iter().flatten().enumerate() {
+        let noul = answers[&format!("test_portion_{index}")]["noul"]
+            .as_f64()
+            .context("Missing test-portion probability")?;
+        if policy::probability_at_least(noul, PORTION_PRESENT) {
+            portions.push(SourceRange {
+                start_line: unit["start_line"].as_u64().unwrap_or(1) as usize,
+                end_line: unit["end_line"].as_u64().unwrap_or(1) as usize,
+            });
+        } else if noul > PORTION_ABSENT {
+            unresolved.push(unit["name"].as_str().unwrap_or("unit").to_string());
+        }
+    }
+    Ok((portions, unresolved))
+}
+
+/// Record the classification the application rules will judge under.
+fn settle(
+    input: &Input,
+    args: &CheckArgs,
+    file: &mut FileResult,
+    kind: &str,
+    separated: Vec<SourceRange>,
+    unresolved: Vec<String>,
+    reason: Option<String>,
+) -> View {
+    let class = file.classification.as_mut().unwrap();
+    class.kind = kind.into();
+    class.gate = "application".into();
+    class.reason = reason.unwrap_or_else(|| separated_reason(&separated));
+    class.separated_tests = separated;
+    class.unresolved_units = unresolved;
+    view(input, args, class.clone())
 }
 
 fn finish_tests(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Option<View> {
@@ -331,34 +352,36 @@ fn finish_tests(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Optio
     Some(view(input, args, class.clone()))
 }
 
+/// A test file: judged by the test rules with `--include-tests`, otherwise skipped.
+fn tests_prepared(path: &Path, args: &CheckArgs) -> Prepared {
+    let mut class = classification(
+        "tests",
+        "deterministic",
+        "tests",
+        "Test file. Test rules judge this code.",
+        language(path),
+    );
+    if !args.include_tests {
+        class.gate = "excluded".into();
+        class.reason = "Test file. Pass --include-tests to judge tests.".into();
+    }
+    let action = if args.include_tests {
+        Action::Judge
+    } else {
+        Action::Skip
+    };
+    Prepared {
+        classification: class,
+        action,
+    }
+}
+
 fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
     let original = input.source.clone().unwrap_or_default();
     let path = &input.result.path;
     let located = locate_tests(path, &original)?;
-    let tests_class = || {
-        let mut class = classification(
-            "tests",
-            "deterministic",
-            "tests",
-            "Test file. Test rules judge this code.",
-            language(path),
-        );
-        if !args.include_tests {
-            class.gate = "excluded".into();
-            class.reason = "Test file. Pass --include-tests to judge tests.".into();
-        }
-        let action = if args.include_tests {
-            Action::Judge
-        } else {
-            Action::Skip
-        };
-        Prepared {
-            classification: class,
-            action,
-        }
-    };
     if located.whole_file {
-        return Ok(tests_class());
+        return Ok(tests_prepared(path, args));
     }
     let separated = merge_ranges(located.ranges);
     let remaining = has_implementation(path, &blank_lines(&original, &separated));
@@ -387,7 +410,7 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
     }
     let test_path = input.result.role == "test";
     if (test_path && structural_tests) || (!remaining && (test_path || structural_tests)) {
-        return Ok(tests_class());
+        return Ok(tests_prepared(path, args));
     }
     if structural_tests {
         class.kind = "mixed".into();
@@ -444,408 +467,31 @@ fn purpose_request(input: &Input, args: &CheckArgs, class: &Classification) -> R
     }))
 }
 
-struct Located {
-    ranges: Vec<SourceRange>,
-    unresolved: Vec<String>,
-    whole_file: bool,
-}
-
-fn locate_tests(path: &Path, source: &str) -> Result<Located> {
-    let Some(tree) = crate::locations::parse(path, source)? else {
-        return Ok(Located {
-            ranges: Vec::new(),
-            unresolved: Vec::new(),
-            whole_file: false,
-        });
-    };
-    let root = tree.root_node();
-    if whole_file_cfg_test(root, source) {
-        return Ok(Located {
-            ranges: Vec::new(),
-            unresolved: Vec::new(),
-            whole_file: true,
-        });
-    }
-    let mut spans = Vec::new();
-    walk(root, source, pytest_file(path), &mut spans);
-    let mut ranges = Vec::new();
-    let mut unresolved = Vec::new();
-    for (start, end) in merge_spans(spans) {
-        if owns_lines(source, start, end) {
-            ranges.push(line_range(source, start, end));
-        } else {
-            unresolved.push("test syntax shares a line with other code".into());
-        }
-    }
-    Ok(Located {
-        ranges,
-        unresolved,
-        whole_file: false,
-    })
-}
-
-fn walk(node: Node<'_>, source: &str, pytest: bool, spans: &mut Vec<(usize, usize)>) {
-    if let Some(span) = rust_test_span(node, source)
-        .or_else(|| javascript_test_span(node, source))
-        .or_else(|| python_test_span(node, source, pytest))
-    {
-        spans.push(span);
-        return;
-    }
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        walk(child, source, pytest, spans);
-    }
-}
-
-/// pytest collects top-level `test*` functions only from `test_*.py` and `*_test.py`.
-fn pytest_file(path: &Path) -> bool {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    name.ends_with(".py") && (name.starts_with("test_") || name.ends_with("_test.py"))
-}
-
-/// A pytest `Test*` class or a `unittest` `TestCase` subclass.
-pub(crate) fn python_test_class(node: Node<'_>, source: &str) -> bool {
-    node.kind() == "class_definition"
-        && (node
-            .child_by_field_name("name")
-            .is_some_and(|name| child_text(name, source).starts_with("Test"))
-            || node
-                .child_by_field_name("superclasses")
-                .is_some_and(|bases| child_text(bases, source).contains("TestCase")))
-}
-
-/// Python test classes anywhere, and top-level `test*` functions in pytest files.
-fn python_test_span(node: Node<'_>, source: &str, pytest: bool) -> Option<(usize, usize)> {
-    let definition = if node.kind() == "decorated_definition" {
-        node.child_by_field_name("definition")?
-    } else if matches!(node.kind(), "class_definition" | "function_definition")
-        && node.parent()?.kind() != "decorated_definition"
-    {
-        node
-    } else {
-        return None;
-    };
-    let test = python_test_class(definition, source)
-        || pytest
-            && definition.kind() == "function_definition"
-            && node.parent()?.kind() == "module"
-            && definition
-                .child_by_field_name("name")
-                .is_some_and(|name| child_text(name, source).starts_with("test"));
-    test.then(|| (node.start_byte(), node.end_byte()))
-}
-
-fn rust_test_span(node: Node<'_>, source: &str) -> Option<(usize, usize)> {
-    if !matches!(
-        node.kind(),
-        "function_item" | "function_signature_item" | "mod_item" | "impl_item"
-    ) {
-        return None;
-    }
-    let marked = preceding_attributes(node, source)
-        .iter()
-        .any(|text| attribute_marks_test(text))
-        || has_inner_cfg_test(node, source)
-        || mod_contains_only_tests(node, source);
-    if !marked {
-        return None;
-    }
-    Some((attribute_start(node), node.end_byte()))
-}
-
-fn javascript_test_span(node: Node<'_>, source: &str) -> Option<(usize, usize)> {
-    if node.kind() != "call_expression" || !is_test_call(&callee(node, source)) {
-        return None;
-    }
-    let statement = statement_span(node);
-    Some((statement.start_byte(), statement.end_byte()))
-}
-
-fn mod_contains_only_tests(node: Node<'_>, source: &str) -> bool {
-    if node.kind() != "mod_item" {
-        return false;
-    }
-    let Some(body) = node.child_by_field_name("body") else {
-        return false;
-    };
-    let mut saw_test = false;
-    let mut cursor = body.walk();
-    for child in body.named_children(&mut cursor) {
-        if child.kind().contains("comment")
-            || matches!(
-                child.kind(),
-                "attribute_item" | "inner_attribute_item" | "use_declaration"
-            )
-        {
-            continue;
-        }
-        if rust_test_span(child, source).is_some() {
-            saw_test = true;
-            continue;
-        }
-        return false;
-    }
-    saw_test
-}
-
-fn whole_file_cfg_test(root: Node<'_>, source: &str) -> bool {
-    let mut cursor = root.walk();
-    root.named_children(&mut cursor).any(|child| {
-        child.kind() == "inner_attribute_item" && cfg_is_test_only(child_text(child, source))
-    })
-}
-
-fn has_inner_cfg_test(node: Node<'_>, source: &str) -> bool {
-    let Some(body) = node.child_by_field_name("body") else {
-        return false;
-    };
-    let mut cursor = body.walk();
-    body.named_children(&mut cursor).any(|child| {
-        child.kind() == "inner_attribute_item" && cfg_is_test_only(child_text(child, source))
-    })
-}
-
-pub(crate) fn preceding_attributes<'a>(node: Node<'_>, source: &'a str) -> Vec<&'a str> {
-    let mut texts = Vec::new();
-    let mut previous = node.prev_named_sibling();
-    while let Some(sibling) = previous {
-        if sibling.kind() == "attribute_item" {
-            texts.push(child_text(sibling, source));
-        } else if !sibling.kind().contains("comment") {
-            break;
-        }
-        previous = sibling.prev_named_sibling();
-    }
-    texts
-}
-
-fn attribute_start(node: Node<'_>) -> usize {
-    let mut start = node.start_byte();
-    let mut previous = node.prev_named_sibling();
-    while let Some(sibling) = previous {
-        if sibling.kind() == "attribute_item" {
-            start = sibling.start_byte();
-        } else if !sibling.kind().contains("comment") {
-            break;
-        }
-        previous = sibling.prev_named_sibling();
-    }
-    start
-}
-
-pub(crate) fn attribute_marks_test(text: &str) -> bool {
-    cfg_is_test_only(text) || attribute_path(text).is_some_and(is_test_attribute)
-}
-
-fn attribute_path(text: &str) -> Option<&str> {
-    let start = text.find('[')? + 1;
-    let end = text.rfind(']')?;
-    let body = text.get(start..end)?.trim();
-    let path = body.split(['(', '=']).next()?.trim();
-    (!path.is_empty()).then_some(path)
-}
-
-fn is_test_attribute(path: &str) -> bool {
-    path == "test"
-        || path.ends_with("::test")
-        || path == "rstest"
-        || path.ends_with("::rstest")
-        || path == "test_case"
-        || path.ends_with("::test_case")
-}
-
-/// `cfg(test)` and `all(..., test, ...)` compile only for tests.
-/// `not(test)` and `any(test, ...)` can still be production code, so they stay.
-fn cfg_is_test_only(text: &str) -> bool {
-    let cleaned = strip_strings(text);
-    let mut rest = cleaned.as_str();
-    while let Some(index) = rest.find("cfg") {
-        let boundary = index == 0
-            || !rest.as_bytes()[index - 1].is_ascii_alphanumeric()
-                && rest.as_bytes()[index - 1] != b'_';
-        let after = rest[index + 3..].trim_start();
-        if boundary
-            && let Some(body) = after.strip_prefix('(')
-            && let Some(end) = matching_paren(body)
-            && predicate_is_test_only(&body[..end])
-        {
-            return true;
-        }
-        rest = &rest[index + 3..];
-    }
-    false
-}
-
-fn predicate_is_test_only(expr: &str) -> bool {
-    let expr = expr.trim();
-    if expr == "test" {
-        return true;
-    }
-    strip_call(expr, "all").is_some_and(|inner| {
-        split_top_level(inner)
-            .iter()
-            .any(|part| predicate_is_test_only(part))
-    })
-}
-
-fn strip_call<'a>(expr: &'a str, name: &str) -> Option<&'a str> {
-    let rest = expr.trim().strip_prefix(name)?.trim_start();
-    let rest = rest.strip_prefix('(')?;
-    let end = matching_paren(rest)?;
-    rest[end..].trim().is_empty().then_some(rest[..end].trim())
-}
-
-fn split_top_level(text: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut start = 0usize;
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            ',' if depth == 0 => {
-                let part = text[start..index].trim();
-                if !part.is_empty() {
-                    parts.push(part);
-                }
-                start = index + character.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    let tail = text[start..].trim();
-    if !tail.is_empty() {
-        parts.push(tail);
-    }
-    parts
-}
-
-fn matching_paren(text: &str) -> Option<usize> {
-    let mut depth = 0i32;
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' if depth == 0 => return Some(index),
-            ')' => depth -= 1,
-            _ => {}
-        }
-    }
-    None
-}
-
-fn strip_strings(text: &str) -> String {
-    let mut cleaned = String::new();
-    let mut chars = text.chars().peekable();
-    while let Some(character) = chars.next() {
-        if character == '"' || character == '\'' {
-            let quote = character;
-            while let Some(next) = chars.next() {
-                if next == '\\' {
-                    chars.next();
-                    continue;
-                }
-                if next == quote {
-                    break;
-                }
-            }
-            cleaned.push(' ');
-        } else {
-            cleaned.push(character);
-        }
-    }
-    cleaned
-}
-
-fn is_test_call(name: &str) -> bool {
-    const NAMES: &[&str] = &[
-        "describe",
-        "xdescribe",
-        "test",
-        "xtest",
-        "fdescribe",
-        "it",
-        "xit",
-        "fit",
-        "beforeEach",
-        "afterEach",
-        "beforeAll",
-        "afterAll",
-    ];
-    NAMES
-        .iter()
-        .any(|candidate| name == *candidate || name.starts_with(&format!("{candidate}.")))
-}
-
-fn callee(node: Node<'_>, source: &str) -> String {
-    node.child_by_field_name("function")
-        .map(|child| child_text(child, source).trim().to_string())
-        .unwrap_or_default()
-}
-
-fn statement_span(node: Node<'_>) -> Node<'_> {
-    let mut current = node;
-    while let Some(parent) = current.parent() {
-        if parent.kind() == "expression_statement" {
-            return parent;
-        }
-        if matches!(parent.kind(), "program" | "source_file" | "module") {
-            break;
-        }
-        current = parent;
-    }
-    node
-}
-
-fn child_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
-    node.utf8_text(source.as_bytes()).unwrap_or("")
-}
-
-fn owns_lines(source: &str, start: usize, end: usize) -> bool {
-    if start > end || end > source.len() {
-        return false;
-    }
-    let line_start = source[..start].rfind('\n').map_or(0, |index| index + 1);
-    let line_end = source[end..]
-        .find('\n')
-        .map_or(source.len(), |index| end + index);
-    source[line_start..start].trim().is_empty() && source[end..line_end].trim().is_empty()
-}
-
-fn line_range(source: &str, start: usize, end: usize) -> SourceRange {
-    let start_line = source[..start]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1;
-    let end_at = end.saturating_sub(1).max(start);
-    let end_line = source[..end_at.min(source.len())]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1;
-    SourceRange {
-        start_line,
-        end_line,
-    }
-}
-
 fn has_implementation(path: &Path, source: &str) -> bool {
     if !crate::context_units::review_targets(path, source).is_empty() {
         return true;
     }
-    source.lines().any(|line| {
-        let line = line.trim();
-        !line.is_empty()
-            && !line.starts_with("//")
-            && !line.starts_with('#')
-            && !line.starts_with("/*")
-            && !line.starts_with('*')
-            && !line.starts_with("use ")
-            && !line.starts_with("pub use ")
-            && !line.starts_with("import ")
-            && !line.starts_with("from ")
-    })
+    source.lines().any(code_line)
+}
+
+/// A line that is neither blank, a comment nor an import.
+fn code_line(line: &str) -> bool {
+    const NOT_CODE: &[&str] = &["//", "#", "/*", "*", "use ", "pub use ", "import ", "from "];
+    let line = line.trim();
+    !line.is_empty() && !NOT_CODE.iter().any(|start| line.starts_with(start))
+}
+
+/// One flag per line, set for lines inside any of `ranges`.
+fn line_mask(lines: usize, ranges: &[SourceRange]) -> Vec<bool> {
+    let mut mask = vec![false; lines];
+    for range in ranges {
+        for line in range.start_line..=range.end_line {
+            if let Some(slot) = mask.get_mut(line.saturating_sub(1)) {
+                *slot = true;
+            }
+        }
+    }
+    mask
 }
 
 fn overlaps(range: &SourceRange, ranges: &[SourceRange]) -> bool {
@@ -872,14 +518,7 @@ fn blank_lines(source: &str, ranges: &[SourceRange]) -> String {
     if ranges.is_empty() {
         return source.to_string();
     }
-    let mut blank = vec![false; source.lines().count()];
-    for range in ranges {
-        for line in range.start_line..=range.end_line {
-            if let Some(slot) = blank.get_mut(line.saturating_sub(1)) {
-                *slot = true;
-            }
-        }
-    }
+    let blank = line_mask(source.lines().count(), ranges);
     let mut out = String::with_capacity(source.len());
     for (index, line) in source.lines().enumerate() {
         if blank.get(index).copied().unwrap_or(false) {
@@ -893,21 +532,6 @@ fn blank_lines(source: &str, ranges: &[SourceRange]) -> String {
         out.pop();
     }
     out
-}
-
-fn merge_spans(mut spans: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
-    spans.sort_unstable();
-    let mut merged: Vec<(usize, usize)> = Vec::new();
-    for span in spans {
-        if let Some(last) = merged.last_mut()
-            && span.0 <= last.1
-        {
-            last.1 = last.1.max(span.1);
-            continue;
-        }
-        merged.push(span);
-    }
-    merged
 }
 
 fn merge_ranges(mut ranges: Vec<SourceRange>) -> Vec<SourceRange> {
@@ -1213,44 +837,48 @@ mod tests {
         }
     }
 
+    impl PurposeEval {
+        /// The file-purpose Choice for this mode.
+        fn purpose(&self) -> Value {
+            let (tests, mixed, application) = match self.mode {
+                "tests" => (1.0, 0.0, 0.0),
+                "mixed" => (0.0, 1.0, 0.0),
+                _ => (0.34, 0.33, 0.33),
+            };
+            let choice = if tests >= mixed && tests >= application {
+                "tests"
+            } else if mixed >= application {
+                "mixed"
+            } else {
+                "application"
+            };
+            json!({"type":"choice","choice":choice,"confidence":0.9,"probabilities":{"tests":tests,"mixed":mixed,"application":application}})
+        }
+    }
+
+    /// Units named like `helper` are application code; every other unit is a test.
+    fn portion(request: &Value, name: &str) -> Value {
+        let index = name
+            .rsplit_once('_')
+            .and_then(|(_, index)| index.parse::<usize>().ok())
+            .unwrap_or(0);
+        let unit = request["state"]["units"][index]["name"]
+            .as_str()
+            .unwrap_or("");
+        let noul = if unit.contains("helper") { 0.05 } else { 0.95 };
+        json!({"type":"noul","noul":noul})
+    }
+
     impl crate::transport::Evaluator for PurposeEval {
         fn evaluate(&mut self, request: &Value) -> Result<Value> {
             self.calls += 1;
             if request["questions"]["file_purpose"].is_object() {
                 let mut answers = serde_json::Map::new();
-                let (tests, mixed, application) = match self.mode {
-                    "tests" => (1.0, 0.0, 0.0),
-                    "mixed" => (0.0, 1.0, 0.0),
-                    _ => (0.34, 0.33, 0.33),
-                };
-                let choice = if tests >= mixed && tests >= application {
-                    "tests"
-                } else if mixed >= application {
-                    "mixed"
-                } else {
-                    "application"
-                };
-                answers.insert(
-                    "file_purpose".into(),
-                    json!({"type":"choice","choice":choice,"confidence":0.9,"probabilities":{"tests":tests,"mixed":mixed,"application":application}}),
-                );
+                answers.insert("file_purpose".into(), self.purpose());
                 for (name, question) in request["questions"].as_object().unwrap() {
-                    if question["type"] != "noul" {
-                        continue;
+                    if question["type"] == "noul" {
+                        answers.insert(name.clone(), portion(request, name));
                     }
-                    let index = name
-                        .rsplit_once('_')
-                        .and_then(|(_, index)| index.parse::<usize>().ok())
-                        .unwrap_or(0);
-                    let unit_name = request["state"]["units"][index]["name"]
-                        .as_str()
-                        .unwrap_or("");
-                    let noul = if unit_name.contains("helper") {
-                        0.05
-                    } else {
-                        0.95
-                    };
-                    answers.insert(name.clone(), json!({"type":"noul","noul":noul}));
                 }
                 return Ok(
                     json!({"model":request["model"],"answers":answers,"usage":{"input_tokens":8,"output_tokens":2}}),

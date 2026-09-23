@@ -1,24 +1,9 @@
+//! Validation of provider responses against the request, and the cached form of an answer.
 use anyhow::{Context, Result, ensure};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 pub fn validate(response: &Value, request: &Value) -> Result<()> {
-    let model = response["model"]
-        .as_str()
-        .context("Missing model identity")?;
-    ensure!(
-        !model.is_empty()
-            && model.len() <= 128
-            && model
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)),
-        "Invalid model identity"
-    );
-    if let Some(requested) = request["model"].as_str() {
-        ensure!(
-            matches!(requested, "jev-latest" | "jev-preview") || model == requested,
-            "Provider returned a different pinned model"
-        );
-    }
+    validate_model(response, request)?;
     let answers = response["answers"].as_object().context("Missing answers")?;
     let questions = request["questions"]
         .as_object()
@@ -47,6 +32,28 @@ pub fn validate(response: &Value, request: &Value) -> Result<()> {
     Ok(())
 }
 
+/// A well-formed model name, equal to the pinned model when one was requested.
+fn validate_model(response: &Value, request: &Value) -> Result<()> {
+    let model = response["model"]
+        .as_str()
+        .context("Missing model identity")?;
+    ensure!(
+        !model.is_empty()
+            && model.len() <= 128
+            && model
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)),
+        "Invalid model identity"
+    );
+    if let Some(requested) = request["model"].as_str() {
+        ensure!(
+            matches!(requested, "jev-latest" | "jev-preview") || model == requested,
+            "Provider returned a different pinned model"
+        );
+    }
+    Ok(())
+}
+
 fn probability(value: &Value) -> Result<f64> {
     let p = value.as_f64().context("Non-numeric probability")?;
     ensure!(
@@ -56,26 +63,14 @@ fn probability(value: &Value) -> Result<f64> {
     Ok(p)
 }
 
+/// A Score or Choice answer: probabilities over exactly the defined options,
+/// summing to one, consistent with the reported score or choice.
 fn validate_distribution(answer: &Value, question: &Value) -> Result<()> {
     probability(&answer["confidence"])?;
     let probabilities = answer["probabilities"]
         .as_object()
         .context("Missing probabilities")?;
-    let keys: Vec<String> = if question["type"] == "score" {
-        (0..question["criteria"]
-            .as_array()
-            .context("Invalid rubric")?
-            .len())
-            .map(|i| i.to_string())
-            .collect()
-    } else {
-        question["criteria"]
-            .as_object()
-            .context("Invalid choices")?
-            .keys()
-            .cloned()
-            .collect()
-    };
+    let keys = option_keys(question)?;
     ensure!(
         keys.len() == probabilities.len() && keys.iter().all(|k| probabilities.contains_key(k)),
         "Wrong probability keys"
@@ -91,59 +86,85 @@ fn validate_distribution(answer: &Value, question: &Value) -> Result<()> {
         "Invalid probability mass"
     );
     if question["type"] == "score" {
-        let score = answer["score"].as_f64().context("Missing score")?;
-        let expected = keys
-            .iter()
-            .enumerate()
-            .map(|(i, k)| i as f64 * probabilities[k].as_f64().unwrap())
-            .sum::<f64>();
-        let rounding = 0.005 * (1 + (0..keys.len()).sum::<usize>()) as f64 + 1e-9;
-        ensure!(
-            (0.0..=(keys.len() - 1) as f64).contains(&score)
-                && (score - expected).abs() <= rounding,
-            "Inconsistent score"
-        );
+        validate_score(answer, probabilities, &keys)
     } else {
-        let choice = answer["choice"].as_str().context("Missing choice")?;
-        ensure!(probabilities.contains_key(choice), "Invalid choice");
-        let chosen = probability(&probabilities[choice])?;
-        ensure!(
-            probabilities
-                .values()
-                .all(|v| v.as_f64().unwrap() <= chosen + 0.01),
-            "Choice is not a highest-probability option"
-        );
+        validate_choice(answer, probabilities)
     }
+}
+
+/// Score levels by index, or Choice options by name.
+fn option_keys(question: &Value) -> Result<Vec<String>> {
+    Ok(if question["type"] == "score" {
+        let levels = question["criteria"]
+            .as_array()
+            .context("Invalid rubric")?
+            .len();
+        (0..levels).map(|i| i.to_string()).collect()
+    } else {
+        question["criteria"]
+            .as_object()
+            .context("Invalid choices")?
+            .keys()
+            .cloned()
+            .collect()
+    })
+}
+
+/// The score is the probability-weighted level, within rounding.
+fn validate_score(
+    answer: &Value,
+    probabilities: &Map<String, Value>,
+    keys: &[String],
+) -> Result<()> {
+    let score = answer["score"].as_f64().context("Missing score")?;
+    let expected = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| i as f64 * probabilities[k].as_f64().unwrap())
+        .sum::<f64>();
+    let rounding = 0.005 * (1 + (0..keys.len()).sum::<usize>()) as f64 + 1e-9;
+    ensure!(
+        (0.0..=(keys.len() - 1) as f64).contains(&score) && (score - expected).abs() <= rounding,
+        "Inconsistent score"
+    );
     Ok(())
 }
 
-pub(crate) const REVIEW_PROBABILITY: f64 = 0.80;
-pub(crate) const LOCATION_PROBABILITY: f64 = 0.65;
-
-/// Aggregating and normalizing binary floats can move an exact decimal boundary
-/// by a few machine rounding units. This is only an arithmetic allowance, not a
-/// confidence margin; raw probabilities and the configured thresholds stay intact.
-pub(crate) fn probability_at_least(value: f64, threshold: f64) -> bool {
-    value.is_finite()
-        && threshold.is_finite()
-        && (value >= threshold || threshold - value <= 8.0 * f64::EPSILON)
+/// The choice is an option with the highest probability, within rounding.
+fn validate_choice(answer: &Value, probabilities: &Map<String, Value>) -> Result<()> {
+    let choice = answer["choice"].as_str().context("Missing choice")?;
+    ensure!(probabilities.contains_key(choice), "Invalid choice");
+    let chosen = probability(&probabilities[choice])?;
+    ensure!(
+        probabilities
+            .values()
+            .all(|v| v.as_f64().unwrap() <= chosen + 0.01),
+        "Choice is not a highest-probability option"
+    );
+    Ok(())
 }
 
 pub fn cache_value(response: &Value, request: &Value) -> Value {
     let mut answers = serde_json::Map::new();
     for (key, question) in request["questions"].as_object().unwrap() {
-        let answer = &response["answers"][key];
-        let fields: &[&str] = match question["type"].as_str().unwrap() {
-            "score" => &["type", "score", "confidence", "probabilities"],
-            "choice" => &["type", "choice", "confidence", "probabilities"],
-            _ => &["type", "noul"],
-        };
-        let clean: serde_json::Map<_, _> = fields
-            .iter()
-            .map(|f| (f.to_string(), answer[*f].clone()))
-            .collect();
-        answers.insert(key.clone(), Value::Object(clean));
+        let kind = question["type"].as_str().unwrap();
+        answers.insert(key.clone(), typed_fields(&response["answers"][key], kind));
     }
     serde_json::json!({"model":response["model"], "answers":answers,
         "usage":{"input_tokens":response["usage"]["input_tokens"], "output_tokens":response["usage"]["output_tokens"]}})
+}
+
+/// Only the fields a typed answer defines; anything else the provider sent is dropped.
+fn typed_fields(answer: &Value, kind: &str) -> Value {
+    let fields: &[&str] = match kind {
+        "score" => &["type", "score", "confidence", "probabilities"],
+        "choice" => &["type", "choice", "confidence", "probabilities"],
+        _ => &["type", "noul"],
+    };
+    Value::Object(
+        fields
+            .iter()
+            .map(|f| (f.to_string(), answer[*f].clone()))
+            .collect(),
+    )
 }

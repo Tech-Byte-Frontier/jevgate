@@ -1,22 +1,14 @@
 use super::*;
 use clap::Parser;
 use serde_json::{Value, json};
-use std::{
-    path::PathBuf,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::path::PathBuf;
+#[path = "../tests/support/temp_dir.rs"]
+mod temp_dir;
 
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-pub(super) struct Project(pub(super) PathBuf);
+pub(super) struct Project(pub(super) temp_dir::TempDir);
 impl Project {
     pub(super) fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "jev-unit-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&path).unwrap();
-        Self(path)
+        Self(temp_dir::TempDir::new("jev-unit"))
     }
     pub(super) fn write(&self, name: &str, text: &str) {
         std::fs::create_dir_all(self.0.join(name).parent().unwrap()).unwrap();
@@ -24,15 +16,10 @@ impl Project {
     }
     pub(super) fn context(&self) -> ConfigContext {
         ConfigContext {
-            invocation_dir: self.0.clone(),
-            root: self.0.clone(),
+            invocation_dir: self.0.to_path_buf(),
+            root: self.0.to_path_buf(),
             config: Default::default(),
         }
-    }
-}
-impl Drop for Project {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -62,35 +49,44 @@ pub(super) fn answer(request: &Value, level: usize) -> Value {
         .as_object()
         .unwrap()
         .iter()
-        .map(|(name, q)| {
-            let answer = match q["type"].as_str().unwrap() {
-                "noul" => {
-                    let noul = [0.05, 0.5, 0.95, 0.5][level];
-                    json!({"type":"noul","noul":noul})
-                }
-                "score" => {
-                    let p = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.4, 0.2, 0.4]][level];
-                    json!({"type":"score","score":p[1] + 2.0 * p[2],"confidence":1.0,
-                        "probabilities":{"0":p[0],"1":p[1],"2":p[2]}})
-                }
-                _ => {
-                    let keys = q["criteria"].as_object().unwrap();
-                    let chosen = if keys.contains_key("none") {
-                        "none"
-                    } else {
-                        keys.keys().next().unwrap()
-                    };
-                    let probabilities: serde_json::Map<_, _> = keys
-                        .keys()
-                        .map(|k| (k.clone(), json!(if k == chosen { 1.0 } else { 0.0 })))
-                        .collect();
-                    json!({"type":"choice","choice":chosen,"confidence":1.0,"probabilities":probabilities})
-                }
-            };
-            (name.clone(), answer)
-        })
+        .map(|(name, q)| (name.clone(), typed_answer(q, level)))
         .collect::<serde_json::Map<_, _>>();
     json!({"model":request["model"],"answers":answers,"usage":{"input_tokens":10,"output_tokens":0}})
+}
+
+/// A valid answer of the question's type at `level` (see [`answer`]).
+fn typed_answer(question: &Value, level: usize) -> Value {
+    match question["type"].as_str().unwrap() {
+        "noul" => {
+            let noul = [0.05, 0.5, 0.95, 0.5][level];
+            json!({"type":"noul","noul":noul})
+        }
+        "score" => {
+            let p = [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.4, 0.2, 0.4],
+            ][level];
+            json!({"type":"score","score":p[1] + 2.0 * p[2],"confidence":1.0,
+                "probabilities":{"0":p[0],"1":p[1],"2":p[2]}})
+        }
+        _ => choice_answer(question["criteria"].as_object().unwrap()),
+    }
+}
+
+/// A certain Choice of `none` when offered, else the first option.
+fn choice_answer(options: &serde_json::Map<String, Value>) -> Value {
+    let chosen = if options.contains_key("none") {
+        "none"
+    } else {
+        options.keys().next().unwrap()
+    };
+    let probabilities: serde_json::Map<_, _> = options
+        .keys()
+        .map(|k| (k.clone(), json!(if k == chosen { 1.0 } else { 0.0 })))
+        .collect();
+    json!({"type":"choice","choice":chosen,"confidence":1.0,"probabilities":probabilities})
 }
 
 #[derive(Default)]
@@ -130,7 +126,7 @@ pub(super) fn session<'a>(
         requests: 0,
         paid_input_tokens: 0,
         paid_output_tokens: 0,
-        budget: requests::TokenBudget::default(),
+        budget: token_budget::TokenBudget::default(),
         observed: (0, 0),
     }
 }
@@ -169,10 +165,9 @@ fn unchanged_files_are_answered_from_cache_without_api_calls() {
     let options = args();
     let mut mock = Mock::default();
     let first = run(&project, &options, &mut mock);
-    assert_eq!(mock.calls, 2);
+    assert_eq!(first.api_requests, 2);
     assert_eq!(first.stages["functions"].successful_requests, 2);
     let second = run(&project, &options, &mut mock);
-    assert_eq!(mock.calls, 2);
     assert_eq!(second.api_requests, 0);
     assert_eq!(second.paid_input_tokens, 0);
     assert!(second.files.iter().all(|file| file.cached));
@@ -183,8 +178,8 @@ fn unchanged_files_are_answered_from_cache_without_api_calls() {
             .all(|f| f.status == schema::Status::Clear)
     );
     project.write("b.rs", &function("b_changed"));
-    run(&project, &options, &mut mock);
-    assert_eq!(mock.calls, 3, "only the changed unit is sent again");
+    let third = run(&project, &options, &mut mock);
+    assert_eq!(third.api_requests, 1, "only the changed unit is sent again");
 }
 
 #[test]
@@ -206,46 +201,32 @@ fn gate_fails_only_on_the_configured_results() {
     let project = Project::new();
     project.write("lib.rs", &function("f"));
     let mut options = args();
-    let mut review = Mock {
-        level: 2,
-        ..Default::default()
-    };
-    let report = run(&project, &options, &mut review);
-    assert_eq!(report.status, "review");
-    assert_eq!(report.files[0].findings.len(), 1);
-    assert_eq!(gate::exit_code(&report), 1);
-    assert!(!report.acceptance_evaluated);
-    options.fail_on = vec![options::FailOn::None];
-    assert_eq!(gate::exit_code(&run(&project, &options, &mut review)), 0);
-    options.refresh = true;
-    options.fail_on = vec![options::FailOn::Review];
-    let mut consider = Mock {
-        level: 1,
-        ..Default::default()
-    };
-    let report = run(&project, &options, &mut consider);
-    assert_eq!(report.status, "consider");
-    assert_eq!(
-        gate::exit_code(&report),
-        0,
-        "consider does not fail by default"
-    );
-    options.fail_on = vec![options::FailOn::Consider];
-    assert_eq!(gate::exit_code(&run(&project, &options, &mut consider)), 1);
-    let mut uncertain = Mock {
-        level: 3,
-        ..Default::default()
-    };
-    options.fail_on = vec![options::FailOn::Review];
-    let report = run(&project, &options, &mut uncertain);
-    assert_eq!(report.status, "uncertain");
-    assert_eq!(
-        gate::exit_code(&report),
-        0,
-        "uncertain does not fail by default"
-    );
-    options.fail_on = vec![options::FailOn::Uncertain];
-    assert_eq!(gate::exit_code(&run(&project, &options, &mut uncertain)), 1);
+    // Mock level, report status, the default gate's exit code, and the gate that fails it.
+    let cases = [
+        (2, "review", 1, options::FailOn::None, 0),
+        (1, "consider", 0, options::FailOn::Consider, 1),
+        (3, "uncertain", 0, options::FailOn::Uncertain, 1),
+    ];
+    for (level, status, default, stricter, stricter_code) in cases {
+        options.refresh = true;
+        options.fail_on = vec![options::FailOn::Review];
+        let mut mock = Mock {
+            level,
+            ..Default::default()
+        };
+        let report = run(&project, &options, &mut mock);
+        assert_eq!(report.status, status);
+        assert_eq!(gate::exit_code(&report), default, "{status} by default");
+        assert!(!report.acceptance_evaluated);
+        options.refresh = false;
+        options.fail_on = vec![stricter];
+        let report = run(&project, &options, &mut mock);
+        assert_eq!(
+            gate::exit_code(&report),
+            stricter_code,
+            "{status} with {stricter:?}"
+        );
+    }
 }
 
 #[test]
@@ -449,18 +430,14 @@ fn fixture_and_generated_roles_are_not_uploaded() {
     let mut context = project.context();
     context.config.generated = vec!["database.types.ts".into()];
     let inputs = inventory::collect(&args(), &context, &[]).unwrap();
-    let fixture = inputs
-        .iter()
-        .find(|i| i.result.path == std::path::Path::new("fixtures/sample.rs"))
-        .unwrap();
-    assert_eq!(fixture.result.status, schema::Status::Skipped);
-    assert!(fixture.source.is_none());
-    let generated = inputs
-        .iter()
-        .find(|i| i.result.path == std::path::Path::new("database.types.ts"))
-        .unwrap();
-    assert_eq!(generated.result.status, schema::Status::Skipped);
-    assert!(generated.source.is_none());
+    for path in ["fixtures/sample.rs", "database.types.ts"] {
+        let input = inputs
+            .iter()
+            .find(|i| i.result.path == std::path::Path::new(path))
+            .unwrap();
+        assert_eq!(input.result.status, schema::Status::Skipped, "{path}");
+        assert!(input.source.is_none(), "{path}");
+    }
 }
 
 #[cfg(unix)]

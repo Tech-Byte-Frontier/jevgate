@@ -52,87 +52,6 @@ pub(super) fn stage(request: &Value) -> &'static str {
     }
 }
 
-/// Provider context limits: all questions plus state, and state plus the longest question.
-const TOTAL_TOKENS: f64 = 64_000.0;
-const STATE_TOKENS: f64 = 32_000.0;
-/// Headroom for estimation error.
-const MARGIN: f64 = 0.9;
-const BUDGET_FILE: &str = "token-budget.json";
-
-/// Token estimates from request bytes. The ratio is calibrated from observed
-/// `usage.input_tokens` and saved in `.jevgate/`; it only decides packing and
-/// whether a unit fits, never a verdict.
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct TokenBudget {
-    pub bytes_per_token: f64,
-}
-
-impl Default for TokenBudget {
-    fn default() -> Self {
-        Self {
-            bytes_per_token: 3.0,
-        }
-    }
-}
-
-impl TokenBudget {
-    pub fn load(root: &std::path::Path) -> Self {
-        crate::inventory::read_source(&root.join(".jevgate").join(BUDGET_FILE), 4096)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Self>(&text).ok())
-            .map(|b| Self::calibrated(b.bytes_per_token))
-            .unwrap_or_default()
-    }
-
-    fn calibrated(bytes_per_token: f64) -> Self {
-        Self {
-            bytes_per_token: if bytes_per_token.is_finite() {
-                bytes_per_token.clamp(2.0, 6.0)
-            } else {
-                Self::default().bytes_per_token
-            },
-        }
-    }
-
-    /// Replace the ratio with one observed over a batch of fresh requests.
-    pub fn observe(&mut self, bytes: u64, tokens: u64) {
-        if tokens > 0 {
-            *self = Self::calibrated(bytes as f64 / tokens as f64);
-        }
-    }
-
-    pub fn save(&self, store: &crate::storage::Store) -> Result<()> {
-        store.write(BUDGET_FILE, &serde_json::to_vec(self)?)
-    }
-
-    pub fn tokens(&self, bytes: usize) -> usize {
-        (bytes as f64 / self.bytes_per_token).ceil() as usize
-    }
-
-    pub fn tokens_of(&self, value: &Value) -> usize {
-        self.tokens(serde_json::to_vec(value).map_or(0, |v| v.len()))
-    }
-
-    /// Estimated uploaded tokens of a request.
-    pub fn request_tokens(&self, request: &Value) -> usize {
-        self.tokens_of(&provider_request(request))
-    }
-
-    pub fn fits(&self, request: &Value) -> bool {
-        let provider = provider_request(request);
-        let state = self.tokens_of(&provider["state"]) as f64;
-        let longest = provider["questions"]
-            .as_object()
-            .into_iter()
-            .flat_map(|q| q.values())
-            .map(|q| self.tokens_of(q))
-            .max()
-            .unwrap_or(0) as f64;
-        (self.tokens_of(&provider) as f64) <= TOTAL_TOKENS * MARGIN
-            && state + longest <= STATE_TOKENS * MARGIN
-    }
-}
-
 /// One cache entry per request: the model, state and questions it uploads.
 pub(super) fn judgment_key(request: &Value) -> String {
     schema::hash(&serde_json::to_vec(&(schema::RUBRIC, provider_request(request))).unwrap())
@@ -153,8 +72,31 @@ impl Session<'_> {
                 metrics: Default::default(),
             })
             .collect();
-        let mut pending = Vec::new();
+        let mut pending = self.answer_from_cache(requests, &mut receipts);
+        let allowed = pending.len().min(
+            self.args
+                .max_requests
+                .map_or(pending.len(), |n| n.saturating_sub(self.requests) as usize),
+        );
+        for (i, _) in pending.drain(allowed..) {
+            receipts[i].result = Err(anyhow::anyhow!(
+                "Session API request budget exhausted; restart with an explicit larger --max-requests"
+            ));
+        }
+        if !pending.is_empty() {
+            self.send(&pending, &mut receipts);
+        }
+        receipts
+    }
+
+    /// Fill receipts from valid cached answers; return the requests still to send.
+    fn answer_from_cache<'r>(
+        &self,
+        requests: &[&'r Value],
+        receipts: &mut [Receipt],
+    ) -> Vec<(usize, &'r Value)> {
         let ttl = cache_ttl(&self.args.model, self.args.cache_ttl_secs);
+        let mut pending = Vec::new();
         for (i, request) in requests.iter().enumerate() {
             let cached = if self.args.refresh {
                 None
@@ -174,16 +116,12 @@ impl Session<'_> {
                 pending.push((i, *request));
             }
         }
-        let count = pending.len().min(
-            self.args
-                .max_requests
-                .map_or(pending.len(), |n| n.saturating_sub(self.requests) as usize),
-        );
-        for (i, _) in &pending[count..] {
-            receipts[*i].result = Err(anyhow::anyhow!(
-                "Session API request budget exhausted; restart with an explicit larger --max-requests"
-            ));
-        }
+        pending
+    }
+
+    /// Upload `pending` through the evaluator, rechecking each source first,
+    /// and record every outcome in its receipt.
+    fn send(&mut self, pending: &[(usize, &Value)], receipts: &mut [Receipt]) {
         let root = &self.context.root;
         let max_bytes = self.args.max_context_bytes.max(self.args.max_file_bytes);
         let before = |request: &Value| {
@@ -192,61 +130,66 @@ impl Session<'_> {
             // source was already verified while preparing the batch.
             require_paths(root, max_bytes, request, &mut SourceHashes::new())
         };
-        let batch: Vec<&Value> = pending[..count].iter().map(|(_, r)| *r).collect();
-        if batch.is_empty() {
-            return receipts;
-        }
+        let batch: Vec<&Value> = pending.iter().map(|(_, r)| *r).collect();
         let store = self.store;
         let requests_count = &mut self.requests;
-        let paid_input = &mut self.paid_input_tokens;
-        let paid_output = &mut self.paid_output_tokens;
+        let paid = (&mut self.paid_input_tokens, &mut self.paid_output_tokens);
         let observed = &mut self.observed;
         self.evaluator.evaluate_queue(
             &batch,
             self.args.concurrency as usize,
             &before,
             &mut |index, outcome| {
-                let (i, request) = &pending[index];
+                let (i, request) = pending[index];
                 *requests_count += u32::from(outcome.attempted);
-                let receipt = &mut receipts[*i];
-                receipt.metrics.service_ms = outcome.elapsed_ms;
-                receipt.metrics.queue_wait_ms = outcome.started_ms;
-                receipt.metrics.evidence_bytes = if outcome.attempted {
-                    evidence_bytes(request)
-                } else {
-                    0
-                };
-                receipt.result = outcome.result.and_then(|body| {
-                    let input = usage(&body, "input_tokens");
-                    let output = usage(&body, "output_tokens");
-                    *paid_input += input;
-                    *paid_output += output;
-                    receipt.metrics.input_tokens += input;
-                    receipt.metrics.output_tokens += output;
-                    response::validate(&body, request)?;
+                let receipt = &mut receipts[i];
+                record(store, request, outcome, receipt);
+                *paid.0 += receipt.metrics.input_tokens;
+                *paid.1 += receipt.metrics.output_tokens;
+                if receipt.metrics.evaluated_judgments > 0 {
                     observed.0 += serde_json::to_vec(&provider_request(request))
                         .map_or(0, |v| v.len() as u64);
-                    observed.1 += input;
-                    let timestamp = schema::now();
-                    store.save(
-                        &judgment_key(request),
-                        &response::cache_value(&body, request),
-                        timestamp,
-                    )?;
-                    receipt.metrics.evaluated_judgments += 1;
-                    Ok((body, timestamp, false))
-                });
-                receipt.metrics.retries = u64::from(outcome.retries);
-                if outcome.attempted {
-                    if receipt.result.is_ok() {
-                        receipt.metrics.successful_requests = 1;
-                    } else {
-                        receipt.metrics.failed_attempts = 1;
-                    }
+                    observed.1 += receipt.metrics.input_tokens;
                 }
             },
         );
-        receipts
+    }
+}
+
+/// Record one outcome: timing, token usage, and a validated answer saved to the cache.
+fn record(
+    store: &crate::storage::Store,
+    request: &Value,
+    outcome: crate::transport::Outcome,
+    receipt: &mut Receipt,
+) {
+    receipt.metrics.service_ms = outcome.elapsed_ms;
+    receipt.metrics.queue_wait_ms = outcome.started_ms;
+    receipt.metrics.evidence_bytes = if outcome.attempted {
+        evidence_bytes(request)
+    } else {
+        0
+    };
+    receipt.result = outcome.result.and_then(|body| {
+        receipt.metrics.input_tokens += usage(&body, "input_tokens");
+        receipt.metrics.output_tokens += usage(&body, "output_tokens");
+        response::validate(&body, request)?;
+        let timestamp = schema::now();
+        store.save(
+            &judgment_key(request),
+            &response::cache_value(&body, request),
+            timestamp,
+        )?;
+        receipt.metrics.evaluated_judgments += 1;
+        Ok((body, timestamp, false))
+    });
+    receipt.metrics.retries = u64::from(outcome.retries);
+    if outcome.attempted {
+        if receipt.result.is_ok() {
+            receipt.metrics.successful_requests = 1;
+        } else {
+            receipt.metrics.failed_attempts = 1;
+        }
     }
 }
 

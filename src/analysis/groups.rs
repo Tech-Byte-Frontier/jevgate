@@ -32,43 +32,8 @@ pub fn groups(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> 
     {
         merge(&mut sets, &mut links, a, b);
     }
-    // Connected singletons join the cluster they link to most; members with
-    // no link at all share one group.
-    let mut loose = Vec::new();
-    while let Some(single) = sets.iter().position(|set| set.len() == 1) {
-        if sets.len() == 1 {
-            break;
-        }
-        let target = (0..sets.len()).filter(|&t| t != single).max_by(|&x, &y| {
-            links[single][x]
-                .cmp(&links[single][y])
-                .then(sets[x].len().cmp(&sets[y].len()))
-                .then(y.cmp(&x))
-        });
-        match target {
-            Some(target) if links[single][target] > 0 => {
-                merge(&mut sets, &mut links, target, single)
-            }
-            _ => {
-                loose.push(sets[single][0]);
-                remove(&mut sets, &mut links, single);
-            }
-        }
-    }
-    while sets.len() + usize::from(!loose.is_empty()) > MAX_GROUPS {
-        match strongest(&sets, &links) {
-            Some((a, b, average)) if average > 0.0 => merge(&mut sets, &mut links, a, b),
-            _ => {
-                // No links remain: fold the smallest set into the loose members.
-                let smallest = (0..sets.len())
-                    .rev()
-                    .min_by_key(|&i| sets[i].len())
-                    .unwrap();
-                loose.extend(sets[smallest].clone());
-                remove(&mut sets, &mut links, smallest);
-            }
-        }
-    }
+    let mut loose = attach_singletons(&mut sets, &mut links);
+    cap_groups(&mut sets, &mut links, &mut loose);
     if !loose.is_empty() {
         sets.push(loose);
     }
@@ -83,6 +48,49 @@ pub fn groups(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> 
             members: set.into_iter().map(|m| members[m]).collect(),
         })
         .collect()
+}
+
+/// Connected singletons join the cluster they link to most; members with no
+/// link at all are returned to share one group.
+fn attach_singletons(sets: &mut Vec<Vec<usize>>, links: &mut Vec<Vec<u32>>) -> Vec<usize> {
+    let mut loose = Vec::new();
+    while let Some(single) = sets.iter().position(|set| set.len() == 1) {
+        if sets.len() == 1 {
+            break;
+        }
+        let target = (0..sets.len()).filter(|&t| t != single).max_by(|&x, &y| {
+            links[single][x]
+                .cmp(&links[single][y])
+                .then(sets[x].len().cmp(&sets[y].len()))
+                .then(y.cmp(&x))
+        });
+        match target {
+            Some(target) if links[single][target] > 0 => merge(sets, links, target, single),
+            _ => {
+                loose.push(sets[single][0]);
+                remove(sets, links, single);
+            }
+        }
+    }
+    loose
+}
+
+/// Merge the most linked clusters, then fold the smallest into `loose`, until
+/// at most `MAX_GROUPS` remain.
+fn cap_groups(sets: &mut Vec<Vec<usize>>, links: &mut Vec<Vec<u32>>, loose: &mut Vec<usize>) {
+    while sets.len() + usize::from(!loose.is_empty()) > MAX_GROUPS {
+        match strongest(sets, links) {
+            Some((a, b, average)) if average > 0.0 => merge(sets, links, a, b),
+            _ => {
+                let smallest = (0..sets.len())
+                    .rev()
+                    .min_by_key(|&i| sets[i].len())
+                    .unwrap();
+                loose.extend(sets[smallest].clone());
+                remove(sets, links, smallest);
+            }
+        }
+    }
 }
 
 /// The pair of clusters with the highest average link; ties keep the earliest pair.
@@ -124,8 +132,27 @@ fn remove(sets: &mut Vec<Vec<usize>>, links: &mut Vec<Vec<u32>>, index: usize) {
 
 fn weights(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> Vec<Vec<u32>> {
     let n = members.len();
-    // Only names this file declares or imports say which members belong together,
-    // and a name most members mention says nothing.
+    let names = linking_names(units, members, imports);
+    let mut weights = vec![vec![0u32; n]; n];
+    for i in 0..n {
+        for j in i + 1..n {
+            let (a, b) = (&units[members[i]], &units[members[j]]);
+            let shared = names[i].intersection(&names[j]).count().min(2) as u32;
+            let weight = link(a, b) + shared;
+            weights[i][j] = weight;
+            weights[j][i] = weight;
+        }
+    }
+    weights
+}
+
+/// Per member, the names it mentions that link members: only names this file
+/// declares or imports, and not a name most members mention.
+fn linking_names<'a>(
+    units: &'a [Unit],
+    members: &[usize],
+    imports: &'a BTreeSet<String>,
+) -> Vec<BTreeSet<&'a str>> {
     let declared: BTreeSet<&str> = units
         .iter()
         .filter(|u| u.kind == Kind::Type)
@@ -144,8 +171,8 @@ fn weights(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> Vec
             *mentions.entry(name.as_str()).or_default() += 1;
         }
     }
-    let common = (n / 2).max(2);
-    let names: Vec<BTreeSet<&str>> = members
+    let common = (members.len() / 2).max(2);
+    members
         .iter()
         .map(|&m| {
             units[m]
@@ -155,28 +182,22 @@ fn weights(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> Vec
                 .filter(|name| declared.contains(name) && mentions[name] <= common)
                 .collect()
         })
-        .collect();
-    let mut weights = vec![vec![0u32; n]; n];
-    for i in 0..n {
-        for j in i + 1..n {
-            let (a, b) = (&units[members[i]], &units[members[j]]);
-            let mut weight = 0;
-            // Calling a function, or constructing the type that owns a method.
-            let calls = |x: &Unit, y: &Unit| {
-                x.calls.contains(&y.short_name) || !y.owner.is_empty() && x.calls.contains(&y.owner)
-            };
-            if calls(a, b) || calls(b, a) {
-                weight += 3;
-            }
-            if !a.owner.is_empty() && a.owner == b.owner {
-                weight += 2;
-            }
-            weight += names[i].intersection(&names[j]).count().min(2) as u32;
-            weights[i][j] = weight;
-            weights[j][i] = weight;
-        }
+        .collect()
+}
+
+/// A call (or constructing the type that owns a method) links strongly; a shared owner less.
+fn link(a: &Unit, b: &Unit) -> u32 {
+    let calls = |x: &Unit, y: &Unit| {
+        x.calls.contains(&y.short_name) || !y.owner.is_empty() && x.calls.contains(&y.owner)
+    };
+    let mut weight = 0;
+    if calls(a, b) || calls(b, a) {
+        weight += 3;
     }
-    weights
+    if !a.owner.is_empty() && a.owner == b.owner {
+        weight += 2;
+    }
+    weight
 }
 
 #[cfg(test)]

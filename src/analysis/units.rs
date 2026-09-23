@@ -7,9 +7,6 @@ use tree_sitter::Node;
 
 /// Bodies with fewer non-brace lines are too small to judge. They are never clear.
 pub const MIN_BODY_LINES: usize = 5;
-/// Control flow nested this deep, or a branch chain this long, is a flattening candidate.
-pub const DEEP_NESTING: usize = 4;
-pub const LONG_CHAIN: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -59,7 +56,8 @@ impl Unit {
 
     /// Control flow deep or long enough that flattening it is worth asking about.
     pub fn deeply_nested(&self) -> bool {
-        self.nesting >= DEEP_NESTING || self.branch_chain >= LONG_CHAIN
+        self.nesting >= super::nesting::DEEP_NESTING
+            || self.branch_chain >= super::nesting::LONG_CHAIN
     }
 
     pub fn lines(&self) -> usize {
@@ -82,7 +80,7 @@ pub struct FileUnits {
 /// Units of a supported language. Unsupported languages return an unparsed,
 /// empty result; syntax errors are an error, never an empty clear file.
 pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
-    let Some(tree) = crate::locations::parse(path, source)? else {
+    let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(FileUnits::default());
     };
     let mut file = FileUnits {
@@ -342,104 +340,12 @@ fn push(
         signature,
         doc: doc_line(&source[start..outer.start_byte()], outer, source),
         body_lines: body.map_or(0, |b| body_lines(text(b, source))),
-        nesting: body.map_or(0, |b| control(b).0),
-        branch_chain: body.map_or(0, |b| control(b).1),
+        nesting: body.map_or(0, |b| super::nesting::control(b).0),
+        branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         calls: facts.calls,
         refs,
         mentions: facts.idents,
     });
-}
-
-const CONTROL: &[&str] = &[
-    "if_statement",
-    "if_expression",
-    "for_statement",
-    "for_in_statement",
-    "for_expression",
-    "while_statement",
-    "while_expression",
-    "loop_expression",
-    "do_statement",
-    "match_expression",
-    "match_statement",
-    "switch_statement",
-    "try_statement",
-    "with_statement",
-    "conditional_expression",
-    "ternary_expression",
-];
-
-/// Maximum control-flow depth and longest branch chain under `node`. An `if`
-/// that is the `else` branch of another `if` continues its chain instead of nesting.
-fn control(node: Node<'_>) -> (usize, usize) {
-    fn chained(node: Node<'_>) -> bool {
-        let parent = node.parent();
-        match node.kind() {
-            "if_statement" | "if_expression" => parent.is_some_and(|p| {
-                p.kind() == "else_clause"
-                    || (p.kind() == "if_expression"
-                        && p.child_by_field_name("alternative") == Some(node))
-            }),
-            "conditional_expression" | "ternary_expression" => parent.is_some_and(|p| {
-                p.kind() == node.kind() && p.child_by_field_name("alternative") == Some(node)
-            }),
-            _ => false,
-        }
-    }
-    fn chain(node: Node<'_>) -> usize {
-        // Python lists `elif` and `else` clauses as children of one `if_statement`.
-        let clauses = node
-            .named_children(&mut node.walk())
-            .filter(|c| matches!(c.kind(), "elif_clause"))
-            .count();
-        if clauses > 0 {
-            let otherwise = node
-                .named_children(&mut node.walk())
-                .any(|c| c.kind() == "else_clause");
-            return 1 + clauses + usize::from(otherwise);
-        }
-        let mut length = 1;
-        let mut current = node;
-        loop {
-            let alternative = current.child_by_field_name("alternative").map(|a| {
-                if a.kind() == "else_clause" {
-                    a.named_child(0).unwrap_or(a)
-                } else {
-                    a
-                }
-            });
-            match alternative {
-                Some(next) if next.kind() == current.kind() => {
-                    length += 1;
-                    current = next;
-                }
-                Some(_) => return length + 1,
-                None => return length,
-            }
-        }
-    }
-    fn walk(node: Node<'_>, depth: usize, result: &mut (usize, usize)) {
-        let control = CONTROL.contains(&node.kind());
-        let depth = if control && !chained(node) {
-            if matches!(
-                node.kind(),
-                "if_statement" | "if_expression" | "conditional_expression" | "ternary_expression"
-            ) {
-                result.1 = result.1.max(chain(node));
-            }
-            depth + 1
-        } else {
-            depth
-        };
-        result.0 = result.0.max(depth);
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            walk(child, depth, result);
-        }
-    }
-    let mut result = (0, 0);
-    walk(node, 0, &mut result);
-    result
 }
 
 /// Include documentation, comments and attributes directly above the definition.
@@ -707,8 +613,12 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_languages_are_unparsed_and_syntax_errors_fail() {
+    fn unsupported_languages_are_unparsed() {
         assert!(!parse(Path::new("main.go"), "package main").unwrap().parsed);
+    }
+
+    #[test]
+    fn syntax_errors_fail_instead_of_returning_no_units() {
         assert!(parse(Path::new("broken.rs"), "fn broken( {").is_err());
     }
 }

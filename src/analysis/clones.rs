@@ -1,7 +1,7 @@
 //! Type-2 clone candidates across the selected files and explicit context.
 //! Identifiers and literals are normalized; windows start and end on whole
 //! statements inside function bodies; identifiers must be renamed consistently.
-use super::{is_comment, line_of, text, units::Unit};
+use super::{fast_hash, is_comment, line_of, text, units::Unit};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
@@ -27,7 +27,7 @@ pub struct SourceFile<'a> {
     pub selected: bool,
     pub units: &'a [Unit],
     /// Lines excluded from comparison, such as test code when tests are not judged.
-    pub excluded: &'a [Range<usize>],
+    pub excluded: Vec<Range<usize>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,6 +100,7 @@ impl Token<'_> {
     }
 }
 
+#[derive(Clone)]
 struct Statement {
     span: Range<usize>,
     tokens: Range<usize>,
@@ -116,10 +117,25 @@ struct Parsed<'a> {
 }
 
 pub fn find(files: &[SourceFile<'_>]) -> Candidates {
+    let (parsed, blocks) = statement_blocks(files);
+    let mut pairs: Vec<Pair> = matching_windows(&blocks)
+        .into_iter()
+        .filter_map(|window| pair(files, &parsed, &blocks, window))
+        .collect();
+    drop_nested(&mut pairs);
+    pairs.sort_by(by_rank);
+    let mut pairs = representatives(pairs);
+    // Groups rank by size times their number of copies.
+    pairs.sort_by(by_rank);
+    capped(pairs)
+}
+
+/// Tokens of every file and the statement blocks inside unit bodies.
+fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block>) {
     let mut parsed = Vec::new();
     let mut blocks = Vec::new();
     for (index, file) in files.iter().enumerate() {
-        let Ok(Some(tree)) = crate::locations::parse(file.path, file.source) else {
+        let Ok(Some(tree)) = crate::syntax::parse(file.path, file.source) else {
             parsed.push(Parsed { tokens: Vec::new() });
             continue;
         };
@@ -129,16 +145,18 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         collect_blocks(tree.root_node(), file, index, &bodies, &tokens, &mut blocks);
         parsed.push(Parsed { tokens });
     }
-    let mut seeds = BTreeMap::<(u64, u64), Vec<(usize, usize)>>::new();
-    for (b, block) in blocks.iter().enumerate() {
-        for k in 0..block.statements.len().saturating_sub(1) {
-            let key = (block.statements[k].hash, block.statements[k + 1].hash);
-            seeds.entry(key).or_default().push((b, k));
-        }
-    }
+    (parsed, blocks)
+}
+
+/// A maximal run of matching statement hashes: (block, start) twice and its length.
+type Window = ((usize, usize), (usize, usize), usize);
+
+/// Seed on consecutive statement pairs, then extend each diagonal as far as the
+/// hashes keep matching; a diagonal already covered is not reported again.
+fn matching_windows(blocks: &[Block]) -> Vec<Window> {
     let mut covered = BTreeSet::new();
     let mut found = Vec::new();
-    for occurrences in seeds.values() {
+    for occurrences in seeds(blocks).values() {
         let occurrences = &occurrences[..occurrences.len().min(SEED_OCCURRENCES)];
         for (x, &(bx, kx)) in occurrences.iter().enumerate() {
             for &(by, ky) in &occurrences[x + 1..] {
@@ -149,15 +167,7 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
                 if covered.contains(&(diagonal, kx)) {
                     continue;
                 }
-                let (sx, sy) = (&blocks[bx].statements, &blocks[by].statements);
-                let mut n = MIN_STATEMENTS;
-                while kx + n < sx.len()
-                    && ky + n < sy.len()
-                    && sx[kx + n].hash == sy[ky + n].hash
-                    && (bx != by || kx + n < ky)
-                {
-                    n += 1;
-                }
+                let n = extend(blocks, (bx, kx), (by, ky));
                 for t in 0..n {
                     covered.insert((diagonal, kx + t));
                 }
@@ -165,62 +175,94 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
             }
         }
     }
-    let mut pairs = Vec::new();
-    for ((bx, kx), (by, ky), n) in found {
-        let (fx, fy) = (blocks[bx].file, blocks[by].file);
-        if !files[fx].selected && !files[fy].selected {
-            continue;
+    found
+}
+
+/// Every place a pair of consecutive statement hashes occurs.
+fn seeds(blocks: &[Block]) -> BTreeMap<(u64, u64), Vec<(usize, usize)>> {
+    let mut seeds = BTreeMap::<(u64, u64), Vec<(usize, usize)>>::new();
+    for (b, block) in blocks.iter().enumerate() {
+        for k in 0..block.statements.len().saturating_sub(1) {
+            let key = (block.statements[k].hash, block.statements[k + 1].hash);
+            seeds.entry(key).or_default().push((b, k));
         }
-        let x = &blocks[bx].statements[kx..kx + n];
-        let y = &blocks[by].statements[ky..ky + n];
-        let tx = &parsed[fx].tokens[x[0].tokens.start..x[n - 1].tokens.end];
-        let ty = &parsed[fy].tokens[y[0].tokens.start..y[n - 1].tokens.end];
-        let Some(differences) = align(tx, ty) else {
-            continue;
-        };
-        let span_x = x[0].span.start..x[n - 1].span.end;
-        let span_y = y[0].span.start..y[n - 1].span.end;
-        let size = compact(&files[fx].source[span_x.clone()])
-            .min(compact(&files[fy].source[span_y.clone()]));
-        // A repeated pair of statements is usually an idiom, such as a call and its check.
-        if n < MIN_CLONE_STATEMENTS || size < MIN_BYTES {
-            continue;
-        }
-        let normalized = crate::schema::hash(
-            tx.iter()
-                .map(Token::normal)
-                .collect::<Vec<_>>()
-                .join("\u{0}")
-                .as_bytes(),
-        );
-        let a = site(files, fx, span_x);
-        let b = site(files, fy, span_y);
-        // The owner is a selected site; ties keep path and line order.
-        let (a, b, differences) = if !files[fx].selected
-            || (files[fy].selected && (&b.path, b.start_line) < (&a.path, a.start_line))
-        {
-            (
-                b,
-                a,
-                differences
-                    .into_iter()
-                    .map(|d| Difference { a: d.b, b: d.a })
-                    .collect(),
-            )
-        } else {
-            (a, b, differences)
-        };
-        pairs.push(Pair {
-            a,
-            b,
-            differences,
-            size,
-            occurrences: 2,
-            copies: Vec::new(),
-            normalized,
-        });
     }
-    // Drop pairs whose sites both lie inside a larger pair's sites.
+    seeds
+}
+
+/// How many statements match from two seeds; a window never overlaps itself.
+fn extend(blocks: &[Block], (bx, kx): (usize, usize), (by, ky): (usize, usize)) -> usize {
+    let (sx, sy) = (&blocks[bx].statements, &blocks[by].statements);
+    let mut n = MIN_STATEMENTS;
+    while kx + n < sx.len()
+        && ky + n < sy.len()
+        && sx[kx + n].hash == sy[ky + n].hash
+        && (bx != by || kx + n < ky)
+    {
+        n += 1;
+    }
+    n
+}
+
+/// A candidate pair from one window, when its tokens align with consistent
+/// renaming and it is large enough to report. The owner is a selected site.
+fn pair(
+    files: &[SourceFile<'_>],
+    parsed: &[Parsed<'_>],
+    blocks: &[Block],
+    ((bx, kx), (by, ky), n): Window,
+) -> Option<Pair> {
+    let (fx, fy) = (blocks[bx].file, blocks[by].file);
+    if !files[fx].selected && !files[fy].selected {
+        return None;
+    }
+    let x = &blocks[bx].statements[kx..kx + n];
+    let y = &blocks[by].statements[ky..ky + n];
+    let tx = &parsed[fx].tokens[x[0].tokens.start..x[n - 1].tokens.end];
+    let ty = &parsed[fy].tokens[y[0].tokens.start..y[n - 1].tokens.end];
+    let differences = align(tx, ty)?;
+    let span_x = x[0].span.start..x[n - 1].span.end;
+    let span_y = y[0].span.start..y[n - 1].span.end;
+    let size =
+        compact(&files[fx].source[span_x.clone()]).min(compact(&files[fy].source[span_y.clone()]));
+    // A repeated pair of statements is usually an idiom, such as a call and its check.
+    if n < MIN_CLONE_STATEMENTS || size < MIN_BYTES {
+        return None;
+    }
+    let normalized = crate::schema::hash(
+        tx.iter()
+            .map(Token::normal)
+            .collect::<Vec<_>>()
+            .join("\u{0}")
+            .as_bytes(),
+    );
+    let a = site(files, fx, span_x);
+    let b = site(files, fy, span_y);
+    // Ties keep path and line order.
+    let swap = !files[fx].selected
+        || (files[fy].selected && (&b.path, b.start_line) < (&a.path, a.start_line));
+    let (a, b, differences) = if swap {
+        let flipped = differences
+            .into_iter()
+            .map(|d| Difference { a: d.b, b: d.a })
+            .collect();
+        (b, a, flipped)
+    } else {
+        (a, b, differences)
+    };
+    Some(Pair {
+        a,
+        b,
+        differences,
+        size,
+        occurrences: 2,
+        copies: Vec::new(),
+        normalized,
+    })
+}
+
+/// Drop pairs whose sites both lie inside a larger pair's sites.
+fn drop_nested(pairs: &mut Vec<Pair>) {
     let snapshot = pairs.clone();
     pairs.retain(|p| {
         !snapshot.iter().any(|q| {
@@ -230,10 +272,10 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
                     || (contains(&q.a, &p.b) && contains(&q.b, &p.a)))
         })
     });
-    pairs.sort_by(by_rank);
-    let mut pairs = representatives(pairs);
-    // Groups rank by size times their number of copies.
-    pairs.sort_by(by_rank);
+}
+
+/// Keep ranked groups within the per-run and per-file caps; count the rest.
+fn capped(pairs: Vec<Pair>) -> Candidates {
     let mut omitted = BTreeMap::<PathBuf, usize>::new();
     let mut per_file = BTreeMap::<PathBuf, usize>::new();
     let mut kept = Vec::new();
@@ -281,29 +323,10 @@ fn same_code(x: &Site, y: &Site) -> bool {
 /// order represents it and carries the other copies. Linking on plain overlap
 /// let short idioms inside a larger copy chain unrelated code together.
 fn representatives(pairs: Vec<Pair>) -> Vec<Pair> {
-    let mut parent: Vec<usize> = (0..pairs.len()).collect();
-    fn root(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
-    for i in 0..pairs.len() {
-        for j in i + 1..pairs.len() {
-            let (p, q) = (&pairs[i], &pairs[j]);
-            let linked = [&p.a, &p.b]
-                .iter()
-                .any(|x| same_code(x, &q.a) || same_code(x, &q.b));
-            if linked {
-                let (ri, rj) = (root(&mut parent, i), root(&mut parent, j));
-                parent[ri.max(rj)] = ri.min(rj);
-            }
-        }
-    }
+    let groups = same_code_groups(&pairs);
     let mut sites = BTreeMap::<usize, Vec<Site>>::new();
     for (i, pair) in pairs.iter().enumerate() {
-        let group = sites.entry(root(&mut parent, i)).or_default();
+        let group = sites.entry(groups[i]).or_default();
         for site in [&pair.a, &pair.b] {
             if !group.iter().any(|known| overlaps(known, site)) {
                 group.push(site.clone());
@@ -312,7 +335,7 @@ fn representatives(pairs: Vec<Pair>) -> Vec<Pair> {
     }
     let mut kept = Vec::new();
     for (i, mut pair) in pairs.into_iter().enumerate() {
-        if root(&mut parent, i) != i {
+        if groups[i] != i {
             continue;
         }
         pair.copies = sites[&i]
@@ -326,6 +349,32 @@ fn representatives(pairs: Vec<Pair>) -> Vec<Pair> {
         kept.push(pair);
     }
     kept
+}
+
+/// For each pair, the first pair of its group: pairs whose sites repeat the
+/// same code are linked, transitively (union-find).
+fn same_code_groups(pairs: &[Pair]) -> Vec<usize> {
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut parent: Vec<usize> = (0..pairs.len()).collect();
+    for i in 0..pairs.len() {
+        for j in i + 1..pairs.len() {
+            let (p, q) = (&pairs[i], &pairs[j]);
+            let linked = [&p.a, &p.b]
+                .iter()
+                .any(|x| same_code(x, &q.a) || same_code(x, &q.b));
+            if linked {
+                let (ri, rj) = (root(&mut parent, i), root(&mut parent, j));
+                parent[ri.max(rj)] = ri.min(rj);
+            }
+        }
+    }
+    (0..pairs.len()).map(|i| root(&mut parent, i)).collect()
 }
 
 fn contains(outer: &Site, inner: &Site) -> bool {
@@ -443,47 +492,15 @@ fn collect_blocks(
             .iter()
             .any(|b| b.start <= node.start_byte() && node.end_byte() <= b.end)
     {
-        let mut statements = Vec::new();
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            if is_comment(child) {
-                continue;
-            }
-            let line = line_of(file.source, child.start_byte());
-            if file.excluded.iter().any(|r| r.contains(&line)) {
-                statements.push(None);
-                continue;
-            }
-            let start = tokens.partition_point(|t| t.start < child.start_byte());
-            let end = tokens.partition_point(|t| t.start < child.end_byte());
-            let key = tokens[start..end]
-                .iter()
-                .map(Token::normal)
-                .collect::<Vec<_>>()
-                .join("\u{0}");
-            statements.push(Some(Statement {
-                span: child.byte_range(),
-                tokens: start..end,
-                hash: fast_hash(&key),
-            }));
-        }
         // Excluded statements break a window, so split the block there.
-        let mut current = Vec::new();
-        for statement in statements {
-            match statement {
-                Some(statement) => current.push(statement),
-                None if !current.is_empty() => blocks.push(Block {
+        for statements in block_statements(node, file, tokens).split(Option::is_none) {
+            let statements: Vec<Statement> = statements.iter().flatten().cloned().collect();
+            if !statements.is_empty() {
+                blocks.push(Block {
                     file: index,
-                    statements: std::mem::take(&mut current),
-                }),
-                None => {}
+                    statements,
+                });
             }
-        }
-        if !current.is_empty() {
-            blocks.push(Block {
-                file: index,
-                statements: current,
-            });
         }
     }
     let mut cursor = node.walk();
@@ -492,11 +509,37 @@ fn collect_blocks(
     }
 }
 
-fn fast_hash(text: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+/// A block's statements with normalized-token hashes; `None` for excluded lines.
+fn block_statements(
+    node: Node<'_>,
+    file: &SourceFile<'_>,
+    tokens: &[Token<'_>],
+) -> Vec<Option<Statement>> {
+    let mut statements = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if is_comment(child) {
+            continue;
+        }
+        let line = line_of(file.source, child.start_byte());
+        if file.excluded.iter().any(|r| r.contains(&line)) {
+            statements.push(None);
+            continue;
+        }
+        let start = tokens.partition_point(|t| t.start < child.start_byte());
+        let end = tokens.partition_point(|t| t.start < child.end_byte());
+        let key = tokens[start..end]
+            .iter()
+            .map(Token::normal)
+            .collect::<Vec<_>>()
+            .join("\u{0}");
+        statements.push(Some(Statement {
+            span: child.byte_range(),
+            tokens: start..end,
+            hash: fast_hash(&key),
+        }));
+    }
+    statements
 }
 
 #[cfg(test)]
@@ -516,7 +559,7 @@ mod tests {
                 source,
                 selected: *selected,
                 units: &units.units,
-                excluded: &[],
+                excluded: Vec::new(),
             })
             .collect();
         find(&sources)

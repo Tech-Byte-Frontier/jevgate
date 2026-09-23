@@ -1,5 +1,23 @@
+/// Print a line to stdout. A closed pipe (as with `| head`) is not an error:
+/// the reader has what it wanted, so the write failure is ignored.
+macro_rules! say {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), $($arg)*);
+    }};
+}
+
+/// Print a line to stderr, ignoring a closed stream like [`say!`].
+macro_rules! note {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+
 mod analysis;
 mod auth;
+mod boundary;
 mod cancellation;
 mod catalog;
 mod changes;
@@ -15,12 +33,17 @@ mod inventory;
 mod locations;
 mod options;
 mod output;
+mod policy;
+mod provider_error;
 mod requests;
 mod response;
 mod revision;
 mod schema;
 mod server;
 mod storage;
+mod syntax;
+mod test_locations;
+mod token_budget;
 mod transport;
 mod units;
 mod watch;
@@ -42,7 +65,7 @@ fn main() -> std::process::ExitCode {
     let code = match result {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("jevgate: {error:#}");
+            note!("jevgate: {error:#}");
             2
         }
     };
@@ -65,11 +88,11 @@ fn run(command: JevCommand) -> Result<u8> {
         }
         JevCommand::Baseline => {
             let (path, count) = gate::write_baseline(&context.root)?;
-            println!("Accepted {count} finding(s) in {}", path.display());
+            say!("Accepted {count} finding(s) in {}", path.display());
             Ok(0)
         }
         JevCommand::Rules => {
-            println!("{}", serde_json::to_string_pretty(&catalog::describe())?);
+            say!("{}", serde_json::to_string_pretty(&catalog::describe())?);
             Ok(0)
         }
         JevCommand::Serve { port } => {
@@ -94,6 +117,30 @@ fn validate_check(args: &CheckArgs) -> Result<()> {
         "Use --format jsonl for watch snapshots"
     );
     Ok(())
+}
+
+/// The credential file: `--env-file` from the invocation directory, else the root `.env`.
+fn credential_path(args: &CheckArgs, context: &ConfigContext) -> std::path::PathBuf {
+    args.env_file
+        .as_ref()
+        .map(|p| context.input_path(p))
+        .unwrap_or_else(|| context.root.join(".env"))
+}
+
+/// Record a failed evaluation in the snapshot (and report) before returning the error.
+fn publish_failure(
+    session: &evaluate::Session<'_>,
+    report: &mut schema::Report,
+    error: anyhow::Error,
+) -> Result<u8> {
+    report.watcher_pid = None;
+    report.errors.push(error.to_string());
+    report.update_status();
+    session.publish(report)?;
+    if session.args.report {
+        html_report::open(&session.context.root);
+    }
+    Err(error)
 }
 
 fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
@@ -123,12 +170,8 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         return Ok(0);
     }
     let store = store.unwrap();
-    let credential = args
-        .env_file
-        .as_ref()
-        .map(|p| context.input_path(p))
-        .unwrap_or_else(|| context.root.join(".env"));
-    let mut client = transport::Client::new(&credential, args.env_file.is_some());
+    let mut client =
+        transport::Client::new(&credential_path(args, context), args.env_file.is_some());
     let mut session = evaluate::Session {
         args,
         context,
@@ -137,18 +180,11 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         requests: 0,
         paid_input_tokens: 0,
         paid_output_tokens: 0,
-        budget: requests::TokenBudget::load(&context.root),
+        budget: token_budget::TokenBudget::load(&context.root),
         observed: (0, 0),
     };
     if let Err(error) = session.evaluate(&inputs, &mut report) {
-        report.watcher_pid = None;
-        report.errors.push(error.to_string());
-        report.update_status();
-        session.publish(&report)?;
-        if args.report {
-            html_report::open(&context.root);
-        }
-        return Err(error);
+        return publish_failure(&session, &mut report, error);
     }
     changes::compare(baseline.as_ref(), &mut report);
     gate::settle(&context.root, &mut report, &args.fail_on)?;

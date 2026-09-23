@@ -1,9 +1,9 @@
 use super::{
     inventory::Input,
     options::CheckArgs,
-    requests::TokenBudget,
     schema::{self, FileResult, Report, Status},
     storage::Store,
+    token_budget::TokenBudget,
     transport::Evaluator,
 };
 use crate::config::ConfigContext;
@@ -54,7 +54,27 @@ pub fn snapshot(
     // Always recompose from cached answers, so a composition change is never
     // hidden behind a reused report.
     let files = inputs.iter().map(|input| input.result.clone()).collect();
-    let mut report = Report {
+    let mut report = empty_report(args, &current, files);
+    if let Some(base) = &args.base {
+        match crate::revision::Changes::load(current.root, base) {
+            Ok(changes) => {
+                report.base_revision = Some(changes.revision);
+                report.deleted_files = changes.deleted;
+            }
+            Err(error) => report.errors.push(error.to_string()),
+        }
+    }
+    report.update_status();
+    if args.dry_run {
+        preview(inputs, args, &TokenBudget::load(current.root), &mut report);
+        report.update_status();
+    }
+    report
+}
+
+/// A new report for this generation, before any status or evaluation.
+fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<FileResult>) -> Report {
+    Report {
         quick: args.quick,
         base_revision: args.base.clone(),
         deleted_files: Vec::new(),
@@ -84,22 +104,7 @@ pub fn snapshot(
         decision_policy: crate::catalog::policy(),
         fail_on: args.fail_on_names(),
         gate: None,
-    };
-    if let Some(base) = &args.base {
-        match crate::revision::Changes::load(current.root, base) {
-            Ok(changes) => {
-                report.base_revision = Some(changes.revision);
-                report.deleted_files = changes.deleted;
-            }
-            Err(error) => report.errors.push(error.to_string()),
-        }
     }
-    report.update_status();
-    if args.dry_run {
-        preview(inputs, args, &TokenBudget::load(current.root), &mut report);
-        report.update_status();
-    }
-    report
 }
 
 /// Planned first-pass requests, without credentials, network or state.
@@ -145,56 +150,9 @@ impl Session<'_> {
     pub fn evaluate(&mut self, inputs: &[Input], report: &mut Report) -> Result<()> {
         self.evaluator.begin_review();
         self.publish(report)?;
-        let selected: Vec<_> = report
-            .files
-            .iter()
-            .enumerate()
-            .filter_map(|(i, f)| (f.status == Status::Pending).then_some(i))
-            .collect();
-        let mut purpose = Vec::new();
-        let mut views = BTreeMap::new();
-        for &owner in &selected {
-            let file = &mut report.files[owner];
-            file.judgments.clear();
-            match schedule(&inputs[owner], self.args, &self.budget, file) {
-                Ok(Scheduled::None) => file.cached = false,
-                Ok(Scheduled::Purpose(request)) => {
-                    file.cached = true;
-                    purpose.push(Task {
-                        owner,
-                        payload: request.clone(),
-                        request,
-                    });
-                }
-                Ok(Scheduled::Ready(view)) => {
-                    views.insert(owner, *view);
-                }
-                Err(error) => fail(file, error),
-            }
-        }
+        let (purpose, mut views) = self.schedule_files(inputs, report);
         if !purpose.is_empty() {
-            let owners: Vec<usize> = purpose.iter().map(|t| t.owner).collect();
-            self.dispatch(report, purpose, |file, request, body| {
-                crate::file_kind::record_purpose(file, &request, body)
-            })?;
-            for owner in owners {
-                let file = &mut report.files[owner];
-                if file.status == Status::Error
-                    || file
-                        .classification
-                        .as_ref()
-                        .is_none_or(|class| class.stage != "answered")
-                {
-                    continue;
-                }
-                match crate::file_kind::decide_after_purpose(&inputs[owner], self.args, file) {
-                    Ok(Some(view)) => {
-                        views.insert(owner, view);
-                    }
-                    Ok(None) => file.cached = false,
-                    Err(error) => fail(file, error),
-                }
-            }
+            self.resolve_purposes(inputs, report, purpose, &mut views)?;
         }
         let plan = crate::units::plan(inputs, &views, self.args, &self.budget);
         for (owner, reason) in &plan.skipped {
@@ -216,22 +174,80 @@ impl Session<'_> {
                 crate::units::record(file, &asked, body)
             })?;
         }
-        for (&owner, file_plan) in &plan.files {
-            let file = &mut report.files[owner];
-            if file.status == Status::Error {
-                continue;
-            }
-            let composed = crate::units::compose::compose(file_plan, &file.judgments);
-            file.syntax_checked = true;
-            file.dimensions = composed.dimensions;
-            file.findings = composed.findings;
-            file.status = composed.status;
-        }
+        compose_files(&plan, report);
         if self.observed.1 > 0 {
             self.budget.observe(self.observed.0, self.observed.1);
             self.budget.save(self.store)?;
         }
         self.progress(report)
+    }
+
+    /// Classify every pending file: ready with a gate view, waiting on a
+    /// file-purpose request, excluded, or failed.
+    fn schedule_files(
+        &self,
+        inputs: &[Input],
+        report: &mut Report,
+    ) -> (
+        Vec<Task<serde_json::Value>>,
+        BTreeMap<usize, crate::file_kind::View>,
+    ) {
+        let mut purpose = Vec::new();
+        let mut views = BTreeMap::new();
+        for (owner, file) in report.files.iter_mut().enumerate() {
+            if file.status != Status::Pending {
+                continue;
+            }
+            file.judgments.clear();
+            match schedule(&inputs[owner], self.args, &self.budget, file) {
+                Ok(Scheduled::None) => file.cached = false,
+                Ok(Scheduled::Purpose(request)) => {
+                    file.cached = true;
+                    purpose.push(Task {
+                        owner,
+                        payload: request.clone(),
+                        request,
+                    });
+                }
+                Ok(Scheduled::Ready(view)) => {
+                    views.insert(owner, *view);
+                }
+                Err(error) => fail(file, error),
+            }
+        }
+        (purpose, views)
+    }
+
+    /// Ask what each ambiguous test path contains, then add its gate view.
+    fn resolve_purposes(
+        &mut self,
+        inputs: &[Input],
+        report: &mut Report,
+        purpose: Vec<Task<serde_json::Value>>,
+        views: &mut BTreeMap<usize, crate::file_kind::View>,
+    ) -> Result<()> {
+        let owners: Vec<usize> = purpose.iter().map(|t| t.owner).collect();
+        self.dispatch(report, purpose, |file, request, body| {
+            crate::file_kind::record_purpose(file, &request, body)
+        })?;
+        for owner in owners {
+            let file = &mut report.files[owner];
+            let answered = file
+                .classification
+                .as_ref()
+                .is_some_and(|class| class.stage == "answered");
+            if file.status == Status::Error || !answered {
+                continue;
+            }
+            match crate::file_kind::decide_after_purpose(&inputs[owner], self.args, file) {
+                Ok(Some(view)) => {
+                    views.insert(owner, view);
+                }
+                Ok(None) => file.cached = false,
+                Err(error) => fail(file, error),
+            }
+        }
+        Ok(())
     }
 
     fn dispatch<T>(
@@ -258,10 +274,8 @@ impl Session<'_> {
         let mut spans = BTreeMap::<&str, (u64, u64)>::new();
         for (task, receipt) in ready.into_iter().zip(receipts) {
             let name = crate::requests::stage(&task.request);
-            let stage = report.stages.entry(name.into()).or_default();
-            let m = receipt.metrics;
-            stage.service_ms += m.service_ms;
-            stage.queue_wait_ms += m.queue_wait_ms;
+            let m = &receipt.metrics;
+            add_metrics(report.stages.entry(name.into()).or_default(), m);
             if m.successful_requests + m.failed_attempts > 0 {
                 let span = spans
                     .entry(name)
@@ -269,33 +283,9 @@ impl Session<'_> {
                 span.0 = span.0.min(m.queue_wait_ms);
                 span.1 = span.1.max(m.queue_wait_ms + m.service_ms);
             }
-            stage.successful_requests += m.successful_requests;
-            stage.failed_attempts += m.failed_attempts;
-            stage.retries += m.retries;
-            stage.cache_hits += m.cache_hits;
-            stage.cached_judgments += m.cached_judgments;
-            stage.evaluated_judgments += m.evaluated_judgments;
-            stage.input_tokens += m.input_tokens;
-            stage.output_tokens += m.output_tokens;
-            stage.evidence_bytes += m.evidence_bytes;
             let file = &mut report.files[task.owner];
             file.elapsed_ms += m.service_ms;
-            match receipt.result {
-                Ok((body, timestamp, cached)) => {
-                    file.cached &= cached;
-                    file.input_tokens += body["usage"]["input_tokens"].as_u64().unwrap_or(0);
-                    file.output_tokens += body["usage"]["output_tokens"].as_u64().unwrap_or(0);
-                    file.evaluated_at = Some(timestamp);
-                    if file.status != Status::Error
-                        && let Err(error) = apply(file, task.payload, &body)
-                    {
-                        fail(file, error);
-                    }
-                }
-                // Later skipped work must not overwrite this file's first failure.
-                Err(error) if file.status != Status::Error => fail(file, error),
-                Err(_) => {}
-            }
+            apply_receipt(file, receipt.result, task.payload, &mut apply);
         }
         // Concurrent stage spans overlap; service_ms is the additive request duration.
         for (name, (start, end)) in spans {
@@ -376,6 +366,61 @@ enum Scheduled {
     None,
     Purpose(serde_json::Value),
     Ready(Box<crate::file_kind::View>),
+}
+
+/// Record one answered request on its file, or its first failure.
+fn apply_receipt<T>(
+    file: &mut FileResult,
+    result: Result<(serde_json::Value, u64, bool)>,
+    payload: T,
+    apply: &mut impl FnMut(&mut FileResult, T, &serde_json::Value) -> Result<()>,
+) {
+    match result {
+        Ok((body, timestamp, cached)) => {
+            file.cached &= cached;
+            file.input_tokens += body["usage"]["input_tokens"].as_u64().unwrap_or(0);
+            file.output_tokens += body["usage"]["output_tokens"].as_u64().unwrap_or(0);
+            file.evaluated_at = Some(timestamp);
+            if file.status != Status::Error
+                && let Err(error) = apply(file, payload, &body)
+            {
+                fail(file, error);
+            }
+        }
+        // Later skipped work must not overwrite this file's first failure.
+        Err(error) if file.status != Status::Error => fail(file, error),
+        Err(_) => {}
+    }
+}
+
+/// Add one request's metrics to its stage totals.
+fn add_metrics(stage: &mut crate::schema::StageMetrics, m: &crate::schema::StageMetrics) {
+    stage.service_ms += m.service_ms;
+    stage.queue_wait_ms += m.queue_wait_ms;
+    stage.successful_requests += m.successful_requests;
+    stage.failed_attempts += m.failed_attempts;
+    stage.retries += m.retries;
+    stage.cache_hits += m.cache_hits;
+    stage.cached_judgments += m.cached_judgments;
+    stage.evaluated_judgments += m.evaluated_judgments;
+    stage.input_tokens += m.input_tokens;
+    stage.output_tokens += m.output_tokens;
+    stage.evidence_bytes += m.evidence_bytes;
+}
+
+/// Compose each planned file's recorded judgments into dimensions and findings.
+fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
+    for (&owner, file_plan) in &plan.files {
+        let file = &mut report.files[owner];
+        if file.status == Status::Error {
+            continue;
+        }
+        let composed = crate::units::compose::compose(file_plan, &file.judgments);
+        file.syntax_checked = true;
+        file.dimensions = composed.dimensions;
+        file.findings = composed.findings;
+        file.status = composed.status;
+    }
 }
 
 fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {

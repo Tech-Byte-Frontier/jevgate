@@ -1,7 +1,7 @@
 //! Test cases, the non-test functions they call, and candidate redundant pairs.
 //! Rust `#[test]`-family functions, JavaScript and TypeScript `it`/`test`
 //! (including `.each`), and Python `test_*` functions.
-use super::{callee_name, is_comment, line_of, macro_calls, text};
+use super::{callee_name, fast_hash, is_comment, line_of, macro_calls, text};
 use anyhow::Result;
 use std::{collections::BTreeSet, ops::Range, path::Path};
 use tree_sitter::Node;
@@ -37,7 +37,7 @@ pub struct TestPair {
 }
 
 pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
-    let Some(tree) = crate::locations::parse(path, source)? else {
+    let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(Vec::new());
     };
     let mut found = Vec::new();
@@ -48,9 +48,9 @@ pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
 fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<TestCase>) {
     match node.kind() {
         "function_item" => {
-            let marked = crate::file_kind::preceding_attributes(node, source)
+            let marked = crate::test_locations::preceding_attributes(node, source)
                 .iter()
-                .any(|attribute| crate::file_kind::attribute_marks_test(attribute));
+                .any(|attribute| crate::test_locations::attribute_marks_test(attribute));
             if marked {
                 push(
                     node,
@@ -75,7 +75,7 @@ fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<Test
             return;
         }
         "class_definition" => {
-            let test_class = crate::file_kind::python_test_class(node, source);
+            let test_class = crate::test_locations::python_test_class(node, source);
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
                 visit(child, source, test_class, found);
@@ -154,15 +154,7 @@ fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Ve
     let mut calls = BTreeSet::new();
     let mut tokens = Vec::new();
     walk(node, source, &mut calls, &mut tokens);
-    let shingles = tokens
-        .windows(3)
-        .map(|w| {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            w.hash(&mut hasher);
-            hasher.finish()
-        })
-        .collect();
+    let shingles = tokens.windows(3).map(fast_hash).collect();
     found.push(TestCase {
         name,
         span: start..node.end_byte(),

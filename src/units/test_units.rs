@@ -7,8 +7,8 @@ use super::{
 use crate::{
     analysis::test_map::{self, TestCase},
     catalog::{TEST_REDUNDANCY, TEST_VALUE},
-    requests::TokenBudget,
     schema::Pass,
+    token_budget::TokenBudget,
 };
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -59,37 +59,7 @@ pub(super) fn plan_values(
         ));
     }
     for group in pack(items, TEST_PACK_ITEMS, |(_, _, _, item)| item) {
-        let mut questions = Map::new();
-        let mut asked = Asked::default();
-        for (index, (_, id, _, _)) in group.iter().enumerate() {
-            let path = format!("tests[{index}].source");
-            for (question, body) in [
-                ("internal", questions::test_internal(&path)),
-                ("own_logic", questions::test_own_logic(&path)),
-                ("mock_only", questions::test_mock_only(&path)),
-                ("several", questions::test_several(&path)),
-            ] {
-                asked.ask(
-                    &mut questions,
-                    format!("t{index}_{question}"),
-                    body,
-                    id,
-                    TEST_VALUE,
-                    question,
-                    Pass::First,
-                );
-            }
-        }
-        let names: Vec<&String> = group
-            .iter()
-            .flat_map(|(_, _, case, _)| case.subjects.iter())
-            .collect();
-        let state = json!({
-            "file": file.file_state(),
-            "tests": group.iter().map(|(_, _, _, item)| item.clone()).collect::<Vec<_>>(),
-            "subjects": subject_state(&names, subjects),
-        });
-        let request = file.request("tests", state, questions);
+        let (request, asked) = value_request(file, &group, subjects);
         if budget.fits(&request) {
             requests.push(Planned {
                 owner: file.owner,
@@ -102,6 +72,45 @@ pub(super) fn plan_values(
             }
         }
     }
+}
+
+/// One test-value request: four questions per test, with the signatures the tests call.
+fn value_request(
+    file: &FileContext<'_>,
+    group: &[(usize, String, &TestCase, Value)],
+    subjects: &BTreeMap<String, String>,
+) -> (Value, Asked) {
+    let mut questions = Map::new();
+    let mut asked = Asked::default();
+    for (index, (_, id, _, _)) in group.iter().enumerate() {
+        let path = format!("tests[{index}].source");
+        for (question, body) in [
+            ("internal", questions::test_internal(&path)),
+            ("own_logic", questions::test_own_logic(&path)),
+            ("mock_only", questions::test_mock_only(&path)),
+            ("several", questions::test_several(&path)),
+        ] {
+            asked.ask(
+                &mut questions,
+                format!("t{index}_{question}"),
+                body,
+                id,
+                TEST_VALUE,
+                question,
+                Pass::First,
+            );
+        }
+    }
+    let names: Vec<&String> = group
+        .iter()
+        .flat_map(|(_, _, case, _)| case.subjects.iter())
+        .collect();
+    let state = json!({
+        "file": file.file_state(),
+        "tests": group.iter().map(|(_, _, _, item)| item.clone()).collect::<Vec<_>>(),
+        "subjects": subject_state(&names, subjects),
+    });
+    (file.request("tests", state, questions), asked)
 }
 
 pub(super) fn plan_pairs(
