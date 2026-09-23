@@ -41,6 +41,8 @@ pub struct Unit {
     pub literals: Vec<super::literals::Literal>,
     /// Calls, built text and field assignments, for locating security findings.
     pub sites: Vec<super::sites::Site>,
+    /// Errors the body creates with their message arguments, for error-detail questions.
+    pub errors: Vec<super::errors::CreatedError>,
     pub calls: BTreeSet<String>,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
@@ -356,6 +358,7 @@ fn push(
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
         literals: body.map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
         sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source)),
+        errors: body.map_or_else(Vec::new, |b| super::errors::created_errors(b, source)),
         calls: facts.calls,
         refs,
         mentions: facts.idents,

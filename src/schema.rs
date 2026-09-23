@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub const RUBRIC: &str = "jevgate-units-v1";
 /// Changes how saved answers become a status. Included in the report identity
 /// and not in the judgment cache, so unchanged questions are not sent again.
-pub const COMPOSITION: &str = "unit-composition-v9";
+pub const COMPOSITION: &str = "unit-composition-v10";
 pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -222,8 +222,12 @@ pub struct StageMetrics {
     pub elapsed_ms: u64,
     pub service_ms: u64,
     pub queue_wait_ms: u64,
+    /// Estimated input tokens of the planned requests the cache does not answer.
     #[serde(default)]
     pub planned_tokens: u64,
+    /// Planned requests a dry run found answered in the cache; they cost nothing.
+    #[serde(default)]
+    pub planned_cached: u64,
     pub successful_requests: u64,
     pub failed_attempts: u64,
     /// Extra sends after rate limits, overload or connection failures.
@@ -269,6 +273,9 @@ pub struct Report {
     /// Rules whose gate levels differ from `fail_on`, by rule ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fail_on_rules: BTreeMap<String, Vec<String>>,
+    /// Gate levels for the files `[[scope]]` paths match, in configuration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fail_on_paths: Vec<PathFailOn>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<crate::gate::Gate>,
     pub api_requests: u32,
@@ -351,6 +358,13 @@ impl Report {
             "clear"
         }
     }
+}
+
+/// One `[[scope]]` as the report records it: its paths and levels by rule ID.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PathFailOn {
+    pub paths: Vec<String>,
+    pub rules: BTreeMap<String, Vec<String>>,
 }
 
 pub fn now() -> u64 {

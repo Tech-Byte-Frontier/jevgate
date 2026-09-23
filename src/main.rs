@@ -120,8 +120,16 @@ fn run(command: JevCommand) -> Result<u8> {
             }
             check(&args, &context)
         }
-        JevCommand::Baseline { merge } => {
-            let written = gate::write_baseline(&context.root, merge)?;
+        JevCommand::Baseline {
+            action: Some(action),
+            ..
+        } => baseline_action(&context, action),
+        JevCommand::Baseline {
+            merge,
+            reason,
+            action: None,
+        } => {
+            let written = gate::write_baseline(&context.root, merge, reason)?;
             let path = written.path.display();
             if merge {
                 say!(
@@ -149,6 +157,38 @@ fn run(command: JevCommand) -> Result<u8> {
             Ok(0)
         }
     }
+}
+
+/// `baseline mark` and `baseline stats`: offline edits and counts of the baseline.
+fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> Result<u8> {
+    match action {
+        options::BaselineAction::Mark {
+            reason,
+            targets,
+            rules,
+        } => {
+            let mut keys = Vec::new();
+            for name in &rules {
+                keys.extend(
+                    catalog::select(name)
+                        .ok_or_else(|| anyhow::anyhow!("Unknown rule or group: {name}"))?,
+                );
+            }
+            let marked = gate::mark(&context.root, reason, &targets, &keys)?;
+            say!(
+                "Marked {marked} accepted finding(s) as {}",
+                output::label(&reason)
+            );
+        }
+        options::BaselineAction::Stats { format } => {
+            let counts = gate::stats(&context.root)?;
+            match format {
+                options::RulesFormat::Json => say!("{}", serde_json::to_string_pretty(&counts)?),
+                options::RulesFormat::Table => say!("{}", gate::stats_table(&counts)),
+            }
+        }
+    }
+    Ok(0)
 }
 
 fn validate_check(args: &CheckArgs) -> Result<()> {

@@ -16,6 +16,18 @@ pub struct Input {
     pub context: Vec<super::context::ContextInput>,
     /// For an agent instruction file, the repository's documentation evidence.
     pub repository: Option<std::sync::Arc<crate::docs::Repository>>,
+    /// With access control, for a SpacetimeDB module file (it imports
+    /// `spacetimedb/server`), its package and framework version.
+    pub framework: Option<Framework>,
+}
+
+/// A SpacetimeDB module's package: the directory of the `package.json` that
+/// declares `spacetimedb` (else the module file's directory), and the declared
+/// version without range operators, empty when none is declared.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Framework {
+    pub root: PathBuf,
+    pub version: String,
 }
 
 pub fn scope(args: &CheckArgs, context: &ConfigContext) -> Result<Vec<PathBuf>> {
@@ -77,12 +89,17 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
     } else {
         Vec::new()
     };
+    keep_module_packages(args, &mut inputs);
     if args.documentation() {
         add_documents(args, context, &boundary, &selected, &mut inputs)?;
     }
+    // SQL is also a source extension, so the code rules' walk may have listed
+    // the file already; the configuration rule's role replaces that entry.
     for (relative, role) in configuration_files(args, context, &in_scope, &changed)? {
-        if !inputs.iter().any(|i| i.result.path == relative) {
-            inputs.push(bounded(&relative, role, args, context, &boundary)?);
+        let input = bounded(&relative, role, args, context, &boundary)?;
+        match inputs.iter_mut().find(|i| i.result.path == relative) {
+            Some(existing) => *existing = input,
+            None => inputs.push(input),
         }
     }
     Ok(inputs)
@@ -233,6 +250,7 @@ fn load_document(
                 source: Some(source),
                 context: Vec::new(),
                 repository: None,
+                framework: None,
             }
         }
         Err(error) => error_input(result, error),
@@ -286,6 +304,9 @@ fn load(
                 .ok()
                 .map(|(_, s)| s.into_iter().map(|(name, _)| name).collect())
                 .unwrap_or_default();
+            let framework = (args.enabled(crate::catalog::ACCESS_CONTROL)
+                && crate::units::spacetimedb_module(&source))
+            .then(|| spacetimedb_package(&context.root, relative));
             Ok(Input {
                 result,
                 source: Some(source),
@@ -296,6 +317,7 @@ fn load(
                     .cloned()
                     .collect(),
                 repository: None,
+                framework,
             })
         }
         // Binary and non-UTF-8 files are reported and skipped; they never make a run incomplete.
@@ -379,6 +401,51 @@ fn bare_input(result: FileResult) -> Input {
         source: None,
         context: Vec::new(),
         repository: None,
+        framework: None,
+    }
+}
+
+/// Access control reads application source only for SpacetimeDB modules:
+/// alone among the code rules, it keeps just the files of their packages.
+fn keep_module_packages(args: &CheckArgs, inputs: &mut Vec<Input>) {
+    let only_access = args.rules.iter().all(|rule| {
+        rule == crate::catalog::ACCESS_CONTROL
+            || !crate::catalog::find(rule).is_some_and(|r| args.code_rules_include(r.key))
+    });
+    if !only_access {
+        return;
+    }
+    let roots: Vec<PathBuf> = inputs
+        .iter()
+        .filter_map(|i| Some(i.framework.as_ref()?.root.clone()))
+        .collect();
+    inputs.retain(|input| roots.iter().any(|root| input.result.path.starts_with(root)));
+}
+
+/// The package of a SpacetimeDB module file: the nearest `package.json` above
+/// it that declares `spacetimedb`. Only the version is read from it, never
+/// the manifest's other text.
+fn spacetimedb_package(root: &Path, relative: &Path) -> Framework {
+    for directory in relative.ancestors().skip(1) {
+        let manifest = root.join(directory).join("package.json");
+        let Ok(text) = read_source(&manifest, LOCAL_PARSE_MAX) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        for section in ["dependencies", "devDependencies", "peerDependencies"] {
+            if let Some(version) = json[section]["spacetimedb"].as_str() {
+                return Framework {
+                    root: directory.to_path_buf(),
+                    version: version.trim_start_matches(['^', '~', '=', 'v', ' ']).into(),
+                };
+            }
+        }
+    }
+    Framework {
+        root: relative.parent().unwrap_or(Path::new("")).to_path_buf(),
+        version: String::new(),
     }
 }
 

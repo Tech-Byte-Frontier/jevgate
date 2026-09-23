@@ -73,6 +73,36 @@ fn cache_ttl(model: &str, ttl: u64) -> Option<u64> {
     matches!(model, "jev-latest" | "jev-preview").then_some(ttl)
 }
 
+/// A valid, unexpired cached answer to `request`, read through `load`; none
+/// with `--refresh`.
+fn cached_answer(
+    args: &crate::options::CheckArgs,
+    request: &Value,
+    load: impl Fn(&str, Option<u64>) -> Option<(Value, u64)>,
+) -> Option<(Value, u64)> {
+    if args.refresh {
+        return None;
+    }
+    load(
+        &judgment_key(request),
+        cache_ttl(args.model(), args.cache_ttl_secs()),
+    )
+    .filter(|(b, _)| response::validate(b, request).is_ok())
+}
+
+/// Whether a dry run's planned request already has a cached answer, read
+/// without opening the store.
+pub(super) fn answered(
+    root: &std::path::Path,
+    args: &crate::options::CheckArgs,
+    request: &Value,
+) -> bool {
+    cached_answer(args, request, |key, ttl| {
+        crate::storage::peek(root, key, ttl)
+    })
+    .is_some()
+}
+
 impl Session<'_> {
     pub(super) fn queries(&mut self, requests: &[&Value]) -> Vec<Receipt> {
         let mut receipts: Vec<_> = requests
@@ -105,15 +135,9 @@ impl Session<'_> {
         requests: &[&'r Value],
         receipts: &mut [Receipt],
     ) -> Vec<(usize, &'r Value)> {
-        let ttl = cache_ttl(self.args.model(), self.args.cache_ttl_secs());
         let mut pending = Vec::new();
         for (i, request) in requests.iter().enumerate() {
-            let cached = if self.args.refresh {
-                None
-            } else {
-                self.store.load(&judgment_key(request), ttl)
-            }
-            .filter(|(b, _)| response::validate(b, request).is_ok());
+            let cached = cached_answer(self.args, request, |key, ttl| self.store.load(key, ttl));
             if let Some((cached, created)) = cached {
                 receipts[i].metrics.cache_hits = 1;
                 receipts[i].metrics.cached_judgments = 1;

@@ -2,11 +2,11 @@
 //! files once, build the facts that span files, then plan each file.
 /// A scope of files sharing clone, subject and caller evidence.
 pub(super) struct Scope<'a> {
-    owners: Vec<usize>,
-    inputs: &'a [Input],
-    views: &'a BTreeMap<usize, View>,
-    units: BTreeMap<usize, FileUnits>,
-    context: Vec<(PathBuf, &'a str, FileUnits)>,
+    pub(super) owners: Vec<usize>,
+    pub(super) inputs: &'a [Input],
+    pub(super) views: &'a BTreeMap<usize, View>,
+    pub(super) units: BTreeMap<usize, FileUnits>,
+    pub(super) context: Vec<(PathBuf, &'a str, FileUnits)>,
     /// Agent instruction files, judged by the documentation rules only.
     documents: Vec<usize>,
     /// SQL and workflow files, judged by the access-control and workflow rules.
@@ -15,7 +15,7 @@ pub(super) struct Scope<'a> {
 
 use super::{
     FileContext, FilePlan, Plan, Planned, access, documents, drift, duplicates, functions,
-    hardcoded, instructions, outline, security, test_units, workflows,
+    handlers, hardcoded, instructions, outline, security, spacetimedb, test_units, workflows,
 };
 use crate::{
     analysis::{
@@ -45,23 +45,28 @@ impl Scope<'_> {
             .collect()
     }
 
-    /// Callable units outside tests, in selected files and explicit context.
-    pub(super) fn scope_units(&self) -> impl Iterator<Item = (&Path, &Unit)> {
+    /// Callable units outside tests, in selected files and explicit context,
+    /// with the path and source of their file.
+    pub(super) fn scope_units(&self) -> impl Iterator<Item = (&Path, &str, &Unit)> {
         let selected = self.owners.iter().flat_map(move |owner| {
             let lines = self.test_lines(*owner);
-            let path = self.inputs[*owner].result.path.as_path();
+            let input = &self.inputs[*owner];
+            let (path, source) = (
+                input.result.path.as_path(),
+                input.source.as_deref().unwrap_or(""),
+            );
             self.units[owner]
                 .units
                 .iter()
                 .filter(move |u| u.callable() && !lines.iter().any(|l| u.overlaps(l)))
-                .map(move |u| (path, u))
+                .map(move |u| (path, source, u))
         });
-        let context = self.context.iter().flat_map(|(path, _, units)| {
+        let context = self.context.iter().flat_map(|(path, source, units)| {
             units
                 .units
                 .iter()
                 .filter(|u| u.callable())
-                .map(move |u| (path.as_path(), u))
+                .map(move |u| (path.as_path(), *source, u))
         });
         selected.chain(context)
     }
@@ -80,6 +85,13 @@ pub fn plan(
         let file = plan_file(&scope, &shared, owner, args, budget, &mut result.requests);
         result.files.insert(owner, file);
     }
+    if shared.enabled(catalog::SENSITIVE_DATA) {
+        let evidence = handlers::Evidence {
+            imports: &shared.imports,
+            hashes: &shared.hashes,
+        };
+        handlers::plan(&scope, &evidence, args, budget, &mut result);
+    }
     let drift = drift::Shared::new(
         inputs,
         &scope.documents,
@@ -93,8 +105,25 @@ pub fn plan(
         .map(|&o| (o, &inputs[o]))
         .collect();
     access::plan(&sql, args, budget, &mut result.files, &mut result.requests);
+    plan_workflows(&scope, args, budget, &mut result);
+    for &owner in &scope.documents {
+        let file = plan_document(
+            &inputs[owner],
+            owner,
+            args,
+            budget,
+            &drift,
+            &mut result.requests,
+        );
+        result.files.insert(owner, file);
+    }
+    result
+}
+
+/// Each GitHub Actions workflow file's jobs.
+fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: &TokenBudget, result: &mut Plan) {
     for &owner in &scope.configuration {
-        let input = &inputs[owner];
+        let input = &scope.inputs[owner];
         if input.result.role != crate::inventory::WORKFLOW {
             continue;
         }
@@ -114,18 +143,6 @@ pub fn plan(
         workflows::plan(&context, &mut file, &mut result.requests);
         result.files.insert(owner, file);
     }
-    for &owner in &scope.documents {
-        let file = plan_document(
-            &inputs[owner],
-            owner,
-            args,
-            budget,
-            &drift,
-            &mut result.requests,
-        );
-        result.files.insert(owner, file);
-    }
-    result
 }
 
 /// The documentation rules for one agent instruction file.
@@ -227,6 +244,10 @@ struct Shared<'a> {
     imports: BTreeMap<usize, Imports>,
     /// Callable short names to their signatures, for test subjects.
     subjects: BTreeMap<String, String>,
+    /// Callable short names to their file and source, for the test recheck.
+    subject_sources: BTreeMap<String, test_units::SubjectSource>,
+    /// With access control, every callable by short name, for SpacetimeDB helpers.
+    module_helpers: BTreeMap<String, Vec<spacetimedb::Helper>>,
     /// Test cases of each selected file with a test view, inside its test lines.
     cases: BTreeMap<PathBuf, Vec<TestCase>>,
     hashes: BTreeMap<PathBuf, String>,
@@ -239,17 +260,26 @@ impl<'a> Shared<'a> {
             pairs: clones::Candidates::default(),
             imports: imports(scope),
             subjects: BTreeMap::new(),
+            subject_sources: BTreeMap::new(),
+            module_helpers: BTreeMap::new(),
             cases: test_cases(scope),
             hashes: BTreeMap::new(),
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
             shared.pairs = duplicate_candidates(scope);
         }
-        for (_, unit) in scope.scope_units() {
+        for (path, source, unit) in scope.scope_units() {
             shared
                 .subjects
                 .entry(unit.short_name.clone())
                 .or_insert_with(|| unit.signature.clone());
+            shared
+                .subject_sources
+                .entry(unit.short_name.clone())
+                .or_insert_with(|| test_units::SubjectSource {
+                    path: path.to_path_buf(),
+                    source: unit.source(source).to_string(),
+                });
         }
         for &owner in &scope.owners {
             let result = &scope.inputs[owner].result;
@@ -264,12 +294,39 @@ impl<'a> Shared<'a> {
                     .insert(context.file.path.clone(), context.file.source_hash.clone());
             }
         }
+        if shared.enabled(catalog::ACCESS_CONTROL) {
+            shared.module_helpers = module_helpers(scope, &shared.hashes);
+        }
         shared
     }
 
     fn enabled(&self, key: &str) -> bool {
         self.rules.iter().any(|r| r == key || r == catalog::id(key))
     }
+}
+
+/// Every callable of the scope by short name, with its file's hash, as the
+/// helpers a SpacetimeDB definition may call.
+fn module_helpers(
+    scope: &Scope<'_>,
+    hashes: &BTreeMap<PathBuf, String>,
+) -> BTreeMap<String, Vec<spacetimedb::Helper>> {
+    let mut helpers = BTreeMap::<String, Vec<spacetimedb::Helper>>::new();
+    for (path, source, unit) in scope.scope_units() {
+        let Some(source_hash) = hashes.get(path) else {
+            continue;
+        };
+        helpers
+            .entry(unit.short_name.clone())
+            .or_default()
+            .push(spacetimedb::Helper {
+                name: unit.short_name.clone(),
+                path: path.to_path_buf(),
+                source_hash: source_hash.clone(),
+                source: unit.source(source).to_string(),
+            });
+    }
+    helpers
 }
 
 /// Every rule's units and requests for one selected file.
@@ -351,7 +408,30 @@ fn plan_file(
         );
     }
     if view.tests && args.include_tests {
-        plan_tests(shared, &context, cases, &mut file, requests);
+        plan_tests(shared, &context, cases, &lines, &mut file, requests);
+    }
+    if shared.enabled(catalog::ACCESS_CONTROL)
+        && view.application
+        && let Some(framework) = &input.framework
+    {
+        // A helper of the same name in the module's package, nearest the file.
+        let lookup = |name: &str| {
+            shared.module_helpers.get(name).and_then(|candidates| {
+                candidates
+                    .iter()
+                    .filter(|h| h.path.starts_with(&framework.root))
+                    .max_by_key(|h| {
+                        let shared_parts = h
+                            .path
+                            .iter()
+                            .zip(context.path.iter())
+                            .take_while(|(a, b)| a == b)
+                            .count();
+                        (shared_parts, std::cmp::Reverse(h.path.clone()))
+                    })
+            })
+        };
+        spacetimedb::plan(&context, &framework.version, lookup, &mut file, requests);
     }
     file
 }
@@ -460,13 +540,19 @@ fn plan_tests(
     shared: &Shared<'_>,
     context: &FileContext<'_>,
     mut cases: Vec<TestCase>,
+    test_lines: &[Range<usize>],
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
     test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
     if shared.enabled(catalog::TEST_VALUE) {
         file.rules.insert(catalog::TEST_VALUE, 0);
-        test_units::plan_values(context, &cases, &shared.subjects, file, requests);
+        let subjects = test_units::Subjects {
+            signatures: &shared.subjects,
+            sources: &shared.subject_sources,
+            hashes: &shared.hashes,
+        };
+        test_units::plan_values(context, &cases, &subjects, test_lines, file, requests);
     }
     if shared.enabled(catalog::TEST_REDUNDANCY) {
         file.rules.insert(catalog::TEST_REDUNDANCY, 0);

@@ -3,6 +3,7 @@
 //! every judgment about meaning is left to Jev.
 pub mod blocks;
 pub mod clones;
+pub mod errors;
 pub mod groups;
 pub mod imports;
 pub mod literals;

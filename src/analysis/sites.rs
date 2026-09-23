@@ -272,7 +272,7 @@ fn statement<'t>(node: Node<'t>, body: Node<'t>, source: &str) -> Node<'t> {
     node
 }
 
-fn clip(value: &str) -> String {
+pub(super) fn clip(value: &str) -> String {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() <= MAX_TEXT {
         return collapsed;

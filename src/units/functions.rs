@@ -143,7 +143,7 @@ fn recheck(
     scope: &Scope<'_>,
 ) -> Option<(Value, Asked)> {
     let mut callees = Vec::new();
-    for (_, callee) in scope.scope_units() {
+    for (_, _, callee) in scope.scope_units() {
         if callees.len() == CALLEES {
             break;
         }

@@ -8,6 +8,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// A cached answer larger than this is ignored and asked again.
+const CACHE_ENTRY_BYTES: u64 = 1_048_576;
+
+/// Reports kept in `.jevgate/history/`, by generation; older ones are removed.
+const HISTORY: u64 = 64;
+
 pub struct Store {
     pub directory: PathBuf,
     _lock: fs::File,
@@ -83,15 +89,7 @@ impl Store {
 
     /// `ttl` is `None` for answers that never expire (a pinned model version).
     pub fn load(&self, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
-        let path = self.directory.join("cache").join(format!("{hash}.json"));
-        if path.is_symlink() {
-            return None;
-        }
-        let entry: Cache =
-            serde_json::from_str(&crate::inventory::read_source(&path, 1_048_576).ok()?).ok()?;
-        let age = now().checked_sub(entry.created_at)?;
-        (entry.request_hash == hash && ttl.is_none_or(|ttl| age < ttl))
-            .then_some((entry.response, entry.created_at))
+        load_entry(&self.directory, hash, ttl)
     }
 
     pub fn save(&self, hash: &str, response: &Value, created_at: u64) -> Result<()> {
@@ -130,17 +128,40 @@ impl Store {
             &bytes,
         )?;
         atomic(&self.directory.join("latest.json"), &bytes)?;
-        if report.generation > 64 {
+        if report.generation > HISTORY {
             let old = self
                 .directory
                 .join("history")
-                .join(format!("{}.json", report.generation - 64));
+                .join(format!("{}.json", report.generation - HISTORY));
             if old.is_file() {
                 fs::remove_file(old)?;
             }
         }
         Ok(())
     }
+}
+
+fn load_entry(directory: &Path, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
+    let path = directory.join("cache").join(format!("{hash}.json"));
+    if path.is_symlink() {
+        return None;
+    }
+    let entry: Cache =
+        serde_json::from_str(&crate::inventory::read_source(&path, CACHE_ENTRY_BYTES).ok()?)
+            .ok()?;
+    let age = now().checked_sub(entry.created_at)?;
+    (entry.request_hash == hash && ttl.is_none_or(|ttl| age < ttl))
+        .then_some((entry.response, entry.created_at))
+}
+
+/// A cached answer read without opening the store: no lock is taken and no
+/// directory is created, so a dry run stays free of saved state.
+pub fn peek(root: &Path, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
+    let directory = root.join(".jevgate");
+    if directory.is_symlink() || !directory.is_dir() {
+        return None;
+    }
+    load_entry(&directory, hash, ttl)
 }
 
 fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -209,7 +230,7 @@ pub fn writer_active(root: &Path) -> bool {
 }
 
 pub fn history(root: &Path, since: u64, current: u64) -> Result<Vec<serde_json::Value>> {
-    ensure!(current.saturating_sub(since) <= 64, "History expired");
+    ensure!(current.saturating_sub(since) <= HISTORY, "History expired");
     let mut values = Vec::new();
     for generation in since.saturating_add(1)..=current {
         let path = root.join(format!(".jevgate/history/{generation}.json"));

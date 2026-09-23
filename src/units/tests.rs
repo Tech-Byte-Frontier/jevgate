@@ -689,7 +689,11 @@ fn undecided_weak_test_signals_do_not_block_a_clear_test() {
     hollow
         .overrides
         .push(("own_logic", json!({"type":"noul","noul":0.5})));
+    hollow
+        .recheck_overrides
+        .push(("own_logic", json!({"type":"noul","noul":0.5})));
     let report = run(&project, &options, &mut hollow);
+    assert!(hollow.stages.contains(&"recheck".to_string()));
     assert_eq!(
         report.files[0].dimensions["test_value"].status,
         Status::Uncertain
@@ -750,17 +754,26 @@ fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
         &options,
         vec![("special", json!({"type":"noul","noul":0.9}))],
     );
+    // The locate follow-up offered none clearly, so no value is named and
+    // the review is one level lower.
     let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(finding.strength, Strength::Consider);
     assert_eq!(finding.rule, "maintainability/hardcoded-values");
     assert!(
-        finding
-            .message
-            .contains("special-cases one specific identity")
+        finding.message.starts_with(
+            "`connect` special-cases one specific identity (0.90). Which value it means was not found"
+        ),
+        "{}",
+        finding.message
     );
     assert!(finding.action.contains("data or configuration"));
-    // The locate follow-up offered none clearly, so no value is named.
     assert!(finding.values.is_empty());
+    assert_eq!(
+        report.files[0].dimensions["hardcoded_values"]
+            .units
+            .consider,
+        1
+    );
     options.refresh = true;
     let chosen = json!({"type":"choice","choice":"v0","confidence":1.0,
         "probabilities":{"v0":1.0,"v1":0.0,"none":0.0}});
@@ -772,6 +785,7 @@ fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
         ],
     );
     let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Review);
     assert_eq!(finding.values, ["\"db.internal:5432\""]);
     assert!(
         finding
@@ -1328,14 +1342,19 @@ fn a_finished_plan_covers_its_section_checks() {
     assert_eq!(dimension.units.covered, 1, "{}", dimension.decision_basis);
 }
 
-fn hardcoded_file(path: &str, strength: &str, values: &[&str]) -> crate::schema::FileResult {
-    let finding = json!({
+/// A special-case finding at line 3 of `path`, naming `values`.
+fn hardcoded_finding(path: &str, strength: &str, values: &[&str]) -> Value {
+    json!({
         "rule": "maintainability/hardcoded-values", "strength": strength, "line": 3,
         "message": "`f` special-cases one specific identity (0.90).", "action": "Move it",
         "symbol": "f", "rule_version": "1", "concern_probability": 0.9,
         "locations": [{"path": path, "start_line": 3, "end_line": 5, "symbol": "f"}],
         "values": values, "fingerprint": path, "rank": 1.0
-    });
+    })
+}
+
+fn hardcoded_file(path: &str, strength: &str, values: &[&str]) -> crate::schema::FileResult {
+    let finding = hardcoded_finding(path, strength, values);
     let units = json!({"judged": 1, "review": usize::from(strength == "review"), "consider": usize::from(strength == "consider"), "note": 0, "clear": 0, "uncertain": 0, "needs_context": 0, "too_small": 0, "omitted": 0});
     serde_json::from_value(json!({
         "path": path, "role": "source", "contains_tests": false, "source_hash": "", "context_files": [],
@@ -1358,7 +1377,7 @@ fn a_literal_repeated_across_files_is_one_finding_and_its_repeats_are_notes() {
         hardcoded_file("c.ts", "consider", &["0"]),
         hardcoded_file("d.ts", "consider", &["'acme-corp'", "1"]),
     ];
-    super::grouping::group_repeated_values(&mut files);
+    super::grouping::group_repeats(&mut files);
     let primary = &files[1].findings[0];
     assert_eq!(primary.strength, Strength::Review);
     assert_eq!(primary.locations.len(), 3);
@@ -1381,19 +1400,79 @@ fn a_literal_repeated_across_files_is_one_finding_and_its_repeats_are_notes() {
     assert_eq!(files[2].findings[0].strength, Strength::Consider);
 }
 
+fn plan_file(path: &str) -> crate::schema::FileResult {
+    let mut file = hardcoded_file(path, "consider", &[]);
+    let dimension = file.dimensions.remove("hardcoded_values").unwrap();
+    file.dimensions.insert("doc_staleness".into(), dimension);
+    let finding = &mut file.findings[0];
+    finding.rule = "documentation/staleness".into();
+    finding.category = Some(super::grouping::FINISHED_PLAN.into());
+    finding.message = format!("`{path}` is a plan whose work is finished: tag v1 (0.95).");
+    file
+}
+
+#[test]
+fn finished_plans_in_one_directory_are_one_finding_named_by_the_directory() {
+    use crate::schema::{Status, Strength};
+    let mut files = vec![
+        plan_file("docs/plans/b.md"),
+        plan_file("docs/plans/a.md"),
+        plan_file("docs/plans/c.md"),
+        plan_file("docs/other/d.md"),
+    ];
+    super::grouping::group_repeats(&mut files);
+    let primary = &files[1].findings[0];
+    assert_eq!(primary.strength, Strength::Consider);
+    assert!(
+        primary.message.ends_with(
+            "The other 2 plans in `docs/plans` are finished too: `docs/plans/b.md`, `docs/plans/c.md`."
+        ),
+        "{}",
+        primary.message
+    );
+    assert_eq!(primary.locations.len(), 3);
+    for member in [&files[0], &files[2]] {
+        assert_eq!(member.findings[0].strength, Strength::Note);
+        assert_eq!(member.dimensions["doc_staleness"].units.note, 1);
+        assert_eq!(member.status, Status::Note);
+    }
+    assert_eq!(
+        files[3].findings[0].strength,
+        Strength::Consider,
+        "a plan alone in its directory"
+    );
+    // The group keeps its identity when a plan is added or removed.
+    let fingerprint = primary.fingerprint.clone();
+    let mut fewer = vec![plan_file("docs/plans/c.md"), plan_file("docs/plans/b.md")];
+    super::grouping::group_repeats(&mut fewer);
+    assert_eq!(fewer[1].findings[0].fingerprint, fingerprint);
+}
+
 const FIRST_MIGRATION: &str = "create table public.notes (id uuid primary key, owner_id uuid not null, body text);\nalter table public.notes enable row level security;\ncreate policy \"read notes\" on public.notes for select using (true);\n";
 const SECOND_MIGRATION: &str = "drop policy \"read notes\" on public.notes;\ncreate policy \"read own notes\" on public.notes for select using (owner_id = auth.uid());\ncreate function public.note_count(uid uuid) returns bigint language sql security definer as $$ select count(*) from public.notes where owner_id = uid $$;\ngrant select on public.notes to authenticated;\n";
 const WORKFLOW_FILE: &str = "on:\n  pull_request_target:\njobs:\n  greet:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo \"${{ github.event.pull_request.title }}\"\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n";
 
-fn configuration_project() -> (Project, CheckArgs) {
+/// A project holding `files`, checked for `rules` only.
+fn project_with(files: &[(&str, &str)], rules: &[&str]) -> (Project, CheckArgs) {
     let project = Project::new();
-    project.write("supabase/migrations/1_init.sql", FIRST_MIGRATION);
-    project.write("supabase/migrations/2_own.sql", SECOND_MIGRATION);
-    project.write(".github/workflows/greet.yml", WORKFLOW_FILE);
-    project.write("lib.rs", &function("unrelated"));
+    for (path, text) in files {
+        project.write(path, text);
+    }
     let mut options = args();
-    options.rules = vec![catalog::ACCESS_CONTROL.into(), catalog::WORKFLOWS.into()];
+    options.rules = rules.iter().map(|r| r.to_string()).collect();
     (project, options)
+}
+
+fn configuration_project() -> (Project, CheckArgs) {
+    project_with(
+        &[
+            ("supabase/migrations/1_init.sql", FIRST_MIGRATION),
+            ("supabase/migrations/2_own.sql", SECOND_MIGRATION),
+            (".github/workflows/greet.yml", WORKFLOW_FILE),
+            ("lib.rs", &function("unrelated")),
+        ],
+        &[catalog::ACCESS_CONTROL, catalog::WORKFLOWS],
+    )
 }
 
 #[test]
@@ -1471,6 +1550,26 @@ fn access_units_follow_the_final_state_across_migrations() {
 }
 
 #[test]
+fn access_control_judges_migrations_beside_the_code_rules() {
+    let (project, mut options) = configuration_project();
+    options.rules.push(catalog::INJECTION.into());
+    let (inputs, plan) = planned(&project, &options);
+    let migration = inputs
+        .iter()
+        .find(|i| i.result.path.ends_with("2_own.sql"))
+        .unwrap();
+    assert_eq!(migration.result.role, crate::inventory::SQL);
+    assert_eq!(
+        plan.requests
+            .iter()
+            .filter(|p| p.request["jevgate"]["stage"] == "access")
+            .count(),
+        3,
+        "the code rules' walk does not hide migrations from access control"
+    );
+}
+
+#[test]
 fn an_unchecked_definer_is_a_review_and_an_open_search_path_a_consider() {
     let (project, options) = configuration_project();
     let mut eval = scripted(0);
@@ -1506,4 +1605,364 @@ fn an_unchecked_definer_is_a_review_and_an_open_search_path_a_consider() {
         job.message
     );
     assert_eq!(job.locations[0].start_line, 4);
+}
+
+const VITEST: &str = "import { vi } from 'vitest'\nimport { repo } from './repo'\nimport { getProfile } from './profile'\nvi.mock('./repo')\n\ndescribe('profile', () => {\n  beforeEach(() => {\n    repo.findProfile.mockReset()\n  })\n\n  it('returns the stored profile', async () => {\n    repo.findProfile.mockResolvedValue({ id: 'u1', name: 'Ana' })\n    const result = await getProfile('u1')\n    expect(result).toEqual({ id: 'u1', name: 'Ana' })\n  })\n})\n";
+const PROFILE: &str = "export async function getProfile(id: string) {\n  if (!id) {\n    throw new Error('missing id')\n  }\n  const profile = await repo.findProfile(id)\n  return profile\n}\n";
+
+#[test]
+fn an_undecided_test_is_asked_again_with_its_subjects_and_setup() {
+    let project = Project::new();
+    project.write("src/profile.ts", PROFILE);
+    project.write("src/profile.test.ts", VITEST);
+    let mut options = args();
+    options.include_tests = true;
+    only(&mut options, catalog::TEST_VALUE);
+    let (_, plan) = planned(&project, &options);
+    let file = plan
+        .files
+        .values()
+        .find(|f| f.path.ends_with("profile.test.ts"))
+        .unwrap();
+    let (request, _) = file.units[0].recheck.as_ref().expect("a recheck");
+    let state = &request["state"];
+    assert!(
+        state["subjects"][0]["source"]
+            .as_str()
+            .unwrap()
+            .contains("repo.findProfile(id)")
+    );
+    let setup = state["setup"].as_str().unwrap();
+    assert!(
+        setup.starts_with("import { vi } from 'vitest'") && setup.contains("vi.mock('./repo')"),
+        "{setup}"
+    );
+    assert!(setup.contains("beforeEach(() => {\n    repo.findProfile.mockReset()\n  })"));
+    assert!(!setup.contains("describe("), "{setup}");
+    assert_eq!(
+        request["jevgate"]["sources"].as_array().unwrap().len(),
+        2,
+        "the subject's file is checked for freshness"
+    );
+    let first = plan
+        .requests
+        .iter()
+        .find(|p| p.request["jevgate"]["stage"] == "tests")
+        .unwrap();
+    assert!(
+        first.request["state"]["subjects"][0]["source"].is_null(),
+        "the first pass sends signatures only"
+    );
+    let test_value = |report: &Report| {
+        report
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("profile.test.ts"))
+            .unwrap()
+            .clone()
+    };
+    let mut eval = scripted(0);
+    eval.overrides = vec![("own_logic", noul_at(0.5))];
+    let report = run(&project, &options, &mut eval);
+    assert!(eval.stages.contains(&"recheck".to_string()));
+    assert_eq!(
+        test_value(&report).dimensions["test_value"].status,
+        Status::Clear
+    );
+    options.refresh = true;
+    let mut eval = scripted(0);
+    eval.overrides = vec![("own_logic", noul_at(0.5))];
+    eval.recheck_overrides = vec![("mock_only", noul_at(0.95))];
+    let file = test_value(&run(&project, &options, &mut eval));
+    assert_eq!(file.findings[0].strength, Strength::Review);
+    assert!(
+        file.findings[0]
+            .message
+            .contains("only checks values its mocks")
+    );
+}
+
+#[test]
+fn a_test_files_setup_is_its_head_and_hooks_and_long_parts_are_left_out() {
+    let python = "import pytest\nfrom app import total\n\nclass TotalTest(TestCase):\n    def setUp(self):\n        self.rows = [1, 2]\n\n    def test_total(self):\n        self.assertEqual(total(self.rows), 3)\n";
+    let setup = test_units::file_setup(python, 1, 8);
+    assert_eq!(
+        setup,
+        "import pytest\nfrom app import total\n\ndef setUp(self):\n        self.rows = [1, 2]"
+    );
+    let long = format!("{}it('x', () => {{}})\n", "// padding\n".repeat(500));
+    assert_eq!(test_units::file_setup(&long, 1, 501), "");
+}
+
+const ROUTE: &str = "export async function loadThing(c: Context) {\n  const { data, error } = await db.from('things').select('*').eq('id', c.req.param('id'))\n  if (error) throw new InternalError(`Query failed: ${error.message}`, error)\n  if (!data) throw new NotFoundError('Thing not found')\n  return c.json(data)\n}\n";
+
+fn choice_of(chosen: &str, options: &[&str]) -> Value {
+    let probabilities: serde_json::Map<String, Value> = options
+        .iter()
+        .map(|o| {
+            (
+                o.to_string(),
+                json!(if *o == chosen {
+                    0.9
+                } else {
+                    0.1 / (options.len() - 1) as f64
+                }),
+            )
+        })
+        .collect();
+    json!({"type":"choice","choice":chosen,"confidence":0.9,"probabilities":probabilities})
+}
+
+#[test]
+fn each_created_error_message_is_asked_about_and_names_the_foreign_one() {
+    let project = Project::new();
+    project.write("routes.ts", ROUTE);
+    let mut options = args();
+    options.rules = vec![catalog::SENSITIVE_DATA.into()];
+    let (_, plan) = planned(&project, &options);
+    let Detail::Security {
+        trace: Some((trace, _)),
+        messages,
+        ..
+    } = &plan.files[&0].units[0].detail
+    else {
+        panic!("a traced security unit");
+    };
+    assert_eq!(
+        messages,
+        &["`Query failed: ${error.message}`", "'Thing not found'"]
+    );
+    assert_eq!(trace["state"]["messages"][1]["id"], "m1");
+    assert!(trace["questions"].get("messages").is_some());
+    assert!(
+        trace["questions"].get("own_messages").is_none(),
+        "the Choice replaces the Noul"
+    );
+    let run_with = |options: &CheckArgs, chosen: &str| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("error_details", noul_at(0.3)),
+            ("exception_to_client", noul_at(0.6)),
+            ("messages", choice_of(chosen, &["m0", "m1", "none"])),
+        ];
+        run(&project, options, &mut eval)
+    };
+    let report = run_with(&options, "none");
+    assert_eq!(
+        report.files[0].dimensions[catalog::SENSITIVE_DATA].status,
+        Status::Clear,
+        "every message is the program's own"
+    );
+    options.refresh = true;
+    let report = run_with(&options, "m0");
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Consider);
+    assert!(
+        finding.message.contains("into an error message (0.90)")
+            && finding
+                .message
+                .ends_with("The message is `Query failed: ${error.message}`."),
+        "{}",
+        finding.message
+    );
+}
+
+#[test]
+fn a_registered_error_handler_is_one_unit_judged_with_the_error_classes() {
+    let project = Project::new();
+    project.write(
+        "src/app.ts",
+        "import { errorHandler } from './middleware/error-handler'\nconst app = new Hono()\napp.onError(errorHandler)\nexport default app\n",
+    );
+    project.write(
+        "src/middleware/error-handler.ts",
+        "export const errorHandler = (err, c) => {\n  logger.error(err)\n  if (err instanceof AppError) {\n    return c.json({ error: { code: err.code, message: err.message } }, err.status)\n  }\n  return c.json({ error: { message: err.message, stack: err.stack } }, 500)\n}\n",
+    );
+    project.write(
+        "src/lib/errors.ts",
+        "export class AppError extends Error {\n  constructor(public status: number, public code: string, message: string) {\n    super(message)\n  }\n}\n",
+    );
+    project.write(
+        "src/app.test.ts",
+        "import { errorHandler } from './middleware/error-handler'\ntest('x', () => {\n  app.onError(errorHandler)\n})\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::SENSITIVE_DATA.into()];
+    let (inputs, plan) = planned(&project, &options);
+    let handlers: Vec<(&std::path::Path, &UnitPlan)> = plan
+        .files
+        .values()
+        .flat_map(|f| f.units.iter().map(move |u| (f.path.as_path(), u)))
+        .filter(|(_, u)| matches!(u.detail, Detail::Handler { .. }))
+        .collect();
+    assert_eq!(handlers.len(), 1, "registered once outside tests");
+    let (path, unit) = handlers[0];
+    assert_eq!(
+        path,
+        std::path::Path::new("src/middleware/error-handler.ts")
+    );
+    assert_eq!(unit.name, "errorHandler");
+    let request = &plan
+        .requests
+        .iter()
+        .find(|p| p.request["state"]["error_handler"].is_object())
+        .unwrap()
+        .request;
+    assert_eq!(
+        request["state"]["error_handler"]["registered"],
+        "`app.onError(errorHandler)` (src/app.ts:3)"
+    );
+    assert!(
+        request["state"]["error_classes"]
+            .as_str()
+            .unwrap()
+            .starts_with("export class AppError")
+    );
+    assert_eq!(request["jevgate"]["sources"].as_array().unwrap().len(), 2);
+    assert!(inputs.len() >= 3);
+    let mut eval = scripted(0);
+    eval.overrides = vec![("handler_leaks", noul_at(0.95))];
+    let report = run(&project, &options, &mut eval);
+    let file = report
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("error-handler.ts"))
+        .unwrap();
+    let finding = file
+        .findings
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("errorHandler") && f.strength == Strength::Review)
+        .unwrap();
+    assert!(
+        finding
+            .message
+            .starts_with("`errorHandler`, the error handler registered by `app.onError(errorHandler)` (src/app.ts:3), sends clients"),
+        "{}",
+        finding.message
+    );
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-209 error details exposed")
+    );
+}
+
+const STDB_TABLES: &str = "import { table, t } from 'spacetimedb/server'\n\nexport const character = table(\n  { public: true },\n  {\n    id: t.u64().primaryKey(),\n    owner: t.identity(),\n    name: t.string(),\n  },\n)\n\nexport const account = table({ public: false }, { owner: t.identity().primaryKey() })\n";
+const STDB_COMMANDS: &str = "import { t } from 'spacetimedb/server'\nimport { database } from './schema'\nimport { ownedCharacter } from './owned'\n\nexport const renameCharacter = database.reducer({ characterId: t.u64(), name: t.string() }, (ctx, { characterId, name }) => {\n  const row = ownedCharacter(ctx, characterId)\n  ctx.db.character.id.update({ ...row, name })\n})\n\nexport const myCharacters = database.view({ public: true }, t.array(character.rowType), (ctx) => {\n  return [...ctx.db.character.owner.filter(ctx.sender)]\n})\n";
+const STDB_OWNED: &str = "export function ownedCharacter(ctx, id) {\n  const row = ctx.db.character.id.find(id)\n  if (!row || !row.owner.isEqual(ctx.sender)) throw new Error('NOT_OWNER')\n  return row\n}\n";
+
+fn spacetimedb_project() -> (Project, CheckArgs) {
+    project_with(
+        &[
+            (
+                "server/package.json",
+                "{\"dependencies\": {\"spacetimedb\": \"^2.10.0\"}}",
+            ),
+            ("server/src/tables.ts", STDB_TABLES),
+            ("server/src/commands.ts", STDB_COMMANDS),
+            ("server/src/owned.ts", STDB_OWNED),
+            (
+                "web/src/owned.ts",
+                "export function ownedCharacter(id) {\n  return fetch(`/characters/${id}`)\n}\n",
+            ),
+        ],
+        &[catalog::ACCESS_CONTROL],
+    )
+}
+
+#[test]
+fn spacetimedb_tables_views_and_reducers_are_judged_with_helpers_and_the_version() {
+    let (project, options) = spacetimedb_project();
+    let (_, plan) = planned(&project, &options);
+    let units: Vec<(&str, &Detail)> = plan
+        .files
+        .values()
+        .flat_map(|f| f.units.iter().map(|u| (u.name.as_str(), &u.detail)))
+        .collect();
+    assert_eq!(units.len(), 3, "the private table is not asked about");
+    let reducer = plan
+        .requests
+        .iter()
+        .find(|p| p.request["state"]["reducer"].is_object())
+        .unwrap();
+    let state = &reducer.request["state"];
+    assert_eq!(state["helpers"][0]["name"], "ownedCharacter");
+    assert!(
+        state["helpers"][0]["source"]
+            .as_str()
+            .unwrap()
+            .contains("ctx.sender"),
+        "the helper nearest the module, not the web client's"
+    );
+    let note = reducer.request["questions"]["reach"]["instructions"]["note"]
+        .as_str()
+        .unwrap();
+    assert!(
+        note.contains("SpacetimeDB 2.10.0")
+            && note.contains("Scheduled reducers (`onSchedule`) are private")
+    );
+    assert_eq!(
+        reducer.request["jevgate"]["sources"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let table = plan
+        .requests
+        .iter()
+        .find(|p| p.request["state"]["table"].is_object())
+        .unwrap();
+    assert_eq!(
+        table.request["state"]["table"]["columns_naming_players"],
+        json!(["owner"])
+    );
+    // Acceptable levels clear; a literal check at review raises the reducer,
+    // while a public table is at most a consider.
+    let report = run(&project, &options, &mut scripted(0));
+    assert!(
+        report
+            .files
+            .iter()
+            .filter(|f| f.path.starts_with("server/src"))
+            .all(|f| f.status == Status::Clear || f.status == Status::NotApplicable),
+        "{:?}",
+        report
+            .files
+            .iter()
+            .map(|f| (&f.path, &f.status))
+            .collect::<Vec<_>>()
+    );
+    let mut options = options;
+    options.refresh = true;
+    let mut eval = scripted(0);
+    eval.overrides = vec![("argument_rows", noul_at(0.9)), ("exposed", noul_at(0.95))];
+    let report = run(&project, &options, &mut eval);
+    let findings: Vec<&crate::schema::Finding> =
+        report.files.iter().flat_map(|f| &f.findings).collect();
+    let reducer = findings
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("renameCharacter"))
+        .unwrap();
+    assert_eq!(reducer.strength, Strength::Review);
+    assert!(
+        reducer
+            .message
+            .starts_with("Reducer `renameCharacter` reads or changes a row its arguments choose"),
+        "{}",
+        reducer.message
+    );
+    assert_eq!(
+        reducer.category.as_deref(),
+        Some("CWE-639 authorization through a user-controlled key")
+    );
+    let table = findings
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("character"))
+        .unwrap();
+    assert_eq!(table.strength, Strength::Consider);
+    assert!(
+        table
+            .message
+            .starts_with("Public table `character` likely lets every client read")
+    );
 }
