@@ -1,6 +1,7 @@
 //! Evidence units: small typed requests about one function group, one file
 //! outline, one candidate pair or a few tests. Code builds the evidence,
 //! Jev answers short literal questions, and `compose` turns answers into results.
+mod access;
 mod answers;
 pub mod compose;
 mod documents;
@@ -9,6 +10,7 @@ mod duplicates;
 mod evidence;
 mod follow_ups;
 mod functions;
+pub mod grouping;
 mod hardcoded;
 mod instructions;
 mod outcome;
@@ -18,6 +20,7 @@ pub mod questions;
 mod security;
 mod test_units;
 mod wording;
+mod workflows;
 
 use answers::Questions;
 pub use answers::{Asked, record};
@@ -93,6 +96,10 @@ pub enum Detail {
     /// A function and the literal values it uses.
     Values {
         values: Vec<String>,
+        /// Its distinct values, whose ids `v0`, `v1`, ... the locate follow-up
+        /// chooses among; that follow-up is sent only after a review or consider.
+        choices: Vec<String>,
+        locate: Option<(Value, Asked)>,
     },
     /// A file's module-level constants and the literal values they hold.
     Constants {
@@ -134,11 +141,25 @@ pub enum Detail {
         /// Which harnesses load the file and when.
         loaded: String,
     },
+    /// A policy, SECURITY DEFINER function or grant in its final state.
+    Access(Access),
+    /// A workflow job and the expressions its `run` scripts hold.
+    Job {
+        expressions: Vec<String>,
+    },
     Test,
     TestPair {
         names: [String; 2],
         subject: String,
     },
+}
+
+/// What an access-control unit holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Access {
+    Policy { table: String },
+    Definer,
+    Grant,
 }
 
 #[derive(Clone, Debug)]

@@ -28,6 +28,8 @@ pub const INJECTION: &str = "injection";
 pub const SENSITIVE_DATA: &str = "sensitive_data";
 pub const UNSAFE_SETTINGS: &str = "unsafe_settings";
 pub const SECURITY: [&str; 3] = [INJECTION, SENSITIVE_DATA, UNSAFE_SETTINGS];
+pub const ACCESS_CONTROL: &str = "access_control";
+pub const WORKFLOWS: &str = "workflows";
 pub const TEST_VALUE: &str = "test_value";
 pub const TEST_REDUNDANCY: &str = "test_redundancy";
 pub const AGENT_CONTEXT: &str = "agent_context";
@@ -134,6 +136,34 @@ pub fn rules() -> Vec<Rule> {
             unit: "one function's source or the file's setup statements; then their statements as sites",
             inspection: "Does the code turn off a security check or choose a weak setting: certificate verification, password hashing, random tokens, CORS or cookies?",
             acceptable_example: "MD5 for cache keys, non-cryptographic random for shuffling, secure defaults",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "security/access-control",
+            group: "security",
+            default_enabled: false,
+            key: ACCESS_CONTROL,
+            version: rule_version(ACCESS_CONTROL),
+            scope: "SQL files: row-level security policies, SECURITY DEFINER functions and grants, in their final state across migrations",
+            unit: "one policy with its table and the functions it calls, one SECURITY DEFINER function, or one grant",
+            inspection: "Does a policy let every user it applies to reach other users' rows, or trust a value users can change? Does a SECURITY DEFINER function leave search_path open or skip checking the caller? Does a grant open writes or private reads to every user?",
+            acceptable_example: "Policies tied to the user, account or membership; role checks; restrictive policies; public data; grants narrowed by row-level security",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "security/workflows",
+            group: "security",
+            default_enabled: false,
+            key: WORKFLOWS,
+            version: rule_version(WORKFLOWS),
+            scope: "GitHub Actions jobs in .github/workflows",
+            unit: "one job with the workflow's triggers and permissions, and the ${{ }} expressions in its run scripts",
+            inspection: "Can a run script execute text that people outside the repository write? Does a job run pull request code while it has secrets or a write token?",
+            acceptable_example: "Untrusted text passed through env variables; pull_request workflows; jobs that run only the base branch's code",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,

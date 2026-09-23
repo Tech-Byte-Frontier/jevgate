@@ -759,6 +759,27 @@ fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
             .contains("special-cases one specific identity")
     );
     assert!(finding.action.contains("data or configuration"));
+    // The locate follow-up offered none clearly, so no value is named.
+    assert!(finding.values.is_empty());
+    options.refresh = true;
+    let chosen = json!({"type":"choice","choice":"v0","confidence":1.0,
+        "probabilities":{"v0":1.0,"v1":0.0,"none":0.0}});
+    let report = run_with(
+        &options,
+        vec![
+            ("special", json!({"type":"noul","noul":0.9})),
+            ("value", chosen),
+        ],
+    );
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.values, ["\"db.internal:5432\""]);
+    assert!(
+        finding
+            .message
+            .ends_with("The value is \"db.internal:5432\"."),
+        "{}",
+        finding.message
+    );
 }
 
 #[test]
@@ -1305,4 +1326,184 @@ fn a_finished_plan_covers_its_section_checks() {
     );
     let dimension = &plan.dimensions[catalog::DOC_STALENESS];
     assert_eq!(dimension.units.covered, 1, "{}", dimension.decision_basis);
+}
+
+fn hardcoded_file(path: &str, strength: &str, values: &[&str]) -> crate::schema::FileResult {
+    let finding = json!({
+        "rule": "maintainability/hardcoded-values", "strength": strength, "line": 3,
+        "message": "`f` special-cases one specific identity (0.90).", "action": "Move it",
+        "symbol": "f", "rule_version": "1", "concern_probability": 0.9,
+        "locations": [{"path": path, "start_line": 3, "end_line": 5, "symbol": "f"}],
+        "values": values, "fingerprint": path, "rank": 1.0
+    });
+    let units = json!({"judged": 1, "review": usize::from(strength == "review"), "consider": usize::from(strength == "consider"), "note": 0, "clear": 0, "uncertain": 0, "needs_context": 0, "too_small": 0, "omitted": 0});
+    serde_json::from_value(json!({
+        "path": path, "role": "source", "contains_tests": false, "source_hash": "", "context_files": [],
+        "syntax_checked": true, "context_complete": true, "context_limitations": [], "context_requests": [],
+        "content_identity": "", "symbols": [], "semantic_size": 1, "input_tokens": 0, "output_tokens": 0,
+        "status": strength, "cached": false, "evaluated_at": null, "model": null, "elapsed_ms": 0,
+        "dimensions": {"hardcoded_values": {"status": strength, "concern_probability": 0.9,
+            "decision_basis": "", "rule_version": "1", "units": units}},
+        "findings": [finding], "error": null
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_literal_repeated_across_files_is_one_finding_and_its_repeats_are_notes() {
+    use crate::schema::{Status, Strength};
+    let mut files = vec![
+        hardcoded_file("a.ts", "consider", &["'acme-corp'", "0"]),
+        hardcoded_file("b.ts", "review", &["'acme-corp'"]),
+        hardcoded_file("c.ts", "consider", &["0"]),
+        hardcoded_file("d.ts", "consider", &["'acme-corp'", "1"]),
+    ];
+    super::grouping::group_repeated_values(&mut files);
+    let primary = &files[1].findings[0];
+    assert_eq!(primary.strength, Strength::Review);
+    assert_eq!(primary.locations.len(), 3);
+    assert!(
+        primary.message.contains("also flagged at a.ts:3, d.ts:3"),
+        "{}",
+        primary.message
+    );
+    for repeat in [&files[0], &files[3]] {
+        assert_eq!(repeat.findings[0].strength, Strength::Note);
+        assert!(
+            repeat.findings[0]
+                .message
+                .contains("Same value 'acme-corp' as b.ts:3")
+        );
+        assert_eq!(repeat.status, Status::Note);
+        assert_eq!(repeat.dimensions["hardcoded_values"].status, Status::Note);
+    }
+    // A short shared value such as `0` never links findings.
+    assert_eq!(files[2].findings[0].strength, Strength::Consider);
+}
+
+const FIRST_MIGRATION: &str = "create table public.notes (id uuid primary key, owner_id uuid not null, body text);\nalter table public.notes enable row level security;\ncreate policy \"read notes\" on public.notes for select using (true);\n";
+const SECOND_MIGRATION: &str = "drop policy \"read notes\" on public.notes;\ncreate policy \"read own notes\" on public.notes for select using (owner_id = auth.uid());\ncreate function public.note_count(uid uuid) returns bigint language sql security definer as $$ select count(*) from public.notes where owner_id = uid $$;\ngrant select on public.notes to authenticated;\n";
+const WORKFLOW_FILE: &str = "on:\n  pull_request_target:\njobs:\n  greet:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo \"${{ github.event.pull_request.title }}\"\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n";
+
+fn configuration_project() -> (Project, CheckArgs) {
+    let project = Project::new();
+    project.write("supabase/migrations/1_init.sql", FIRST_MIGRATION);
+    project.write("supabase/migrations/2_own.sql", SECOND_MIGRATION);
+    project.write(".github/workflows/greet.yml", WORKFLOW_FILE);
+    project.write("lib.rs", &function("unrelated"));
+    let mut options = args();
+    options.rules = vec![catalog::ACCESS_CONTROL.into(), catalog::WORKFLOWS.into()];
+    (project, options)
+}
+
+#[test]
+fn access_units_follow_the_final_state_across_migrations() {
+    let (project, options) = configuration_project();
+    let (inputs, plan) = planned(&project, &options);
+    assert!(
+        inputs
+            .iter()
+            .all(|i| i.result.path.extension().is_some_and(|e| e != "rs")),
+        "no application source is collected for these rules"
+    );
+    let access: Vec<(&str, &str)> = plan
+        .requests
+        .iter()
+        .filter(|p| p.request["jevgate"]["stage"] == "access")
+        .map(|p| {
+            let state = &p.request["state"];
+            let kind = ["policy", "function", "statement"]
+                .into_iter()
+                .find(|k| state.get(k).is_some())
+                .unwrap();
+            (kind, state["file"]["path"].as_str().unwrap())
+        })
+        .collect();
+    assert_eq!(
+        access,
+        [
+            ("policy", "supabase/migrations/2_own.sql"),
+            ("function", "supabase/migrations/2_own.sql"),
+            ("statement", "supabase/migrations/2_own.sql"),
+        ],
+        "the dropped policy is not judged"
+    );
+    let policy = plan
+        .requests
+        .iter()
+        .find(|p| p.request["state"]["policy"].is_object())
+        .unwrap();
+    assert!(
+        policy.request["state"]["table"]["source"]
+            .as_str()
+            .unwrap()
+            .starts_with("create table public.notes"),
+        "the table from the earlier migration is evidence"
+    );
+    let grant = plan
+        .requests
+        .iter()
+        .find(|p| p.request["state"]["statement"].is_object())
+        .unwrap();
+    assert_eq!(grant.request["state"]["table"]["row_level_security"], true);
+    let jobs: Vec<&str> = plan
+        .requests
+        .iter()
+        .filter(|p| p.request["jevgate"]["stage"] == "workflows")
+        .map(|p| p.request["state"]["job"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        jobs,
+        ["greet", "build"],
+        "both jobs run on pull_request_target"
+    );
+    let greet = &plan
+        .requests
+        .iter()
+        .find(|p| p.request["state"]["job"]["name"] == "greet")
+        .unwrap()
+        .request;
+    assert_eq!(
+        greet["state"]["expressions"],
+        json!(["github.event.pull_request.title"])
+    );
+    assert_eq!(greet["questions"].as_object().unwrap().len(), 2);
+}
+
+#[test]
+fn an_unchecked_definer_is_a_review_and_an_open_search_path_a_consider() {
+    let (project, options) = configuration_project();
+    let mut eval = scripted(0);
+    eval.overrides = vec![("search_path", noul_at(0.9)), ("outside", noul_at(0.95))];
+    let report = run(&project, &options, &mut eval);
+    let file = |name: &str| {
+        report
+            .files
+            .iter()
+            .find(|f| f.path.ends_with(name))
+            .unwrap()
+    };
+    let definer = &file("2_own.sql").findings[0];
+    assert_eq!(definer.strength, Strength::Consider);
+    assert_eq!(definer.rule, "security/access-control");
+    assert_eq!(
+        definer.category.as_deref(),
+        Some("CWE-426 untrusted search path")
+    );
+    assert!(
+        definer
+            .message
+            .starts_with("SECURITY DEFINER function `note_count`")
+    );
+    assert_eq!(file("1_init.sql").status, Status::NotApplicable);
+    let job = &file("greet.yml").findings[0];
+    assert_eq!(job.strength, Strength::Review);
+    assert_eq!(job.category.as_deref(), Some("CWE-78 command injection"));
+    assert!(
+        job.message
+            .contains("`${{ github.event.pull_request.title }}`"),
+        "{}",
+        job.message
+    );
+    assert_eq!(job.locations[0].start_line, 4);
 }

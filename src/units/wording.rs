@@ -225,8 +225,83 @@ pub(super) fn question_label(question: &str) -> &str {
         "a_covers" | "b_covers" => "repeats the other section",
         "conflict" => "disagrees with the other section",
         "enforced" => "rule linters check",
+        "others" => "other users' rows",
+        "editable" => "value users can change",
+        "search_path" => "open search_path",
+        "unchecked" => "caller not checked",
+        "broad" => "broad grant",
+        "outside" => "outside text in a run script",
+        "untrusted" => "pull request code with secrets",
         other => other,
     }
+}
+
+/// Each access-control and workflow question: what a finding says the unit
+/// does, the weakness it names, and the next step.
+const PRIVILEGE: [(&str, &str, &str, &str); 7] = [
+    (
+        "others",
+        "lets every user it applies to read or change other users' rows",
+        "CWE-863 incorrect authorization",
+        "Tie the condition to the user's id, account or membership",
+    ),
+    (
+        "editable",
+        "trusts a value users can change, such as `user_metadata`",
+        "CWE-639 authorization through a user-controlled key",
+        "Base access on the user id or on claims only the server sets, such as `app_metadata`",
+    ),
+    (
+        "unchecked",
+        "reads or changes other users' rows without checking the caller",
+        "CWE-862 missing authorization",
+        "Check `auth.uid()` or a role in the function, or make it SECURITY INVOKER",
+    ),
+    (
+        "search_path",
+        "runs with its owner's privileges without a fixed `search_path`",
+        "CWE-426 untrusted search path",
+        "Add `set search_path = ''` and schema-qualify the names it uses",
+    ),
+    (
+        "broad",
+        "gives anon, public or every signed-in user more than reads of public data",
+        "CWE-732 incorrect permission assignment",
+        "Grant only what clients need, and enable row-level security on the table",
+    ),
+    (
+        "outside",
+        "places text that people outside the repository write into a `run` script",
+        "CWE-78 command injection",
+        "Pass the value through an `env` variable and quote it in the script",
+    ),
+    (
+        "untrusted",
+        "runs pull request code while it has secrets or a write token",
+        "CWE-829 untrusted code with privileges",
+        "Run untrusted code on `pull_request`, or keep secrets and write tokens out of the job that checks it out",
+    ),
+];
+
+/// The finding of an access-control or workflow unit: the strongest question
+/// that reached the concern names what it does and its weakness.
+pub(super) fn privilege_wording(
+    subject: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> (Wording, String) {
+    let reached = |q: &str| matches!(answers.get(q).map(|a| noul(a)), Some(Outcome::Review(_)));
+    let (_, what, category, action) = PRIVILEGE
+        .iter()
+        .find(|(q, ..)| reached(q))
+        .copied()
+        .unwrap_or(PRIVILEGE[0]);
+    let message = match strength {
+        Strength::Review => format!("{subject} {what} ({p:.2})."),
+        _ => format!("{subject} likely {what} ({p:.2})."),
+    };
+    ((message, action), category.to_string())
 }
 
 /// One hardcoded-value question and its words.

@@ -34,7 +34,12 @@ signatures, or one candidate pair.
    value "explains itself", it cleared none, even of field names.
    A function or file-organization note whose middle and top levels both
    stay under 0.50 gets the same recheck, and a decisive answer replaces it.
-   Then one locate Choice per split finding picks the body block to extract.
+   Then one locate Choice per split finding picks the body block to extract,
+   and one per hardcoded-value review or consider names the value it is about.
+   Special-case findings in different files that name the same identity
+   become one finding at the strongest site; the others are notes pointing at
+   it. Numbers and paths are not grouped: `1000` meant metres per kilometre in
+   one file and an image height in another.
    Security units whose presence answers are not clear get one trace before the
    rechecks: specific literal checks per kind, a Choice among the unit's sites,
    and the origin of its values (or whether it runs only in development). One
@@ -65,6 +70,20 @@ signatures, or one candidate pair.
    states, and the reverse; do they disagree?) are follow-ups for the other
    documents. A Score on how two sections relate stayed on its middle level
    for almost every pair, so it is not asked.
+   SQL files (`security/access-control`) are split into statements that honor
+   comments, quotes and dollar quotes. Each project's files, grouped above
+   their `supabase` or `migrations` directory, are read in path order, so a
+   dropped or replaced policy or function is not judged. Each policy is sent
+   with its table and the functions it calls; SECURITY DEFINER functions and
+   grants go alone, a grant with whether its table has row-level security.
+   The criteria name role checks, service roles, restrictive policies and
+   trigger functions, which a literal "other users' rows" question flagged.
+   Workflow jobs (`security/workflows`) are split by indentation. The parser
+   lists the `${{ }}` expressions inside `run` scripts, and Jev is asked
+   whether one can hold text outside people write: one question over the
+   whole job scored obvious injections 0.57 to 0.79. Jobs of workflows that
+   run on `pull_request_target` or `workflow_run` are asked whether they run
+   pull request code with secrets.
 5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise
@@ -78,11 +97,16 @@ signatures, or one candidate pair.
    leaning toward a client is a consider. Instruction sections are
    cleanups, so their findings are at most a consider. Undecided answers do not
    lean into notes, because on the labeled set that added notes to kept sections.
-   A large document's undecided history answer does lean into a note. On its
+   A large document's undecided history answer does lean into a note. Policies,
+   grants and an open `search_path` are at most a consider, since a policy
+   may cover data meant for everyone; an unchecked SECURITY DEFINER function
+   and workflow findings can be reviews. On its
    labeled set, no living document leaned past 0.50. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
    Jev does not count reliably and reads "tasks" literally. Copies inside test
-   cases are one level lower. A review always carries a finding.
+   cases are one level lower. A test that checks several unrelated behaviors is at
+   most a note: on labeled tests, tables of inputs and browser journeys rated
+   as high as tests that really mix behaviors. A review always carries a finding.
 6. **Gate.** `--fail-on` and the baseline act on composed findings only.
 
 ## Constraints

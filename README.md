@@ -57,6 +57,8 @@ Consider (2):
 | Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths or outbound URLs without binding, escaping or checks |
 | Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients |
 | Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly` |
+| Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user |
+| Workflows | GitHub Actions `run` scripts that execute text outside people write (`${{ github.event.pull_request.title }}`); `pull_request_target` or `workflow_run` jobs that run pull request code with secrets |
 
 **Documentation** (opt-in with `--rule documentation`)
 
@@ -115,7 +117,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     env:
-      JEVGATE_VERSION: 0.6.0
+      JEVGATE_VERSION: 0.7.0
     steps:
       - uses: actions/checkout@v7
         with:
@@ -226,8 +228,8 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 ## Limits
 
-- **Languages:** Rust, Python, JavaScript and TypeScript. Other files are listed as skipped, with the reason.
-- **Security scope:** one function plus at most one hop of callers. This is not whole-program data-flow analysis, and it does not cover SQL files, row-level policies or access control.
+- **Languages:** Rust, Python, JavaScript and TypeScript. The access-control rule reads SQL files and the workflow rule reads `.github/workflows`. Other files are listed as skipped, with the reason.
+- **Security scope:** one function plus at most one hop of callers. This is not whole-program data-flow analysis. Access control reads the final state of policies, SECURITY DEFINER functions and grants across a project's SQL files in path order; with `--base`, unchanged migrations are read for that state but not judged. It does not judge application-level authorization or dynamic SQL inside database functions.
 - **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates. Code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
 

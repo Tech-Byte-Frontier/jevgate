@@ -132,7 +132,24 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
     let mut pairs = representatives(pairs);
     // Groups rank by size times their number of copies.
     pairs.sort_by(by_rank);
-    capped(pairs)
+    capped(one_per_function_pair(pairs))
+}
+
+/// Two copied windows of the same two functions, split by one differing
+/// statement, are one repetition: keep the higher-ranked pair only.
+fn one_per_function_pair(pairs: Vec<Pair>) -> Vec<Pair> {
+    let mut seen = BTreeSet::new();
+    pairs
+        .into_iter()
+        .filter(|pair| {
+            let (Some(a), Some(b)) = (&pair.a.function, &pair.b.function) else {
+                return true;
+            };
+            let mut key = [(&pair.a.path, a), (&pair.b.path, b)];
+            key.sort();
+            seen.insert(key.map(|(path, name)| (path.clone(), name.clone())))
+        })
+        .collect()
 }
 
 /// Tokens of every file and the statement blocks inside unit bodies.
@@ -700,5 +717,25 @@ mod tests {
         let found = run(&[("totals.py", &python, true)]);
         assert_eq!(found.pairs.len(), 1);
         assert_eq!(found.pairs[0].a.function.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn windows_of_the_same_two_functions_split_by_one_statement_are_one_pair() {
+        let head = "    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument('--owner', default='Tech')\n    parser.add_argument('--project', type=int, default=2)\n    parser.add_argument('--apply', action='store_true')\n";
+        let tail = "    args = parser.parse_args()\n    if args.apply and not args.backup:\n        parser.error('--apply requires --backup')\n    run(args.owner, args.project, args.apply, args.backup)\n";
+        let first = format!(
+            "def main():\n{head}    parser.add_argument('--completed', action='store_true')\n{tail}"
+        );
+        let second = format!("def main():\n{head}{tail}");
+        let found = run(&[("migrate.py", &first, true), ("retire.py", &second, true)]);
+        assert_eq!(
+            found
+                .pairs
+                .iter()
+                .map(|p| (p.a.start_line, p.b.start_line))
+                .collect::<Vec<_>>()
+                .len(),
+            1
+        );
     }
 }

@@ -4,7 +4,10 @@ use super::{
 };
 use crate::{boundary::Boundary, config::ConfigContext, discovery};
 use anyhow::{Context, Result, ensure};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone)]
 pub struct Input {
@@ -54,24 +57,55 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
         .map(|b| crate::revision::Changes::load(&context.root, b))
         .transpose()?;
     let extra = super::context::collect(args, context)?;
-    let classifier = discovery::Classifier::new(&context.config)?;
     let boundary = Boundary::new(&context.config)?;
+    let in_scope = |relative: &Path| {
+        let path = context.root.join(relative);
+        scope.is_empty() || scope.iter().any(|s| path.starts_with(s))
+    };
+    let changed = |relative: &Path| {
+        changes
+            .as_ref()
+            .is_none_or(|c| c.paths.contains_key(relative))
+    };
+    let selected = |relative: &Path| in_scope(relative) && changed(relative);
+    // Only the documentation or configuration rules selected: source files are not collected.
+    let mut inputs: Vec<Input> = if args.code_rules() {
+        source_paths(args, context, &boundary, &selected)?
+            .into_iter()
+            .map(|file| load(file, args, context, &extra))
+            .collect::<Result<_>>()?
+    } else {
+        Vec::new()
+    };
+    if args.documentation() {
+        add_documents(args, context, &boundary, &selected, &mut inputs)?;
+    }
+    for (relative, role) in configuration_files(args, context, &in_scope, &changed)? {
+        if !inputs.iter().any(|i| i.result.path == relative) {
+            inputs.push(bounded(&relative, role, args, context, &boundary)?);
+        }
+    }
+    Ok(inputs)
+}
+
+/// Application source and tests in scope, with their roles.
+fn source_paths(
+    args: &CheckArgs,
+    context: &ConfigContext,
+    boundary: &Boundary,
+    selected: &dyn Fn(&Path) -> bool,
+) -> Result<Vec<(PathBuf, String)>> {
+    let classifier = discovery::Classifier::new(&context.config)?;
     let mut paths = Vec::new();
-    // Only the documentation rules selected: source files are not collected.
-    let code = args.code_rules().then(|| walker(&context.root));
-    for entry in code.into_iter().flatten() {
+    for entry in walker(&context.root) {
         let entry = entry.context("Failed while discovering Jev scope")?;
         let path = entry.path();
-        if !entry.file_type().is_some_and(|t| t.is_file())
-            || !(scope.is_empty() || scope.iter().any(|s| path.starts_with(s)))
-        {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
         let relative = path.strip_prefix(&context.root)?;
         if discovery::source(relative, &args.source_extension)
-            && changes
-                .as_ref()
-                .is_none_or(|c| c.paths.contains_key(relative))
+            && selected(relative)
             && boundary.permits(relative)
             && super::context::ensure_visible_path(relative).is_ok()
         {
@@ -79,30 +113,78 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
         }
     }
     paths.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut inputs: Vec<Input> = paths
-        .into_iter()
-        .map(|file| load(file, args, context, &extra))
-        .collect::<Result<_>>()?;
-    if args.documentation() {
-        let selected = |relative: &std::path::Path| {
-            let path = context.root.join(relative);
-            (scope.is_empty() || scope.iter().any(|s| path.starts_with(s)))
-                && changes
-                    .as_ref()
-                    .is_none_or(|c| c.paths.contains_key(relative))
-        };
-        add_documents(args, context, &boundary, &selected, &mut inputs)?;
-    }
-    Ok(inputs)
+    Ok(paths)
 }
 
-/// Agent instruction files and project docs the selected rules judge;
-/// files outside the upload boundary are listed as skipped.
+/// SQL files for the access-control rule and workflows for the workflow rule.
+/// Unchanged SQL is kept as context: earlier migrations decide the final
+/// state of changed ones.
+fn configuration_files(
+    args: &CheckArgs,
+    context: &ConfigContext,
+    in_scope: &dyn Fn(&Path) -> bool,
+    changed: &dyn Fn(&Path) -> bool,
+) -> Result<Vec<(PathBuf, &'static str)>> {
+    let mut files = Vec::new();
+    if args.enabled(crate::catalog::ACCESS_CONTROL) {
+        for entry in walker(&context.root).flatten() {
+            let relative = entry.path().strip_prefix(&context.root)?;
+            if entry.file_type().is_some_and(|t| t.is_file())
+                && relative.extension().is_some_and(|e| e == "sql")
+                && in_scope(relative)
+            {
+                let role = if changed(relative) { SQL } else { SQL_CONTEXT };
+                files.push((relative.to_path_buf(), role));
+            }
+        }
+    }
+    if args.enabled(crate::catalog::WORKFLOWS) {
+        // `.github` is hidden, so the walker does not reach it.
+        let directory = context.root.join(".github/workflows");
+        for entry in std::fs::read_dir(&directory)
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let path = entry.path();
+            let relative = path.strip_prefix(&context.root)?;
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "yml" || e == "yaml")
+                && in_scope(relative)
+                && changed(relative)
+            {
+                files.push((relative.to_path_buf(), WORKFLOW));
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// A file read whole, or listed as skipped when the upload patterns exclude
+/// it, so an allow list that leaves it out is visible.
+fn bounded(
+    relative: &Path,
+    role: &str,
+    args: &CheckArgs,
+    context: &ConfigContext,
+    boundary: &Boundary,
+) -> Result<Input> {
+    if boundary.permits(relative) {
+        return load_document(relative, role, args, &context.root.join(relative));
+    }
+    let mut result = pending_result(relative, role, args, &[]);
+    result.status = Status::Skipped;
+    result.error = Some("Outside upload_allow/upload_deny; not judged.".into());
+    Ok(bare_input(result))
+}
+
+/// Agent instruction files and project docs the selected rules judge.
 fn add_documents(
     args: &CheckArgs,
     context: &ConfigContext,
     boundary: &Boundary,
-    selected: &dyn Fn(&std::path::Path) -> bool,
+    selected: &dyn Fn(&Path) -> bool,
     inputs: &mut Vec<Input>,
 ) -> Result<()> {
     let repository = std::sync::Arc::new(crate::docs::scan(&context.root)?);
@@ -120,20 +202,12 @@ fn add_documents(
         let wanted = selected(relative)
             && (role == DOCS || repository.judged(relative))
             && !inputs.iter().any(|i| i.result.path == *relative);
-        if !wanted {
-            continue;
-        }
-        if boundary.permits(relative) {
-            let mut input = load_document(relative, role, args, &context.root.join(relative))?;
-            input.repository = Some(repository.clone());
+        if wanted {
+            let mut input = bounded(relative, role, args, context, boundary)?;
+            if input.result.status != Status::Skipped {
+                input.repository = Some(repository.clone());
+            }
             inputs.push(input);
-        } else {
-            // Named, so an allow list that leaves them out is visible.
-            let mut result = pending_result(relative, role, args, &[]);
-            result.status = Status::Skipped;
-            result.error =
-                Some("Documentation outside upload_allow/upload_deny; not judged.".into());
-            inputs.push(bare_input(result));
         }
     }
     Ok(())
@@ -172,6 +246,12 @@ fn cross_document(args: &CheckArgs) -> bool {
 
 /// The role of an agent instruction file.
 pub const INSTRUCTIONS: &str = "instructions";
+/// SQL judged by the access-control rule.
+pub const SQL: &str = "sql";
+/// Unchanged SQL read only for the final state of changed migrations.
+pub const SQL_CONTEXT: &str = "sql-context";
+/// A GitHub Actions workflow.
+pub const WORKFLOW: &str = "workflow";
 /// The role of project documentation such as a README or a docs page.
 pub const DOCS: &str = "docs";
 
