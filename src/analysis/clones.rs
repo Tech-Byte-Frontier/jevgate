@@ -90,11 +90,16 @@ struct Token<'a> {
     start: usize,
 }
 
+/// Placeholders for renamed identifiers and literals. The control character
+/// keeps them apart from any real token text.
+const IDENTIFIER_TOKEN: &str = "\u{1}id";
+const LITERAL_TOKEN: &str = "\u{1}lit";
+
 impl Token<'_> {
     fn normal(&self) -> &str {
         match self.kind {
-            TokenKind::Identifier => "\u{1}id",
-            TokenKind::Literal => "\u{1}lit",
+            TokenKind::Identifier => IDENTIFIER_TOKEN,
+            TokenKind::Literal => LITERAL_TOKEN,
             TokenKind::Other => self.text,
         }
     }

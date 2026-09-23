@@ -1,10 +1,11 @@
 # JevGate
 
-Code review with TypeSafe Jev over small evidence units. Five rules:
+Code review with TypeSafe Jev over small evidence units. Six rules:
 
 - **File organization:** would moving some members into a separate module make the file easier to understand?
 - **Function simplification:** would splitting a function into named functions make it easier to understand, or, for deeply nested code, would flattening it help?
 - **Shared logic:** do renamed or exact copies perform the same steps for the same purpose?
+- **Hardcoded values:** does a value fixed in code need to change in another environment, need a descriptive name, or special-case one user, account or record?
 - **Test value** (`--include-tests`): does a test only check its mocks, recompute its expected value, assert internal details or mix unrelated behaviors?
 - **Test redundancy** (`--include-tests`): do similar tests of one function check the same behavior?
 
@@ -39,7 +40,10 @@ Generated files (`@generated`, "DO NOT EDIT" headers) are skipped.
 
 Each request asks short questions about one unit: a pack of up to eight
 functions, one file outline (signatures, callers and groups, no bodies), one clone
-group's representative pair, one test, or one pair of tests. Flattening is asked
+group's representative pair, one test, or one pair of tests. Hardcoded values are
+asked per function with the literal values it uses (0, 1, 2, one-character strings,
+documentation and attributes are skipped) and per file for its module-level
+constants; they get no recheck, because per-value rechecks added false findings. Flattening is asked
 only for control flow nested four deep or four-branch chains. A unit that stays
 uncertain gets one recheck with more evidence (callee signatures, the enclosing
 functions, or the file's source for an outline).

@@ -9,8 +9,10 @@ pub(crate) const LEADING_PROBABILITY: f64 = 0.50;
 /// Aggregating and normalizing binary floats can move an exact decimal boundary
 /// by a few machine rounding units. This is only an arithmetic allowance, not a
 /// confidence margin; raw probabilities and the configured thresholds stay intact.
+const ROUNDING_UNITS: f64 = 8.0;
+
 pub(crate) fn probability_at_least(value: f64, threshold: f64) -> bool {
     value.is_finite()
         && threshold.is_finite()
-        && (value >= threshold || threshold - value <= 8.0 * f64::EPSILON)
+        && (value >= threshold || threshold - value <= ROUNDING_UNITS * f64::EPSILON)
 }
