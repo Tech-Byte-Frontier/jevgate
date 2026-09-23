@@ -50,6 +50,17 @@ signatures, or one candidate pair.
    located with one Choice among its top-level parts. Per-section questions on
    project docs were dropped: on a labeled sample they found almost nothing,
    and they cost about five times more than an outline.
+   Staleness and duplication candidates come from code. Staleness candidates
+   are paths and scripts a section names that the repository lacks, with what
+   Git shows about each. Duplication candidates are section pairs where 30%
+   of the smaller section's three-word sequences recur in the other, at most
+   three per pair of documents. A document whose release is tagged, or whose
+   named paths were deleted, is asked from its headings whether it is a plan;
+   a plan with those facts is one finding, and its own candidates are not
+   asked. The section check and the pair Nouls (does A state everything B
+   states, and the reverse; do they disagree?) are follow-ups for the other
+   documents. A Score on how two sections relate stayed on its middle level
+   for almost every pair, so it is not asked.
 5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise

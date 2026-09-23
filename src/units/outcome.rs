@@ -140,12 +140,33 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
         catalog::LARGE_DOCS => document_outcome(&get),
+        catalog::DOC_STALENESS => {
+            let question = if matches!(unit.detail, Detail::Plan { .. }) {
+                "plan"
+            } else {
+                "relies"
+            };
+            get(question).map(|a| cleanup(noul(a)))
+        }
+        catalog::DOC_DUPLICATION => ["a_covers", "b_covers", "conflict"]
+            .iter()
+            .map(|q| get(q).map(|a| cleanup(noul(a))))
+            .collect::<Option<Vec<_>>>()
+            .map(|signals| strongest(&signals)),
         catalog::AGENT_CONTEXT => {
             section_signals(&get).map(|s| strongest(&s.iter().map(|(_, o)| *o).collect::<Vec<_>>()))
         }
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
+}
+
+/// Documentation findings are cleanups, never defects: at most a consider.
+pub(super) fn cleanup(outcome: Outcome) -> Outcome {
+    match outcome {
+        Outcome::Review(p) => Outcome::Consider(p),
+        other => other,
+    }
 }
 
 /// A large document: a split Score where the middle level says it is fine

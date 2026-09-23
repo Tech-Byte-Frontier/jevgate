@@ -88,12 +88,12 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
         let instructions = repository
             .readers
             .keys()
-            .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT))
+            .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT) || cross_document(args))
             .map(|p| (p, INSTRUCTIONS));
         let docs = repository
             .docs
             .iter()
-            .filter(|_| args.enabled(crate::catalog::LARGE_DOCS))
+            .filter(|_| args.enabled(crate::catalog::LARGE_DOCS) || cross_document(args))
             .map(|p| (p, DOCS));
         for (relative, role) in instructions.chain(docs) {
             let path = context.root.join(relative);
@@ -144,6 +144,11 @@ fn load_document(
         }
         Err(error) => error_input(result, error),
     })
+}
+
+/// Whether a rule that compares or checks every kind of document is selected.
+fn cross_document(args: &CheckArgs) -> bool {
+    args.enabled(crate::catalog::DOC_STALENESS) || args.enabled(crate::catalog::DOC_DUPLICATION)
 }
 
 /// The role of an agent instruction file.

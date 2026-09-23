@@ -184,6 +184,7 @@ impl Session<'_> {
         // settle uncertain units; locate follow-ups then point split findings
         // at a block. Each depends on the answers before it.
         for follow_up in [
+            crate::units::doc_checks,
             crate::units::traces,
             crate::units::rechecks,
             crate::units::locates,

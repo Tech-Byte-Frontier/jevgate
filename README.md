@@ -49,6 +49,8 @@ Consider (2):
 |---|---|
 | Agent context | A section of `CLAUDE.md` only lists the scripts `package.json` already shows, and six harnesses load it at the start of every session. |
 | Large docs | `docs/operations/runbook.md` holds several unrelated subjects; `docs/plans/v0.2-plan.md` mainly records finished work. |
+| Staleness | `docs/plans/v0.4-auth.md` is a plan whose work is finished: the repository has a release tag v0.4.0, and 6 paths it names were since removed. |
+| Duplication | Section `Release Workflow` of `CLAUDE.md` states everything section `Release` of `README.md` states. |
 
 It reads the instruction files that coding agents load: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and Claude, Cursor, Copilot, Windsurf and Cline rules. These files are read even when hidden or gitignored. Each heading section, or each paragraph and list item of a long section, is asked four things:
 
@@ -57,7 +59,7 @@ It reads the instruction files that coding agents load: `AGENTS.md`, `CLAUDE.md`
 - is it generic advice, a record of past work, or a style rule a configured linter already checks?
 - is it text loaded in every session that applies to one directory?
 
-Project Markdown of 300 or more lines is judged from its headings alone, never its full text. This covers root files, README and CONTRIBUTING files, and `docs/` and `doc/` even when gitignored. The questions are whether splitting it would help and whether it mainly records past work. Findings are at most `consider`. The run also estimates the tokens each harness loads at session start and lists loading facts, such as identical copies, imports that do not resolve, or an `AGENTS.md` that Claude Code skips. These facts are evidence and never fail the gate.
+Project Markdown of 300 or more lines is judged from its headings alone, never its full text. This covers root files, README and CONTRIBUTING files, and `docs/` and `doc/` even when gitignored. The questions are whether splitting it would help and whether it mainly records past work. Staleness and duplication work as a cascade. Code finds the candidates: documents that name paths or scripts the repository lacks, and sections of different documents that share much of their wording. A document whose release Git has tagged, or whose named paths Git shows deleted, is first asked from its headings whether it is a plan. A plan with such facts gets one finding, and the section and pair checks run only for the other documents. Findings are at most `consider`. The run also estimates the tokens each harness loads at session start and lists loading facts, such as identical copies, imports that do not resolve, or an `AGENTS.md` that Claude Code skips. These facts are evidence and never fail the gate.
 
 `jevgate rules` prints every rule with its question and default.
 
@@ -135,7 +137,7 @@ In CI, inject `TYPESAFE_API_KEY`, and restore and save `.jevgate/cache` (plus `.
 
 - **Languages:** Rust, Python, JavaScript and TypeScript are supported. Other files are listed as skipped, with the reason.
 - **Security scope:** security rules look at one function plus at most one hop of callers. They are not whole-program data-flow analysis, and they don't cover SQL files, row-level policies or access control.
-- **Documentation scope:** agent instruction files are judged one section at a time, and large project docs by their outline. Duplication across files, staleness against the code, and code comments are not judged yet. Token counts are estimates at four bytes per token.
+- **Documentation scope:** staleness works only from paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Duplication pairs are chosen by shared wording, so paraphrases that share little wording are missed. Code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
 
 ## Contributing

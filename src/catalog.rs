@@ -32,7 +32,9 @@ pub const TEST_VALUE: &str = "test_value";
 pub const TEST_REDUNDANCY: &str = "test_redundancy";
 pub const AGENT_CONTEXT: &str = "agent_context";
 pub const LARGE_DOCS: &str = "large_docs";
-pub const DOCUMENTATION: [&str; 2] = [AGENT_CONTEXT, LARGE_DOCS];
+pub const DOC_STALENESS: &str = "doc_staleness";
+pub const DOC_DUPLICATION: &str = "doc_duplication";
+pub const DOCUMENTATION: [&str; 4] = [AGENT_CONTEXT, LARGE_DOCS, DOC_STALENESS, DOC_DUPLICATION];
 
 const DATASET: &str = "focused development set; not calibrated";
 
@@ -188,6 +190,34 @@ pub fn rules() -> Vec<Rule> {
             unit: "one document's headings in order, without its text",
             inspection: "Would splitting the document make it easier to find and maintain, or does it mainly record past work?",
             acceptable_example: "One long guide, reference or concept, and living procedures",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "documentation/staleness",
+            group: "documentation",
+            default_enabled: false,
+            key: DOC_STALENESS,
+            version: rule_version(DOC_STALENESS),
+            scope: "agent instruction files and project docs that name paths or scripts the repository lacks, or a released version",
+            unit: "a document's headings when Git shows its release tagged or its paths deleted; then each section naming missing paths or scripts, with what Git shows about them",
+            inspection: "Is the document a plan whose work is finished, or does a section tell the reader to use a path or script that no longer exists?",
+            acceptable_example: "Outputs a command writes, local or ignored files, examples, and paths named as removed",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "documentation/duplication",
+            group: "documentation",
+            default_enabled: false,
+            key: DOC_DUPLICATION,
+            version: rule_version(DOC_DUPLICATION),
+            scope: "sections of different agent instruction files and project docs that share much of their wording",
+            unit: "one candidate pair of sections",
+            inspection: "Does one section state everything the other states, or do the two give different values or instructions for the same thing?",
+            acceptable_example: "Sections on the same subject where each adds something",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,

@@ -7,8 +7,9 @@ use super::{
         unit_outcome, value_signals,
     },
     wording::{
-        document_wording, function_wording, outline_wording, pair_wording, question_label,
-        section_wording, security_wording, test_pair_wording, test_wording, values_wording,
+        doc_pair_wording, document_wording, function_wording, outline_wording, pair_wording,
+        plan_wording, question_label, section_wording, security_wording, stale_wording,
+        test_pair_wording, test_wording, values_wording,
     },
 };
 use crate::{
@@ -59,6 +60,12 @@ fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'
 fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers<'a>) {
     if security(unit.rule) {
         let merged = security_answers(unit, judgments);
+        return (unit_outcome(unit, &merged), merged);
+    }
+    if [catalog::DOC_STALENESS, catalog::DOC_DUPLICATION].contains(&unit.rule) {
+        // Section and pair checks are follow-ups beside a document's question.
+        let mut merged = answers(judgments, &unit.id, Pass::First);
+        merged.extend(answers(judgments, &unit.id, Pass::Trace));
         return (unit_outcome(unit, &merged), merged);
     }
     if unit.rule == catalog::HARDCODED_VALUES {
@@ -145,6 +152,26 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
         .collect()
 }
 
+/// Documents whose plan question found a plan whose work Git shows finished.
+pub fn finished_plans(
+    plan: &super::Plan,
+    files: &[crate::schema::FileResult],
+) -> BTreeSet<std::path::PathBuf> {
+    plan.files
+        .iter()
+        .filter(|(owner, file_plan)| {
+            file_plan.units.iter().any(|u| {
+                matches!(u.detail, Detail::Plan { .. })
+                    && matches!(
+                        resolved(u, &files[**owner].judgments).0,
+                        Outcome::Consider(_) | Outcome::Review(_)
+                    )
+            })
+        })
+        .map(|(_, file_plan)| file_plan.path.clone())
+        .collect()
+}
+
 /// Security units whose presence is not clear, to trace.
 pub fn untraced_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
@@ -186,8 +213,15 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
                 count.needs_context += 1;
                 continue;
             }
-            Presence::Judged => count.judged += 1,
+            Presence::Judged => {}
         }
+        // A check left unasked because its document is a finished plan.
+        let cascaded = matches!(unit.detail, Detail::Stale { .. } | Detail::DocPair { .. });
+        if cascaded && answers(judgments, &unit.id, Pass::Trace).is_empty() {
+            count.covered += 1;
+            continue;
+        }
+        count.judged += 1;
         let (outcome, answers) = resolved(unit, judgments);
         let top = concern.entry(unit.rule).or_default();
         *top = top.max(outcome.concern());
@@ -282,6 +316,8 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
         ],
         catalog::UNSAFE_SETTINGS => &["weakened", "tls", "hash", "random", "cors", "cookie"],
         catalog::LARGE_DOCS => &["split", "history"],
+        catalog::DOC_STALENESS => &["plan", "relies"],
+        catalog::DOC_DUPLICATION => &["a_covers", "b_covers", "conflict"],
         catalog::AGENT_CONTEXT => &[
             "inferable",
             "describes",
@@ -411,6 +447,8 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::UNSAFE_SETTINGS => "security unit",
         catalog::AGENT_CONTEXT => "section",
         catalog::LARGE_DOCS => "document",
+        catalog::DOC_STALENESS => "document check",
+        catalog::DOC_DUPLICATION => "section pair",
         _ => "test pair",
     };
     let plural = |n: usize| if n == 1 { "" } else { "s" };
@@ -453,6 +491,13 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
             "{} {noun}{} too small to judge.",
             count.too_small,
             plural(count.too_small)
+        ));
+    }
+    if count.covered > 0 {
+        parts.push(format!(
+            "{} check{} inside finished plans not asked.",
+            count.covered,
+            plural(count.covered)
         ));
     }
     if count.omitted > 0 {
@@ -532,6 +577,18 @@ fn finding(
             wording
         }
         Detail::Section { .. } => section_wording(name, &unit.detail, strength, p, answers),
+        Detail::Plan { facts } => {
+            symbol = None;
+            plan_wording(name, facts, p)
+        }
+        Detail::Stale { missing, .. } => stale_wording(name, missing, p),
+        Detail::DocPair { other, .. } => {
+            let (wording, conflict) = doc_pair_wording(name, other, answers, p);
+            if conflict {
+                category = Some("conflict".into());
+            }
+            wording
+        }
         Detail::Document { parts, .. } => {
             symbol = None;
             block = located_block(unit, parts, judgments, "part");

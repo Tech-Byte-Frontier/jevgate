@@ -15,6 +15,40 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     })
 }
 
+/// The section and pair checks of documents that are not finished plans.
+pub fn doc_checks(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
+    let finished = compose::finished_plans(plan, files);
+    let mut planned = Vec::new();
+    for (&owner, file_plan) in &plan.files {
+        let file = &files[owner];
+        if file.status == Status::Error || finished.contains(&file_plan.path) {
+            continue;
+        }
+        for unit in &file_plan.units {
+            let (check, other) = match &unit.detail {
+                Detail::Stale { check, .. } => (check, None),
+                Detail::DocPair { check, other } => (check, Some(&other.path)),
+                _ => continue,
+            };
+            let asked = file
+                .judgments
+                .iter()
+                .any(|j| j.unit == unit.id && j.pass == crate::schema::Pass::Trace);
+            if let Some((request, questions)) = check
+                && !asked
+                && other.is_none_or(|p| !finished.contains(p))
+            {
+                planned.push(Planned {
+                    owner,
+                    request: request.clone(),
+                    asked: questions.clone(),
+                });
+            }
+        }
+    }
+    planned
+}
+
 /// One trace per security unit whose presence answers call for it.
 pub fn traces(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::untraced_units, |unit| {

@@ -4,7 +4,9 @@
 pub mod discover;
 pub mod load;
 pub mod markdown;
+pub mod overlap;
 pub mod project;
+pub mod references;
 
 use anyhow::Result;
 use std::{
@@ -26,6 +28,11 @@ pub struct Repository {
     /// Project documentation judged by the documentation rules: README,
     /// docs and other Markdown, without generated files.
     pub docs: BTreeSet<PathBuf>,
+    pub root: PathBuf,
+    /// Tracked, tagged and removed paths, for staleness candidates.
+    pub history: crate::revision::History,
+    /// Scripts and targets every tracked manifest declares.
+    pub scripts: BTreeSet<String>,
 }
 
 impl Repository {
@@ -49,6 +56,7 @@ pub fn scan(root: &Path) -> Result<Repository> {
         .filter(|(_, source)| generated(source))
         .map(|(p, _)| p.clone())
         .collect();
+    let history = crate::revision::history(root);
     let files = load::files(sources, &found.links);
     let load = load::context_load(&files, &found.links, root);
     let links: BTreeSet<&PathBuf> = found.links.iter().map(|(p, _)| p).collect();
@@ -73,6 +81,9 @@ pub fn scan(root: &Path) -> Result<Repository> {
         generated: generated_files,
         load,
         docs,
+        scripts: project::scripts(root, &history),
+        history,
+        root: root.to_path_buf(),
     })
 }
 

@@ -66,6 +66,12 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
     });
 }
 
+/// A document's outline for another rule's question.
+pub(super) fn outline_of(source: &str) -> Vec<Value> {
+    let headings = markdown::headings(source);
+    outline(&shallow(&headings), false)
+}
+
 /// The headings shown: every level while the outline stays short enough,
 /// else only the shallowest levels.
 fn shallow(headings: &[Heading]) -> Vec<&Heading> {
