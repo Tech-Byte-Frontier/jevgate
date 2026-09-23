@@ -1,13 +1,13 @@
 [package]
 name = "jevgate"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.90"
-description = "Code-quality review over small evidence units with TypeSafe Jev: file organization, function simplification, shared logic, hardcoded values and test value"
+description = "Code-review gate over small evidence units with TypeSafe Jev: maintainability, test value and opt-in security findings with locations and probabilities"
 repository = "https://github.com/Tech-Byte-Frontier/jevgate"
 homepage = "https://github.com/Tech-Byte-Frontier/jevgate"
 readme = "README.md"
-keywords = ["cli", "code-review", "maintainability", "refactoring"]
+keywords = ["cli", "code-review", "maintainability", "security", "refactoring"]
 categories = ["command-line-utilities", "development-tools"]
 include = ["/src/**", "/tests/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-*", "/NOTICE"]
 license = "MIT OR Apache-2.0"
