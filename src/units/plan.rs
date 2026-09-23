@@ -128,6 +128,8 @@ struct Shared<'a> {
     imports: BTreeMap<usize, Imports>,
     /// Callable short names to their signatures, for test subjects.
     subjects: BTreeMap<String, String>,
+    /// Test cases of each selected file with a test view, inside its test lines.
+    cases: BTreeMap<PathBuf, Vec<TestCase>>,
     hashes: BTreeMap<PathBuf, String>,
 }
 
@@ -138,6 +140,7 @@ impl<'a> Shared<'a> {
             pairs: clones::Candidates::default(),
             imports: imports(scope),
             subjects: BTreeMap::new(),
+            cases: test_cases(scope),
             hashes: BTreeMap::new(),
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
@@ -194,15 +197,7 @@ fn plan_file(
         ..Default::default()
     };
     let lines = scope.test_lines(owner);
-    let cases: Vec<TestCase> = if view.tests {
-        test_map::cases(context.path, context.source)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|c| lines.iter().any(|l| l.contains(&c.line)))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let cases = shared.cases.get(context.path).cloned().unwrap_or_default();
     if shared.enabled(catalog::FUNCTION_SIMPLIFICATION) {
         plan_functions(
             scope, &context, view, &lines, &cases, budget, &mut file, requests,
@@ -228,7 +223,7 @@ fn plan_file(
         duplicates::plan(
             &context,
             pairs,
-            &cases,
+            &shared.cases,
             &lines,
             &shared.hashes,
             budget,
@@ -321,6 +316,25 @@ fn duplicate_candidates(scope: &Scope<'_>) -> clones::Candidates {
             excluded: Vec::new(),
         });
     clones::find(&selected.chain(context).collect::<Vec<_>>())
+}
+
+/// Test cases of every selected file judged with its test view.
+fn test_cases(scope: &Scope<'_>) -> BTreeMap<PathBuf, Vec<TestCase>> {
+    scope
+        .owners
+        .iter()
+        .filter(|owner| scope.views[owner].tests)
+        .map(|&owner| {
+            let input = &scope.inputs[owner];
+            let lines = scope.test_lines(owner);
+            let cases = test_map::cases(&input.result.path, input.source.as_deref().unwrap_or(""))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|c| lines.iter().any(|l| l.contains(&c.line)))
+                .collect();
+            (input.result.path.clone(), cases)
+        })
+        .collect()
 }
 
 /// Import lines of every selected file, for caller lookups.

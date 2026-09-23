@@ -44,7 +44,12 @@ pub fn exit_code(report: &Report) -> u8 {
 }
 
 pub fn evaluate(report: &mut Report, fail_on: &[FailOn]) {
-    let findings = report.files.iter().flat_map(|f| &f.findings);
+    // Notes are optional improvements; no gate counts them.
+    let findings = report
+        .files
+        .iter()
+        .flat_map(|f| &f.findings)
+        .filter(|f| f.strength != Strength::Note);
     let baselined = findings.clone().filter(|f| f.baselined).count();
     let new: Vec<_> = findings.filter(|f| !f.baselined).collect();
     let reasons = failures(report, &new, fail_on);

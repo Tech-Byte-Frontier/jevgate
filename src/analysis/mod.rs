@@ -1,6 +1,7 @@
 //! Free local analysis over the selected scope: units, member groups, Type-2
 //! clone candidates and a test map. Parsers supply evidence and locations;
 //! every judgment about meaning is left to Jev.
+pub mod blocks;
 pub mod clones;
 pub mod groups;
 pub mod imports;

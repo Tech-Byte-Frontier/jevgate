@@ -93,7 +93,8 @@ fn emit_header(out: &mut impl Write, report: &Report) -> Result<()> {
     Ok(())
 }
 
-/// Every review, then the top-ranked considers (all with `verbose`).
+/// Every review, then the top-ranked considers (all with `verbose`). Notes
+/// are listed only with `verbose`; otherwise just counted.
 fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
     let mut findings: Vec<(&Path, &Finding)> = report
         .files
@@ -105,30 +106,53 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result
         })
         .collect();
     findings.sort_by(|a, b| b.1.rank.total_cmp(&a.1.rank));
-    let (review, consider): (Vec<_>, Vec<_>) = findings
-        .iter()
-        .partition(|(_, f)| f.strength == Strength::Review);
+    let of = |strength: Strength| -> Vec<(&Path, &Finding)> {
+        findings
+            .iter()
+            .filter(|(_, f)| f.strength == strength)
+            .copied()
+            .collect()
+    };
+    let (review, consider, notes) = (
+        of(Strength::Review),
+        of(Strength::Consider),
+        of(Strength::Note),
+    );
     if !review.is_empty() {
         writeln!(out, "\nReview ({}):", review.len())?;
         for (path, finding) in &review {
             emit_finding(out, path, finding)?;
         }
     }
-    if consider.is_empty() {
+    if !consider.is_empty() {
+        let shown = if verbose {
+            consider.len()
+        } else {
+            TOP_CONSIDER
+        };
+        let more = if consider.len() > shown {
+            format!(", top {shown}; --verbose shows all")
+        } else {
+            String::new()
+        };
+        writeln!(out, "\nConsider ({}{more}):", consider.len())?;
+        for (path, finding) in consider.iter().take(shown) {
+            emit_finding(out, path, finding)?;
+        }
+    }
+    if notes.is_empty() {
         return Ok(());
     }
-    let shown = if verbose {
-        consider.len()
-    } else {
-        TOP_CONSIDER
-    };
-    let more = if consider.len() > shown {
-        format!(", top {shown}; --verbose shows all")
-    } else {
-        String::new()
-    };
-    writeln!(out, "\nConsider ({}{more}):", consider.len())?;
-    for (path, finding) in consider.iter().take(shown) {
+    if !verbose {
+        writeln!(
+            out,
+            "\n{} optional note(s) on code that reads well as it is; --verbose shows them.",
+            notes.len()
+        )?;
+        return Ok(());
+    }
+    writeln!(out, "\nNotes ({}, optional):", notes.len())?;
+    for (path, finding) in &notes {
         emit_finding(out, path, finding)?;
     }
     Ok(())

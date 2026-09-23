@@ -108,7 +108,8 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
 }
 
 /// Planned first-pass requests, without credentials, network or state.
-/// Requests that depend on answers (after file purpose, rechecks) are not known yet.
+/// Requests that depend on answers (after file purpose, rechecks, locating
+/// blocks) are not known yet.
 fn preview(inputs: &[Input], args: &CheckArgs, budget: &TokenBudget, report: &mut Report) {
     let mut planned = Vec::new();
     let mut views = BTreeMap::new();
@@ -165,14 +166,18 @@ impl Session<'_> {
         self.dispatch(report, first, |file, asked, body| {
             crate::units::record(file, &asked, body)
         })?;
-        let rechecks: Vec<_> = crate::units::rechecks(&plan, &report.files)
-            .iter()
-            .map(Task::unit)
-            .collect();
-        if !rechecks.is_empty() {
-            self.dispatch(report, rechecks, |file, asked, body| {
-                crate::units::record(file, &asked, body)
-            })?;
+        // Rechecks settle uncertain units; locate follow-ups then point split
+        // findings at a block. Each depends on the answers before it.
+        for follow_up in [crate::units::rechecks, crate::units::locates] {
+            let tasks: Vec<_> = follow_up(&plan, &report.files)
+                .iter()
+                .map(Task::unit)
+                .collect();
+            if !tasks.is_empty() {
+                self.dispatch(report, tasks, |file, asked, body| {
+                    crate::units::record(file, &asked, body)
+                })?;
+            }
         }
         compose_files(&plan, report);
         if self.observed.1 > 0 {

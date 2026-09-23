@@ -776,12 +776,16 @@ mod tests {
     }
 
     #[test]
-    fn provider_errors_explain_known_limits_without_echoing_private_text() {
+    fn a_context_limit_error_is_named_without_echoing_private_text() {
         let body = json!({"detail":{"error_type":"max_tokens_exceeded","message":"private source and credentials"}});
         assert_eq!(
             provider_error(400, Some(&body.to_string()), None).to_string(),
             "TypeSafe HTTP 400 (model context limit exceeded); request was not retried"
         );
+    }
+
+    #[test]
+    fn unknown_error_details_are_not_echoed() {
         for body in [
             json!({"detail":"private source"}),
             json!({"detail":{"error_type":"private credentials"}}),
@@ -791,18 +795,31 @@ mod tests {
                 "TypeSafe HTTP 400; request was not retried"
             );
         }
+        assert_eq!(
+            provider_error(503, None, None).to_string(),
+            "TypeSafe HTTP 503"
+        );
+    }
+
+    const EDGE_PAGE: &str =
+        "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head></html>";
+
+    #[test]
+    fn edge_firewall_blocks_are_told_apart_from_account_rejections() {
         let edge = provider_error(403, Some("error code: 1010\n"), None);
         assert!(edge.edge_block);
         assert_eq!(
             edge.to_string(),
             "TypeSafe HTTP 403 (blocked by the provider's edge protection); request was not retried"
         );
+        assert!(provider_error(403, Some(EDGE_PAGE), None).edge_block);
         assert!(!provider_error(403, Some("{\"detail\":\"forbidden\"}"), None).edge_block);
-        let page = "<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head></html>";
-        assert!(provider_error(403, Some(page), None).edge_block);
-        // Isolated firewall blocks fail alone; consecutive blocks stop further uploads.
+    }
+
+    #[test]
+    fn isolated_edge_blocks_fail_alone_and_consecutive_blocks_stop_uploads() {
         let access = ProviderAccess::default();
-        let blocked: Result<Value> = Err(provider_error(403, Some(page), None).into());
+        let blocked: Result<Value> = Err(provider_error(403, Some(EDGE_PAGE), None).into());
         access.observe(&blocked);
         access.observe(&blocked);
         access.observe(&Ok(json!({})));
@@ -816,10 +833,6 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("edge protection")
-        );
-        assert_eq!(
-            provider_error(503, None, None).to_string(),
-            "TypeSafe HTTP 503"
         );
     }
 }

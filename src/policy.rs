@@ -2,6 +2,9 @@
 
 pub(crate) const REVIEW_PROBABILITY: f64 = 0.80;
 pub(crate) const LOCATION_PROBABILITY: f64 = 0.65;
+/// On a benefit Score whose middle level says the code is fine as it is, a
+/// consider needs the top level to lead; mass on the middle alone is a note.
+pub(crate) const LEADING_PROBABILITY: f64 = 0.50;
 
 /// Aggregating and normalizing binary floats can move an exact decimal boundary
 /// by a few machine rounding units. This is only an arithmetic allowance, not a

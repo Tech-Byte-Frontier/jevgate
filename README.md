@@ -45,20 +45,29 @@ uncertain gets one recheck with more evidence (callee signatures, the enclosing
 functions, or the file's source for an outline).
 Code composes the answers at a 0.80 threshold into `review` (top level),
 `consider` (middle-or-top mass), `clear` (top level ruled out) or `uncertain`,
-and ranks findings by probability × ln(1 + lines). Every `review` carries a
-finding. Raw answers are kept under `files[].judgments`.
+and ranks findings by probability × ln(1 + lines). Where the middle level says
+the code reads well as it is (splitting, flattening, moving members), a
+`consider` also needs the top level at 0.50 or more; middle mass alone is an
+optional `note`. A split function finding gets one follow-up Choice among the
+body's top-level blocks, and the chosen block becomes its first location.
+Every `review` carries a finding. Raw answers are kept under `files[].judgments`.
 
 Test files are judged only with `--include-tests`. A file that mixes code and
 tests keeps them apart: application rules judge the code, test rules the tests.
 A test path with structural tests (including Python `unittest` classes and pytest
 functions) is a test file; one without any gets one file-purpose question first.
-Copies inside one test raise at most `consider`: a table of cases is a style choice.
+Copies whose every site is inside test cases are one level lower (review becomes
+consider, consider becomes note): spelling out each case is idiomatic in tests.
+A file split is suggested only when the proposed group has callers of its own in
+other selected files; when no member has known callers (an entry point, or a
+partial scope), the answer stands.
 
 ## Gate, baseline and exit codes
 
 `--fail-on review|consider|uncertain|none` (repeatable, default `review`, or
 `fail_on` in `jevgate.toml`) decides what fails the check. `consider` also fails
-on review findings. Exit codes: `0` pass, `1` gate failed, `2` incomplete or error.
+on review findings. Notes never fail the gate; the agent output counts them and
+`--verbose` lists them. Exit codes: `0` pass, `1` gate failed, `2` incomplete or error.
 
 `jevgate baseline` accepts the findings of the last complete check in
 `jevgate-baseline.json` at the project root, without API calls. Later checks mark

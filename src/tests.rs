@@ -42,8 +42,9 @@ pub(super) fn function(name: &str) -> String {
     )
 }
 
-/// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider),
-/// 2 the top (review), 3 spreads probability (uncertain).
+/// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider,
+/// or a note where the middle says the code is fine), 2 the top (review),
+/// 3 spreads probability (uncertain), 4 leans to the top without reaching review.
 pub(super) fn answer(request: &Value, level: usize) -> Value {
     let answers = request["questions"]
         .as_object()
@@ -58,7 +59,7 @@ pub(super) fn answer(request: &Value, level: usize) -> Value {
 fn typed_answer(question: &Value, level: usize) -> Value {
     match question["type"].as_str().unwrap() {
         "noul" => {
-            let noul = [0.05, 0.5, 0.95, 0.5][level];
+            let noul = [0.05, 0.5, 0.95, 0.5, 0.5][level];
             json!({"type":"noul","noul":noul})
         }
         "score" => {
@@ -67,6 +68,7 @@ fn typed_answer(question: &Value, level: usize) -> Value {
                 [0.0, 1.0, 0.0],
                 [0.0, 0.0, 1.0],
                 [0.4, 0.2, 0.4],
+                [0.1, 0.3, 0.6],
             ][level];
             json!({"type":"score","score":p[1] + 2.0 * p[2],"confidence":1.0,
                 "probabilities":{"0":p[0],"1":p[1],"2":p[2]}})
@@ -204,7 +206,8 @@ fn gate_fails_only_on_the_configured_results() {
     // Mock level, report status, the default gate's exit code, and the gate that fails it.
     let cases = [
         (2, "review", 1, options::FailOn::None, 0),
-        (1, "consider", 0, options::FailOn::Consider, 1),
+        (4, "consider", 0, options::FailOn::Consider, 1),
+        (1, "note", 0, options::FailOn::Consider, 0),
         (3, "uncertain", 0, options::FailOn::Uncertain, 1),
     ];
     for (level, status, default, stricter, stricter_code) in cases {

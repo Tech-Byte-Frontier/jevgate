@@ -1,63 +1,95 @@
 //! The message and recommended action of each kind of finding.
 use super::{
-    GroupInfo,
-    compose::{Answers, Outcome, levels, noul, score},
+    Block, GroupInfo,
+    compose::{Answers, Outcome, benefit, levels, noul},
 };
 use crate::schema::Strength;
 
 /// A finding's message and the action it recommends.
 pub(super) type Wording = (String, &'static str);
 
-/// Splitting, or flattening when only the flatten Score reached this strength.
+/// Splitting, or flattening when only the flatten Score reached this strength,
+/// naming the located block when there is one.
 pub(super) fn function_wording(
     name: &str,
     strength: Strength,
     p: f64,
     answers: &Answers<'_>,
+    block: Option<&Block>,
 ) -> Wording {
     let reached = |question: &str| {
         answers
             .get(question)
-            .map(|a| score(a))
+            .map(|a| benefit(a))
             .is_some_and(|outcome| match strength {
                 Strength::Review => matches!(outcome, Outcome::Review(_)),
                 Strength::Consider => matches!(outcome, Outcome::Consider(_)),
+                Strength::Note => matches!(outcome, Outcome::Note(_)),
             })
     };
     let flattening = reached("flatten") && !reached("split");
-    match (strength == Strength::Review, flattening) {
-        (true, false) => (
+    let located = block.map_or(String::new(), |block| {
+        let l = &block.location;
+        format!(
+            " Lines {}–{} would be most useful as their own function.",
+            l.start_line, l.end_line
+        )
+    });
+    match (strength, flattening) {
+        (Strength::Review, false) => (
             format!(
-                "`{name}` mixes separate jobs in long blocks; splitting it would make it easier to understand ({p:.2})."
+                "`{name}` mixes separate jobs in long blocks; splitting it would make it easier to understand ({p:.2}).{located}"
             ),
-            "Extract each separate job into its own named function",
+            if block.is_some() {
+                "Extract the located block into a named function"
+            } else {
+                "Extract each separate job into its own named function"
+            },
         ),
-        (true, true) => (
+        (Strength::Review, true) => (
             format!("`{name}` has nested or repeated branches that hide its main path ({p:.2})."),
             "Flatten the control flow with guard clauses, early returns or a lookup table",
         ),
-        (false, false) => match answers.get("split").and_then(|a| levels(a)) {
-            // The top level leads without reaching review: say so, with its probability.
-            Some([_, _, top]) if top >= 0.5 => (
+        (Strength::Consider, false) => {
+            let top = answers
+                .get("split")
+                .and_then(|a| levels(a))
+                .map_or(p, |[_, _, top]| top);
+            (
                 format!(
-                    "`{name}` likely mixes separate jobs ({top:.2}); splitting it may make it easier to understand."
+                    "`{name}` likely mixes separate jobs ({top:.2}); splitting it may make it easier to understand.{located}"
                 ),
-                "Consider extracting each separate job into its own named function",
-            ),
-            _ => (
-                format!("`{name}` has a block that could be named as a helper ({p:.2})."),
-                "Consider extracting that block into a named function",
-            ),
-        },
-        (false, true) => (
-            format!("`{name}` has branching that could return early ({p:.2})."),
-            "Consider guard clauses or early returns",
+                if block.is_some() {
+                    "Consider extracting the located block into a named function"
+                } else {
+                    "Consider extracting each separate job into its own named function"
+                },
+            )
+        }
+        (Strength::Consider, true) => (
+            format!("`{name}` has branching that likely hides its main path ({p:.2})."),
+            "Consider guard clauses, early returns or a lookup table",
+        ),
+        (Strength::Note, false) => (
+            format!("`{name}` reads well as it is; one block could be named as a helper ({p:.2})."),
+            "Optional: extract that block if it grows",
+        ),
+        (Strength::Note, true) => (
+            format!("`{name}` is easy to follow; one condition could return early ({p:.2})."),
+            "Optional: a guard clause or early return",
         ),
     }
 }
 
-/// The file-wide concern, naming the group chosen as the module when there is one.
-pub(super) fn outline_wording(chosen: Option<&GroupInfo>, review: bool, p: f64) -> Wording {
+/// The file-wide concern, naming the group chosen as the module when there is
+/// one. A note says why: the file is coherent as it is, or the proposed group
+/// has no users of its own elsewhere.
+pub(super) fn outline_wording(
+    chosen: Option<&GroupInfo>,
+    strength: Strength,
+    own_users: bool,
+    p: f64,
+) -> Wording {
     let detail = chosen.map_or(String::new(), |group| {
         let shown: Vec<_> = group
             .names
@@ -77,30 +109,43 @@ pub(super) fn outline_wording(chosen: Option<&GroupInfo>, review: bool, p: f64) 
             shown.join(", ")
         )
     });
-    if !review {
-        return (
+    match strength {
+        Strength::Note if !own_users => (
+            format!(
+                "Some members of this file could live in a separate module ({p:.2}), but no other file uses them apart from the rest, so a module would gain little.{detail}"
+            ),
+            "Optional: keep the file whole until another file needs that group alone",
+        ),
+        Strength::Note => (
+            format!(
+                "This file is coherent as it is; a small set of members could live elsewhere ({p:.2}).{detail}"
+            ),
+            "Optional: move that set of members if it grows",
+        ),
+        Strength::Consider => (
             format!("Some members of this file could live in a separate module ({p:.2}).{detail}"),
             "Consider moving that set of members into its own module",
-        );
+        ),
+        Strength::Review => (
+            format!("This file holds two or more unrelated responsibilities ({p:.2}).{detail}"),
+            if chosen.is_some() {
+                "Move that group into its own module"
+            } else {
+                "Split the file along its separate purposes"
+            },
+        ),
     }
-    (
-        format!("This file holds two or more unrelated responsibilities ({p:.2}).{detail}"),
-        if chosen.is_some() {
-            "Move that group into its own module"
-        } else {
-            "Split the file along its separate purposes"
-        },
-    )
 }
 
+/// `sites` is (within one test, owner in test code, every site in a test case).
 pub(super) fn pair_wording(
     name: &str,
     differences: &[crate::analysis::clones::Difference],
-    within_test: bool,
-    in_tests: bool,
-    review: bool,
+    sites: (bool, bool, bool),
+    strength: Strength,
     p: f64,
 ) -> Wording {
+    let (within_test, in_tests, in_cases) = sites;
     let renamed = if differences.is_empty() {
         String::new()
     } else {
@@ -111,27 +156,40 @@ pub(super) fn pair_wording(
             .collect();
         format!(" Differences: {}.", shown.join(", "))
     };
-    if within_test {
-        (
-            format!("{name} repeat the same steps inside one test ({p:.2}).{renamed}"),
-            "Consider a table of cases or a local helper for the repeated steps",
-        )
-    } else if review {
-        (
+    let place = if within_test {
+        "inside one test"
+    } else {
+        "across test cases"
+    };
+    match strength {
+        Strength::Note => (
+            format!(
+                "{name} repeat steps {place}; writing each case out is common in tests ({p:.2}).{renamed}"
+            ),
+            "Optional: a fixture, helper or table of cases if the steps grow",
+        ),
+        Strength::Consider if in_cases => (
+            format!("{name} repeat the same steps {place} ({p:.2}).{renamed}"),
+            if within_test {
+                "Consider a table of cases or a local helper for the repeated steps"
+            } else {
+                "Consider a fixture or helper for the repeated steps"
+            },
+        ),
+        Strength::Review => (
             format!("{name} perform the same steps for the same purpose ({p:.2}).{renamed}"),
             if in_tests {
                 "Share the steps through a fixture, helper or parameterized test"
             } else {
                 "Move the shared steps into one implementation"
             },
-        )
-    } else {
-        (
+        ),
+        Strength::Consider => (
             format!(
                 "{name} repeat related steps; a person should decide whether they belong together ({p:.2}).{renamed}"
             ),
             "Decide whether one implementation should serve both",
-        )
+        ),
     }
 }
 

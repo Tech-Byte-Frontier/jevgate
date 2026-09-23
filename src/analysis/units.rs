@@ -34,6 +34,9 @@ pub struct Unit {
     /// `else if`, `elif` or nested conditional-expression branches.
     pub nesting: usize,
     pub branch_chain: usize,
+    /// Top-level statement blocks of the body, as byte ranges; empty when
+    /// there is no choice of block to extract.
+    pub blocks: Vec<Range<usize>>,
     pub calls: BTreeSet<String>,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
@@ -342,6 +345,7 @@ fn push(
         body_lines: body.map_or(0, |b| body_lines(text(b, source))),
         nesting: body.map_or(0, |b| super::nesting::control(b).0),
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
+        blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
         calls: facts.calls,
         refs,
         mentions: facts.idents,
