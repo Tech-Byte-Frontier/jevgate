@@ -120,9 +120,18 @@ fn run(command: JevCommand) -> Result<u8> {
             }
             check(&args, &context)
         }
-        JevCommand::Baseline => {
-            let (path, count) = gate::write_baseline(&context.root)?;
-            say!("Accepted {count} finding(s) in {}", path.display());
+        JevCommand::Baseline { merge } => {
+            let written = gate::write_baseline(&context.root, merge)?;
+            let path = written.path.display();
+            if merge {
+                say!(
+                    "Accepted {} finding(s) from the last check in {path}; kept {} earlier finding(s) for files it did not cover",
+                    written.accepted,
+                    written.kept
+                );
+            } else {
+                say!("Accepted {} finding(s) in {path}", written.accepted);
+            }
             Ok(0)
         }
         JevCommand::Rules { format } => {
