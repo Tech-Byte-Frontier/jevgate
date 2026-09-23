@@ -85,6 +85,34 @@ pub fn benefit(answer: &Answer) -> Outcome {
     }
 }
 
+/// A benefit note split between its two upper levels: neither "fine as it
+/// is" nor the concern leads. It gets the unit's recheck, like an undecided
+/// answer, since the note may hide a consider.
+pub(super) fn torn(answer: &Answer) -> bool {
+    matches!(benefit(answer), Outcome::Note(_))
+        && levels(answer).is_some_and(|[_, middle, top]| {
+            !probability_at_least(middle, LEADING_PROBABILITY)
+                && !probability_at_least(top, LEADING_PROBABILITY)
+        })
+}
+
+/// Whether a unit's first outcome calls for its recheck: undecided, or a
+/// note from a torn function or file-organization answer.
+pub(super) fn open(unit: &UnitPlan, answers: &Answers<'_>, outcome: Outcome) -> bool {
+    let benefit_questions: &[&str] = match unit.rule {
+        catalog::FUNCTION_SIMPLIFICATION => &["split", "flatten"],
+        catalog::FILE_ORGANIZATION => &["split"],
+        _ => &[],
+    };
+    match outcome {
+        Outcome::Uncertain(_) => true,
+        Outcome::Note(_) => benefit_questions
+            .iter()
+            .any(|q| answers.get(q).is_some_and(|a| torn(a))),
+        _ => false,
+    }
+}
+
 /// One level lower: review becomes consider, consider becomes note.
 pub(super) fn lowered(outcome: Outcome) -> Outcome {
     match outcome {
@@ -437,22 +465,20 @@ pub(super) const ERROR_SIGNALS: [&str; 2] = ["error_details", "exception_to_clie
 /// question or a specific check at review raises it, one level lower for
 /// code that runs only in development; clear when presence or every check
 /// rules it out. Error-detail signals are clear when every error message is
-/// the program's own. Otherwise a signal that leans toward the concern is a
-/// note, and the rest stay undecided.
+/// the program's own. When the own-messages check instead finds an
+/// exception's, library's or database's text in an error message, an
+/// error-detail signal that leans toward a client is a consider: the check
+/// states the detail, and the lean where it goes. Otherwise a signal that
+/// leans toward the concern is a note, and the rest stay undecided.
 pub(super) fn exposure_outcome<'a>(
     rule: &str,
     get: &impl Fn(&str) -> Option<&'a Answer>,
     questions: &[&str],
 ) -> Option<Outcome> {
-    let own_messages = rule == catalog::SENSITIVE_DATA
-        && matches!(get("own_messages").map(noul), Some(Outcome::Review(_)));
-    let judge = |question: &str, answer: &Answer| {
-        if own_messages && ERROR_SIGNALS.contains(&question) {
-            (Outcome::Clear, 0.0)
-        } else {
-            (noul(answer), lean(answer))
-        }
-    };
+    let own = (rule == catalog::SENSITIVE_DATA)
+        .then(|| get("own_messages").map(noul))
+        .flatten();
+    let judge = |question: &str, answer: &Answer| exposure_signal(question, answer, own);
     let presence: Vec<(Outcome, f64)> = questions
         .iter()
         .map(|q| get(q).map(|a| judge(q, a)))
@@ -467,7 +493,7 @@ pub(super) fn exposure_outcome<'a>(
         .iter()
         .chain(&specific)
         .map(|(o, _)| *o)
-        .filter(|o| matches!(o, Outcome::Review(_)))
+        .filter(|o| matches!(o, Outcome::Review(_) | Outcome::Consider(_)))
         .collect();
     let leaning = presence
         .iter()
@@ -491,6 +517,27 @@ pub(super) fn exposure_outcome<'a>(
             outcome
         },
     )
+}
+
+/// One exposure answer with its lean. The own-messages check (`own`) settles
+/// error-detail signals: all messages the program's own clears them; a
+/// message carrying another's error text makes a lean toward a client a
+/// consider.
+fn exposure_signal(question: &str, answer: &Answer, own: Option<Outcome>) -> (Outcome, f64) {
+    let outcome = noul(answer);
+    let lean = lean(answer);
+    if !ERROR_SIGNALS.contains(&question) {
+        return (outcome, lean);
+    }
+    match (own, outcome) {
+        (Some(Outcome::Review(_)), _) => (Outcome::Clear, 0.0),
+        (Some(Outcome::Clear), Outcome::Uncertain(_))
+            if probability_at_least(lean, LEADING_PROBABILITY) =>
+        {
+            (Outcome::Consider(lean), lean)
+        }
+        _ => (outcome, lean),
+    }
 }
 
 /// A split is suggested only when the proposed group has users of its own in

@@ -29,7 +29,11 @@ signatures, or one candidate pair.
    enclosing functions or the file's application source; a decisive recheck
    replaces the first answer and both are kept. A hardcoded-value unit is asked
    instead whether every value is of an acceptable kind; that check can only
-   clear, since re-asking the concern per value added false findings.
+   clear, since re-asking the concern per value added false findings. The
+   unnamed-value check lists the kinds in its question: asked whether each
+   value "explains itself", it cleared none, even of field names.
+   A function or file-organization note whose middle and top levels both
+   stay under 0.50 gets the same recheck, and a decisive answer replaces it.
    Then one locate Choice per split finding picks the body block to extract.
    Security units whose presence answers are not clear get one trace before the
    rechecks: specific literal checks per kind, a Choice among the unit's sites,
@@ -37,8 +41,8 @@ signatures, or one candidate pair.
    broad "is every value bound, escaped or checked?" stayed undecided even for
    `eval` of model output; a check per kind decides and names the kind. An
    injection whose origin stays unclear or is the function's parameters is
-   asked its origin and checks again with up to three callers; a decisive
-   answer replaces the traced one.
+   asked its origin and checks again with up to three callers; its answer
+   replaces the traced one unless only the traced one is decisive.
    Agent instruction files (`src/docs/`) are found by name even when hidden
    or ignored. Each file's heading sections, or the top-level blocks of a long
    section, are sent packed beside the nearest manifests, the configured
@@ -69,7 +73,9 @@ signatures, or one candidate pair.
    undecided after its follow-up is a note when it leans toward the concern
    (0.50, the leading probability) and stays uncertain otherwise: undecided
    answers leaning away were almost all acceptable code, and leaning toward
-   held both real positives of the labeled set. Instruction sections are
+   held both real positives of the labeled set. When the own-messages check
+   finds another error's text in an error message, an error-detail answer
+   leaning toward a client is a consider. Instruction sections are
    cleanups, so their findings are at most a consider. Undecided answers do not
    lean into notes, because on the labeled set that added notes to kept sections.
    A large document's undecided history answer does lean into a note. On its
