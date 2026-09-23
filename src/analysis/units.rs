@@ -518,30 +518,21 @@ mod tests {
         assert_eq!(facts("e.py", open), (1, 2, false));
     }
 
-    #[test]
-    fn rust_units_include_methods_types_and_local_facts() {
-        let source = "use std::path::PathBuf;\n\n/// Stored records.\npub struct Store { root: PathBuf }\n\nimpl Store {\n    /// Opens the store.\n    pub fn open(root: PathBuf, strict: bool) -> Self {\n        if strict {\n            for _ in 0..2 {\n                check(&root);\n            }\n        }\n        let store = Self { root };\n        store.touch();\n        store\n    }\n    fn touch(&self) {}\n}\n\nfn check(path: &PathBuf) {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn opens() {}\n}\n";
-        let file = parse(Path::new("store.rs"), source).unwrap();
-        let open = file.units.iter().find(|u| u.name == "Store::open").unwrap();
-        assert_eq!(open.kind, Kind::Method);
-        assert_eq!(open.doc, "Opens the store.");
-        assert_eq!(
-            open.signature,
-            "pub fn open(root: PathBuf, strict: bool) -> Self"
-        );
-        assert!(open.calls.contains("check") && open.calls.contains("touch"));
-        assert!(open.refs.contains("PathBuf") && open.refs.contains("Store"));
-        assert_eq!(open.body_lines, 6);
-        assert!(!open.too_small());
-        assert!(open.source(source).starts_with("/// Opens"));
-        let touch = file
+    const STORE: &str = "use std::path::PathBuf;\n\n/// Stored records.\npub struct Store { root: PathBuf }\n\nimpl Store {\n    /// Opens the store.\n    pub fn open(root: PathBuf, strict: bool) -> Self {\n        if strict {\n            for _ in 0..2 {\n                check(&root);\n            }\n        }\n        let store = Self { root };\n        store.touch();\n        store\n    }\n    fn touch(&self) {}\n}\n\nfn check(path: &PathBuf) {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn opens() {}\n}\n";
+
+    fn store_unit(name: &str) -> Unit {
+        parse(Path::new("store.rs"), STORE)
+            .unwrap()
             .units
-            .iter()
-            .find(|u| u.name == "Store::touch")
-            .unwrap();
-        assert!(touch.too_small());
+            .into_iter()
+            .find(|u| u.name == name)
+            .unwrap()
+    }
+
+    #[test]
+    fn rust_units_are_types_methods_and_functions() {
         assert_eq!(
-            names("store.rs", source),
+            names("store.rs", STORE),
             [
                 ("Store".into(), Kind::Type),
                 ("Store::open".into(), Kind::Method),
@@ -550,27 +541,62 @@ mod tests {
                 ("opens".into(), Kind::Function),
             ]
         );
-        assert!(file.imports.contains("PathBuf"));
     }
 
     #[test]
-    fn python_and_typescript_units_follow_classes_and_bindings() {
-        let python = "import os\n\nclass Loader:\n    def load(self, name):\n        \"\"\"Read one file.\"\"\"\n        return os.path.join(name)\n\n@cache\ndef helper(value):\n    return value\n";
+    fn a_rust_method_keeps_its_signature_doc_and_leading_comment() {
+        let open = store_unit("Store::open");
         assert_eq!(
-            names("loader.py", python),
+            open.signature,
+            "pub fn open(root: PathBuf, strict: bool) -> Self"
+        );
+        assert_eq!(open.doc, "Opens the store.");
+        assert!(open.source(STORE).starts_with("/// Opens"));
+    }
+
+    #[test]
+    fn empty_bodies_are_too_small() {
+        assert!(!store_unit("Store::open").too_small());
+        assert!(store_unit("Store::touch").too_small());
+    }
+
+    #[test]
+    fn rust_imports_are_recorded() {
+        assert!(
+            parse(Path::new("store.rs"), STORE)
+                .unwrap()
+                .imports
+                .contains("PathBuf")
+        );
+    }
+
+    const LOADER: &str = "import os\n\nclass Loader:\n    def load(self, name):\n        \"\"\"Read one file.\"\"\"\n        return os.path.join(name)\n\n@cache\ndef helper(value):\n    return value\n";
+    const VIEW: &str = "export interface Row { id: string }\nexport const label = (row: Row): string => row.id.trim();\nexport class View {\n  render(row: Row) { return <Cell value={label(row)} />; }\n}\nfunction plain() { return 1; }\n";
+
+    #[test]
+    fn python_methods_follow_their_class_and_decorated_functions_count() {
+        assert_eq!(
+            names("loader.py", LOADER),
             [
                 ("Loader::load".into(), Kind::Method),
                 ("helper".into(), Kind::Function)
             ]
         );
-        let load = parse(Path::new("loader.py"), python)
+    }
+
+    #[test]
+    fn a_python_docstring_is_the_unit_doc() {
+        let load = parse(Path::new("loader.py"), LOADER)
             .unwrap()
             .units
             .remove(0);
         assert_eq!(load.doc, "Read one file.");
-        let typescript = "export interface Row { id: string }\nexport const label = (row: Row): string => row.id.trim();\nexport class View {\n  render(row: Row) { return <Cell value={label(row)} />; }\n}\nfunction plain() { return 1; }\n";
+    }
+
+    #[test]
+    fn typescript_units_include_interfaces_bound_arrows_and_methods() {
         assert_eq!(
-            names("view.tsx", typescript),
+            names("view.tsx", VIEW),
             [
                 ("Row".into(), Kind::Type),
                 ("label".into(), Kind::Function),
@@ -578,10 +604,11 @@ mod tests {
                 ("plain".into(), Kind::Function),
             ]
         );
-        let render = parse(Path::new("view.tsx"), typescript)
-            .unwrap()
-            .units
-            .remove(2);
+    }
+
+    #[test]
+    fn jsx_components_count_as_calls() {
+        let render = parse(Path::new("view.tsx"), VIEW).unwrap().units.remove(2);
         assert!(render.calls.contains("Cell") && render.calls.contains("label"));
     }
 

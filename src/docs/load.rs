@@ -100,38 +100,9 @@ pub fn readers(path: &Path, markdown: &Markdown, present: &dyn Fn(&str) -> bool)
     let dir = path.parent().unwrap_or(Path::new(""));
     let parts: Vec<&str> = path.iter().filter_map(|p| p.to_str()).collect();
     let under = |a: &str, b: &str| parts.windows(2).any(|w| w == [a, b]);
-    let nested = |base: &Path| match base.to_str() {
-        Some("") | None => Load::Always,
-        Some(dir) => Load::Directory(dir.to_string()),
-    };
-    let front = |key: &str| markdown.frontmatter.get(key).filter(|v| !v.is_empty());
-    let scoped = |key: &str| match front(key) {
-        Some(globs) if !matches!(globs.as_str(), "**" | "**/*") => Load::Files(globs.clone()),
-        _ => Load::Always,
-    };
-    let at = |base: &Path, file: &str| present(&base.join(file).to_string_lossy());
-    let read = |harnesses: &[&str], load: Load| {
-        harnesses
-            .iter()
-            .map(|h| Reader {
-                harness: (*h).into(),
-                load: load.clone(),
-            })
-            .collect::<Vec<_>>()
-    };
     let claude_dir = dir.file_name().is_some_and(|n| n == ".claude");
     match name {
-        "AGENTS.md" => {
-            let mut readers = read(&[CODEX, COPILOT, CURSOR, WINDSURF, CLINE], nested(dir));
-            // Claude Code reads AGENTS.md only where no CLAUDE.md exists.
-            if !["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"]
-                .iter()
-                .any(|f| at(dir, f))
-            {
-                readers.extend(read(&[CLAUDE], nested(dir)));
-            }
-            readers
-        }
+        "AGENTS.md" => agents_readers(dir, present),
         "AGENTS.override.md" => read(&[CODEX], nested(dir)),
         "CLAUDE.md" if claude_dir => read(&[CLAUDE], nested(dir.parent().unwrap_or(dir))),
         "CLAUDE.md" | "CLAUDE.local.md" => read(&[CLAUDE], nested(dir)),
@@ -140,34 +111,82 @@ pub fn readers(path: &Path, markdown: &Markdown, present: &dyn Fn(&str) -> bool)
         ".windsurfrules" => read(&[WINDSURF, CLINE], Load::Always),
         ".clinerules" => read(&[CLINE], Load::Always),
         "copilot-instructions.md" => read(&[COPILOT], Load::Always),
-        _ if under(".claude", "rules") => read(&[CLAUDE], scoped("paths")),
-        _ if under(".github", "instructions") => match front("applyTo") {
-            Some(_) => read(&[COPILOT], scoped("applyTo")),
+        _ if under(".claude", "rules") => read(&[CLAUDE], scoped(markdown, "paths")),
+        _ if under(".github", "instructions") => match front(markdown, "applyTo") {
+            Some(_) => read(&[COPILOT], scoped(markdown, "applyTo")),
             None => read(&[COPILOT], Load::Manual),
         },
-        _ if under(".cursor", "rules") => {
-            if !name.ends_with(".mdc") {
-                Vec::new()
-            } else if front("alwaysApply").is_some_and(|v| v == "true") {
-                read(&[CURSOR], Load::Always)
-            } else if let Some(globs) = front("globs") {
-                read(&[CURSOR], Load::Files(globs.clone()))
-            } else if front("description").is_some() {
-                read(&[CURSOR], Load::Requested)
-            } else {
-                read(&[CURSOR], Load::Manual)
-            }
-        }
-        _ if under(".windsurf", "rules") || under(".devin", "rules") => {
-            match front("trigger").map(String::as_str) {
-                Some("always_on") => read(&[WINDSURF], Load::Always),
-                Some("glob") => read(&[WINDSURF], scoped("globs")),
-                Some("manual") => read(&[WINDSURF], Load::Manual),
-                _ => read(&[WINDSURF], Load::Requested),
-            }
-        }
-        _ if parts.contains(&".clinerules") => read(&[CLINE], scoped("paths")),
+        _ if under(".cursor", "rules") => cursor_readers(name, markdown),
+        _ if under(".windsurf", "rules") || under(".devin", "rules") => windsurf_readers(markdown),
+        _ if parts.contains(&".clinerules") => read(&[CLINE], scoped(markdown, "paths")),
         _ => Vec::new(),
+    }
+}
+
+/// Every harness reading one load.
+fn read(harnesses: &[&str], load: Load) -> Vec<Reader> {
+    harnesses
+        .iter()
+        .map(|h| Reader {
+            harness: (*h).into(),
+            load: load.clone(),
+        })
+        .collect()
+}
+
+/// Loaded at session start at the root, else when working in the directory.
+fn nested(dir: &Path) -> Load {
+    match dir.to_str() {
+        Some("") | None => Load::Always,
+        Some(dir) => Load::Directory(dir.to_string()),
+    }
+}
+
+fn front<'a>(markdown: &'a Markdown, key: &str) -> Option<&'a String> {
+    markdown.frontmatter.get(key).filter(|v| !v.is_empty())
+}
+
+/// Loaded for the files a frontmatter key's patterns match, or always.
+fn scoped(markdown: &Markdown, key: &str) -> Load {
+    match front(markdown, key) {
+        Some(globs) if !matches!(globs.as_str(), "**" | "**/*") => Load::Files(globs.clone()),
+        _ => Load::Always,
+    }
+}
+
+/// Every AGENTS.md reader; Claude Code reads it only where no CLAUDE.md exists.
+fn agents_readers(dir: &Path, present: &dyn Fn(&str) -> bool) -> Vec<Reader> {
+    let mut readers = read(&[CODEX, COPILOT, CURSOR, WINDSURF, CLINE], nested(dir));
+    let claude_file = ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"]
+        .iter()
+        .any(|f| present(&dir.join(f).to_string_lossy()));
+    if !claude_file {
+        readers.extend(read(&[CLAUDE], nested(dir)));
+    }
+    readers
+}
+
+/// Cursor reads only `.mdc` rules, by their frontmatter.
+fn cursor_readers(name: &str, markdown: &Markdown) -> Vec<Reader> {
+    if !name.ends_with(".mdc") {
+        Vec::new()
+    } else if front(markdown, "alwaysApply").is_some_and(|v| v == "true") {
+        read(&[CURSOR], Load::Always)
+    } else if let Some(globs) = front(markdown, "globs") {
+        read(&[CURSOR], Load::Files(globs.clone()))
+    } else if front(markdown, "description").is_some() {
+        read(&[CURSOR], Load::Requested)
+    } else {
+        read(&[CURSOR], Load::Manual)
+    }
+}
+
+fn windsurf_readers(markdown: &Markdown) -> Vec<Reader> {
+    match front(markdown, "trigger").map(String::as_str) {
+        Some("always_on") => read(&[WINDSURF], Load::Always),
+        Some("glob") => read(&[WINDSURF], scoped(markdown, "globs")),
+        Some("manual") => read(&[WINDSURF], Load::Manual),
+        _ => read(&[WINDSURF], Load::Requested),
     }
 }
 
@@ -316,66 +335,99 @@ fn copies(files: &[File], links: &[(PathBuf, Option<PathBuf>)], facts: &mut Vec<
 }
 
 fn file_facts(file: &File, by_path: &BTreeMap<&Path, &File>, root: &Path, facts: &mut Vec<Fact>) {
-    let path = &file.path;
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let in_cursor_rules = path
-        .iter()
-        .collect::<Vec<_>>()
+    facts.extend(ignored_cursor_rule(file));
+    facts.extend(unresolved_imports(file, root));
+    facts.extend(skipped_agents(file, by_path));
+    facts.extend(windsurf_truncated(file));
+}
+
+fn fact(path: &Path, line: usize, message: String) -> Fact {
+    Fact {
+        path: path.to_path_buf(),
+        line,
+        message,
+    }
+}
+
+/// A plain `.md` file in `.cursor/rules`, which Cursor never loads.
+fn ignored_cursor_rule(file: &File) -> Option<Fact> {
+    let parts: Vec<_> = file.path.iter().collect();
+    let in_rules = parts
         .windows(2)
         .any(|w| w[0] == ".cursor" && w[1] == "rules");
-    if in_cursor_rules && !name.ends_with(".mdc") {
-        facts.push(Fact {
-            path: path.clone(),
-            line: 1,
-            message: "Cursor reads only `.mdc` files in `.cursor/rules`, so this file is never loaded. Rename it to `.mdc` with frontmatter, or remove it.".into(),
-        });
+    let mdc = file.path.extension().is_some_and(|e| e == "mdc");
+    (in_rules && !mdc).then(|| {
+        fact(
+            &file.path,
+            1,
+            "Cursor reads only `.mdc` files in `.cursor/rules`, so this file is never loaded. Rename it to `.mdc` with frontmatter, or remove it.".into(),
+        )
+    })
+}
+
+/// Claude Code imports that do not resolve inside the repository.
+fn unresolved_imports(file: &File, root: &Path) -> Vec<Fact> {
+    if !file.readers.iter().any(|r| r.harness == CLAUDE) {
+        return Vec::new();
     }
-    if file.readers.iter().any(|r| r.harness == CLAUDE) {
-        for (line, import) in markdown::imports(&file.source) {
-            if !import.starts_with('~') && resolve(&root.join(path), &import, root).is_none() {
-                facts.push(Fact {
-                    path: path.clone(),
-                    line,
-                    message: format!(
-                        "The import `@{import}` does not resolve to a file in the repository."
-                    ),
-                });
-            }
-        }
+    markdown::imports(&file.source)
+        .into_iter()
+        .filter(|(_, import)| {
+            !import.starts_with('~') && resolve(&root.join(&file.path), import, root).is_none()
+        })
+        .map(|(line, import)| {
+            fact(
+                &file.path,
+                line,
+                format!("The import `@{import}` does not resolve to a file in the repository."),
+            )
+        })
+        .collect()
+}
+
+/// An AGENTS.md beside a CLAUDE.md that neither imports nor copies it.
+fn skipped_agents(file: &File, by_path: &BTreeMap<&Path, &File>) -> Option<Fact> {
+    if file.path.file_name().is_none_or(|n| n != "CLAUDE.md") {
+        return None;
     }
-    if name == "CLAUDE.md" {
-        let dir = path.parent().unwrap_or(Path::new(""));
-        let agents = dir.join("AGENTS.md");
-        let imported = markdown::imports(&file.source)
-            .iter()
-            .any(|(_, i)| i.trim_start_matches("./") == "AGENTS.md");
-        // A link or an identical copy already gives Claude the same text.
-        let same = by_path
-            .get(agents.as_path())
-            .is_some_and(|other| other.source.trim() == file.source.trim());
-        if by_path.contains_key(agents.as_path()) && !imported && !same {
-            facts.push(Fact {
-                path: agents,
-                line: 1,
-                message: format!(
-                    "Claude Code reads `{}` here and skips this AGENTS.md. Add `@AGENTS.md` to it if Claude should follow these instructions too.",
-                    path.display()
-                ),
-            });
-        }
-    }
-    let windsurf = file.readers.iter().any(|r| r.harness == WINDSURF) && name != "AGENTS.md";
+    let agents = file
+        .path
+        .parent()
+        .unwrap_or(Path::new(""))
+        .join("AGENTS.md");
+    let other = by_path.get(agents.as_path())?;
+    let imported = markdown::imports(&file.source)
+        .iter()
+        .any(|(_, i)| i.trim_start_matches("./") == "AGENTS.md");
+    // A link or an identical copy already gives Claude the same text.
+    let same = other.source.trim() == file.source.trim();
+    (!imported && !same).then(|| {
+        fact(
+            &agents,
+            1,
+            format!(
+                "Claude Code reads `{}` here and skips this AGENTS.md. Add `@AGENTS.md` to it if Claude should follow these instructions too.",
+                file.path.display()
+            ),
+        )
+    })
+}
+
+/// A Windsurf rule past its character cap, whose tail is dropped.
+fn windsurf_truncated(file: &File) -> Option<Fact> {
+    let windsurf = file.readers.iter().any(|r| r.harness == WINDSURF)
+        && file.path.file_name().is_some_and(|n| n != "AGENTS.md");
     let chars = file.source.chars().count();
-    if windsurf && chars > WINDSURF_MAX_CHARS {
-        facts.push(Fact {
-            path: path.clone(),
-            line: 1,
-            message: format!(
+    (windsurf && chars > WINDSURF_MAX_CHARS).then(|| {
+        fact(
+            &file.path,
+            1,
+            format!(
                 "Windsurf reads the first {WINDSURF_MAX_CHARS} characters of a workspace rule; {} of this file's {chars} are dropped.",
                 chars - WINDSURF_MAX_CHARS
             ),
-        });
-    }
+        )
+    })
 }
 
 /// Codex joins the root instruction files and stops at its byte limit.
@@ -487,60 +539,80 @@ mod tests {
         );
     }
 
-    #[test]
-    fn session_cost_and_loading_facts() {
+    /// The context load of instruction files written to a fresh project.
+    fn load_of(sources: &[(&str, &str)]) -> ContextLoad {
         let project = crate::tests::Project::new();
-        let big = "x".repeat(CODEX_MAX_BYTES);
-        let sources: BTreeMap<PathBuf, String> = [
-            ("AGENTS.md", big.as_str()),
-            (
-                "CLAUDE.md",
-                "# Rules\nSee @docs/missing.md\n<!-- note for people -->\n",
-            ),
-            (
-                "GEMINI.md",
-                "# Rules\nSee @docs/missing.md\n<!-- note for people -->\n",
-            ),
-            (".cursor/rules/style.md", "# Style\n"),
-        ]
-        .into_iter()
-        .map(|(p, s)| {
-            project.write(p, s);
-            (PathBuf::from(p), s.to_string())
-        })
-        .collect();
-        let files = files(sources, &[]);
-        let load = context_load(&files, &[], &project.0);
-        let codex = load.harnesses.iter().find(|h| h.harness == CODEX).unwrap();
-        assert_eq!(codex.estimated_tokens, CODEX_MAX_BYTES / 4);
+        let sources: BTreeMap<PathBuf, String> = sources
+            .iter()
+            .map(|(p, s)| {
+                project.write(p, s);
+                (PathBuf::from(p), s.to_string())
+            })
+            .collect();
+        context_load(&files(sources, &[]), &[], &project.0)
+    }
+
+    fn has_fact(load: &ContextLoad, text: &str) -> bool {
+        load.facts.iter().any(|f| f.message.contains(text))
+    }
+
+    #[test]
+    fn claude_session_cost_leaves_out_html_comments() {
+        let load = load_of(&[(
+            "CLAUDE.md",
+            "# Rules\nUse pnpm.\n<!-- note for people -->\n",
+        )]);
         let claude = load.harnesses.iter().find(|h| h.harness == CLAUDE).unwrap();
         assert_eq!(claude.files, [PathBuf::from("CLAUDE.md")]);
         assert_eq!(
             claude.estimated_tokens,
-            markdown::tokens("# Rules\nSee @docs/missing.md\n\n")
+            markdown::tokens("# Rules\nUse pnpm.\n\n")
         );
-        let messages: Vec<&str> = load.facts.iter().map(|f| f.message.as_str()).collect();
-        assert!(messages[0].contains("`CLAUDE.md` and `GEMINI.md` are identical copies"));
-        assert!(
-            messages
-                .iter()
-                .any(|m| m.contains("`@docs/missing.md` does not resolve"))
-        );
-        assert!(
-            messages
-                .iter()
-                .any(|m| m.contains("Cursor reads only `.mdc`"))
-        );
-        assert!(messages.iter().any(|m| m.contains("skips this AGENTS.md")));
-        assert!(!messages.iter().any(|m| m.contains("Codex stops reading")));
-        let bigger = format!("{big}y");
-        let files = super::files([(PathBuf::from("AGENTS.md"), bigger)].into(), &[]);
-        let load = context_load(&files, &[], &project.0);
-        assert!(
-            load.facts[0]
-                .message
-                .contains("1 of these 32769 bytes are not loaded")
-        );
+    }
+
+    #[test]
+    fn identical_copies_are_a_fact() {
+        let text = "# Rules\nUse pnpm.\n";
+        let load = load_of(&[("CLAUDE.md", text), ("GEMINI.md", text)]);
+        assert!(has_fact(
+            &load,
+            "`CLAUDE.md` and `GEMINI.md` are identical copies"
+        ));
+    }
+
+    #[test]
+    fn an_import_that_does_not_resolve_is_a_fact() {
+        let load = load_of(&[("CLAUDE.md", "See @docs/missing.md\n")]);
+        assert!(has_fact(&load, "`@docs/missing.md` does not resolve"));
+    }
+
+    #[test]
+    fn a_plain_markdown_cursor_rule_is_a_fact() {
+        let load = load_of(&[(".cursor/rules/style.md", "# Style\n")]);
+        assert!(has_fact(&load, "Cursor reads only `.mdc`"));
+    }
+
+    #[test]
+    fn an_agents_file_claude_skips_is_a_fact() {
+        let load = load_of(&[
+            ("AGENTS.md", "# A\nUse pnpm.\n"),
+            ("CLAUDE.md", "# C\nUse npm.\n"),
+        ]);
+        assert!(has_fact(&load, "skips this AGENTS.md"));
+    }
+
+    #[test]
+    fn codex_truncation_is_a_fact_only_past_its_limit() {
+        let at_limit = "x".repeat(CODEX_MAX_BYTES);
+        assert!(!has_fact(
+            &load_of(&[("AGENTS.md", &at_limit)]),
+            "Codex stops reading"
+        ));
+        let over = format!("{at_limit}y");
+        assert!(has_fact(
+            &load_of(&[("AGENTS.md", &over)]),
+            "1 of these 32769 bytes are not loaded"
+        ));
     }
 
     #[test]

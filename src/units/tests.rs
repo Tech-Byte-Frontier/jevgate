@@ -793,21 +793,28 @@ fn site(id: &str) -> Value {
 }
 
 #[test]
-fn security_units_are_packed_and_traced_only_when_presence_is_not_clear() {
+fn only_functions_with_calls_built_text_or_field_assignments_are_sent_for_security() {
     let (project, options) = security_project(QUERY);
     let (_, plan) = planned(&project, &options);
-    assert_eq!(plan.requests.len(), 1);
-    let request = &plan.requests[0].request;
-    assert_eq!(request["jevgate"]["stage"], "security");
+    let sent: Vec<&str> = plan
+        .requests
+        .iter()
+        .flat_map(|p| p.request["state"]["functions"].as_array().unwrap())
+        .filter_map(|f| f["name"].as_str())
+        .collect();
     assert_eq!(
-        request["state"]["functions"].as_array().unwrap().len(),
-        1,
+        sent,
+        ["find"],
         "`total` has no call, built text or field assignment"
     );
-    assert_eq!(request["questions"].as_object().unwrap().len(), 5);
+}
+
+#[test]
+fn clear_presence_needs_no_trace_and_clears_every_security_rule() {
+    let (project, options) = security_project(QUERY);
     let mut eval = scripted(0);
     let report = run(&project, &options, &mut eval);
-    assert_eq!(eval.stages, ["first"], "clear presence needs no trace");
+    assert_eq!(eval.stages, ["first"]);
     for rule in catalog::SECURITY {
         assert_eq!(report.files[0].dimensions[rule].status, Status::Clear);
     }

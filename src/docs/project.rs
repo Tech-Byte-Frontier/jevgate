@@ -59,100 +59,20 @@ fn manifests(root: &Path, base: &Path, linters: &mut BTreeSet<String>) -> Vec<Va
     let dir = root.join(base);
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).ok();
     let path = |name: &str| base.join(name).to_string_lossy().into_owned();
-    let mut found = Vec::new();
     for (file, tool) in CONFIG_FILES {
         if dir.join(file).is_file() {
             linters.insert((*tool).into());
         }
     }
+    let mut found = Vec::new();
     if let Some(table) = read("Cargo.toml").and_then(|t| t.parse::<toml::Table>().ok()) {
-        let keys = |section: &str| {
-            table
-                .get(section)
-                .and_then(|v| v.as_table())
-                .map(|t| t.keys().cloned().collect::<Vec<_>>())
-                .unwrap_or_default()
-        };
-        if table.get("lints").is_some()
-            || table
-                .get("workspace")
-                .and_then(|w| w.get("lints"))
-                .is_some()
-        {
-            linters.insert("cargo lints".into());
-        }
-        found.push(json!({
-            "path": path("Cargo.toml"),
-            "name": table.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
-            "dependencies": listed(keys("dependencies")),
-            "dev_dependencies": listed(keys("dev-dependencies")),
-        }));
+        found.push(cargo(&table, path("Cargo.toml"), linters));
     }
-    if let Some(package) = read("package.json").and_then(|t| serde_json::from_str::<Value>(&t).ok())
-    {
-        let keys = |field: &str| {
-            package[field]
-                .as_object()
-                .map(|o| o.keys().cloned().collect::<Vec<_>>())
-                .unwrap_or_default()
-        };
-        let dev = keys("devDependencies");
-        for (dependency, tool) in PACKAGE_LINTERS {
-            if dev
-                .iter()
-                .chain(&keys("dependencies"))
-                .any(|d| d == dependency)
-            {
-                linters.insert((*tool).into());
-            }
-        }
-        let scripts: Vec<String> = package["scripts"]
-            .as_object()
-            .map(|o| {
-                o.iter()
-                    .map(|(name, command)| {
-                        let command: String =
-                            command.as_str().unwrap_or("").chars().take(80).collect();
-                        format!("{name}: {command}")
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        found.push(json!({
-            "path": path("package.json"),
-            "name": package["name"],
-            "scripts": listed(scripts),
-            "dependencies": listed(keys("dependencies")),
-            "dev_dependencies": listed(dev),
-        }));
+    if let Some(package) = read("package.json").and_then(|t| serde_json::from_str(&t).ok()) {
+        found.push(package_json(&package, path("package.json"), linters));
     }
     if let Some(table) = read("pyproject.toml").and_then(|t| t.parse::<toml::Table>().ok()) {
-        let project = table.get("project");
-        let tools: Vec<String> = table
-            .get("tool")
-            .and_then(|t| t.as_table())
-            .map(|t| t.keys().cloned().collect())
-            .unwrap_or_default();
-        for tool in &tools {
-            if PYTHON_LINTERS.contains(&tool.as_str()) {
-                linters.insert(tool.clone());
-            }
-        }
-        let dependencies: Vec<String> = project
-            .and_then(|p| p.get("dependencies"))
-            .and_then(|d| d.as_array())
-            .map(|d| {
-                d.iter()
-                    .filter_map(|v| v.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default();
-        found.push(json!({
-            "path": path("pyproject.toml"),
-            "name": project.and_then(|p| p.get("name")).and_then(|n| n.as_str()),
-            "dependencies": listed(dependencies),
-            "tools": tools,
-        }));
+        found.push(pyproject(&table, path("pyproject.toml"), linters));
     }
     if let Some(text) = read("go.mod") {
         found.push(json!({
@@ -168,9 +88,92 @@ fn manifests(root: &Path, base: &Path, linters: &mut BTreeSet<String>) -> Vec<Va
     found
 }
 
+fn cargo(table: &toml::Table, path: String, linters: &mut BTreeSet<String>) -> Value {
+    let keys = |section: &str| {
+        table
+            .get(section)
+            .and_then(|v| v.as_table())
+            .map(|t| t.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    let workspace_lints = table
+        .get("workspace")
+        .and_then(|w| w.get("lints"))
+        .is_some();
+    if table.get("lints").is_some() || workspace_lints {
+        linters.insert("cargo lints".into());
+    }
+    json!({
+        "path": path,
+        "name": table.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
+        "dependencies": listed(keys("dependencies")),
+        "dev_dependencies": listed(keys("dev-dependencies")),
+    })
+}
+
+fn package_json(package: &Value, path: String, linters: &mut BTreeSet<String>) -> Value {
+    let keys = |field: &str| {
+        package[field]
+            .as_object()
+            .map(|o| o.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    let dev = keys("devDependencies");
+    let all: Vec<String> = dev.iter().cloned().chain(keys("dependencies")).collect();
+    for (dependency, tool) in PACKAGE_LINTERS {
+        if all.iter().any(|d| d == dependency) {
+            linters.insert((*tool).into());
+        }
+    }
+    let scripts: Vec<String> = package["scripts"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, command)| {
+            let command: String = command.as_str().unwrap_or("").chars().take(80).collect();
+            format!("{name}: {command}")
+        })
+        .collect();
+    json!({
+        "path": path,
+        "name": package["name"],
+        "scripts": listed(scripts),
+        "dependencies": listed(keys("dependencies")),
+        "dev_dependencies": listed(dev),
+    })
+}
+
+fn pyproject(table: &toml::Table, path: String, linters: &mut BTreeSet<String>) -> Value {
+    let project = table.get("project");
+    let tools: Vec<String> = table
+        .get("tool")
+        .and_then(|t| t.as_table())
+        .map(|t| t.keys().cloned().collect())
+        .unwrap_or_default();
+    linters.extend(
+        tools
+            .iter()
+            .filter(|t| PYTHON_LINTERS.contains(&t.as_str()))
+            .cloned(),
+    );
+    let dependencies: Vec<String> = project
+        .and_then(|p| p.get("dependencies"))
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    json!({
+        "path": path,
+        "name": project.and_then(|p| p.get("name")).and_then(|n| n.as_str()),
+        "dependencies": listed(dependencies),
+        "tools": tools,
+    })
+}
+
 /// Scripts of every tracked `package.json` and targets of every tracked
 /// Makefile or justfile.
-pub fn scripts(root: &Path, history: &crate::revision::History) -> BTreeSet<String> {
+pub fn scripts(root: &Path, history: &super::history::History) -> BTreeSet<String> {
     let mut scripts = BTreeSet::new();
     for path in &history.tracked {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");

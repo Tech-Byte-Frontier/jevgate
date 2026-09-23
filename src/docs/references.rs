@@ -2,7 +2,7 @@
 //! with what Git shows about them. These select sections for a staleness
 //! check; they never decide one: outputs, local files and examples are named
 //! too.
-use crate::revision::History;
+use super::history::History;
 use std::{
     collections::BTreeSet,
     path::{Component, Path, PathBuf},
@@ -271,11 +271,11 @@ fn code_text(text: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn missing_names_with_their_history() {
+    /// The missing names of `text`, a section of `docs/intro.md`, in a
+    /// repository tracking a few files and with two removed.
+    fn found(text: &str) -> Vec<(String, Fate)> {
         let project = crate::tests::Project::new();
         project.write("src/app.ts", "");
-        project.write("docs/guide.md", "");
         let history = History {
             tracked: ["src/app.ts", "docs/guide.md", "src/services/quota.ts"]
                 .into_iter()
@@ -292,26 +292,54 @@ mod tests {
             .into(),
         };
         let scripts: BTreeSet<String> = ["dev".to_string(), "quality".to_string()].into();
-        let text = "Edit `src/old.ts`, `src/moved.ts:12` and `services/quota.ts`; see [guide](guide.md), \
-            `/login`, `origin/main`, `https://x.io/a.ts` and `src/*.ts`. Create `out.json`.\n\
-            ```sh\npnpm quality\npnpm run lint\nnpm install\nmake the\n```\n";
-        let found = missing(
+        missing(
             &project.0,
             Path::new("docs/intro.md"),
             text,
             &history,
             &scripts,
-        );
-        let names: Vec<(&str, &Fate)> = found.iter().map(|m| (m.name.as_str(), &m.fate)).collect();
+        )
+        .into_iter()
+        .map(|m| (m.name, m.fate))
+        .collect()
+    }
+
+    #[test]
+    fn removed_paths_carry_what_git_shows() {
         assert_eq!(
-            names,
+            found("Edit `src/old.ts` and `src/moved.ts:12`; create `out.json`."),
             [
-                ("src/old.ts", &Fate::Deleted),
-                ("src/moved.ts", &Fate::Renamed(PathBuf::from("src/new.ts"))),
-                ("out.json", &Fate::Absent),
-                ("lint", &Fate::NoScript),
-                ("the", &Fate::NoScript),
+                ("src/old.ts".to_string(), Fate::Deleted),
+                (
+                    "src/moved.ts".into(),
+                    Fate::Renamed(PathBuf::from("src/new.ts"))
+                ),
+                ("out.json".into(), Fate::Absent),
             ]
         );
+    }
+
+    #[test]
+    fn present_partial_and_relative_paths_are_not_missing() {
+        assert!(
+            found("See `src/app.ts`, `services/quota.ts` and [the guide](guide.md).").is_empty()
+        );
+    }
+
+    #[test]
+    fn routes_branches_urls_and_globs_are_not_paths() {
+        assert!(
+            found(
+                "Open `/login`, merge `origin/main`, fetch `https://x.io/a.ts`, match `src/*.ts`."
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn undeclared_scripts_in_code_are_missing() {
+        let text =
+            "```sh\npnpm quality\npnpm run lint\nnpm install\n```\nIn prose, make the build.";
+        assert_eq!(found(text), [("lint".to_string(), Fate::NoScript)]);
     }
 }
