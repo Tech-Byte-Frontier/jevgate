@@ -155,7 +155,7 @@ pub(super) fn run(
     session(options, &context, &store, mock)
         .evaluate(&inputs, &mut report)
         .unwrap();
-    gate::settle(&project.0, &mut report, &options.fail_on).unwrap();
+    gate::settle(&project.0, &mut report, options).unwrap();
     report
 }
 
@@ -229,6 +229,31 @@ fn gate_fails_only_on_the_configured_results() {
             stricter_code,
             "{status} with {stricter:?}"
         );
+    }
+}
+
+#[test]
+fn a_rule_level_fails_the_gate_only_for_that_rule() {
+    let project = Project::new();
+    project.write("lib.rs", &function("f"));
+    let mut options = args();
+    let mut mock = Mock {
+        level: 4,
+        ..Default::default()
+    };
+    let report = run(&project, &options, &mut mock);
+    assert_eq!(
+        (report.status.as_str(), gate::exit_code(&report)),
+        ("consider", 0)
+    );
+    for (rule, code) in [
+        (crate::catalog::SHARED_LOGIC, 0),
+        (crate::catalog::FUNCTION_SIMPLIFICATION, 1),
+    ] {
+        options.rule_fail_on =
+            std::collections::BTreeMap::from([(rule.to_string(), vec![options::FailOn::Consider])]);
+        let report = run(&project, &options, &mut mock);
+        assert_eq!(gate::exit_code(&report), code, "consider on {rule}");
     }
 }
 

@@ -103,6 +103,7 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         changes: Vec::new(),
         decision_policy: crate::catalog::policy(),
         fail_on: args.fail_on_names(),
+        fail_on_rules: args.rule_fail_on_names(),
         gate: None,
     }
 }

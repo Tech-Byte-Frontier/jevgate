@@ -29,6 +29,7 @@ mod evaluate;
 mod file_kind;
 mod gate;
 mod html_report;
+mod init;
 mod inventory;
 mod locations;
 mod options;
@@ -76,9 +77,24 @@ fn run(command: JevCommand) -> Result<u8> {
     if let JevCommand::Auth { command } = command {
         return auth::run(command);
     }
+    if let JevCommand::Init { force } = command {
+        // Before reading configuration, so an invalid file can be replaced.
+        let root = config::repository_root(&std::env::current_dir()?.canonicalize()?);
+        let (path, allow) = init::run(&root, force)?;
+        say!("Wrote {}", path.display());
+        if allow.is_empty() {
+            say!("No supported source found; set upload_allow before checking.");
+        } else {
+            say!("Uploads limited to: {}", allow.join(", "));
+        }
+        say!("Next: jevgate auth login, then jevgate check --dry-run --show-requests");
+        return Ok(0);
+    }
     let context = ConfigContext::discover()?;
     match command {
-        JevCommand::Auth { .. } => unreachable!("auth handled before repository configuration"),
+        JevCommand::Auth { .. } | JevCommand::Init { .. } => {
+            unreachable!("handled before repository configuration")
+        }
         JevCommand::Check(mut args) => {
             context.configure(&mut args)?;
             if let Some(base) = &args.base {
@@ -91,8 +107,13 @@ fn run(command: JevCommand) -> Result<u8> {
             say!("Accepted {count} finding(s) in {}", path.display());
             Ok(0)
         }
-        JevCommand::Rules => {
-            say!("{}", serde_json::to_string_pretty(&catalog::describe())?);
+        JevCommand::Rules { format } => {
+            match format {
+                options::RulesFormat::Json => {
+                    say!("{}", serde_json::to_string_pretty(&catalog::describe())?)
+                }
+                options::RulesFormat::Table => say!("{}", catalog::table()),
+            }
             Ok(0)
         }
         JevCommand::Serve { port } => {
@@ -187,7 +208,7 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         return publish_failure(&session, &mut report, error);
     }
     changes::compare(baseline.as_ref(), &mut report);
-    gate::settle(&context.root, &mut report, &args.fail_on)?;
+    gate::settle(&context.root, &mut report, args)?;
     report.settled = true;
     session.publish(&report)?;
     if args.report {

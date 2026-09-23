@@ -6,6 +6,10 @@ use std::collections::BTreeMap;
 pub struct Rule {
     pub id: &'static str,
     pub key: &'static str,
+    /// The part of the ID before the slash, usable wherever a rule is.
+    pub group: &'static str,
+    /// Selected when no rules are configured; opt-in rules are not.
+    pub default_enabled: bool,
     pub version: &'static str,
     pub scope: &'static str,
     pub unit: &'static str,
@@ -29,6 +33,8 @@ pub fn rules() -> Vec<Rule> {
     vec![
         Rule {
             id: "maintainability/file-organization",
+            group: "maintainability",
+            default_enabled: true,
             key: FILE_ORGANIZATION,
             version: rule_version(FILE_ORGANIZATION),
             scope: "application files with two or more members and 100 or more lines of member code",
@@ -41,6 +47,8 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "maintainability/function-simplification",
+            group: "maintainability",
+            default_enabled: true,
             key: FUNCTION_SIMPLIFICATION,
             version: rule_version(FUNCTION_SIMPLIFICATION),
             scope: "functions and methods with bodies of five or more lines",
@@ -53,6 +61,8 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "maintainability/shared-logic",
+            group: "maintainability",
+            default_enabled: true,
             key: SHARED_LOGIC,
             version: rule_version(SHARED_LOGIC),
             scope: "renamed or exact copies of two or more statements across selected files and explicit context",
@@ -65,6 +75,8 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "maintainability/hardcoded-values",
+            group: "maintainability",
+            default_enabled: true,
             key: HARDCODED_VALUES,
             version: rule_version(HARDCODED_VALUES),
             scope: "application functions and module constants that use literal values other than 0, 1, 2 or one-character strings",
@@ -77,6 +89,8 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "tests/value",
+            group: "tests",
+            default_enabled: true,
             key: TEST_VALUE,
             version: rule_version(TEST_VALUE),
             scope: "test cases, with --include-tests",
@@ -89,6 +103,8 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "tests/redundancy",
+            group: "tests",
+            default_enabled: true,
             key: TEST_REDUNDANCY,
             version: rule_version(TEST_REDUNDANCY),
             scope: "similar tests of one function, with --include-tests",
@@ -114,6 +130,44 @@ pub fn rule_version(key: &str) -> &'static str {
 
 pub fn keys() -> Vec<&'static str> {
     rules().into_iter().map(|r| r.key).collect()
+}
+
+/// Every rule selected when none are configured.
+pub const DEFAULT_GROUP: &str = "default";
+pub const ALL_GROUP: &str = "all";
+
+pub fn groups() -> Vec<&'static str> {
+    let mut groups: Vec<&str> = rules().into_iter().map(|r| r.group).collect();
+    groups.dedup();
+    groups
+}
+
+/// The rule keys a rule ID, key or group names; `None` when it names nothing.
+pub fn select(name: &str) -> Option<Vec<&'static str>> {
+    let selected: Vec<&str> = rules()
+        .into_iter()
+        .filter(|r| match name {
+            ALL_GROUP => true,
+            DEFAULT_GROUP => r.default_enabled,
+            _ => r.key == name || r.id == name || r.group == name,
+        })
+        .map(|r| r.key)
+        .collect();
+    (!selected.is_empty()).then_some(selected)
+}
+
+/// How specifically `name` addresses `rule`: 3 for the rule itself, 2 for its
+/// group, 1 for `default` or `all`, 0 when it does not address it.
+pub fn specificity(name: &str, rule: &Rule) -> u8 {
+    if name == rule.key || name == rule.id {
+        3
+    } else if name == rule.group {
+        2
+    } else if name == ALL_GROUP || (name == DEFAULT_GROUP && rule.default_enabled) {
+        1
+    } else {
+        0
+    }
 }
 
 /// A rule key or its catalog ID.
@@ -164,6 +218,32 @@ pub fn policy() -> BTreeMap<String, f64> {
             crate::analysis::nesting::LONG_CHAIN as f64,
         ),
     ])
+}
+
+/// One line per rule: ID, whether it runs by default, whether it needs
+/// `--include-tests`, and its question; groups and selection follow.
+pub fn table() -> String {
+    let rules = rules();
+    let width = rules.iter().map(|r| r.id.len()).max().unwrap_or(0);
+    let mut lines = vec![format!("{:width$}  DEFAULT  QUESTION", "RULE")];
+    for rule in &rules {
+        let default = match (rule.default_enabled, rule.requires_tests) {
+            (false, _) => "opt-in",
+            (true, true) => "tests",
+            (true, false) => "yes",
+        };
+        lines.push(format!(
+            "{:width$}  {default:7}  {}",
+            rule.id, rule.inspection
+        ));
+    }
+    lines.push(String::new());
+    lines.push(format!(
+        "Groups: {}, {DEFAULT_GROUP} (every rule marked yes or tests), {ALL_GROUP}.",
+        groups().join(", ")
+    ));
+    lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests.".into());
+    lines.join("\n")
 }
 
 pub fn describe() -> Value {

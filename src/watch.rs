@@ -41,7 +41,7 @@ fn settle(
         ));
     }
     super::changes::compare(Some(baseline), report);
-    if let Err(error) = crate::gate::settle(&session.context.root, report, &session.args.fail_on) {
+    if let Err(error) = crate::gate::settle(&session.context.root, report, session.args) {
         return Err(stop_watcher(session, report, error.to_string(), error));
     }
     report.settled = true;

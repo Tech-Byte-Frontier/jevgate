@@ -75,22 +75,38 @@ thread_local! {
     static PARSES: RefCell<ParseCache> = RefCell::new(ParseCache::default());
 }
 
-pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
-    let extension = path.extension().and_then(|x| x.to_str()).unwrap_or("");
-    let language = match extension {
+fn grammar(path: &Path) -> Option<tree_sitter::Language> {
+    let language = match extension(path) {
         "rs" => tree_sitter_rust::LANGUAGE,
         "py" => tree_sitter_python::LANGUAGE,
         "js" | "jsx" | "mjs" | "cjs" => tree_sitter_javascript::LANGUAGE,
         "ts" | "mts" | "cts" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
         "tsx" => tree_sitter_typescript::LANGUAGE_TSX,
-        _ => return Ok(None),
+        _ => return None,
     };
+    Some(language.into())
+}
+
+fn extension(path: &Path) -> &str {
+    path.extension().and_then(|x| x.to_str()).unwrap_or("")
+}
+
+/// Whether a parser supports this file's language.
+pub(crate) fn supported(path: &Path) -> bool {
+    grammar(path).is_some()
+}
+
+pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
+    let Some(language) = grammar(path) else {
+        return Ok(None);
+    };
+    let extension = extension(path);
     let key = (extension.to_owned(), crate::schema::hash(source.as_bytes()));
     if let Some(tree) = PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
         return Ok(Some(tree));
     }
     let mut parser = Parser::new();
-    parser.set_language(&language.into())?;
+    parser.set_language(&language)?;
     let tree = parser
         .parse(source, None)
         .ok_or_else(|| anyhow::anyhow!("Parser did not produce a tree"))?;

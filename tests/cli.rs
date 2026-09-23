@@ -564,7 +564,11 @@ fn watcher_debounces_updates_and_releases_lock_after_credential_failure() {
 #[test]
 fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
     let project = Project::new();
-    let output = project.command().arg("rules").output().unwrap();
+    let output = project
+        .command()
+        .args(["rules", "--format", "json"])
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let rules: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let keys: Vec<_> = rules
@@ -593,6 +597,80 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
         assert_eq!(output.status.code(), Some(2));
         assert!(!project.0.join(".jevgate").exists());
     }
+}
+
+#[test]
+fn rules_table_names_groups_and_selection_accepts_groups_and_levels() {
+    let project = Project::new();
+    let output = project.command().arg("rules").output().unwrap();
+    let table = String::from_utf8(output.stdout).unwrap();
+    assert!(table.starts_with("RULE") && table.contains("maintainability/shared-logic"));
+    assert!(table.contains("Groups: maintainability, tests"), "{table}");
+    std::fs::write(
+        project.0.join("lib.rs"),
+        JUDGED_RS.replace("total * 2", "total * 86400"),
+    )
+    .unwrap();
+    let stages = |preview: &serde_json::Value| -> Vec<String> {
+        preview["stages"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    };
+    let all = project.preview(&["check", "--dry-run", "--format", "json"]);
+    assert!(
+        stages(&all).contains(&"values".to_string()),
+        "{:?}",
+        stages(&all)
+    );
+    let preview = project.preview(&[
+        "check",
+        "--rule",
+        "maintainability",
+        "--skip-rule",
+        "hardcoded_values",
+        "--fail-on",
+        "maintainability/shared-logic=consider",
+        "--dry-run",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(stages(&preview), ["functions"]);
+    assert_eq!(preview["fail_on"], serde_json::json!(["review"]));
+    assert_eq!(
+        preview["fail_on_rules"],
+        serde_json::json!({"maintainability/shared-logic": ["consider"]})
+    );
+    for arguments in [
+        vec!["check", "--rule", "securty", "--dry-run"],
+        vec!["check", "--fail-on", "tests=sometimes", "--dry-run"],
+    ] {
+        let output = project.command().args(arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+    }
+}
+
+#[test]
+fn init_writes_a_valid_configuration_once() {
+    let project = Project::new();
+    std::fs::create_dir_all(project.0.join("src")).unwrap();
+    std::fs::write(project.0.join("src/lib.rs"), JUDGED_RS).unwrap();
+    let output = project.command().arg("init").output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("src/**"));
+    let config = std::fs::read_to_string(project.0.join("jevgate.toml")).unwrap();
+    assert!(config.contains("upload_allow = [\"src/**\"]"), "{config}");
+    project.preview(&["check", "--dry-run", "--format", "json"]);
+    let again = project.command().arg("init").output().unwrap();
+    assert_eq!(again.status.code(), Some(2), "an existing file is kept");
+    let forced = project
+        .command()
+        .args(["init", "--force"])
+        .output()
+        .unwrap();
+    assert!(forced.status.success());
 }
 
 #[test]

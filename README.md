@@ -13,6 +13,7 @@ Code review with TypeSafe Jev over small evidence units. Six rules:
 
 ```sh
 cargo install jevgate --locked
+jevgate init          # writes jevgate.toml: detected sources, rule groups
 jevgate auth login
 
 # Review a directory and open a local dashboard
@@ -25,8 +26,11 @@ jevgate check --include-tests --base origin/main --format json
 jevgate check src --dry-run --show-requests
 ```
 
-`jevgate rules` prints the rule catalog. `--rule` selects a subset. `--context`
-adds a related file as evidence for shared logic, callers and test subjects.
+`jevgate rules` lists the rules and their groups (`--format json` for the
+catalog). `--rule` and `--skip-rule` take a rule ID, key or group
+(`maintainability`, `tests`, `default`, `all`); without them the `default` group
+runs. `--context` adds a related file as evidence for shared logic, callers and
+test subjects.
 
 ## How it works
 
@@ -69,7 +73,9 @@ partial scope), the answer stands.
 ## Gate, baseline and exit codes
 
 `--fail-on review|consider|uncertain|none` (repeatable, default `review`, or
-`fail_on` in `jevgate.toml`) decides what fails the check. `consider` also fails
+`fail_on` in `jevgate.toml`) decides what fails the check; `--fail-on
+TARGET=LEVEL` sets it for one rule or group, such as `tests=consider`. The
+command line wins over the file, and a rule's own level over its group's. `consider` also fails
 on review findings. Notes never fail the gate; the agent output counts them and
 `--verbose` lists them. Exit codes: `0` pass, `1` gate failed, `2` incomplete or error.
 
@@ -87,9 +93,14 @@ upload_allow = ["src/**", "tests/**"]
 upload_deny = ["src/private/**"]
 generated = ["**/*.generated.*"]
 fail_on = ["review"]
+
+[rules]                      # level per group or rule; the rule's own entry wins
+maintainability = "review"
+tests = "consider"
+"maintainability/hardcoded-values" = "off"   # or "report": judge, never fail
 ```
 
-Unknown keys are errors; configured budgets are ceilings. In CI, restore and
+`rules = ["maintainability"]` (a list) selects rules without levels. Unknown keys are errors; configured budgets are ceilings. In CI, restore and
 save `.jevgate/cache` (and `.jevgate/latest.json` for change tracking) and inject
 `TYPESAFE_API_KEY`. Cached answers from a pinned model version do not expire;
 `jev-latest` and `jev-preview` answers expire after `--cache-ttl-secs`. An

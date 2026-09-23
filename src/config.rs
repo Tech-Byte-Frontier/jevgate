@@ -1,7 +1,13 @@
-use crate::options::CheckArgs;
-use anyhow::{Context, Result, ensure};
+use crate::{
+    catalog,
+    options::{CheckArgs, FailOn},
+};
+use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -11,7 +17,7 @@ pub struct Config {
     pub generated: Vec<String>,
     pub tests: Vec<String>,
     pub context: Vec<PathBuf>,
-    pub rules: Vec<String>,
+    pub rules: Rules,
     pub max_requests: Option<u32>,
     pub concurrency: Option<u32>,
     pub max_file_bytes: Option<u64>,
@@ -19,6 +25,54 @@ pub struct Config {
     /// Default `--fail-on` values when none are passed.
     pub fail_on: Vec<String>,
 }
+
+/// `rules = ["security"]` selects rules; a `[rules]` table sets each rule's or
+/// group's gate level, or `"off"`, on top of the default group.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum Rules {
+    List(Vec<String>),
+    Levels(BTreeMap<String, Level>),
+}
+
+impl Default for Rules {
+    fn default() -> Self {
+        Self::List(Vec::new())
+    }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Level {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Level {
+    fn names(&self) -> Vec<&str> {
+        match self {
+            Self::One(name) => vec![name],
+            Self::Many(names) => names.iter().map(String::as_str).collect(),
+        }
+    }
+
+    fn off(&self) -> bool {
+        self.names() == [OFF]
+    }
+
+    fn levels(&self, target: &str) -> Result<Vec<FailOn>> {
+        self.names()
+            .into_iter()
+            .map(|name| {
+                FailOn::parse(name).ok_or_else(|| {
+                    anyhow!("Unknown level {name:?} for {target}; use review, consider, uncertain, report or off")
+                })
+            })
+            .collect()
+    }
+}
+
+const OFF: &str = "off";
 
 pub struct ConfigContext {
     pub invocation_dir: PathBuf,
@@ -60,32 +114,90 @@ impl ConfigContext {
         self.configure_budgets(args)
     }
 
-    /// Rules from the CLI, else the configuration, else every rule; all must exist.
+    /// Rules from `--rule`, else the configuration, else the `default` group,
+    /// less `off` entries and `--skip-rule`. Every name must exist.
     fn configure_rules(&self, args: &mut CheckArgs) -> Result<()> {
-        if args.rules.is_empty() {
-            args.rules = self.config.rules.clone();
+        let mut enabled = BTreeSet::new();
+        if !args.rules.is_empty() {
+            enabled.extend(expand(&args.rules)?);
+        } else {
+            match &self.config.rules {
+                Rules::List(names) if !names.is_empty() => enabled.extend(expand(names)?),
+                Rules::List(_) => enabled.extend(expand(&[catalog::DEFAULT_GROUP.into()])?),
+                Rules::Levels(levels) => {
+                    enabled.extend(expand(&[catalog::DEFAULT_GROUP.into()])?);
+                    for rule in catalog::rules() {
+                        match most_specific(levels, &rule) {
+                            Some(level) if level.off() => enabled.remove(rule.key),
+                            Some(_) => enabled.insert(rule.key),
+                            None => false,
+                        };
+                    }
+                }
+            }
         }
-        if args.rules.is_empty() {
-            args.rules = crate::catalog::keys().into_iter().map(Into::into).collect();
+        for skipped in expand(&args.skip_rules)? {
+            enabled.remove(skipped);
         }
-        for rule in &args.rules {
-            ensure!(crate::catalog::find(rule).is_some(), "Unknown rule: {rule}");
-        }
+        args.rules = catalog::keys()
+            .into_iter()
+            .filter(|key| enabled.contains(key))
+            .map(Into::into)
+            .collect();
         Ok(())
     }
 
-    /// Gate levels from the CLI, else the configuration, else `review`.
+    /// Each enabled rule's gate levels. The command line wins over the file;
+    /// within each, a rule's own entry wins over its group's, then over the
+    /// levels for every rule, then `review`.
     fn configure_gate(&self, args: &mut CheckArgs) -> Result<()> {
-        if args.fail_on.is_empty() {
-            for name in &self.config.fail_on {
-                args.fail_on.push(
-                    <crate::options::FailOn as clap::ValueEnum>::from_str(name, true)
-                        .map_err(|_| anyhow::anyhow!("Unknown fail_on value: {name}"))?,
-                );
+        let mut cli_global = Vec::new();
+        let mut cli_targets = BTreeMap::<String, Vec<FailOn>>::new();
+        for spec in &args.fail_on_specs {
+            match &spec.target {
+                Some(target) => {
+                    expand(std::slice::from_ref(target))?;
+                    cli_targets
+                        .entry(target.clone())
+                        .or_default()
+                        .push(spec.level);
+                }
+                None => cli_global.push(spec.level),
             }
         }
-        if args.fail_on.is_empty() {
-            args.fail_on.push(crate::options::FailOn::Review);
+        let mut file_global = Vec::new();
+        for name in &self.config.fail_on {
+            file_global
+                .push(FailOn::parse(name).ok_or_else(|| anyhow!("Unknown fail_on value: {name}"))?);
+        }
+        let mut file_targets = BTreeMap::new();
+        if let Rules::Levels(levels) = &self.config.rules {
+            for (target, level) in levels {
+                expand(std::slice::from_ref(target))?;
+                if !level.off() {
+                    file_targets.insert(target.clone(), level.levels(target)?);
+                }
+            }
+        }
+        let fallback = [&cli_global, &file_global]
+            .into_iter()
+            .find(|levels| !levels.is_empty())
+            .cloned()
+            .unwrap_or_else(|| vec![FailOn::Review]);
+        args.fail_on = fallback.clone();
+        args.rule_fail_on.clear();
+        for rule in catalog::rules() {
+            if !args.rules.iter().any(|r| r == rule.key) {
+                continue;
+            }
+            let levels = most_specific(&cli_targets, &rule)
+                .cloned()
+                .or_else(|| (!cli_global.is_empty()).then(|| cli_global.clone()))
+                .or_else(|| most_specific(&file_targets, &rule).cloned())
+                .unwrap_or_else(|| fallback.clone());
+            if levels != fallback {
+                args.rule_fail_on.insert(rule.key.into(), levels);
+            }
         }
         Ok(())
     }
@@ -117,6 +229,33 @@ impl ConfigContext {
     }
 }
 
+/// Rule keys named by rule IDs, keys or groups; an unknown name is an error.
+fn expand(names: &[String]) -> Result<Vec<&'static str>> {
+    let mut keys = Vec::new();
+    for name in names {
+        let selected = catalog::select(name).ok_or_else(|| {
+            anyhow!(
+                "Unknown rule or group: {name} (groups: {}, {}, {})",
+                catalog::groups().join(", "),
+                catalog::DEFAULT_GROUP,
+                catalog::ALL_GROUP
+            )
+        })?;
+        keys.extend(selected);
+    }
+    Ok(keys)
+}
+
+/// The entry that addresses `rule` most specifically: its ID or key, its
+/// group, then `default` or `all`.
+fn most_specific<'a, T>(entries: &'a BTreeMap<String, T>, rule: &catalog::Rule) -> Option<&'a T> {
+    entries
+        .iter()
+        .filter(|(name, _)| catalog::specificity(name, rule) > 0)
+        .max_by_key(|(name, _)| catalog::specificity(name, rule))
+        .map(|(_, value)| value)
+}
+
 pub fn repository_root(invocation_dir: &Path) -> PathBuf {
     invocation_dir
         .ancestors()
@@ -127,4 +266,95 @@ pub fn repository_root(invocation_dir: &Path) -> PathBuf {
         })
         .unwrap_or(invocation_dir)
         .to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::options::FailOnSpec;
+
+    fn configured(
+        toml_text: &str,
+        rules: &[&str],
+        specs: &[(Option<&str>, FailOn)],
+    ) -> Result<CheckArgs> {
+        let context = ConfigContext {
+            invocation_dir: PathBuf::from("."),
+            root: PathBuf::from("."),
+            config: toml::from_str(toml_text)?,
+        };
+        let mut args = crate::tests::args();
+        args.rules = rules.iter().map(|r| r.to_string()).collect();
+        args.fail_on.clear();
+        args.fail_on_specs = specs
+            .iter()
+            .map(|(target, level)| FailOnSpec {
+                target: target.map(Into::into),
+                level: *level,
+            })
+            .collect();
+        context.configure(&mut args)?;
+        Ok(args)
+    }
+
+    #[test]
+    fn default_group_runs_when_nothing_is_configured() {
+        let args = configured("", &[], &[]).unwrap();
+        assert_eq!(args.rules, catalog::select(catalog::DEFAULT_GROUP).unwrap());
+        assert_eq!(args.fail_on, [FailOn::Review]);
+        assert!(args.rule_fail_on.is_empty());
+    }
+
+    #[test]
+    fn a_rule_entry_wins_over_its_group_and_off_disables_it() {
+        let args = configured(
+            r#"
+            fail_on = ["consider"]
+            [rules]
+            maintainability = "review"
+            "maintainability/hardcoded-values" = "off"
+            tests = "report"
+            test_value = ["review", "uncertain"]
+            "#,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(!args.rules.iter().any(|r| r == catalog::HARDCODED_VALUES));
+        assert_eq!(args.fail_on, [FailOn::Consider]);
+        assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Review]);
+        assert_eq!(args.levels(catalog::TEST_REDUNDANCY), [FailOn::None]);
+        assert_eq!(
+            args.levels("tests/value"),
+            [FailOn::Review, FailOn::Uncertain]
+        );
+    }
+
+    #[test]
+    fn the_command_line_wins_over_the_file_and_targets_win_over_every_rule() {
+        let file = "[rules]\nmaintainability = \"review\"\ntests = \"report\"\n";
+        let args = configured(
+            file,
+            &[],
+            &[
+                (None, FailOn::Consider),
+                (Some("tests/value"), FailOn::Uncertain),
+            ],
+        )
+        .unwrap();
+        assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Consider]);
+        assert_eq!(args.levels(catalog::TEST_REDUNDANCY), [FailOn::Consider]);
+        assert_eq!(args.levels(catalog::TEST_VALUE), [FailOn::Uncertain]);
+    }
+
+    #[test]
+    fn rule_lists_and_cli_rules_accept_groups_and_reject_unknown_names() {
+        let args = configured("rules = [\"tests\"]", &[], &[]).unwrap();
+        assert_eq!(args.rules, [catalog::TEST_VALUE, catalog::TEST_REDUNDANCY]);
+        let args = configured("rules = [\"tests\"]", &["shared_logic"], &[]).unwrap();
+        assert_eq!(args.rules, [catalog::SHARED_LOGIC]);
+        assert!(configured("", &["securty"], &[]).is_err());
+        assert!(configured("[rules]\nmaintainability = \"sometimes\"\n", &[], &[]).is_err());
+        assert!(configured("[rules]\nnothing = \"review\"\n", &[], &[]).is_err());
+    }
 }

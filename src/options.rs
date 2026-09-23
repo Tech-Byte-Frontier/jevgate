@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand, ValueEnum};
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 #[derive(Subcommand)]
 pub enum JevCommand {
@@ -12,13 +12,28 @@ pub enum JevCommand {
     Check(Box<CheckArgs>),
     /// Accept the findings of the last complete check in jevgate-baseline.json (no API calls)
     Baseline,
-    /// Print the versioned rule catalog as JSON
-    Rules,
+    /// List the rules and their groups (JSON with --format json)
+    Rules {
+        #[arg(long, value_enum, default_value_t = RulesFormat::Table)]
+        format: RulesFormat,
+    },
+    /// Write a commented jevgate.toml for this repository (no API calls)
+    Init {
+        /// Replace an existing jevgate.toml
+        #[arg(long)]
+        force: bool,
+    },
     /// Serve read-only snapshots on localhost (run alongside check --watch)
     Serve {
         #[arg(long, default_value_t = 47831)]
         port: u16,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum RulesFormat {
+    Table,
+    Json,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
@@ -46,6 +61,33 @@ impl FailOn {
             Self::None => "none",
         }
     }
+
+    /// A gate level by name; `report` (judge, never fail) is `none`.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "report" => Some(Self::None),
+            _ => <Self as ValueEnum>::from_str(name, true).ok(),
+        }
+    }
+}
+
+/// A `--fail-on` value: a level for every rule, or `TARGET=LEVEL` for a rule
+/// ID, key or group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailOnSpec {
+    pub target: Option<String>,
+    pub level: FailOn,
+}
+
+fn fail_on_spec(value: &str) -> Result<FailOnSpec, String> {
+    let (target, level) = match value.split_once('=') {
+        Some((target, level)) => (Some(target.trim().to_string()), level.trim()),
+        None => (None, value.trim()),
+    };
+    let level = FailOn::parse(level).ok_or_else(|| {
+        format!("Unknown level {level:?}; use review, consider, uncertain or none")
+    })?;
+    Ok(FailOnSpec { target, level })
 }
 
 #[derive(Args, Debug)]
@@ -55,9 +97,16 @@ pub struct CheckArgs {
     /// Also judge tests: test value, redundancy, shared logic and support functions
     #[arg(long)]
     pub include_tests: bool,
-    /// Fail on these results (repeatable): review, consider, uncertain or none [default: review]
-    #[arg(long = "fail-on", value_enum)]
+    /// Fail on these results (repeatable): review, consider, uncertain or none, for
+    /// every rule or as TARGET=LEVEL for a rule or group (security=consider) [default: review]
+    #[arg(long = "fail-on", value_parser = fail_on_spec)]
+    pub fail_on_specs: Vec<FailOnSpec>,
+    /// The resolved levels for rules without their own: from --fail-on, else configuration.
+    #[arg(skip)]
     pub fail_on: Vec<FailOn>,
+    /// Resolved levels of each enabled rule key that differ from `fail_on`.
+    #[arg(skip)]
+    pub rule_fail_on: BTreeMap<String, Vec<FailOn>>,
     /// Show per-file detail in agent output
     #[arg(long)]
     pub verbose: bool,
@@ -123,9 +172,13 @@ pub struct CheckArgs {
     /// Poll interval for watch mode
     #[arg(long, default_value_t = 250, value_parser = clap::value_parser!(u64).range(50..=60000))]
     pub poll_ms: u64,
-    /// Enable a rule ID or catalog key (repeatable); defaults to every rule. Test rules need --include-tests
+    /// Enable a rule ID, key or group (repeatable), such as `security`; defaults to
+    /// the `default` group. Test rules need --include-tests
     #[arg(long = "rule")]
     pub rules: Vec<String>,
+    /// Disable a rule ID, key or group (repeatable)
+    #[arg(long = "skip-rule")]
+    pub skip_rules: Vec<String>,
 }
 
 /// Upper bound on simultaneous requests; rate-limit retries share one cooldown.
@@ -136,6 +189,10 @@ pub const MAX_CONCURRENCY: u32 = 8;
 /// `--max-file-bytes` can only narrow it.
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 262_144;
 
+fn names(levels: &[FailOn]) -> Vec<String> {
+    levels.iter().map(|f| f.name().to_string()).collect()
+}
+
 fn source_extension(value: &str) -> Result<String, String> {
     if value.is_empty() || !value.bytes().all(|c| c.is_ascii_alphanumeric()) {
         return Err("Use an extension without a dot, for example: --source-extension zig".into());
@@ -145,7 +202,22 @@ fn source_extension(value: &str) -> Result<String, String> {
 
 impl CheckArgs {
     pub fn fail_on_names(&self) -> Vec<String> {
-        self.fail_on.iter().map(|f| f.name().to_string()).collect()
+        names(&self.fail_on)
+    }
+
+    /// Levels that differ from `fail_on`, by rule ID, for the report.
+    pub fn rule_fail_on_names(&self) -> BTreeMap<String, Vec<String>> {
+        self.rule_fail_on
+            .iter()
+            .map(|(key, levels)| (crate::catalog::id(key).to_string(), names(levels)))
+            .collect()
+    }
+
+    /// The gate levels of a rule, by ID or key.
+    pub fn levels(&self, rule: &str) -> &[FailOn] {
+        crate::catalog::find(rule)
+            .and_then(|r| self.rule_fail_on.get(r.key))
+            .unwrap_or(&self.fail_on)
     }
 
     pub fn output_format(&self) -> Format {
