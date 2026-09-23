@@ -43,6 +43,21 @@ Consider (2):
 | Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients |
 | Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly` |
 
+**Documentation** (opt-in with `--rule documentation`)
+
+| Rule | Example finding |
+|---|---|
+| Agent context | A section of `CLAUDE.md` only lists the scripts `package.json` already shows, and six harnesses load it at the start of every session. |
+
+It reads the instruction files that coding agents load: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and Claude, Cursor, Copilot, Windsurf and Cline rules. These files are read even when hidden or gitignored. Each heading section, or each paragraph and list item of a long section, is asked four things:
+
+- does it only describe the stack, dependencies or layout?
+- does it only list commands the manifests show?
+- is it generic advice, a record of past work, or a style rule a configured linter already checks?
+- is it text loaded in every session that applies to one directory?
+
+Findings are at most `consider`. The run also estimates the tokens each harness loads at session start and lists loading facts, such as identical copies, imports that do not resolve, or an `AGENTS.md` that Claude Code skips. These facts are evidence and never fail the gate.
+
 `jevgate rules` prints every rule with its question and default.
 
 ## Quick start
@@ -60,6 +75,7 @@ More ways to run it:
 
 ```sh
 jevgate check --rule default --rule security          # add the security group
+jevgate check --rule documentation                    # only the agent instruction files
 jevgate check --base origin/main --format json        # changed files only, for CI and agents
 jevgate check --include-tests                         # also judge tests
 jevgate check --watch                                 # re-check on save
@@ -89,7 +105,7 @@ security = "consider"                    # opt-in group
 "maintainability/hardcoded-values" = "report"   # judge but never fail; "off" skips it
 ```
 
-- **Groups:** `maintainability`, `tests`, `security`, `default` and `all`. They work with `--rule`, `--skip-rule` and `--fail-on`, and anywhere a rule ID does.
+- **Groups:** `maintainability`, `tests`, `security`, `documentation`, `default` and `all`. They work with `--rule`, `--skip-rule` and `--fail-on`, and anywhere a rule ID does.
 - **Precedence:** the command line wins over the file, and a rule's own entry wins over its group's.
 - **Validation:** unknown keys are errors, and budgets in the file are ceilings that flags can only lower.
 
@@ -110,6 +126,7 @@ In CI, inject `TYPESAFE_API_KEY`, and restore and save `.jevgate/cache` (plus `.
 ## Privacy and cost
 
 - **What is uploaded:** only the selected units of source leave your machine, and `upload_allow`/`upload_deny` bound them. `--dry-run --show-requests` prints every request body without credentials or network access.
+- **Instruction files:** they are uploaded only when a documentation rule is selected, and `upload_allow`/`upload_deny` still apply to them.
 - **Cost:** every run prints its input tokens and an estimated cost, and cached answers cost nothing.
 - **Secrets:** they are deliberately out of scope. Use a local secret scanner, because judging secrets would mean uploading them.
 
@@ -117,6 +134,7 @@ In CI, inject `TYPESAFE_API_KEY`, and restore and save `.jevgate/cache` (plus `.
 
 - **Languages:** Rust, Python, JavaScript and TypeScript are supported. Other files are listed as skipped, with the reason.
 - **Security scope:** security rules look at one function plus at most one hop of callers. They are not whole-program data-flow analysis, and they don't cover SQL files, row-level policies or access control.
+- **Documentation scope:** the documentation rules judge agent instruction files one section at a time. Duplication across files, staleness against the code, and code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
 
 ## Contributing

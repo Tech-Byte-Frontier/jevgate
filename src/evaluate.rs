@@ -55,6 +55,13 @@ pub fn snapshot(
     // hidden behind a reused report.
     let files = inputs.iter().map(|input| input.result.clone()).collect();
     let mut report = empty_report(args, &current, files);
+    if args.documentation() {
+        report.context_load = inputs
+            .iter()
+            .find_map(|i| i.repository.as_ref())
+            .map(|r| r.load.clone())
+            .or_else(|| crate::docs::scan(current.root).ok().map(|r| r.load));
+    }
     if let Some(base) = &args.base {
         match crate::revision::Changes::load(current.root, base) {
             Ok(changes) => {
@@ -105,6 +112,7 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         fail_on: args.fail_on_names(),
         fail_on_rules: args.rule_fail_on_names(),
         gate: None,
+        context_load: None,
     }
 }
 

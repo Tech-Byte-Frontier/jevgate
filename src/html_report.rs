@@ -50,7 +50,8 @@ pub fn render(report: &Report) -> Result<String> {
         "refresh":report.watcher_pid.is_some(),"model":report.requested_model,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
         "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
-        "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules});
+        "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules,
+        "context_load":report.context_load});
     // Even a filename or analyzer message may contain </script>. Never let data
     // terminate the JSON element, and insert all displayed strings with textContent.
     let data = serde_json::to_string(&data)?

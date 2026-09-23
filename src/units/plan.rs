@@ -7,11 +7,13 @@ pub(super) struct Scope<'a> {
     views: &'a BTreeMap<usize, View>,
     units: BTreeMap<usize, FileUnits>,
     context: Vec<(PathBuf, &'a str, FileUnits)>,
+    /// Agent instruction files, judged by the documentation rules only.
+    documents: Vec<usize>,
 }
 
 use super::{
-    FileContext, FilePlan, Plan, Planned, duplicates, functions, hardcoded, outline, security,
-    test_units,
+    FileContext, FilePlan, Plan, Planned, duplicates, functions, hardcoded, instructions, outline,
+    security, test_units,
 };
 use crate::{
     analysis::{
@@ -76,7 +78,40 @@ pub fn plan(
         let file = plan_file(&scope, &shared, owner, args, budget, &mut result.requests);
         result.files.insert(owner, file);
     }
+    for &owner in &scope.documents {
+        let file = plan_document(&inputs[owner], owner, args, budget, &mut result.requests);
+        result.files.insert(owner, file);
+    }
     result
+}
+
+/// The documentation rules for one agent instruction file.
+fn plan_document(
+    input: &Input,
+    owner: usize,
+    args: &CheckArgs,
+    budget: &TokenBudget,
+    requests: &mut Vec<Planned>,
+) -> FilePlan {
+    let mut file = FilePlan {
+        path: input.result.path.clone(),
+        ..Default::default()
+    };
+    let context = FileContext {
+        owner,
+        path: &input.result.path,
+        language: "Markdown",
+        source: input.source.as_deref().unwrap_or(""),
+        source_hash: &input.result.source_hash,
+        model: &args.model,
+        budget,
+    };
+    if let Some(repository) = &input.repository
+        && args.enabled(catalog::AGENT_CONTEXT)
+    {
+        instructions::plan(&context, repository, &mut file, requests);
+    }
+    file
 }
 
 /// Parse every selected file and the explicit context. Files without a parser
@@ -92,9 +127,14 @@ fn parsed_scope<'a>(
         views,
         units: BTreeMap::new(),
         context: Vec::new(),
+        documents: Vec::new(),
     };
     for (&owner, view) in views {
         let input = &inputs[owner];
+        if view.classification.kind == crate::file_kind::INSTRUCTIONS {
+            scope.documents.push(owner);
+            continue;
+        }
         let source = input.source.as_deref().unwrap_or("");
         match parsed::parse(&input.result.path, source) {
             Ok(units) if units.parsed => {

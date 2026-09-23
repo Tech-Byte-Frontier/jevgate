@@ -1,7 +1,9 @@
 //! The message and recommended action of each kind of finding.
 use super::{
     Block, Detail, GroupInfo,
-    outcome::{Answers, Outcome, benefit, levels, noul, origin_outcome, value_signals},
+    outcome::{
+        Answers, Outcome, benefit, levels, noul, origin_outcome, section_signals, value_signals,
+    },
 };
 use crate::catalog;
 use crate::schema::{Answer, Strength};
@@ -213,6 +215,12 @@ pub(super) fn question_label(question: &str) -> &str {
         "own_logic" => "recomputed expected value",
         "mock_only" => "checks only its mocks",
         "overlap" => "overlapping tests",
+        "inferable" => "restates the repository",
+        "describes" => "description only",
+        "commands" => "commands the manifests show",
+        "generic" => "generic advice",
+        "history" => "past work",
+        "enforced" => "rule linters check",
         other => other,
     }
 }
@@ -301,6 +309,117 @@ pub(super) fn values_wording(
             (Strength::Note, _) => "Optional: name or configure the value if it changes",
             (_, Some((signal, _))) => signal.action,
             (_, None) => "Review the values",
+        },
+    )
+}
+
+/// One instruction-section question and its words.
+struct SectionSignal {
+    question: &'static str,
+    finding: &'static str,
+    note: &'static str,
+    action: &'static str,
+}
+
+const SECTION_SIGNALS: [SectionSignal; 7] = [
+    SectionSignal {
+        question: "inferable",
+        finding: "restates what the repository's files show",
+        note: "partly restates what the repository's files show",
+        action: "Remove what agents learn from the code; keep project-specific instructions",
+    },
+    SectionSignal {
+        question: "describes",
+        finding: "only describes the project, which agents read from its files",
+        note: "only describes the project, which agents read from its files",
+        action: "Remove the description; keep instructions agents cannot infer",
+    },
+    SectionSignal {
+        question: "commands",
+        finding: "only lists commands the manifests already show",
+        note: "only lists commands the manifests already show",
+        action: "Remove the command list, or keep only when each command must run",
+    },
+    SectionSignal {
+        question: "generic",
+        finding: "gives only advice that applies to any project",
+        note: "gives only advice that applies to any project",
+        action: "Remove the generic advice",
+    },
+    SectionSignal {
+        question: "history",
+        finding: "records past work instead of instructions",
+        note: "records past work instead of instructions",
+        action: "Move the record out of the instructions, into notes or commit history",
+    },
+    SectionSignal {
+        question: "enforced",
+        finding: "asks for rules the configured linters already check",
+        note: "asks for rules the configured linters already check",
+        action: "Remove the rules the linters enforce",
+    },
+    SectionSignal {
+        question: "scope",
+        finding: "applies to one directory but loads in every session",
+        note: "applies to one directory but loads in every session",
+        action: "Optional: move it to instructions that load only for that directory",
+    },
+];
+
+/// Each instruction-section signal that reached this strength, with the
+/// harnesses that load the section and its estimated size.
+pub(super) fn section_wording(
+    name: &str,
+    detail: &Detail,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> Wording {
+    let get = |q: &str| answers.get(q).copied();
+    let reached: Vec<&SectionSignal> = section_signals(&get)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, outcome)| {
+            matches!(
+                (strength, outcome),
+                (Strength::Consider, Outcome::Consider(_)) | (Strength::Note, Outcome::Note(_))
+            )
+        })
+        .filter_map(|(question, _)| SECTION_SIGNALS.iter().find(|s| s.question == question))
+        .collect();
+    let directory = super::outcome::choice(get("scope")).map(|(dir, _)| dir);
+    let reasons: Vec<String> = reached
+        .iter()
+        .map(|signal| match (signal.question, directory) {
+            ("scope", Some(dir)) => {
+                format!("applies only to work in `{dir}` but loads in every session")
+            }
+            _ if strength == Strength::Note => signal.note.to_string(),
+            _ => signal.finding.to_string(),
+        })
+        .collect();
+    // A block of a long section is named "heading, line N".
+    let subject = match name.split_once(", line ") {
+        Some((heading, line)) if heading == super::instructions::PREAMBLE => {
+            format!("The text at line {line}, before the first heading,")
+        }
+        Some((heading, line)) => format!("Section `{heading}` at line {line}"),
+        None if name == super::instructions::PREAMBLE => format!("The {name}"),
+        None => format!("Section `{name}`"),
+    };
+    let load = match detail {
+        Detail::Section { tokens, loaded } if !loaded.is_empty() => {
+            format!(" {loaded} (about {tokens} tokens).")
+        }
+        _ => String::new(),
+    };
+    (
+        format!("{subject} {} ({p:.2}).{load}", reasons.join("; ")),
+        match (strength, reached.first()) {
+            (Strength::Note, Some(signal)) if signal.question == "scope" => signal.action,
+            (Strength::Note, _) => "Optional: trim what agents learn from the code",
+            (_, Some(signal)) => signal.action,
+            (_, None) => "Review the section",
         },
     )
 }

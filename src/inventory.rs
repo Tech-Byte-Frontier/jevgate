@@ -11,6 +11,8 @@ pub struct Input {
     pub result: FileResult,
     pub source: Option<String>,
     pub context: Vec<super::context::ContextInput>,
+    /// For an agent instruction file, the repository's documentation evidence.
+    pub repository: Option<std::sync::Arc<crate::docs::Repository>>,
 }
 
 pub fn scope(args: &CheckArgs, context: &ConfigContext) -> Result<Vec<PathBuf>> {
@@ -55,7 +57,9 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
     let classifier = discovery::Classifier::new(&context.config)?;
     let boundary = Boundary::new(&context.config)?;
     let mut paths = Vec::new();
-    for entry in walker(&context.root) {
+    // Only the documentation rules selected: source files are not collected.
+    let code = args.code_rules().then(|| walker(&context.root));
+    for entry in code.into_iter().flatten() {
         let entry = entry.context("Failed while discovering Jev scope")?;
         let path = entry.path();
         if !entry.file_type().is_some_and(|t| t.is_file())
@@ -75,12 +79,65 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
         }
     }
     paths.sort_by(|a, b| a.0.cmp(&b.0));
-    let inputs: Vec<Input> = paths
+    let mut inputs: Vec<Input> = paths
         .into_iter()
         .map(|file| load(file, args, context, &extra))
         .collect::<Result<_>>()?;
+    if args.documentation() {
+        let repository = std::sync::Arc::new(crate::docs::scan(&context.root)?);
+        for relative in repository.readers.keys() {
+            let path = context.root.join(relative);
+            let selected = (scope.is_empty() || scope.iter().any(|s| path.starts_with(s)))
+                && changes
+                    .as_ref()
+                    .is_none_or(|c| c.paths.contains_key(relative))
+                && repository.judged(relative)
+                && !inputs.iter().any(|i| i.result.path == *relative);
+            if selected && !boundary.permits(relative) {
+                // Named, so an allow list that leaves them out is visible.
+                let mut result = pending_result(relative, INSTRUCTIONS, args, &[]);
+                result.status = Status::Skipped;
+                result.error = Some(
+                    "Agent instruction file outside upload_allow/upload_deny; not judged.".into(),
+                );
+                inputs.push(bare_input(result));
+            } else if selected {
+                let mut input = load_instructions(relative, args, &path)?;
+                input.repository = Some(repository.clone());
+                inputs.push(input);
+            }
+        }
+    }
     Ok(inputs)
 }
+
+/// An agent instruction file, read whole; hidden and ignored paths are allowed.
+fn load_instructions(
+    relative: &std::path::Path,
+    args: &CheckArgs,
+    path: &std::path::Path,
+) -> Result<Input> {
+    let mut result = pending_result(relative, INSTRUCTIONS, args, &[]);
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
+        return over_read_cap(result, relative, path, args.max_file_bytes);
+    }
+    Ok(match read_source(path, args.max_file_bytes) {
+        Ok(source) => {
+            result.source_hash = hash(source.as_bytes());
+            result.content_identity = result.source_hash.clone();
+            Input {
+                result,
+                source: Some(source),
+                context: Vec::new(),
+                repository: None,
+            }
+        }
+        Err(error) => error_input(result, error),
+    })
+}
+
+/// The role of an agent instruction file.
+pub const INSTRUCTIONS: &str = "instructions";
 
 fn load(
     (path, role): (PathBuf, String),
@@ -122,6 +179,7 @@ fn load(
                     .filter(|i| i.file.path != relative)
                     .cloned()
                     .collect(),
+                repository: None,
             })
         }
         // Binary and non-UTF-8 files are reported and skipped; they never make a run incomplete.
@@ -204,6 +262,7 @@ fn bare_input(result: FileResult) -> Input {
         result,
         source: None,
         context: Vec::new(),
+        repository: None,
     }
 }
 

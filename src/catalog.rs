@@ -30,6 +30,8 @@ pub const UNSAFE_SETTINGS: &str = "unsafe_settings";
 pub const SECURITY: [&str; 3] = [INJECTION, SENSITIVE_DATA, UNSAFE_SETTINGS];
 pub const TEST_VALUE: &str = "test_value";
 pub const TEST_REDUNDANCY: &str = "test_redundancy";
+pub const AGENT_CONTEXT: &str = "agent_context";
+pub const DOCUMENTATION: [&str; 1] = [AGENT_CONTEXT];
 
 const DATASET: &str = "focused development set; not calibrated";
 
@@ -158,6 +160,20 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Do the two tests check the same behavior, with different or equivalent inputs?",
             acceptable_example: "Tests of different behaviors of one function",
             requires_tests: true,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "documentation/agent-context",
+            group: "documentation",
+            default_enabled: false,
+            key: AGENT_CONTEXT,
+            version: rule_version(AGENT_CONTEXT),
+            scope: "agent instruction files that a harness loads: AGENTS.md, CLAUDE.md, GEMINI.md, and Claude, Cursor, Copilot, Windsurf and Cline rules",
+            unit: "one file's heading sections, with the repository's manifests, linters and directories",
+            inspection: "Does a section restate what the repository's files show, give generic advice, repeat what linters check, or record past work?",
+            acceptable_example: "Project-specific commands, constraints, decisions and workflows the code does not show",
+            requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,
         },
