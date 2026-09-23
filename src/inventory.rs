@@ -31,7 +31,7 @@ pub fn scope(args: &CheckArgs, context: &ConfigContext) -> Result<Vec<PathBuf>> 
 }
 
 /// Files under `root`, honoring ignore files and skipping dependency and build directories.
-fn walker(root: &std::path::Path) -> ignore::Walk {
+pub(crate) fn walker(root: &std::path::Path) -> ignore::Walk {
     ignore::WalkBuilder::new(root)
         .standard_filters(true)
         .parents(false)

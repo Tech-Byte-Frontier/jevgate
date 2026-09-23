@@ -1,7 +1,7 @@
 //! The configurable quality gate: which results fail a check, and a baseline
 //! of accepted findings. Classification never depends on this policy.
 use crate::{
-    options::FailOn,
+    options::{CheckArgs, FailOn},
     schema::{Finding, Report, Status, Strength},
 };
 use anyhow::{Context, Result, ensure};
@@ -43,7 +43,7 @@ pub fn exit_code(report: &Report) -> u8 {
     }
 }
 
-pub fn evaluate(report: &mut Report, fail_on: &[FailOn]) {
+pub fn evaluate(report: &mut Report, args: &CheckArgs) {
     // Notes are optional improvements; no gate counts them.
     let findings = report
         .files
@@ -52,7 +52,7 @@ pub fn evaluate(report: &mut Report, fail_on: &[FailOn]) {
         .filter(|f| f.strength != Strength::Note);
     let baselined = findings.clone().filter(|f| f.baselined).count();
     let new: Vec<_> = findings.filter(|f| !f.baselined).collect();
-    let reasons = failures(report, &new, fail_on);
+    let reasons = failures(report, &new, args);
     report.gate = report.complete.then_some(Gate {
         passed: reasons.is_empty(),
         reasons,
@@ -61,46 +61,55 @@ pub fn evaluate(report: &mut Report, fail_on: &[FailOn]) {
     });
 }
 
-/// Why the gate fails: new findings at a configured level, or undecided files.
-fn failures(report: &Report, new: &[&Finding], fail_on: &[FailOn]) -> Vec<String> {
+/// Why the gate fails: new findings at their rule's level, or undecided
+/// results of a rule whose level includes `uncertain`.
+fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> {
     let mut reasons = Vec::new();
-    let review = new
+    // Consider is the lower bar, so it also fails on review findings.
+    let fails = |finding: &&&Finding| {
+        let levels = args.levels(&finding.rule);
+        levels.contains(&FailOn::Consider)
+            || (finding.strength == Strength::Review && levels.contains(&FailOn::Review))
+    };
+    let failing: Vec<&&Finding> = new.iter().filter(fails).collect();
+    let review = failing
         .iter()
         .filter(|f| f.strength == Strength::Review)
         .count();
-    let consider = new.len() - review;
-    // Consider is the lower bar, so it also fails on review findings.
-    let consider_bar = fail_on.contains(&FailOn::Consider);
-    if (consider_bar || fail_on.contains(&FailOn::Review)) && review > 0 {
+    let consider = failing.len() - review;
+    if review > 0 {
         reasons.push(format!("{review} new review finding(s)"));
     }
-    if consider_bar && consider > 0 {
+    if consider > 0 {
         reasons.push(format!("{consider} new consider finding(s)"));
     }
-    if fail_on.contains(&FailOn::Uncertain) {
-        let undecided = report
-            .files
-            .iter()
-            .filter(|f| {
-                f.dimensions
-                    .values()
-                    .any(|d| matches!(d.status, Status::Uncertain | Status::NeedsContext))
-                    || f.status == Status::NeedsContext
-            })
-            .count();
-        if undecided > 0 {
-            reasons.push(format!(
-                "{undecided} file(s) with uncertain or needs-context results"
-            ));
-        }
+    let uncertain = |rule: &str| args.levels(rule).contains(&FailOn::Uncertain);
+    let any_uncertain = args.fail_on.contains(&FailOn::Uncertain)
+        || args
+            .rule_fail_on
+            .values()
+            .any(|levels| levels.contains(&FailOn::Uncertain));
+    let undecided = report
+        .files
+        .iter()
+        .filter(|f| {
+            f.dimensions.iter().any(|(rule, d)| {
+                uncertain(rule) && matches!(d.status, Status::Uncertain | Status::NeedsContext)
+            }) || (any_uncertain && f.status == Status::NeedsContext)
+        })
+        .count();
+    if undecided > 0 {
+        reasons.push(format!(
+            "{undecided} file(s) with uncertain or needs-context results"
+        ));
     }
     reasons
 }
 
 /// Apply the baseline and the gate policy to a settled report.
-pub fn settle(root: &Path, report: &mut Report, fail_on: &[FailOn]) -> Result<()> {
+pub fn settle(root: &Path, report: &mut Report, args: &CheckArgs) -> Result<()> {
     apply_baseline(root, report)?;
-    evaluate(report, fail_on);
+    evaluate(report, args);
     Ok(())
 }
 

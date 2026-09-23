@@ -255,6 +255,9 @@ pub struct Report {
     /// The configured gate policy; classification does not depend on it.
     #[serde(default)]
     pub fail_on: Vec<String>,
+    /// Rules whose gate levels differ from `fail_on`, by rule ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fail_on_rules: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<crate::gate::Gate>,
     pub api_requests: u32,
