@@ -27,6 +27,8 @@ struct State {
     tables: BTreeMap<String, Statement>,
     row_security: BTreeMap<String, bool>,
     grants: Vec<(usize, Statement, Option<String>)>,
+    /// Grants and revokes of EXECUTE, by function.
+    execute: BTreeMap<String, Vec<Statement>>,
 }
 
 /// The directory a file's migrations belong to: above its last `supabase`
@@ -97,7 +99,7 @@ pub(super) fn plan(
         }
         for (name, (owner, statement, definer)) in &state.functions {
             if *definer {
-                push(*owner, definer_unit(name, statement));
+                push(*owner, definer_unit(&state, name, statement));
             }
         }
         for (owner, statement, target) in &state.grants {
@@ -138,6 +140,13 @@ fn final_state(members: &[(usize, &Input)]) -> State {
                     let target = target.map(|t| short(&t).to_string());
                     state.grants.push((owner, statement, target));
                 }
+                Kind::Execute { function } => {
+                    state
+                        .execute
+                        .entry(short(&function).into())
+                        .or_default()
+                        .push(statement);
+                }
                 Kind::Other => {}
             }
         }
@@ -166,10 +175,20 @@ fn policy_unit(state: &State, table: &str, name: &str, statement: &Statement) ->
             before.is_none_or(|c| !(c.is_alphanumeric() || c == '_')) && after.starts_with('(')
         })
     };
+    // A claim read from the token is only as trustworthy as what sets it,
+    // such as a custom access token hook that writes `claims`.
+    let claims = sql::jwt_claims(&statement.source);
+    let sets_claim = |source: &str| {
+        let text = source.to_lowercase();
+        text.contains("claims")
+            && claims
+                .iter()
+                .any(|c| text.contains(&format!("'{c}'")) || text.contains(&format!("'{{{c}}}'")))
+    };
     let functions: Vec<Value> = state
         .functions
         .iter()
-        .filter(|(function, _)| calls(function))
+        .filter(|(function, (_, s, _))| calls(function) || sets_claim(&s.source))
         .map(|(function, (_, s, _))| json!({"name": function, "source": s.source}))
         .collect();
     Unit {
@@ -191,13 +210,20 @@ fn policy_unit(state: &State, table: &str, name: &str, statement: &Statement) ->
     }
 }
 
-fn definer_unit(name: &str, statement: &Statement) -> Unit {
+fn definer_unit(state: &State, name: &str, statement: &Statement) -> Unit {
+    let privileges: Vec<&str> = state
+        .execute
+        .get(name)
+        .into_iter()
+        .flatten()
+        .map(|s| s.source.as_str())
+        .collect();
     Unit {
         id: format!("function:{name}"),
         name: name.into(),
         statement: statement.clone(),
         access: Access::Definer,
-        state: json!({"function": {"name": name, "source": statement.source}}),
+        state: json!({"function": {"name": name, "source": statement.source, "privileges": privileges}}),
         questions: vec![
             ("search_path", questions::definer_search_path),
             ("unchecked", questions::definer_unchecked),

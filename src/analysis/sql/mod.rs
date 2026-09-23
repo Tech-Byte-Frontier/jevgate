@@ -12,105 +12,41 @@ pub struct Statement {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
-    Policy { name: String, table: String },
-    DropPolicy { name: String, table: String },
-    Function { name: String, definer: bool },
-    DropFunction { name: String },
-    Table { name: String },
-    Grant { target: Option<String> },
-    RowSecurity { table: String, enabled: bool },
+    Policy {
+        name: String,
+        table: String,
+    },
+    DropPolicy {
+        name: String,
+        table: String,
+    },
+    Function {
+        name: String,
+        definer: bool,
+    },
+    DropFunction {
+        name: String,
+    },
+    Table {
+        name: String,
+    },
+    Grant {
+        target: Option<String>,
+    },
+    /// A grant or revoke of EXECUTE on one function.
+    Execute {
+        function: String,
+    },
+    RowSecurity {
+        table: String,
+        enabled: bool,
+    },
     Other,
 }
 
-/// Statements in order, without leading comments; blank statements are dropped.
-pub fn statements(text: &str) -> Vec<Statement> {
-    let bytes = text.as_bytes();
-    let mut spans = Vec::new();
-    let (mut i, mut start) = (0, 0);
-    while i < bytes.len() {
-        if text[i..].starts_with("--") {
-            i = text[i..].find('\n').map_or(bytes.len(), |j| i + j);
-        } else if text[i..].starts_with("/*") {
-            i = text[i + 2..]
-                .find("*/")
-                .map_or(bytes.len(), |j| i + 2 + j + 2);
-        } else if bytes[i] == b'\'' || bytes[i] == b'"' {
-            i = quoted_end(bytes, i);
-        } else if let Some(tag) = dollar_tag(&text[i..]) {
-            let body = i + tag.len();
-            i = text[body..]
-                .find(tag)
-                .map_or(bytes.len(), |j| body + j + tag.len());
-        } else if bytes[i] == b';' {
-            spans.push(start..i + 1);
-            i += 1;
-            start = i;
-        } else {
-            i += 1;
-        }
-    }
-    spans.push(start..bytes.len());
-    spans
-        .into_iter()
-        .filter_map(|span| {
-            let offset = span.start + leading_comments(&text[span.clone()]);
-            let source = text[offset..span.end].trim();
-            (!source.is_empty() && source != ";").then(|| Statement {
-                start_line: line_at(text, offset),
-                end_line: line_at(text, span.end.saturating_sub(1).max(offset)),
-                source: source.to_string(),
-            })
-        })
-        .collect()
-}
-
-/// The index after a quoted string or identifier; doubled quotes escape.
-fn quoted_end(bytes: &[u8], open: usize) -> usize {
-    let quote = bytes[open];
-    let mut j = open + 1;
-    while j < bytes.len() {
-        if bytes[j] == quote {
-            if bytes.get(j + 1) == Some(&quote) {
-                j += 2;
-                continue;
-            }
-            return j + 1;
-        }
-        j += 1;
-    }
-    bytes.len()
-}
-
-/// `$tag$` or `$$` opening a dollar-quoted body.
-fn dollar_tag(rest: &str) -> Option<&str> {
-    let tail = rest.strip_prefix('$')?;
-    let end = tail.find('$')?;
-    tail[..end]
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        .then(|| &rest[..end + 2])
-}
-
-/// Bytes of whitespace and comments before a statement's first token.
-fn leading_comments(text: &str) -> usize {
-    let mut i = 0;
-    loop {
-        let rest = &text[i..];
-        let trimmed = rest.trim_start();
-        i += rest.len() - trimmed.len();
-        if trimmed.starts_with("--") {
-            i += trimmed.find('\n').map_or(trimmed.len(), |j| j + 1);
-        } else if trimmed.starts_with("/*") {
-            i += trimmed.find("*/").map_or(trimmed.len(), |j| j + 2);
-        } else {
-            return i;
-        }
-    }
-}
-
-fn line_at(text: &str, offset: usize) -> usize {
-    text[..offset].matches('\n').count() + 1
-}
+mod split;
+use split::quoted_end;
+pub use split::statements;
 
 /// Classifying reads only a statement's head: its kind, name and target.
 const HEAD_TOKENS: usize = 48;
@@ -180,6 +116,11 @@ impl Head {
         i
     }
 
+    /// Whether `words` appear in order starting at `i`.
+    fn phrase(&self, i: usize, words: &[&str]) -> bool {
+        words.iter().enumerate().all(|(k, w)| self.is(i + k, w))
+    }
+
     fn name(&self, at: usize) -> Option<String> {
         qualified(&self.0, at).map(|(name, _)| name)
     }
@@ -190,7 +131,8 @@ pub fn classify(source: &str) -> Kind {
     let kind = match head.0.first().map(String::as_str) {
         Some("create") => create(&head, source),
         Some("drop") => dropped(&head),
-        Some("grant") => Some(grant(&head)),
+        Some("grant") => Some(execute(&head).unwrap_or_else(|| grant(&head))),
+        Some("revoke") => execute(&head),
         Some("alter") => row_security(&head),
         _ => None,
     };
@@ -236,6 +178,40 @@ fn dropped(head: &Head) -> Option<Kind> {
     })?
 }
 
+/// A grant or revoke on one function: who may call it.
+fn execute(head: &Head) -> Option<Kind> {
+    let on = head.0.iter().position(|w| w == "on")?;
+    head.is(on + 1, "function").then(|| {
+        Some(Kind::Execute {
+            function: head.name(on + 2)?,
+        })
+    })?
+}
+
+/// Claims a statement reads from the token: `auth.jwt() ->> 'name'`, or a
+/// path such as `-> 'app_metadata' ->> 'role'`.
+pub fn jwt_claims(source: &str) -> Vec<String> {
+    let text = source.to_lowercase();
+    let mut claims: Vec<String> = Vec::new();
+    for (at, _) in text.match_indices("jwt()") {
+        let mut rest = text[at + "jwt()".len()..].trim_start();
+        while let Some(after) = rest.strip_prefix("->>").or_else(|| rest.strip_prefix("->")) {
+            let Some(quoted) = after.trim_start().strip_prefix('\'') else {
+                break;
+            };
+            let Some(end) = quoted.find('\'') else {
+                break;
+            };
+            let claim = quoted[..end].to_string();
+            if !claims.contains(&claim) {
+                claims.push(claim);
+            }
+            rest = quoted[end + 1..].trim_start();
+        }
+    }
+    claims
+}
+
 /// A grant and the table it names, when it names one table.
 fn grant(head: &Head) -> Kind {
     let target = head.0.iter().position(|w| w == "on").and_then(|on| {
@@ -253,11 +229,8 @@ fn row_security(head: &Head) -> Option<Kind> {
     let (table, next) = qualified(&head.0, head.skip(2, &["only", "if", "exists"]))?;
     let enabled = head.is(next, "enable") || head.is(next, "force");
     let toggles = enabled || head.is(next, "disable");
-    (toggles
-        && head.is(next + 1, "row")
-        && head.is(next + 2, "level")
-        && head.is(next + 3, "security"))
-    .then_some(Kind::RowSecurity { table, enabled })
+    (toggles && head.phrase(next + 1, &["row", "level", "security"]))
+        .then_some(Kind::RowSecurity { table, enabled })
 }
 
 fn security_definer(source: &str) -> bool {
@@ -309,6 +282,18 @@ mod tests {
             ]
         );
         assert_eq!((found[2].start_line, found[2].end_line), (6, 7));
+        assert_eq!(
+            classify("REVOKE EXECUTE ON FUNCTION public.hook FROM anon;"),
+            Kind::Execute {
+                function: "public.hook".into()
+            }
+        );
+        assert_eq!(
+            jwt_claims(
+                "using (org = (select (auth.jwt() ->> 'organization_id')::uuid) and (auth.jwt() -> 'app_metadata' ->> 'role') = 'x')"
+            ),
+            ["organization_id", "app_metadata", "role"]
+        );
         assert!(found[2].source.starts_with("create policy"));
         assert_eq!((found[3].start_line, found[3].end_line), (8, 14));
     }

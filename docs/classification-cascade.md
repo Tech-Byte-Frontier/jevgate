@@ -74,8 +74,11 @@ signatures, or one candidate pair.
    comments, quotes and dollar quotes. Each project's files, grouped above
    their `supabase` or `migrations` directory, are read in path order, so a
    dropped or replaced policy or function is not judged. Each policy is sent
-   with its table and the functions it calls; SECURITY DEFINER functions and
-   grants go alone, a grant with whether its table has row-level security.
+   with its table, the functions it calls, and the functions that set the
+   token claims it reads, such as a custom access token hook: without the
+   hook, 63 of one project's policies stayed undecided on whether users can
+   change the claim. A SECURITY DEFINER function goes with its grants and
+   revokes of EXECUTE; a grant with whether its table has row-level security.
    The criteria name role checks, service roles, restrictive policies and
    trigger functions, which a literal "other users' rows" question flagged.
    Workflow jobs (`security/workflows`) are split by indentation. The parser
