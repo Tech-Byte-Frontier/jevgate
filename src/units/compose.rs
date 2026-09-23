@@ -3,10 +3,13 @@
 //! Score whose top level is the actionable concern: review when the top level
 //! reaches it, consider when the middle-or-top mass does, clear when the top
 //! level is ruled out (its complement reaches it), otherwise uncertain.
-use super::{Detail, FilePlan, Presence, UnitPlan};
+use super::{
+    Detail, FilePlan, Presence, UnitPlan,
+    wording::{function_wording, outline_wording, pair_wording, test_pair_wording, test_wording},
+};
 use crate::{
     catalog,
-    response::{LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
+    policy::{LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
     schema::{Answer, Dimension, Finding, Judgment, Pass, Status, Strength, UnitCounts, hash},
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -45,7 +48,7 @@ fn at_least(value: f64) -> bool {
     probability_at_least(value, REVIEW_PROBABILITY)
 }
 
-fn levels(answer: &Answer) -> Option<[f64; 3]> {
+pub(super) fn levels(answer: &Answer) -> Option<[f64; 3]> {
     let Answer::Score { probabilities, .. } = answer else {
         return None;
     };
@@ -99,7 +102,7 @@ fn choice(answer: Option<&Answer>) -> Option<(&str, f64)> {
     (choice != "none" && probability_at_least(p, LOCATION_PROBABILITY)).then_some((choice, p))
 }
 
-type Answers<'a> = BTreeMap<&'a str, &'a Answer>;
+pub(super) type Answers<'a> = BTreeMap<&'a str, &'a Answer>;
 
 fn answers<'a>(judgments: &'a [Judgment], unit: &str, pass: Pass) -> Answers<'a> {
     judgments
@@ -112,64 +115,74 @@ fn answers<'a>(judgments: &'a [Judgment], unit: &str, pass: Pass) -> Answers<'a>
 fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     let get = |q: &str| answers.get(q).copied();
     let result = match unit.rule {
-        catalog::FUNCTION_SIMPLIFICATION => (|| {
-            let split = score(get("split")?);
-            // Flattening is asked only for deeply nested functions.
-            let flatten = get("flatten").map(score);
-            Some(match (split, flatten) {
-                (Outcome::Review(p), _) | (_, Some(Outcome::Review(p))) => Outcome::Review(p),
-                (Outcome::Consider(p), _) | (_, Some(Outcome::Consider(p))) => Outcome::Consider(p),
-                (Outcome::Clear, None | Some(Outcome::Clear)) => Outcome::Clear,
-                (split, flatten) => {
-                    Outcome::Uncertain(split.concern().max(flatten.map_or(0.0, Outcome::concern)))
-                }
-            })
-        })(),
+        catalog::FUNCTION_SIMPLIFICATION => function_outcome(get("split"), get("flatten")),
         catalog::FILE_ORGANIZATION => get("split").map(score),
-        catalog::SHARED_LOGIC => (|| {
-            // Repetition the behavior requires is not a shared-logic concern.
-            if matches!(noul(get("required")?), Outcome::Review(_)) {
-                return Some(Outcome::Clear);
-            }
-            let same = score(get("same")?);
-            // Cases written out in one test are a style choice, never a required change.
-            Some(match (same, &unit.detail) {
-                (
-                    Outcome::Review(p),
-                    Detail::Pair {
-                        within_test: true, ..
-                    },
-                ) => Outcome::Consider(p),
-                (same, _) => same,
-            })
-        })(),
-        catalog::TEST_VALUE => (|| {
-            let hollow = [noul(get("own_logic")?), noul(get("mock_only")?)];
-            let weak = [noul(get("internal")?), noul(get("several")?)];
-            let strongest = |outcomes: &[Outcome]| {
-                outcomes
-                    .iter()
-                    .filter_map(|o| match o {
-                        Outcome::Review(p) => Some(*p),
-                        _ => None,
-                    })
-                    .reduce(f64::max)
-            };
-            // Weak signals can raise a consider; their uncertainty does not block a clear.
-            Some(if let Some(p) = strongest(&hollow) {
-                Outcome::Review(p)
-            } else if let Some(p) = strongest(&weak) {
-                Outcome::Consider(p)
-            } else if hollow.iter().all(|o| *o == Outcome::Clear) {
-                Outcome::Clear
-            } else {
-                Outcome::Uncertain(hollow.iter().map(|o| o.concern()).fold(0.0, f64::max))
-            })
-        })(),
+        catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), &unit.detail),
+        catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => get("overlap").map(score),
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
+}
+
+/// The stronger of splitting and (for deeply nested functions only) flattening.
+fn function_outcome(split: Option<&Answer>, flatten: Option<&Answer>) -> Option<Outcome> {
+    let split = score(split?);
+    let flatten = flatten.map(score);
+    Some(match (split, flatten) {
+        (Outcome::Review(p), _) | (_, Some(Outcome::Review(p))) => Outcome::Review(p),
+        (Outcome::Consider(p), _) | (_, Some(Outcome::Consider(p))) => Outcome::Consider(p),
+        (Outcome::Clear, None | Some(Outcome::Clear)) => Outcome::Clear,
+        (split, flatten) => {
+            Outcome::Uncertain(split.concern().max(flatten.map_or(0.0, Outcome::concern)))
+        }
+    })
+}
+
+/// Repetition the behavior requires is not a concern; cases written out in one
+/// test are a style choice, never a required change.
+fn shared_outcome(
+    required: Option<&Answer>,
+    same: Option<&Answer>,
+    detail: &Detail,
+) -> Option<Outcome> {
+    if matches!(noul(required?), Outcome::Review(_)) {
+        return Some(Outcome::Clear);
+    }
+    Some(match (score(same?), detail) {
+        (
+            Outcome::Review(p),
+            Detail::Pair {
+                within_test: true, ..
+            },
+        ) => Outcome::Consider(p),
+        (same, _) => same,
+    })
+}
+
+/// Hollow signals decide review and clear; weak signals can raise a consider,
+/// and their uncertainty does not block a clear.
+fn test_value_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
+    let hollow = [noul(get("own_logic")?), noul(get("mock_only")?)];
+    let weak = [noul(get("internal")?), noul(get("several")?)];
+    let strongest = |outcomes: &[Outcome]| {
+        outcomes
+            .iter()
+            .filter_map(|o| match o {
+                Outcome::Review(p) => Some(*p),
+                _ => None,
+            })
+            .reduce(f64::max)
+    };
+    Some(if let Some(p) = strongest(&hollow) {
+        Outcome::Review(p)
+    } else if let Some(p) = strongest(&weak) {
+        Outcome::Consider(p)
+    } else if hollow.iter().all(|o| *o == Outcome::Clear) {
+        Outcome::Clear
+    } else {
+        Outcome::Uncertain(hollow.iter().map(|o| o.concern()).fold(0.0, f64::max))
+    })
 }
 
 /// The first-pass outcome, replaced by a decisive recheck when one exists.
@@ -244,39 +257,45 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         }
     }
     findings.extend(over_tested(plan, &redundant));
-    let mut dimensions = BTreeMap::new();
-    for rule in plan.rules.keys() {
-        let count = counts.remove(rule).unwrap_or_default();
-        let status = if count.review > 0 {
-            Status::Review
-        } else if count.consider > 0 {
-            Status::Consider
-        } else if count.needs_context > 0 {
-            Status::NeedsContext
-        } else if count.uncertain > 0 {
-            Status::Uncertain
-        } else if count.clear > 0 {
-            Status::Clear
-        } else {
-            Status::NotApplicable
-        };
-        dimensions.insert(
-            rule.to_string(),
-            Dimension {
-                decision_basis: basis(rule, &count),
-                status,
-                concern_probability: concern.get(rule).copied().unwrap_or(0.0),
-                rule_version: catalog::rule_version(rule).into(),
-                units: count,
-            },
-        );
-    }
+    let dimensions = plan
+        .rules
+        .keys()
+        .map(|rule| {
+            let count = counts.remove(rule).unwrap_or_default();
+            let concern = concern.get(rule).copied().unwrap_or(0.0);
+            (rule.to_string(), dimension(rule, count, concern))
+        })
+        .collect();
     findings.sort_by(|a, b| b.rank.total_cmp(&a.rank));
     let status = file_status(&dimensions, &findings);
     Composed {
         dimensions,
         findings,
         status,
+    }
+}
+
+/// A rule's status is its most severe unit outcome.
+fn dimension(rule: &str, count: UnitCounts, concern: f64) -> Dimension {
+    let status = if count.review > 0 {
+        Status::Review
+    } else if count.consider > 0 {
+        Status::Consider
+    } else if count.needs_context > 0 {
+        Status::NeedsContext
+    } else if count.uncertain > 0 {
+        Status::Uncertain
+    } else if count.clear > 0 {
+        Status::Clear
+    } else {
+        Status::NotApplicable
+    };
+    Dimension {
+        decision_basis: basis(rule, &count),
+        status,
+        concern_probability: concern,
+        rule_version: catalog::rule_version(rule).into(),
+        units: count,
     }
 }
 
@@ -378,191 +397,26 @@ fn finding(
     let name = &unit.name;
     let mut locations = unit.locations.clone();
     let mut symbol = Some(name.clone());
-    let (message, action) = match (&unit.detail, unit.rule) {
-        (Detail::Function, _) => {
-            let flatten = answers.get("flatten").map(|a| score(a));
-            let flattening = match strength {
-                Strength::Review => {
-                    matches!(flatten, Some(Outcome::Review(_)))
-                        && !matches!(
-                            answers.get("split").map(|a| score(a)),
-                            Some(Outcome::Review(_))
-                        )
-                }
-                Strength::Consider => {
-                    matches!(flatten, Some(Outcome::Consider(_)))
-                        && !matches!(
-                            answers.get("split").map(|a| score(a)),
-                            Some(Outcome::Consider(_))
-                        )
-                }
-            };
-            match (review, flattening) {
-                (true, false) => (
-                    format!(
-                        "`{name}` mixes separate jobs in long blocks; splitting it would make it easier to understand ({p:.2})."
-                    ),
-                    "Extract each separate job into its own named function",
-                ),
-                (true, true) => (
-                    format!(
-                        "`{name}` has nested or repeated branches that hide its main path ({p:.2})."
-                    ),
-                    "Flatten the control flow with guard clauses, early returns or a lookup table",
-                ),
-                (false, false) => match answers.get("split").and_then(|a| levels(a)) {
-                    // The top level leads without reaching review: say so, with its probability.
-                    Some([_, _, top]) if top >= 0.5 => (
-                        format!(
-                            "`{name}` likely mixes separate jobs ({top:.2}); splitting it may make it easier to understand."
-                        ),
-                        "Consider extracting each separate job into its own named function",
-                    ),
-                    _ => (
-                        format!("`{name}` has a block that could be named as a helper ({p:.2})."),
-                        "Consider extracting that block into a named function",
-                    ),
-                },
-                (false, true) => (
-                    format!("`{name}` has branching that could return early ({p:.2})."),
-                    "Consider guard clauses or early returns",
-                ),
-            }
-        }
-        (Detail::Outline { groups }, _) => {
-            symbol = None;
+    let (message, action) = match &unit.detail {
+        Detail::Function => function_wording(name, strength, p, answers),
+        Detail::Outline { groups } => {
             let chosen = choice(answers.get("module").copied())
-                .and_then(|(id, _)| groups.iter().position(|g| g.id == id));
-            let mut detail = String::new();
-            if let Some(index) = chosen {
-                let group = &groups[index];
+                .and_then(|(id, _)| groups.iter().find(|g| g.id == id));
+            symbol = chosen.map(|group| group.id.clone());
+            if let Some(group) = chosen {
                 locations = group.locations.clone();
-                symbol = Some(group.id.clone());
-                let shown: Vec<_> = group
-                    .names
-                    .iter()
-                    .take(6)
-                    .map(|n| format!("`{n}`"))
-                    .collect();
-                let more = group.names.len().saturating_sub(shown.len());
-                detail = format!(
-                    " {} ({}{}) would be most useful as its own module.",
-                    group.id,
-                    shown.join(", "),
-                    if more > 0 {
-                        format!(" and {more} more")
-                    } else {
-                        String::new()
-                    }
-                );
             }
-            if review {
-                (
-                    format!(
-                        "This file holds two or more unrelated responsibilities ({p:.2}).{detail}"
-                    ),
-                    if chosen.is_some() {
-                        "Move that group into its own module"
-                    } else {
-                        "Split the file along its separate purposes"
-                    },
-                )
-            } else {
-                (
-                    format!(
-                        "Some members of this file could live in a separate module ({p:.2}).{detail}"
-                    ),
-                    "Consider moving that set of members into its own module",
-                )
-            }
+            outline_wording(chosen, review, p)
         }
-        (
-            Detail::Pair {
-                differences,
-                within_test,
-                in_tests,
-            },
-            _,
-        ) => {
-            let renamed = if differences.is_empty() {
-                String::new()
-            } else {
-                let shown: Vec<_> = differences
-                    .iter()
-                    .take(6)
-                    .map(|d| format!("`{}`→`{}`", d.a, d.b))
-                    .collect();
-                format!(" Differences: {}.", shown.join(", "))
-            };
-            if *within_test {
-                (
-                    format!("{name} repeat the same steps inside one test ({p:.2}).{renamed}"),
-                    "Consider a table of cases or a local helper for the repeated steps",
-                )
-            } else if review {
-                (
-                    format!(
-                        "{name} perform the same steps for the same purpose ({p:.2}).{renamed}"
-                    ),
-                    if *in_tests {
-                        "Share the steps through a fixture, helper or parameterized test"
-                    } else {
-                        "Move the shared steps into one implementation"
-                    },
-                )
-            } else {
-                (
-                    format!(
-                        "{name} repeat related steps; a person should decide whether they belong together ({p:.2}).{renamed}"
-                    ),
-                    "Decide whether one implementation should serve both",
-                )
-            }
-        }
-        (Detail::Test, _) => {
-            let reasons: Vec<&str> = [
-                (
-                    "own_logic",
-                    "computes its expected value with the logic it tests",
-                ),
-                (
-                    "mock_only",
-                    "only checks values its mocks were set to return",
-                ),
-                (
-                    "internal",
-                    "asserts internal details instead of observable results",
-                ),
-                ("several", "checks several unrelated behaviors"),
-            ]
-            .into_iter()
-            .filter(|(q, _)| matches!(answers.get(q).map(|a| noul(a)), Some(Outcome::Review(_))))
-            .map(|(_, text)| text)
-            .collect();
-            (
-                format!("`{name}` {} ({p:.2}).", reasons.join("; ")),
-                if review {
-                    "Assert on the behavior of the code under test with an independent expected value"
-                } else {
-                    "Assert on observable results, one behavior per test"
-                },
-            )
-        }
-        (Detail::TestPair { .. }, _) => {
+        Detail::Pair {
+            differences,
+            within_test,
+            in_tests,
+        } => pair_wording(name, differences, *within_test, *in_tests, review, p),
+        Detail::Test => test_wording(name, review, p, answers),
+        Detail::TestPair { .. } => {
             symbol = None;
-            if review {
-                (
-                    format!(
-                        "{name} check the same behavior with equivalent inputs; one adds nothing ({p:.2})."
-                    ),
-                    "Remove one of the tests",
-                )
-            } else {
-                (
-                    format!("{name} check the same behavior with different inputs ({p:.2})."),
-                    "Combine them into one parameterized test",
-                )
-            }
+            test_pair_wording(name, review, p)
         }
     };
     let lines = locations

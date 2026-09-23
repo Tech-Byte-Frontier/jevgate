@@ -67,6 +67,14 @@ pub fn resolve_with(
 }
 
 pub fn key_from_file(path: &Path) -> Result<Option<Secret>> {
+    match read_limited(path)? {
+        Some(text) => parse_key(&text),
+        None => Ok(None),
+    }
+}
+
+/// The file's text, at most 64 KiB and zeroed on drop; `None` when it does not exist.
+fn read_limited(path: &Path) -> Result<Option<zeroize::Zeroizing<String>>> {
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -86,6 +94,11 @@ pub fn key_from_file(path: &Path) -> Result<Option<Secret>> {
         text.len() <= 65536,
         "Credential environment file is too large"
     );
+    Ok(Some(text))
+}
+
+/// The single `TYPESAFE_API_KEY=` definition, optionally exported or quoted.
+fn parse_key(text: &str) -> Result<Option<Secret>> {
     let mut key = None;
     for line in text.lines() {
         let line = line.trim().strip_prefix("export ").unwrap_or(line.trim());

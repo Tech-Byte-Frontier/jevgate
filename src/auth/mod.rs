@@ -69,7 +69,7 @@ fn login(args: LoginArgs) -> Result<u8> {
             std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
             "Interactive login requires a terminal. For automation use jevgate auth login --with-key < key-file, or set TYPESAFE_API_KEY"
         );
-        eprintln!("Create an API key at https://console.typesafe.ai/settings/keys");
+        note!("Create an API key at https://console.typesafe.ai/settings/keys");
         let value = rpassword::prompt_password("TypeSafe API key (hidden): ").map_err(|_| {
             anyhow::anyhow!("Could not read hidden input; use --with-key to read from stdin")
         })?;
@@ -80,15 +80,13 @@ fn login(args: LoginArgs) -> Result<u8> {
         .map(Ok)
         .unwrap_or_else(StorageMode::configured)?;
     let store = SavedCredentials::native(mode)?;
-    eprintln!("Validating with TypeSafe; no source code is uploaded.");
+    note!("Validating with TypeSafe; no source code is uploaded.");
     let saved = validate_and_save(&TypeSafe, &store, &key)?;
     if saved.fallback {
-        eprintln!(
-            "System credential store unavailable; using owner-only file storage (unencrypted)."
-        );
+        note!("System credential store unavailable; using owner-only file storage (unencrypted).");
     }
-    println!("API key verified and saved in {}.", saved.description);
-    println!("Ready: jevgate check . --dry-run");
+    say!("API key verified and saved in {}.", saved.description);
+    say!("Ready: jevgate check . --dry-run");
     report_override();
     Ok(0)
 }
@@ -118,8 +116,18 @@ fn status(args: StatusArgs) -> Result<u8> {
     };
     let checked = !args.offline && source.is_some();
     let code = if result.is_ok() { 0 } else { 2 };
+    print_status(&args, source, result, checked)?;
+    Ok(code)
+}
+
+fn print_status(
+    args: &StatusArgs,
+    source: Option<String>,
+    result: Result<()>,
+    checked: bool,
+) -> Result<()> {
     if args.json {
-        println!(
+        say!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "source":source,"configured":source.is_some(),"connection_checked":checked,
@@ -127,36 +135,36 @@ fn status(args: StatusArgs) -> Result<u8> {
                 "error":result.err().map(|e|format!("{e:#}")),
             }))?
         );
-    } else {
-        if let Some(source) = source {
-            println!("Credential source: {source}");
-        }
-        match result {
-            Ok(()) => println!(
-                "{}",
-                if args.offline {
-                    "Connection: not checked (--offline)."
-                } else {
-                    "Connection: authenticated with TypeSafe. No source code was uploaded."
-                }
-            ),
-            Err(error) => eprintln!("Authentication: {error:#}"),
-        }
+        return Ok(());
     }
-    Ok(code)
+    if let Some(source) = source {
+        say!("Credential source: {source}");
+    }
+    match result {
+        Ok(()) => say!(
+            "{}",
+            if args.offline {
+                "Connection: not checked (--offline)."
+            } else {
+                "Connection: authenticated with TypeSafe. No source code was uploaded."
+            }
+        ),
+        Err(error) => note!("Authentication: {error:#}"),
+    }
+    Ok(())
 }
 
 fn logout() -> Result<u8> {
     let store = SavedCredentials::<NativeBackend>::native(StorageMode::configured()?)?;
     let removed = store.remove()?;
     if removed.file {
-        println!("Removed saved credential file: {}", store.path.display());
+        say!("Removed saved credential file: {}", store.path.display());
     }
     if removed.keyring {
-        println!("Removed the saved system credential.");
+        say!("Removed the saved system credential.");
     }
     if !removed.file && !removed.keyring && !removed.keyring_error {
-        println!("No saved credential to remove.");
+        say!("No saved credential to remove.");
     }
     report_override();
     ensure!(
@@ -183,10 +191,10 @@ fn report_override() {
         Ok(sources::key_from_file(&path)?.map(|_| format!("repository .env: {}", path.display())))
     })();
     match override_source {
-        Ok(Some(source)) => println!(
+        Ok(Some(source)) => say!(
             "Current override: {source}. Saved credentials are used when this override is absent."
         ),
-        Err(_) => eprintln!(
+        Err(_) => note!(
             "A local credential override could not be read. Run jevgate auth status --offline to inspect it."
         ),
         Ok(None) => (),

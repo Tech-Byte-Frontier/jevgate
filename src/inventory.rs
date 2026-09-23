@@ -2,10 +2,7 @@ use super::{
     options::CheckArgs,
     schema::{FileResult, Status, hash},
 };
-use crate::{
-    config::{Boundary, ConfigContext},
-    discovery,
-};
+use crate::{boundary::Boundary, config::ConfigContext, discovery};
 use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -33,16 +30,9 @@ pub fn scope(args: &CheckArgs, context: &ConfigContext) -> Result<Vec<PathBuf>> 
         .collect()
 }
 
-pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> Result<Vec<Input>> {
-    let changes = args
-        .base
-        .as_ref()
-        .map(|b| crate::revision::Changes::load(&context.root, b))
-        .transpose()?;
-    let extra = super::context::collect(args, context)?;
-    let classifier = discovery::Classifier::new(&context.config)?;
-    let boundary = Boundary::new(&context.config)?;
-    let walker = ignore::WalkBuilder::new(&context.root)
+/// Files under `root`, honoring ignore files and skipping dependency and build directories.
+fn walker(root: &std::path::Path) -> ignore::Walk {
+    ignore::WalkBuilder::new(root)
         .standard_filters(true)
         .parents(false)
         .require_git(false)
@@ -52,9 +42,20 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
                 || !e.file_type().is_some_and(|t| t.is_dir())
                 || !discovery::SKIPPED_DIRS.contains(&e.file_name().to_str().unwrap_or_default())
         })
-        .build();
+        .build()
+}
+
+pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> Result<Vec<Input>> {
+    let changes = args
+        .base
+        .as_ref()
+        .map(|b| crate::revision::Changes::load(&context.root, b))
+        .transpose()?;
+    let extra = super::context::collect(args, context)?;
+    let classifier = discovery::Classifier::new(&context.config)?;
+    let boundary = Boundary::new(&context.config)?;
     let mut paths = Vec::new();
-    for entry in walker {
+    for entry in walker(&context.root) {
         let entry = entry.context("Failed while discovering Jev scope")?;
         let path = entry.path();
         if !entry.file_type().is_some_and(|t| t.is_file())
@@ -90,56 +91,9 @@ fn load(
     let relative = path
         .strip_prefix(&context.root)
         .context("Source outside root")?;
-    let mut result = FileResult {
-        path: relative.into(),
-        contains_tests: role == "test",
-        role: role.clone(),
-        source_hash: String::new(),
-        catalog_hash: hash(
-            &serde_json::to_vec(&(
-                crate::schema::RUBRIC,
-                crate::schema::COMPOSITION,
-                crate::units::questions::VERSION,
-                crate::file_kind::VERSION,
-                args.include_tests,
-                &args.model,
-                &args.rules,
-            ))
-            .unwrap(),
-        ),
-        context_complete: true,
-        context_expanded: false,
-
-        context_limitations: Vec::new(),
-        context_requests: Vec::new(),
-        content_identity: String::new(),
-        symbols: Vec::new(),
-        semantic_size: 0,
-        input_tokens: 0,
-        output_tokens: 0,
-        context_files: extra
-            .iter()
-            .filter(|i| i.file.path != relative)
-            .map(|i| i.file.clone())
-            .collect(),
-        syntax_checked: false,
-        status: Status::Pending,
-        cached: false,
-        evaluated_at: None,
-        model: None,
-        elapsed_ms: 0,
-        dimensions: BTreeMap::new(),
-        judgments: Vec::new(),
-
-        findings: Vec::new(),
-        error: None,
-        classification: None,
-    };
+    let mut result = pending_result(relative, &role, args, extra);
     if !matches!(role.as_str(), "source" | "test") {
-        result.status = Status::Skipped;
-        result.error = Some(crate::file_kind::excluded_reason(&role).into());
-        result.classification = Some(crate::file_kind::excluded(&role, relative));
-        return Ok(bare_input(result));
+        return Ok(excluded(result, &role, relative));
     }
     if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
         return over_read_cap(result, relative, &path, args.max_file_bytes);
@@ -149,10 +103,7 @@ fn load(
         Ok(source) if discovery::generated_header(&source) => {
             result.role = "generated".into();
             result.contains_tests = false;
-            result.status = Status::Skipped;
-            result.error = Some(crate::file_kind::excluded_reason("generated").into());
-            result.classification = Some(crate::file_kind::excluded("generated", relative));
-            Ok(bare_input(result))
+            Ok(excluded(result, "generated", relative))
         }
         Ok(source) => {
             result.source_hash = hash(source.as_bytes());
@@ -181,6 +132,66 @@ fn load(
         }
         Err(error) => Ok(error_input(result, error)),
     }
+}
+
+/// A pending result for one discovered file, before its source is read.
+fn pending_result(
+    relative: &std::path::Path,
+    role: &str,
+    args: &CheckArgs,
+    extra: &[super::context::ContextInput],
+) -> FileResult {
+    FileResult {
+        path: relative.into(),
+        contains_tests: role == "test",
+        role: role.into(),
+        source_hash: String::new(),
+        catalog_hash: hash(
+            &serde_json::to_vec(&(
+                crate::schema::RUBRIC,
+                crate::schema::COMPOSITION,
+                crate::units::questions::VERSION,
+                crate::file_kind::VERSION,
+                args.include_tests,
+                &args.model,
+                &args.rules,
+            ))
+            .unwrap(),
+        ),
+        context_complete: true,
+        context_expanded: false,
+        context_limitations: Vec::new(),
+        context_requests: Vec::new(),
+        content_identity: String::new(),
+        symbols: Vec::new(),
+        semantic_size: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        context_files: extra
+            .iter()
+            .filter(|i| i.file.path != relative)
+            .map(|i| i.file.clone())
+            .collect(),
+        syntax_checked: false,
+        status: Status::Pending,
+        cached: false,
+        evaluated_at: None,
+        model: None,
+        elapsed_ms: 0,
+        dimensions: BTreeMap::new(),
+        judgments: Vec::new(),
+        findings: Vec::new(),
+        error: None,
+        classification: None,
+    }
+}
+
+/// A file outside the reviewed roles, skipped with its reason.
+fn excluded(mut result: FileResult, role: &str, relative: &std::path::Path) -> Input {
+    result.status = Status::Skipped;
+    result.error = Some(crate::file_kind::excluded_reason(role).into());
+    result.classification = Some(crate::file_kind::excluded(role, relative));
+    bare_input(result)
 }
 
 fn not_text(error: &anyhow::Error) -> bool {

@@ -41,12 +41,17 @@ fn store(root: &Path, mode: StorageMode) -> SavedCredentials<FakeStore> {
     }
 }
 
+/// A store that already holds `old-key`, and the `new-key` meant to replace it.
+fn replacing_old_key(root: &Path) -> (SavedCredentials<FakeStore>, Secret) {
+    let saved = store(root, StorageMode::Auto);
+    *saved.backend.secret.borrow_mut() = Some("old-key".into());
+    (saved, Secret::parse("new-key".into()).unwrap())
+}
+
 #[test]
 fn validation_failure_preserves_the_previous_credential() {
     let project = crate::tests::Project::new();
-    let saved = store(&project.0, StorageMode::Auto);
-    *saved.backend.secret.borrow_mut() = Some("old-key".into());
-    let key = Secret::parse("new-key".into()).unwrap();
+    let (saved, key) = replacing_old_key(&project.0);
     assert!(validate_and_save(&Verification(false), &saved, &key).is_err());
     assert_eq!(saved.backend.writes.get(), 0);
     assert_eq!(saved.get().unwrap().unwrap().0.expose(), "old-key");
@@ -72,10 +77,8 @@ fn successful_login_and_logout_use_the_system_store() {
 fn fallback_is_private_survives_store_recovery_and_can_migrate_back() {
     use std::os::unix::fs::PermissionsExt;
     let project = crate::tests::Project::new();
-    let saved = store(&project.0, StorageMode::Auto);
-    *saved.backend.secret.borrow_mut() = Some("old-key".into());
+    let (saved, key) = replacing_old_key(&project.0);
     saved.backend.unavailable.set(true);
-    let key = Secret::parse("new-key".into()).unwrap();
     let location = validate_and_save(&Verification(true), &saved, &key).unwrap();
     assert!(location.fallback);
     assert_eq!(
@@ -213,7 +216,7 @@ fn fallback_rejects_symlinks_hardlinks_and_broad_permissions() {
 }
 
 #[test]
-fn provider_contract_errors_are_sanitized() {
+fn authentication_is_known_only_after_a_checked_connection() {
     assert_eq!(provider::authenticated(&Ok(()), false), None);
     assert_eq!(provider::authenticated(&Ok(()), true), Some(true));
     assert_eq!(
@@ -224,6 +227,10 @@ fn provider_contract_errors_are_sanitized() {
         provider::authenticated(&provider::http_error(429), true),
         None
     );
+}
+
+#[test]
+fn model_listing_errors_never_echo_provider_text() {
     assert!(
         provider::validate_models(&serde_json::json!({"models":[{"name":"jev-latest"}]})).is_ok()
     );
@@ -231,6 +238,10 @@ fn provider_contract_errors_are_sanitized() {
         .unwrap_err()
         .to_string();
     assert!(!error.contains("secret-do-not-echo"));
+}
+
+#[test]
+fn http_errors_explain_rejection_and_retry() {
     assert!(
         provider::http_error(403)
             .unwrap_err()

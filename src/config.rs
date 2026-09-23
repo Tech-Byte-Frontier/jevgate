@@ -1,6 +1,5 @@
 use crate::options::CheckArgs;
 use anyhow::{Context, Result, ensure};
-use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -56,6 +55,13 @@ impl ConfigContext {
         for path in &self.config.context {
             args.context.push(self.root.join(path));
         }
+        self.configure_rules(args)?;
+        self.configure_gate(args)?;
+        self.configure_budgets(args)
+    }
+
+    /// Rules from the CLI, else the configuration, else every rule; all must exist.
+    fn configure_rules(&self, args: &mut CheckArgs) -> Result<()> {
         if args.rules.is_empty() {
             args.rules = self.config.rules.clone();
         }
@@ -65,6 +71,11 @@ impl ConfigContext {
         for rule in &args.rules {
             ensure!(crate::catalog::find(rule).is_some(), "Unknown rule: {rule}");
         }
+        Ok(())
+    }
+
+    /// Gate levels from the CLI, else the configuration, else `review`.
+    fn configure_gate(&self, args: &mut CheckArgs) -> Result<()> {
         if args.fail_on.is_empty() {
             for name in &self.config.fail_on {
                 args.fail_on.push(
@@ -76,7 +87,11 @@ impl ConfigContext {
         if args.fail_on.is_empty() {
             args.fail_on.push(crate::options::FailOn::Review);
         }
-        // Configuration is a ceiling; CLI flags may narrow but cannot bypass upload budgets.
+        Ok(())
+    }
+
+    /// Configuration is a ceiling; CLI flags may narrow but cannot bypass upload budgets.
+    fn configure_budgets(&self, args: &mut CheckArgs) -> Result<()> {
         if let Some(n) = self.config.max_requests {
             args.max_requests = Some(args.max_requests.map_or(n, |limit| limit.min(n)));
         }
@@ -99,30 +114,6 @@ impl ConfigContext {
             "Budgets must be positive"
         );
         Ok(())
-    }
-}
-
-pub fn globs(patterns: &[String]) -> Result<GlobSet> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        builder.add(Glob::new(pattern)?);
-    }
-    Ok(builder.build()?)
-}
-
-pub struct Boundary {
-    allow: GlobSet,
-    deny: GlobSet,
-}
-impl Boundary {
-    pub fn new(config: &Config) -> Result<Self> {
-        Ok(Self {
-            allow: globs(&config.upload_allow)?,
-            deny: globs(&config.upload_deny)?,
-        })
-    }
-    pub fn permits(&self, path: &Path) -> bool {
-        (self.allow.is_empty() || self.allow.is_match(path)) && !self.deny.is_match(path)
     }
 }
 

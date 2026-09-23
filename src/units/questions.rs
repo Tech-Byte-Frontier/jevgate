@@ -277,11 +277,17 @@ mod tests {
     }
 
     #[test]
-    fn questions_are_short_literal_and_well_formed() {
+    fn questions_are_short_and_name_a_state_path() {
         for question in all() {
             let text = question["instructions"]["question"].as_str().unwrap();
             assert!(text.ends_with('?') && text.len() < 200, "{text}");
             assert!(text.contains('`'), "names a state path: {text}");
+        }
+    }
+
+    #[test]
+    fn criteria_match_each_question_type() {
+        for question in all() {
             match question["type"].as_str().unwrap() {
                 "score" => assert_eq!(question["criteria"].as_array().unwrap().len(), 3),
                 "noul" => {
@@ -291,12 +297,17 @@ mod tests {
                 "choice" => assert!(question["criteria"].as_object().unwrap().len() >= 3),
                 other => panic!("{other}"),
             }
-            // No thresholds, versions, hashes or self-descriptions in what is uploaded.
+        }
+        assert!(outline_module(&["G1".into()])["criteria"]["G1"].is_null());
+    }
+
+    #[test]
+    fn questions_upload_no_thresholds_versions_or_self_descriptions() {
+        for question in all() {
             let body = question.to_string();
             for forbidden in ["JevGate", "jevgate", "0.8", "sha256", "version", "cascade"] {
                 assert!(!body.contains(forbidden), "{forbidden} in {body}");
             }
         }
-        assert!(outline_module(&["G1".into()])["criteria"]["G1"].is_null());
     }
 }

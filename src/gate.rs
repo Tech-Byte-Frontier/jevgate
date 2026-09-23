@@ -2,7 +2,7 @@
 //! of accepted findings. Classification never depends on this policy.
 use crate::{
     options::FailOn,
-    schema::{Report, Status, Strength},
+    schema::{Finding, Report, Status, Strength},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,17 @@ pub fn evaluate(report: &mut Report, fail_on: &[FailOn]) {
     let findings = report.files.iter().flat_map(|f| &f.findings);
     let baselined = findings.clone().filter(|f| f.baselined).count();
     let new: Vec<_> = findings.filter(|f| !f.baselined).collect();
+    let reasons = failures(report, &new, fail_on);
+    report.gate = report.complete.then_some(Gate {
+        passed: reasons.is_empty(),
+        reasons,
+        new_findings: new.len(),
+        baselined_findings: baselined,
+    });
+}
+
+/// Why the gate fails: new findings at a configured level, or undecided files.
+fn failures(report: &Report, new: &[&Finding], fail_on: &[FailOn]) -> Vec<String> {
     let mut reasons = Vec::new();
     let review = new
         .iter()
@@ -78,12 +89,7 @@ pub fn evaluate(report: &mut Report, fail_on: &[FailOn]) {
             ));
         }
     }
-    report.gate = report.complete.then_some(Gate {
-        passed: reasons.is_empty(),
-        reasons,
-        new_findings: new.len(),
-        baselined_findings: baselined,
-    });
+    reasons
 }
 
 /// Apply the baseline and the gate policy to a settled report.

@@ -12,7 +12,7 @@ use std::{
 pub fn run(root: &Path, port: u16) -> Result<()> {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))?;
     listener.set_nonblocking(true)?;
-    eprintln!("JevGate report API: http://{}", listener.local_addr()?);
+    note!("JevGate report API: http://{}", listener.local_addr()?);
     loop {
         crate::cancellation::check()?;
         match listener.accept() {
@@ -28,6 +28,26 @@ pub fn run(root: &Path, port: u16) -> Result<()> {
 }
 
 fn respond(root: &Path, stream: &mut TcpStream) -> Result<()> {
+    let header = read_header(stream)?;
+    let (status, body) = match local_get(&header) {
+        Some(path) => route(root, path),
+        None => (
+            "403 Forbidden",
+            json!({"error":"Only local non-browser GET requests are supported"}),
+        ),
+    };
+    let body = serde_json::to_vec(&body)?;
+    write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+        body.len()
+    )?;
+    stream.write_all(&body)?;
+    Ok(())
+}
+
+/// The request head, up to the blank line; at most 8 KiB.
+fn read_header(stream: &mut TcpStream) -> Result<String> {
     stream.set_read_timeout(Some(Duration::from_millis(500)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut buffer = [0u8; 8192];
@@ -44,8 +64,12 @@ fn respond(root: &Path, stream: &mut TcpStream) -> Result<()> {
     }
     let header = std::str::from_utf8(&buffer[..size])?;
     ensure!(header.ends_with("\r\n\r\n"), "Incomplete HTTP request");
-    let first = header.lines().next().unwrap_or_default();
-    let parts: Vec<_> = first.split_whitespace().collect();
+    Ok(header.to_string())
+}
+
+/// The path of a GET addressed to localhost without a browser `Origin`.
+fn local_get(header: &str) -> Option<&str> {
+    let parts: Vec<_> = header.lines().next()?.split_whitespace().collect();
     let host = header.lines().find_map(|line| {
         line.split_once(':')
             .filter(|(name, _)| name.eq_ignore_ascii_case("host"))
@@ -60,51 +84,17 @@ fn respond(root: &Path, stream: &mut TcpStream) -> Result<()> {
     let origin = header
         .lines()
         .any(|l| l.to_ascii_lowercase().starts_with("origin:"));
-    let (status, body) = if parts.len() != 3 || parts[0] != "GET" || origin || !allowed_host {
-        (
-            "403 Forbidden",
-            json!({"error":"Only local non-browser GET requests are supported"}),
-        )
-    } else {
-        route(root, parts[1])
-    };
-    let body = serde_json::to_vec(&body)?;
-    write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
-        body.len()
-    )?;
-    stream.write_all(&body)?;
-    Ok(())
+    (parts.len() == 3 && parts[0] == "GET" && !origin && allowed_host).then_some(parts[1])
 }
 
 pub fn route(root: &Path, route: &str) -> (&'static str, serde_json::Value) {
-    let mut report = match crate::storage::read_latest(root) {
-        Ok(report) => report,
-        Err(_) => {
-            return (
-                "503 Service Unavailable",
-                json!({"error":"No compatible snapshot available"}),
-            );
-        }
+    let Ok(mut report) = crate::storage::read_latest(root) else {
+        return (
+            "503 Service Unavailable",
+            json!({"error":"No compatible snapshot available"}),
+        );
     };
-    if report.watcher_pid.is_some() && !crate::storage::writer_active(root) {
-        report.watcher_pid = None;
-        report.errors.push("Watcher is no longer active".into());
-    }
-    for file in &mut report.files {
-        let current = crate::inventory::read_source(&root.join(&file.path), 1024 * 1024)
-            .is_ok_and(|s| crate::schema::hash(s.as_bytes()) == file.source_hash);
-        let context_current = file.context_files.iter().all(|c| {
-            crate::inventory::read_source(&root.join(&c.path), 1024 * 1024)
-                .is_ok_and(|s| crate::schema::hash(s.as_bytes()) == c.source_hash)
-        });
-        if file.status != crate::schema::Status::Skipped && (!current || !context_current) {
-            file.status = crate::schema::Status::Error;
-            file.error = Some("Stored evidence is stale".into());
-        }
-    }
-    report.update_status();
+    refresh(root, &mut report);
     match route {
         "/snapshot" => ("200 OK", json!(report)),
         "/evidence" => (
@@ -117,24 +107,7 @@ pub fn route(root: &Path, route: &str) -> (&'static str, serde_json::Value) {
         ),
         _ if route.starts_with("/changes?since=") => {
             match route.trim_start_matches("/changes?since=").parse::<u64>() {
-                Ok(since) if since <= report.generation => match crate::storage::history(
-                    root,
-                    since,
-                    if report.settled {
-                        report.generation
-                    } else {
-                        report.generation.saturating_sub(1)
-                    },
-                ) {
-                    Ok(history) => (
-                        "200 OK",
-                        json!({"generation":if report.settled { report.generation } else { report.generation.saturating_sub(1) },"pending_generation":if report.settled { None } else { Some(report.generation) },"changes":history}),
-                    ),
-                    Err(_) => (
-                        "409 Conflict",
-                        json!({"error":"History gap; fetch /snapshot and reset the cursor", "generation":report.generation}),
-                    ),
-                },
+                Ok(since) if since <= report.generation => changes_since(root, &report, since),
                 _ => (
                     "400 Bad Request",
                     json!({"error":"Invalid generation cursor"}),
@@ -144,6 +117,53 @@ pub fn route(root: &Path, route: &str) -> (&'static str, serde_json::Value) {
         _ => (
             "404 Not Found",
             json!({"error":"Use /snapshot, /changes?since=N, /evidence or /context-requests"}),
+        ),
+    }
+}
+
+/// Drop a watcher that stopped and mark files whose stored evidence changed on disk.
+fn refresh(root: &Path, report: &mut crate::schema::Report) {
+    if report.watcher_pid.is_some() && !crate::storage::writer_active(root) {
+        report.watcher_pid = None;
+        report.errors.push("Watcher is no longer active".into());
+    }
+    let current = |path: &Path, hash: &str| {
+        crate::inventory::read_source(&root.join(path), 1024 * 1024)
+            .is_ok_and(|s| crate::schema::hash(s.as_bytes()) == hash)
+    };
+    for file in &mut report.files {
+        let fresh = current(&file.path, &file.source_hash)
+            && file
+                .context_files
+                .iter()
+                .all(|c| current(&c.path, &c.source_hash));
+        if file.status != crate::schema::Status::Skipped && !fresh {
+            file.status = crate::schema::Status::Error;
+            file.error = Some("Stored evidence is stale".into());
+        }
+    }
+    report.update_status();
+}
+
+/// Settled change history since `since`; an unsettled snapshot is still pending.
+fn changes_since(
+    root: &Path,
+    report: &crate::schema::Report,
+    since: u64,
+) -> (&'static str, serde_json::Value) {
+    let settled = if report.settled {
+        report.generation
+    } else {
+        report.generation.saturating_sub(1)
+    };
+    match crate::storage::history(root, since, settled) {
+        Ok(history) => (
+            "200 OK",
+            json!({"generation":settled,"pending_generation":if report.settled { None } else { Some(report.generation) },"changes":history}),
+        ),
+        Err(_) => (
+            "409 Conflict",
+            json!({"error":"History gap; fetch /snapshot and reset the cursor", "generation":report.generation}),
         ),
     }
 }

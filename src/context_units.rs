@@ -1,5 +1,5 @@
 //! Locate complete definitions and their original source ranges.
-use crate::{locations, schema::SourceRange};
+use crate::schema::SourceRange;
 use std::{collections::BTreeSet, ops::Range, path::Path};
 use tree_sitter::Node;
 
@@ -26,21 +26,26 @@ fn identifiers(node: Node<'_>, source: &str, result: &mut BTreeSet<String>) {
     }
 }
 
+/// A string literal that is the first statement of a module or class body.
 fn python_docstring(node: Node<'_>, source: &str) -> bool {
-    if node.kind() != "expression_statement" {
-        return false;
-    }
+    node.kind() == "expression_statement"
+        && docstring_position(node)
+        && node.named_child_count() == 1
+        && node
+            .named_child(0)
+            .is_some_and(|child| string_literal(child, source))
+}
+
+/// Directly in a module or class body, after nothing but comments.
+fn docstring_position(node: Node<'_>) -> bool {
     let Some(parent) = node.parent() else {
         return false;
     };
-    if parent.kind() != "module"
-        && !(parent.kind() == "block"
+    let body = parent.kind() == "module"
+        || (parent.kind() == "block"
             && parent
                 .parent()
-                .is_some_and(|p| p.kind() == "class_definition"))
-    {
-        return false;
-    }
+                .is_some_and(|p| p.kind() == "class_definition"));
     let mut previous = node.prev_named_sibling();
     while let Some(sibling) = previous {
         if !sibling.kind().contains("comment") {
@@ -48,29 +53,30 @@ fn python_docstring(node: Node<'_>, source: &str) -> bool {
         }
         previous = sibling.prev_named_sibling();
     }
-    fn literal(node: Node<'_>, source: &str) -> bool {
-        match node.kind() {
-            "string" => !node
-                .utf8_text(source.as_bytes())
-                .unwrap_or("")
-                .chars()
-                .take_while(|c| !matches!(c, '\'' | '"'))
-                .any(|c| matches!(c, 'b' | 'B' | 'f' | 'F')),
-            "parenthesized_expression" | "concatenated_string" => {
-                let mut cursor = node.walk();
-                let mut children = node
-                    .named_children(&mut cursor)
-                    .filter(|child| !child.kind().contains("comment"));
-                children.next().is_some_and(|child| literal(child, source))
-                    && children.all(|child| literal(child, source))
-            }
-            _ => false,
+    body
+}
+
+/// A plain (not bytes or f-) string, possibly parenthesized or concatenated.
+fn string_literal(node: Node<'_>, source: &str) -> bool {
+    match node.kind() {
+        "string" => !node
+            .utf8_text(source.as_bytes())
+            .unwrap_or("")
+            .chars()
+            .take_while(|c| !matches!(c, '\'' | '"'))
+            .any(|c| matches!(c, 'b' | 'B' | 'f' | 'F')),
+        "parenthesized_expression" | "concatenated_string" => {
+            let mut cursor = node.walk();
+            let mut children = node
+                .named_children(&mut cursor)
+                .filter(|child| !child.kind().contains("comment"));
+            children
+                .next()
+                .is_some_and(|child| string_literal(child, source))
+                && children.all(|child| string_literal(child, source))
         }
+        _ => false,
     }
-    node.named_child_count() == 1
-        && node
-            .named_child(0)
-            .is_some_and(|child| literal(child, source))
 }
 
 fn collect(
@@ -104,72 +110,11 @@ fn collect(
         }
         return;
     }
-    // Keep the enclosing module/impl/class declaration and select complete members.
-    if matches!(
-        kind,
-        "impl_item" | "mod_item" | "class_declaration" | "class_definition"
-    ) && let Some(body) = node.child_by_field_name("body")
-    {
-        let first = body
-            .named_child(0)
-            .map_or(body.end_byte(), |n| n.start_byte());
-        let last = body
-            .named_child(body.named_child_count().saturating_sub(1) as u32)
-            .map_or(first, |n| n.end_byte());
-        scaffolding.push(definition_start(node)..first);
-        scaffolding.push(last..node.end_byte());
-        let mut cursor = body.walk();
-        for child in body.named_children(&mut cursor) {
-            collect(child, source, units, scaffolding);
-        }
+    if container(node, source, units, scaffolding) {
         return;
     }
-    let mut names = BTreeSet::new();
-    if let Some(name) = node.child_by_field_name("name") {
-        identifiers(name, source, &mut names);
-    }
-    if let Some(name) = node.child_by_field_name("left") {
-        identifiers(name, source, &mut names);
-    }
-    // Bindings and export wrappers may name the definition below their root.
-    if names.is_empty()
-        && matches!(
-            kind,
-            "export_statement"
-                | "lexical_declaration"
-                | "variable_declaration"
-                | "expression_statement"
-                | "decorated_definition"
-        )
-    {
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            if let Some(name) = child.child_by_field_name("name") {
-                identifiers(name, source, &mut names);
-            }
-            if let Some(name) = child.child_by_field_name("left") {
-                identifiers(name, source, &mut names);
-            }
-        }
-    }
-    let mut owner = node.parent();
-    let mut enclosing = String::new();
-    while let Some(parent) = owner {
-        if enclosing.is_empty()
-            && matches!(
-                parent.kind(),
-                "impl_item" | "class_declaration" | "class_definition"
-            )
-        {
-            enclosing = parent
-                .child_by_field_name("type")
-                .or_else(|| parent.child_by_field_name("name"))
-                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-                .unwrap_or("")
-                .into();
-        }
-        owner = parent.parent();
-    }
+    let names = unit_names(node, source);
+    let enclosing = enclosing_owner(node, source);
     // Preserve documentation and decorators that immediately precede this unit.
     units.push(Unit {
         span: definition_start(node)..node.end_byte(),
@@ -186,6 +131,87 @@ fn collect(
                 | "type_alias_declaration"
         ),
     });
+}
+
+/// Keep the enclosing module/impl/class declaration and select complete members.
+fn container(
+    node: Node<'_>,
+    source: &str,
+    units: &mut Vec<Unit>,
+    scaffolding: &mut Vec<Range<usize>>,
+) -> bool {
+    if !matches!(
+        node.kind(),
+        "impl_item" | "mod_item" | "class_declaration" | "class_definition"
+    ) {
+        return false;
+    }
+    let Some(body) = node.child_by_field_name("body") else {
+        return false;
+    };
+    let first = body
+        .named_child(0)
+        .map_or(body.end_byte(), |n| n.start_byte());
+    let last = body
+        .named_child(body.named_child_count().saturating_sub(1) as u32)
+        .map_or(first, |n| n.end_byte());
+    scaffolding.push(definition_start(node)..first);
+    scaffolding.push(last..node.end_byte());
+    let mut cursor = body.walk();
+    for child in body.named_children(&mut cursor) {
+        collect(child, source, units, scaffolding);
+    }
+    true
+}
+
+/// Names a definition binds. Bindings and export wrappers may name the
+/// definition below their root.
+fn unit_names(node: Node<'_>, source: &str) -> BTreeSet<String> {
+    fn add(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
+        for field in ["name", "left"] {
+            if let Some(name) = node.child_by_field_name(field) {
+                identifiers(name, source, names);
+            }
+        }
+    }
+    let mut names = BTreeSet::new();
+    add(node, source, &mut names);
+    if names.is_empty()
+        && matches!(
+            node.kind(),
+            "export_statement"
+                | "lexical_declaration"
+                | "variable_declaration"
+                | "expression_statement"
+                | "decorated_definition"
+        )
+    {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            add(child, source, &mut names);
+        }
+    }
+    names
+}
+
+/// The nearest impl or class that contains `node`, by name.
+fn enclosing_owner(node: Node<'_>, source: &str) -> String {
+    let mut owner = node.parent();
+    while let Some(parent) = owner {
+        if matches!(
+            parent.kind(),
+            "impl_item" | "class_declaration" | "class_definition"
+        ) {
+            return parent
+                .child_by_field_name("type")
+                .or_else(|| parent.child_by_field_name("name"))
+                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                .unwrap_or("")
+                .into();
+        }
+        owner = parent.parent();
+    }
+    String::new()
 }
 
 fn definition_start(node: Node<'_>) -> usize {
@@ -206,7 +232,7 @@ fn line_number(source: &str, byte: usize) -> usize {
 }
 
 pub fn review_targets(path: &Path, source: &str) -> Vec<(String, SourceRange, String)> {
-    let Some(tree) = locations::parse(path, source).ok().flatten() else {
+    let Some(tree) = crate::syntax::parse(path, source).ok().flatten() else {
         return Vec::new();
     };
     let mut units = Vec::new();
@@ -219,17 +245,22 @@ pub fn review_targets(path: &Path, source: &str) -> Vec<(String, SourceRange, St
                 start_line: line_number(source, unit.span.start),
                 end_line: line_number(source, unit.span.end),
             };
-            let name = if unit.names.is_empty() {
-                format!("declaration/effect at line {}", range.start_line)
-            } else {
-                unit.names.into_iter().collect::<Vec<_>>().join(", ")
-            };
-            let name = if unit.owner.is_empty() {
-                name
-            } else {
-                format!("{}::{name}", unit.owner)
-            };
+            let name = target_name(&unit, range.start_line);
             (name, range, source[unit.span].to_owned())
         })
         .collect()
+}
+
+/// The unit's names, qualified by its owner; unnamed code by its line.
+fn target_name(unit: &Unit, line: usize) -> String {
+    let name = if unit.names.is_empty() {
+        format!("declaration/effect at line {line}")
+    } else {
+        unit.names.iter().cloned().collect::<Vec<_>>().join(", ")
+    };
+    if unit.owner.is_empty() {
+        name
+    } else {
+        format!("{}::{name}", unit.owner)
+    }
 }

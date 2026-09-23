@@ -41,6 +41,49 @@ fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+type ChangedPaths = (BTreeMap<PathBuf, Option<PathBuf>>, Vec<PathBuf>);
+
+/// Changed paths since `revision`, each with its previous path (none when
+/// added), and deleted paths. Renames keep their source; conflicts stop the review.
+fn tracked_changes(root: &Path, revision: &str) -> Result<ChangedPaths> {
+    let bytes = git(
+        root,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--find-renames",
+            "--name-status",
+            "-z",
+            revision,
+            "--",
+        ],
+    )?;
+    let mut fields = bytes.split(|b| *b == 0).filter(|s| !s.is_empty());
+    let mut paths = BTreeMap::new();
+    let mut deleted = Vec::new();
+    while let Some(status) = fields.next() {
+        let old = git_path(&mut fields, "Missing Git path")?;
+        match status.first() {
+            Some(b'R') => {
+                let new = git_path(&mut fields, "Missing Git rename target")?;
+                paths.insert(new, Some(old));
+            }
+            Some(b'D') => deleted.push(old),
+            Some(b'A') => {
+                paths.insert(old, None);
+            }
+            Some(b'U') => {
+                anyhow::bail!("Resolve Git conflict in {} before reviewing", old.display())
+            }
+            _ => {
+                paths.insert(old.clone(), Some(old));
+            }
+        }
+    }
+    Ok((paths, deleted))
+}
+
 pub fn resolve(root: &Path, revision: &str) -> Result<String> {
     let bytes = git(
         root,
@@ -62,41 +105,7 @@ pub fn resolve(root: &Path, revision: &str) -> Result<String> {
 impl Changes {
     pub fn load(root: &Path, base: &str) -> Result<Self> {
         let revision = resolve(root, base)?;
-        let bytes = git(
-            root,
-            &[
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--find-renames",
-                "--name-status",
-                "-z",
-                &revision,
-                "--",
-            ],
-        )?;
-        let mut fields = bytes.split(|b| *b == 0).filter(|s| !s.is_empty());
-        let mut paths = BTreeMap::new();
-        let mut deleted = Vec::new();
-        while let Some(status) = fields.next() {
-            let old = git_path(&mut fields, "Missing Git path")?;
-            match status.first() {
-                Some(b'R') => {
-                    let new = git_path(&mut fields, "Missing Git rename target")?;
-                    paths.insert(new, Some(old));
-                }
-                Some(b'D') => deleted.push(old),
-                Some(b'A') => {
-                    paths.insert(old, None);
-                }
-                Some(b'U') => {
-                    anyhow::bail!("Resolve Git conflict in {} before reviewing", old.display())
-                }
-                _ => {
-                    paths.insert(old.clone(), Some(old));
-                }
-            }
-        }
+        let (mut paths, deleted) = tracked_changes(root, &revision)?;
         let untracked = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
         for name in untracked.split(|b| *b == 0).filter(|s| !s.is_empty()) {
             paths

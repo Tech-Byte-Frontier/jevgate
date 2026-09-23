@@ -4,6 +4,7 @@
 pub mod clones;
 pub mod groups;
 pub mod imports;
+pub mod nesting;
 pub mod test_map;
 pub mod units;
 
@@ -61,6 +62,14 @@ pub(crate) fn macro_calls(
             macro_calls(child, source, calls);
         }
     }
+}
+
+/// A fast in-process hash for comparing token sequences; never persisted.
+pub(crate) fn fast_hash<T: std::hash::Hash + ?Sized>(value: &T) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 pub(crate) fn is_comment(node: Node<'_>) -> bool {

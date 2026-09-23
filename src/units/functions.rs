@@ -6,7 +6,8 @@ use super::{
     identity, pack, questions, unique_ids,
 };
 use crate::{
-    analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, requests::TokenBudget, schema::Pass,
+    analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, schema::Pass,
+    token_budget::TokenBudget,
 };
 use serde_json::{Map, Value, json};
 

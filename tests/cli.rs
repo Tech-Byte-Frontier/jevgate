@@ -1,20 +1,15 @@
+#[path = "support/temp_dir.rs"]
+mod temp_dir;
+
 use std::{
-    path::PathBuf,
     process::{Command, Stdio},
-    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-struct Project(PathBuf);
+
+struct Project(temp_dir::TempDir);
 impl Project {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "jevgate-cli-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&path).unwrap();
-        Self(path)
+        Self(temp_dir::TempDir::new("jevgate-cli"))
     }
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jevgate"));
@@ -25,15 +20,38 @@ impl Project {
             .env("JEVGATE_CONFIG_DIR", self.0.join("isolated-auth"));
         command
     }
+    /// Runs an offline preview: it succeeds, never prints the key and sends nothing.
+    fn preview(&self, args: &[&str]) -> serde_json::Value {
+        let output = self.command().args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(!text.contains("do-not-expose"));
+        let body: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(body["api_requests"], 0);
+        body
+    }
+    /// `auth status --offline --json` without a credential: exit 2 and an actionable error.
+    fn unconfigured_status(&self, extra: &[&str], hint: &str) -> serde_json::Value {
+        let output = self
+            .command()
+            .args(["auth", "status", "--offline", "--json"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(body["configured"], false);
+        assert!(body["error"].as_str().unwrap().contains(hint), "{body}");
+        body
+    }
     fn snapshot(&self) -> Option<serde_json::Value> {
         std::fs::read(self.0.join(".jevgate/latest.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
-    }
-}
-impl Drop for Project {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -104,27 +122,14 @@ fn default_preview_sends_units_without_automatic_context_or_state() {
     .unwrap();
     std::fs::write(project.0.join("storage.rs"), "pub fn save() {}").unwrap();
     std::fs::write(project.0.join(".env"), "TYPESAFE_API_KEY=do-not-expose").unwrap();
-    let output = project
-        .command()
-        .args([
-            "check",
-            "lib.rs",
-            "--dry-run",
-            "--show-requests",
-            "--format",
-            "json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let text = String::from_utf8(output.stdout).unwrap();
-    assert!(!text.contains("do-not-expose"));
-    let body: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(body["api_requests"], 0);
+    let body = project.preview(&[
+        "check",
+        "lib.rs",
+        "--dry-run",
+        "--show-requests",
+        "--format",
+        "json",
+    ]);
     assert_eq!(body["files"].as_array().unwrap().len(), 1);
     assert_eq!(body["files"][0]["context_files"], serde_json::json!([]));
     let stages = body["stages"].as_object().unwrap();
@@ -208,28 +213,15 @@ fn initial_request_preview_is_explicit_offline_and_contains_selected_evidence() 
         .output()
         .unwrap();
     assert_eq!(invalid.status.code(), Some(2));
-    let output = project
-        .command()
-        .args([
-            "check",
-            "save.py",
-            "--quick",
-            "--rule",
-            "function_simplification",
-            "--dry-run",
-            "--show-requests",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let text = String::from_utf8(output.stdout).unwrap();
-    assert!(!text.contains("do-not-expose"));
-    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(report["api_requests"], 0);
+    let report = project.preview(&[
+        "check",
+        "save.py",
+        "--quick",
+        "--rule",
+        "function_simplification",
+        "--dry-run",
+        "--show-requests",
+    ]);
     let requests = report["initial_requests"].as_array().unwrap();
     assert_eq!(requests.len(), 1);
     let functions = requests[0]["state"]["functions"].as_array().unwrap();
@@ -407,49 +399,14 @@ fn auth_status_explains_precedence_without_loading_review_config_or_showing_keys
         assert_eq!(body["connection_checked"], false);
         assert!(body["authenticated"].is_null());
     }
-    let output = project
-        .command()
-        .args([
-            "auth",
-            "status",
-            "--offline",
-            "--json",
-            "--env-file",
-            "missing.env",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body["configured"], false);
-    assert!(
-        body["error"]
-            .as_str()
-            .unwrap()
-            .contains("Selected --env-file")
-    );
+    project.unconfigured_status(&["--env-file", "missing.env"], "Selected --env-file");
 }
 
 #[cfg(unix)]
 #[test]
-fn saved_credential_is_shared_across_repositories_and_logout_preserves_overrides() {
-    use std::io::Write;
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+fn saved_credential_is_shared_across_repositories() {
     let project = Project::new();
-    let config = project.0.join("isolated-auth");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&config)
-        .unwrap();
-    let saved = config.join("credentials");
-    std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(0o600)
-        .open(&saved)
-        .unwrap()
-        .write_all(b"private-saved-key")
-        .unwrap();
+    save_credential(&project);
     for name in ["first-repository", "second-repository"] {
         let root = project.0.join(name);
         std::fs::create_dir(&root).unwrap();
@@ -470,6 +427,13 @@ fn saved_credential_is_shared_across_repositories_and_logout_preserves_overrides
                 .starts_with("protected file:")
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn logout_removes_the_saved_credential_and_names_remaining_overrides() {
+    let project = Project::new();
+    let saved = save_credential(&project);
     let local = "TYPESAFE_API_KEY=private-repo-key\nUNRELATED=keep\n";
     std::fs::write(project.0.join(".env"), local).unwrap();
     let output = project.command().args(["auth", "logout"]).output().unwrap();
@@ -494,23 +458,32 @@ fn saved_credential_is_shared_across_repositories_and_logout_preserves_overrides
     );
 }
 
+/// A private saved credential in the project's isolated configuration directory.
+#[cfg(unix)]
+fn save_credential(project: &Project) -> std::path::PathBuf {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let config = project.0.join("isolated-auth");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&config)
+        .unwrap();
+    let saved = config.join("credentials");
+    std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&saved)
+        .unwrap()
+        .write_all(b"private-saved-key")
+        .unwrap();
+    saved
+}
+
 #[test]
 fn missing_saved_credential_has_machine_readable_actionable_status() {
     let project = Project::new();
-    let output = project
-        .command()
-        .args(["auth", "status", "--offline", "--json"])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body["configured"], false);
-    assert!(
-        body["error"]
-            .as_str()
-            .unwrap()
-            .contains("jevgate auth login")
-    );
+    let body = project.unconfigured_status(&[], "jevgate auth login");
     assert!(body["authenticated"].is_null());
     assert!(!project.0.join(".jevgate").exists());
 }
@@ -618,5 +591,29 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
         let output = project.command().args(arguments).output().unwrap();
         assert_eq!(output.status.code(), Some(2));
         assert!(!project.0.join(".jevgate").exists());
+    }
+}
+
+#[test]
+fn a_closed_output_pipe_ends_output_without_a_panic() {
+    let project = Project::new();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+    for args in [
+        &["rules"][..],
+        &["check", "lib.rs", "--dry-run", "--format", "json"],
+    ] {
+        let mut child = project
+            .command()
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Close the reading end before the command writes, as `| head` does.
+        drop(child.stdout.take());
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {stderr}");
     }
 }

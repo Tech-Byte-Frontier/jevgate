@@ -8,8 +8,8 @@ use crate::{
         test_map::TestCase,
     },
     catalog::SHARED_LOGIC,
-    requests::TokenBudget,
     schema::{Location, Pass},
+    token_budget::TokenBudget,
 };
 use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
