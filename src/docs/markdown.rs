@@ -71,6 +71,40 @@ fn finish(sections: &mut Vec<Section>, mut section: Section, text: &mut Vec<&str
     sections.push(section);
 }
 
+/// A heading outside code blocks: its one-based line, level and text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Heading {
+    pub line: usize,
+    pub level: usize,
+    pub text: String,
+}
+
+/// Every ATX heading outside fenced code, in order.
+pub fn headings(source: &str) -> Vec<Heading> {
+    let lines: Vec<&str> = source.lines().collect();
+    let (_, body) = frontmatter(&lines);
+    let mut fence: Option<&str> = None;
+    let mut found = Vec::new();
+    for (index, line) in lines.iter().enumerate().skip(body) {
+        let trimmed = line.trim_start();
+        if let Some(open) = fence {
+            if trimmed.starts_with(open) {
+                fence = None;
+            }
+        } else if let Some(open) = ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f)) {
+            fence = Some(open);
+        } else if let Some(text) = heading(line) {
+            let level = trimmed.chars().take_while(|c| *c == '#').count();
+            found.push(Heading {
+                line: index + 1,
+                level,
+                text,
+            });
+        }
+    }
+    found
+}
+
 /// The top-level blocks of a section, each a paragraph or a list item with
 /// its nested lines and code, carrying the section's heading.
 pub fn blocks(source: &str, section: &Section) -> Vec<Section> {
@@ -245,6 +279,26 @@ mod tests {
         assert_eq!(doc.sections[1].start_line, 7);
         assert_eq!(doc.sections[1].end_line, 11);
         assert_eq!(doc.sections[2].text, "Run tests.");
+    }
+
+    #[test]
+    fn headings_skip_code_and_keep_levels() {
+        let found = headings("# A\n```\n# no\n```\n### B ###\n");
+        assert_eq!(
+            found,
+            [
+                Heading {
+                    line: 1,
+                    level: 1,
+                    text: "A".into()
+                },
+                Heading {
+                    line: 5,
+                    level: 3,
+                    text: "B".into()
+                },
+            ]
+        );
     }
 
     #[test]

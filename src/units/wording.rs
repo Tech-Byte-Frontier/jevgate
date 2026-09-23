@@ -424,6 +424,58 @@ pub(super) fn section_wording(
     )
 }
 
+/// A large document to split, naming the part the locate follow-up chose,
+/// or one that mainly records past work.
+pub(super) fn document_wording(
+    name: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+    part: Option<&Block>,
+) -> Wording {
+    let get = |q: &str| answers.get(q).copied();
+    let split = get("split").map(benefit);
+    let reached = |outcome: Option<Outcome>| {
+        matches!(
+            (strength, outcome),
+            (Strength::Consider, Some(Outcome::Consider(_)))
+                | (Strength::Note, Some(Outcome::Note(_)))
+        )
+    };
+    if reached(split.map(|o| match o {
+        Outcome::Review(p) => Outcome::Consider(p),
+        other => other,
+    })) {
+        let part = part
+            .and_then(|b| b.location.symbol.as_deref())
+            .map_or(String::new(), |h| {
+                format!("; `{h}` would be most useful as its own document")
+            });
+        return if strength == Strength::Note {
+            (
+                format!("`{name}` has a section that could live elsewhere ({p:.2}){part}."),
+                "Optional: move that section to its own document",
+            )
+        } else {
+            (
+                format!("`{name}` holds several unrelated subjects ({p:.2}){part}."),
+                "Split the document by subject and link the parts",
+            )
+        };
+    }
+    let likely = if strength == Strength::Note {
+        " may"
+    } else {
+        ""
+    };
+    (
+        format!(
+            "`{name}`{likely} mainly records past work, such as dated plans, completed tasks or logs ({p:.2})."
+        ),
+        "Remove finished plans and logs, or move them out of the living documentation",
+    )
+}
+
 /// Each test-value signal that reached review, in plain words.
 pub(super) fn test_wording(name: &str, review: bool, p: f64, answers: &Answers<'_>) -> Wording {
     let reasons: Vec<&str> = [

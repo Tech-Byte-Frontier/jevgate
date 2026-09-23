@@ -139,12 +139,31 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
         }
         catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
+        catalog::LARGE_DOCS => document_outcome(&get),
         catalog::AGENT_CONTEXT => {
             section_signals(&get).map(|s| strongest(&s.iter().map(|(_, o)| *o).collect::<Vec<_>>()))
         }
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
+}
+
+/// A large document: a split Score where the middle level says it is fine
+/// as it is, and a Noul on whether it mainly records past work. Both are at
+/// most a consider; an undecided history answer that leans toward past work
+/// is a note, since no labeled living document leaned past 0.50.
+pub(super) fn document_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
+    let capped = |outcome: Outcome| match outcome {
+        Outcome::Review(p) => Outcome::Consider(p),
+        other => other,
+    };
+    let split = capped(benefit(get("split")?));
+    let history = get("history")?;
+    let past = match capped(noul(history)) {
+        Outcome::Uncertain(p) if probability_at_least(p, LEADING_PROBABILITY) => Outcome::Note(p),
+        other => other,
+    };
+    Some(strongest(&[split, past]))
 }
 
 /// Each answered question about an instruction section with its outcome.

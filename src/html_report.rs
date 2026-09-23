@@ -45,13 +45,17 @@ pub fn render(report: &Report) -> Result<String> {
         .into_iter()
         .map(|r| json!({"key":r.key,"id":r.id,"description":r.inspection}))
         .collect();
+    // A run that leaves out default rules lists fewer files; say so.
+    let partial = crate::catalog::rules()
+        .iter()
+        .any(|r| r.default_enabled && !report.rules.iter().any(|s| s == r.id));
     let data = json!({"root":report.root,"generation":report.generation,"generated_at":report.generated_at,
         "status":report.status,"complete":report.complete,"settled":report.settled,
         "refresh":report.watcher_pid.is_some(),"model":report.requested_model,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
         "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
         "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules,
-        "context_load":report.context_load});
+        "selected":report.rules,"partial":partial});
     // Even a filename or analyzer message may contain </script>. Never let data
     // terminate the JSON element, and insert all displayed strings with textContent.
     let data = serde_json::to_string(&data)?

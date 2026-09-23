@@ -589,7 +589,8 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "unsafe_settings",
             "test_value",
             "test_redundancy",
-            "agent_context"
+            "agent_context",
+            "large_docs"
         ]
     );
     for arguments in [

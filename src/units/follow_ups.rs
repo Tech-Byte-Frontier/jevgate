@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::unlocated_units, |unit| {
         match &unit.detail {
-            Detail::Function { locate, .. } => locate.as_ref(),
+            Detail::Function { locate, .. } | Detail::Document { locate, .. } => locate.as_ref(),
             _ => None,
         }
     })

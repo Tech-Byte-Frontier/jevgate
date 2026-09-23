@@ -3,6 +3,7 @@
 //! Jev answers short literal questions, and `compose` turns answers into results.
 mod answers;
 pub mod compose;
+mod documents;
 mod duplicates;
 mod evidence;
 mod follow_ups;
@@ -101,6 +102,12 @@ pub enum Detail {
     Security {
         sites: Vec<Block>,
         trace: Option<(Value, Asked)>,
+    },
+    /// A large document judged by its outline, with its top-level parts
+    /// and the follow-up that locates a split.
+    Document {
+        parts: Vec<Block>,
+        locate: Option<(Value, Asked)>,
     },
     /// A heading section of an agent instruction file.
     Section {
