@@ -304,10 +304,10 @@ fn load(
     }
     let source = read_source(&path, args.max_file_bytes);
     match source {
-        Ok(source) if let Some(kind) = not_written_here(&path, &role, &source) => {
-            Ok(recast(result, kind, relative))
-        }
         Ok(source) => {
+            if let Some(kind) = not_written_here(&path, &role, &source) {
+                return Ok(recast(result, kind, relative));
+            }
             result.source_hash = hash(source.as_bytes());
             result.content_identity = super::locations::identity(&path, &source);
             result.semantic_size = super::locations::semantic_size(&path, &source);
