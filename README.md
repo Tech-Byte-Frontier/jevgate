@@ -23,6 +23,7 @@ Consider (2):
 ```
 
 - [What it finds](#what-it-finds)
+- [Supported languages and frameworks](#supported-languages-and-frameworks)
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Continuous integration](#continuous-integration)
@@ -73,6 +74,36 @@ The documentation rules read the instruction files that coding agents load (`AGE
 
 `jevgate rules` prints every rule with its question and default.
 
+## Supported languages and frameworks
+
+✅ judged · ➖ not applicable
+
+| Language or file | Extensions | Maintainability | Tests | Security | Documentation |
+|---|---|:---:|:---:|:---:|:---:|
+| Rust | `.rs` | ✅ | ✅ `#[test]`, `#[cfg(test)]` | ✅ | ➖ |
+| Python | `.py` | ✅ | ✅ pytest, unittest | ✅ | ➖ |
+| JavaScript | `.js` `.jsx` `.mjs` `.cjs` | ✅ | ✅ `describe`/`it`/`test` | ✅ | ➖ |
+| TypeScript | `.ts` `.tsx` `.mts` `.cts` | ✅ | ✅ `describe`/`it`/`test` | ✅ | ➖ |
+| Go | `.go` | ✅ | ✅ `Test…(t *testing.T)` | ✅ | ➖ |
+| Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ➖ |
+| SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
+| GitHub Actions | `.github/workflows/*.yml` | ➖ | ➖ | ✅ workflows | ➖ |
+| Markdown | `README.md`, `docs/**`, agent instruction files | ➖ | ➖ | ➖ | ✅ |
+
+| Framework or platform | What JevGate understands |
+|---|---|
+| Hono, Express, Fastify, Koa | Route handlers written inline (`app.post('/pages', async (c) => …)`); error handlers (`app.onError`, `setErrorHandler`, four-parameter Express middleware) |
+| NestJS | Exception filters (`@Catch`) |
+| Flask, FastAPI | Error handlers (`@app.errorhandler`, `@app.exception_handler`) |
+| axum, actix-web, Rocket | Error responses (`IntoResponse` or `ResponseError` for an error type, `#[catch]`) |
+| Supabase and PostgreSQL | Row-level security policies, `SECURITY DEFINER` functions, grants, and the claims an access token hook sets |
+| SpacetimeDB (TypeScript and Rust modules) | Public tables, views and reducers, checked against the caller (`ctx.sender`) and the framework version's scheduling rules |
+| React | JSX components and hooks as functions; text shown as a JSX child is not treated as markup injection |
+| Monorepos | Copies are compared within a package and across packages linked by a local dependency, not across separate example apps or templates |
+| Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
+
+Other files, such as Java, C#, PHP or Ruby, are listed as skipped with the reason and never fail the gate.
+
 ## Install
 
 ```sh
@@ -120,7 +151,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     env:
-      JEVGATE_VERSION: 0.9.0
+      JEVGATE_VERSION: 0.10.0
     steps:
       - uses: actions/checkout@v7
         with:
@@ -241,7 +272,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 ## Limits
 
-- **Languages:** Rust, Python, JavaScript and TypeScript, and the scripts of Astro, Vue and Svelte components (their markup is not read). Minified and compiled output is skipped as generated. Copies are compared within a package and packages linked by a local dependency, not across separate example apps or templates. The access-control rule reads SQL files and SpacetimeDB modules (TypeScript files that import `spacetimedb/server`, Rust files with `#[table]` or `#[reducer]` attributes), and the workflow rule reads `.github/workflows`. Other files are listed as skipped, with the reason.
+- **Languages and frameworks:** see [the support table](#supported-languages-and-frameworks). Astro, Vue and Svelte markup is not read, only their scripts.
 - **Security scope:** one function plus at most one hop of callers. This is not whole-program data-flow analysis. Access control reads the final state of policies, SECURITY DEFINER functions and grants across a project's SQL files in path order; with `--base`, unchanged migrations are read for that state but not judged. It does not judge application-level authorization or dynamic SQL inside database functions.
 - **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates; a translation is not a duplicate. Code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
