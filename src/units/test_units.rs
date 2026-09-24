@@ -177,6 +177,22 @@ fn value_recheck(
 /// test or suite (imports, mocks, fixtures), then each setup hook. A part
 /// larger than its limit is left out rather than cut.
 pub(super) fn file_setup(source: &str, region_start: usize, first_case: usize) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    let start = region_start.saturating_sub(1).min(lines.len());
+    let mut parts: Vec<String> = setup_head(&lines, start, first_case).into_iter().collect();
+    parts.extend(setup_hooks(&lines[start..].join("\n")));
+    let setup = parts.join("\n\n");
+    if setup.len() <= SETUP_BYTES + HOOK_BYTES {
+        setup
+    } else {
+        parts.truncate(1);
+        parts.join("")
+    }
+}
+
+/// The lines from `start` up to the first suite, test or test module, when
+/// they are short enough to send.
+fn setup_head(lines: &[&str], start: usize, first_case: usize) -> Option<String> {
     const OPENERS: [&str; 12] = [
         "describe(",
         "describe.",
@@ -191,20 +207,21 @@ pub(super) fn file_setup(source: &str, region_start: usize, first_case: usize) -
         "mod tests",
         "#[test]",
     ];
-    let lines: Vec<&str> = source.lines().collect();
-    let start = region_start.saturating_sub(1).min(lines.len());
-    let end = (start..first_case.saturating_sub(1).min(lines.len()))
+    let last = first_case.saturating_sub(1).min(lines.len());
+    let end = (start..last)
         .find(|&i| {
             let line = lines[i].trim_start();
             OPENERS.iter().any(|opener| line.starts_with(opener))
         })
-        .unwrap_or(first_case.saturating_sub(1).min(lines.len()));
+        .unwrap_or(last);
     let head = lines[start..end].join("\n");
-    let mut parts = Vec::new();
-    if !head.trim().is_empty() && head.len() <= SETUP_BYTES {
-        parts.push(head.trim().to_string());
-    }
-    let region = lines[start..].join("\n");
+    (!head.trim().is_empty() && head.len() <= SETUP_BYTES).then(|| head.trim().to_string())
+}
+
+/// Every setup hook in `region` short enough to send: `beforeEach`/`beforeAll`
+/// calls and Python `setUp`/`setup_method` methods.
+fn setup_hooks(region: &str) -> Vec<String> {
+    let mut hooks = Vec::new();
     for hook in [
         "beforeEach(",
         "beforeAll(",
@@ -221,18 +238,12 @@ pub(super) fn file_setup(source: &str, region_start: usize, first_case: usize) -
                 balanced_call(&region[at..])
             };
             if text.len() <= HOOK_BYTES {
-                parts.push(text.to_string());
+                hooks.push(text.to_string());
             }
             from = at + hook.len();
         }
     }
-    let setup = parts.join("\n\n");
-    if setup.len() <= SETUP_BYTES + HOOK_BYTES {
-        setup
-    } else {
-        parts.truncate(1);
-        parts.join("")
-    }
+    hooks
 }
 
 /// A call from its name through the parenthesis that closes it.

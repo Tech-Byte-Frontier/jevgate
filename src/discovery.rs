@@ -170,7 +170,10 @@ mod tests {
         let classifier = super::Classifier::new(&Default::default()).unwrap();
         assert_eq!(classifier.role(Path::new("app/test_orders.py")), "test");
         assert_eq!(classifier.role(Path::new("src/test_orders.js")), "test");
-        assert_eq!(classifier.role(Path::new("src/test_locations.rs")), "source");
+        assert_eq!(
+            classifier.role(Path::new("src/test_locations.rs")),
+            "source"
+        );
         assert_eq!(classifier.role(Path::new("pkg/test_helpers.go")), "source");
         assert_eq!(classifier.role(Path::new("src/orders.test.ts")), "test");
         assert_eq!(classifier.role(Path::new("pkg/orders_test.go")), "test");
