@@ -19,6 +19,9 @@ pub struct TestCase {
     pub calls: BTreeSet<String>,
     /// Called non-test functions in scope, by name.
     pub subjects: Vec<String>,
+    /// Titles of the enclosing `describe` blocks, test classes or modules,
+    /// outermost first.
+    pub suite: Vec<String>,
     shingles: BTreeSet<u64>,
 }
 
@@ -42,7 +45,58 @@ pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
     };
     let mut found = Vec::new();
     visit(tree.root_node(), source, false, &mut found);
+    let mut suites = Vec::new();
+    collect_suites(tree.root_node(), source, &mut suites);
+    for case in &mut found {
+        case.suite = suites
+            .iter()
+            .filter(|(span, _)| span.start <= case.span.start && case.span.end <= span.end)
+            .map(|(_, title)| title.clone())
+            .collect();
+    }
     Ok(found)
+}
+
+/// Blocks that group test cases, with their titles, in source order: a
+/// `describe`/`context`/`suite` call with a literal title, a Python class,
+/// or a Rust module.
+fn collect_suites(node: Node<'_>, source: &str, suites: &mut Vec<(Range<usize>, String)>) {
+    let title = match node.kind() {
+        "call_expression" => suite_call(node, source),
+        "class_definition" | "mod_item" => Some(name(node, source)).filter(|name| !name.is_empty()),
+        _ => None,
+    };
+    if let Some(title) = title {
+        suites.push((node.start_byte()..node.end_byte(), title));
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_suites(child, source, suites);
+    }
+}
+
+/// The title of `describe("title", fn)`, `describe.each(table)("title", fn)`
+/// and their `context` and `suite` spellings.
+fn suite_call(node: Node<'_>, source: &str) -> Option<String> {
+    let callee = node.child_by_field_name("function")?;
+    let base = if callee.kind() == "call_expression" {
+        text(callee.child_by_field_name("function")?, source).trim_end_matches(".each")
+    } else {
+        text(callee, source)
+    };
+    let head = base.split('.').next().unwrap_or("");
+    if !matches!(
+        head,
+        "describe" | "context" | "suite" | "xdescribe" | "fdescribe"
+    ) {
+        return None;
+    }
+    let first = node.child_by_field_name("arguments")?.named_child(0)?;
+    matches!(first.kind(), "string" | "template_string").then(|| {
+        text(first, source)
+            .trim_matches(['"', '\'', '`'])
+            .to_string()
+    })
 }
 
 fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<TestCase>) {
@@ -166,6 +220,7 @@ fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Ve
         end_line: line_of(source, node.end_byte().saturating_sub(1)),
         calls,
         subjects: Vec::new(),
+        suite: Vec::new(),
         shingles,
     });
 }
@@ -290,6 +345,19 @@ mod tests {
         );
         let python = "from app import total\n\ndef test_adds():\n    assert total([1, 2]) == 3\n\ndef helper():\n    return [1]\n\nclass TestTotal:\n    def test_empty(self):\n        assert total([]) == 0\n\nclass Other:\n    def test_like(self):\n        pass\n";
         assert_eq!(names("test_total.py", python), ["test_adds", "test_empty"]);
+        let suites = |path: &str, source: &str| -> Vec<Vec<String>> {
+            cases(Path::new(path), source)
+                .unwrap()
+                .into_iter()
+                .map(|c| c.suite)
+                .collect()
+        };
+        assert_eq!(
+            suites("total.test.ts", script),
+            [vec!["total"], vec!["total"], vec![]]
+        );
+        assert_eq!(suites("test_total.py", python), [vec![], vec!["TestTotal"]]);
+        assert_eq!(suites("lib.rs", rust), [vec!["tests"], vec!["tests"]]);
         let go = "package total\n\nimport \"testing\"\n\nfunc TestAdds(t *testing.T) {\n\tif Total([]int{1, 2}) != 3 {\n\t\tt.Fatal(\"sum\")\n\t}\n}\n\nfunc BenchmarkTotal(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t\tTotal(nil)\n\t}\n}\n\nfunc TestHelper() int { return 1 }\n";
         assert_eq!(names("total_test.go", go), ["TestAdds", "BenchmarkTotal"]);
         let located = crate::test_locations::locate_tests(Path::new("total_test.go"), go).unwrap();

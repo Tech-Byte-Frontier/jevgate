@@ -1,4 +1,6 @@
-//! File organization: an outline of member signatures and groups, without bodies.
+//! File organization: an outline of member signatures, sizes and groups,
+//! without bodies. A test file's members are its test cases and the support
+//! code they share.
 use super::{
     Asked, Detail, FileContext, FilePlan, GroupInfo, Planned, Presence, Questions, UnitPlan,
     identity, questions,
@@ -6,6 +8,7 @@ use super::{
 use crate::{
     analysis::{
         groups,
+        test_map::TestCase,
         units::{FileUnits, Kind, Unit},
     },
     catalog::FILE_ORGANIZATION,
@@ -22,6 +25,15 @@ const USED_BY: usize = 3;
 /// Files with fewer non-blank lines are too small to split.
 pub const MIN_FILE_LINES: usize = 100;
 
+/// One listed member: its name, its lines and the state sent for it.
+struct Member {
+    name: String,
+    line: usize,
+    end_line: usize,
+    state: Value,
+}
+
+/// An application file's members outside its tests.
 pub(super) fn plan(
     file: &FileContext<'_>,
     parsed: &FileUnits,
@@ -31,27 +43,113 @@ pub(super) fn plan(
     requests: &mut Vec<Planned>,
 ) {
     let units = &parsed.units;
-    let groups = groups::groups(units, members, &parsed.imports);
+    let position: BTreeMap<usize, usize> =
+        members.iter().enumerate().map(|(p, &m)| (m, p)).collect();
+    let sets = groups::groups(units, members, &parsed.imports)
+        .into_iter()
+        .map(|g| g.members.iter().map(|m| position[m]).collect())
+        .collect();
+    let listed = member_state(file, units, members, callers);
+    let source = application_source(file.source, units, members);
+    plan_outline(file, false, listed, sets, source, out, requests);
+}
+
+/// A test file's cases, with their suites and subjects, and the helpers,
+/// fixtures and types outside them.
+pub(super) fn plan_tests(
+    file: &FileContext<'_>,
+    parsed: &FileUnits,
+    cases: &[TestCase],
+    out: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let support: Vec<&Unit> = parsed
+        .units
+        .iter()
+        .filter(|u| !cases.iter().any(|c| u.overlaps(&(c.line..c.end_line + 1))))
+        .collect();
+    if cases.len() + support.len() < 2 {
+        return;
+    }
+    let helpers: BTreeSet<&str> = support.iter().map(|u| u.short_name.as_str()).collect();
+    let listed = cases
+        .iter()
+        .map(|case| {
+            let mut state = json!({
+                "name": case.name,
+                "kind": "test",
+                "lines": case.end_line + 1 - case.line,
+            });
+            if !case.suite.is_empty() {
+                state["suite"] = json!(case.suite.join(" > "));
+            }
+            if !case.subjects.is_empty() {
+                state["subjects"] = json!(case.subjects.iter().take(CALLS).collect::<Vec<_>>());
+            }
+            let calls: Vec<&String> = case
+                .calls
+                .iter()
+                .filter(|c| helpers.contains(c.as_str()))
+                .take(CALLS)
+                .collect();
+            if !calls.is_empty() {
+                state["calls"] = json!(calls);
+            }
+            Member {
+                name: case.name.clone(),
+                line: case.line,
+                end_line: case.end_line,
+                state,
+            }
+        })
+        .chain(
+            support
+                .iter()
+                .map(|unit| unit_member(unit, &helpers, &BTreeSet::new())),
+        )
+        .collect();
+    let sets = groups::test_groups(cases, &support);
+    plan_outline(
+        file,
+        true,
+        listed,
+        sets,
+        file.source.to_string(),
+        out,
+        requests,
+    );
+}
+
+/// The outline unit and its request; `sets` are groups of positions in `listed`.
+fn plan_outline(
+    file: &FileContext<'_>,
+    tests: bool,
+    listed: Vec<Member>,
+    sets: Vec<Vec<usize>>,
+    source: String,
+    out: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let ids: Vec<String> = (1..=sets.len()).map(|i| format!("G{i}")).collect();
     let outline = Outline {
-        members: member_state(file, units, members, callers),
-        groups: groups
+        tests,
+        lines: file.source.lines().count(),
+        members: listed.iter().map(|m| m.state.clone()).collect(),
+        groups: ids
             .iter()
-            .map(|g| json!({"id": g.id, "members": g.members.iter().map(|&m| &units[m].name).collect::<Vec<_>>()}))
+            .zip(&sets)
+            .map(|(id, set)| json!({"id": id, "members": set.iter().map(|&p| &listed[p].name).collect::<Vec<_>>()}))
             .collect(),
-        ids: groups.iter().map(|g| g.id.clone()).collect(),
+        ids: ids.clone(),
     };
     let (request, asked) = outline.request(file, None);
     let fits = file.budget.fits(&request);
     // A short file is read in one pass; splitting it is not a maintainability gain.
-    let small = member_code_lines(file.source, units, members) < MIN_FILE_LINES;
+    let small = member_code_lines(file.source, &listed) < MIN_FILE_LINES;
     let judged = fits && !small;
-    let first = members.iter().map(|&m| units[m].line).min().unwrap_or(1);
-    let last = members
-        .iter()
-        .map(|&m| units[m].end_line)
-        .max()
-        .unwrap_or(first);
-    let member_names: Vec<&str> = members.iter().map(|&m| units[m].name.as_str()).collect();
+    let first = listed.iter().map(|m| m.line).min().unwrap_or(1);
+    let last = listed.iter().map(|m| m.end_line).max().unwrap_or(first);
+    let names: Vec<&str> = listed.iter().map(|m| m.name.as_str()).collect();
     out.units.push(UnitPlan {
         rule: FILE_ORGANIZATION,
         id: ID.into(),
@@ -66,12 +164,27 @@ pub(super) fn plan(
         locations: vec![file.location(first, last, None)],
         quote: None,
         lines: file.source.lines().count(),
-        identity: identity(&member_names),
+        identity: identity(&names),
         detail: Detail::Outline {
-            groups: group_info(file, units, &groups, callers),
+            tests,
+            groups: ids
+                .into_iter()
+                .zip(&sets)
+                .map(|(id, set)| GroupInfo {
+                    id,
+                    names: set.iter().map(|&p| listed[p].name.clone()).collect(),
+                    locations: set
+                        .iter()
+                        .map(|&p| {
+                            let m = &listed[p];
+                            file.location(m.line, m.end_line, Some(&m.name))
+                        })
+                        .collect(),
+                })
+                .collect(),
         },
         recheck: judged
-            .then(|| outline.request(file, Some(application_source(file.source, units, members))))
+            .then(|| outline.request(file, Some(source)))
             .filter(|(request, _)| file.budget.fits(request)),
     });
     if judged {
@@ -87,6 +200,8 @@ const ID: &str = "outline";
 
 /// The uploaded outline: members, their groups, and the group IDs as options.
 struct Outline {
+    tests: bool,
+    lines: usize,
     members: Vec<Value>,
     groups: Vec<Value>,
     ids: Vec<String>,
@@ -103,7 +218,7 @@ impl Outline {
         let mut questions = Questions::default();
         questions.ask(
             "split".into(),
-            questions::outline_split(source.is_some()),
+            questions::outline_split(self.tests, source.is_some()),
             ID,
             FILE_ORGANIZATION,
             "split",
@@ -113,7 +228,7 @@ impl Outline {
             // Speculative location: consumed only when the split Score raises a finding.
             questions.ask(
                 "module".into(),
-                questions::outline_module(&self.ids),
+                questions::outline_module(self.tests, &self.ids),
                 ID,
                 FILE_ORGANIZATION,
                 "module",
@@ -125,6 +240,7 @@ impl Outline {
             "members": self.members,
             "groups": self.groups,
         });
+        state["file"]["lines"] = json!(self.lines);
         let stage = match source {
             Some(source) => {
                 state["file"]["source"] = json!(source);
@@ -136,14 +252,14 @@ impl Outline {
     }
 }
 
-/// Each member's name, kind, signature, doc line, calls to other members,
-/// and a few files that import this one and call it.
+/// Each member's name, kind, size, signature, doc line, calls to other
+/// members, and a few files that import this one and call it.
 fn member_state(
     file: &FileContext<'_>,
     units: &[Unit],
     members: &[usize],
     callers: &BTreeMap<String, BTreeSet<PathBuf>>,
-) -> Vec<Value> {
+) -> Vec<Member> {
     // Member names and the types that own member methods.
     let names: BTreeSet<&str> = members
         .iter()
@@ -154,81 +270,60 @@ fn member_state(
         .iter()
         .map(|&m| {
             let unit = &units[m];
-            let calls: Vec<&String> = unit
-                .calls
-                .iter()
-                .filter(|call| names.contains(call.as_str()) && **call != unit.short_name)
-                .take(CALLS)
-                .collect();
-            let used_by: Vec<&PathBuf> = callers
+            let used_by: BTreeSet<&PathBuf> = callers
                 .get(&unit.short_name)
                 .into_iter()
                 .flatten()
                 .filter(|path| path.as_path() != file.path)
                 .take(USED_BY)
                 .collect();
-            let mut member = json!({
-                "name": unit.name,
-                "kind": match unit.kind {
-                    Kind::Function => "function",
-                    Kind::Method => "method",
-                    Kind::Type => "type",
-                },
-                "signature": unit.signature,
-            });
-            if !unit.doc.is_empty() {
-                member["doc"] = json!(unit.doc);
-            }
-            if !calls.is_empty() {
-                member["calls"] = json!(calls);
-            }
-            if !used_by.is_empty() {
-                member["used_by"] = json!(used_by);
-            }
-            member
+            unit_member(unit, &names, &used_by)
         })
         .collect()
 }
 
-/// Non-blank lines inside members, so test code outside them does not count.
-fn member_code_lines(source: &str, units: &[Unit], members: &[usize]) -> usize {
-    let covered: BTreeSet<usize> = members
+fn unit_member(unit: &Unit, names: &BTreeSet<&str>, used_by: &BTreeSet<&PathBuf>) -> Member {
+    let calls: Vec<&String> = unit
+        .calls
         .iter()
-        .flat_map(|&m| units[m].line..=units[m].end_line)
+        .filter(|call| names.contains(call.as_str()) && **call != unit.short_name)
+        .take(CALLS)
         .collect();
+    let mut state = json!({
+        "name": unit.name,
+        "kind": match unit.kind {
+            Kind::Function => "function",
+            Kind::Method => "method",
+            Kind::Type => "type",
+        },
+        "lines": unit.lines(),
+        "signature": unit.signature,
+    });
+    if !unit.doc.is_empty() {
+        state["doc"] = json!(unit.doc);
+    }
+    if !calls.is_empty() {
+        state["calls"] = json!(calls);
+    }
+    if !used_by.is_empty() {
+        state["used_by"] = json!(used_by);
+    }
+    Member {
+        name: unit.name.clone(),
+        line: unit.line,
+        end_line: unit.end_line,
+        state,
+    }
+}
+
+/// Non-blank lines inside members, so test code outside them does not count.
+fn member_code_lines(source: &str, listed: &[Member]) -> usize {
+    let covered: BTreeSet<usize> = listed.iter().flat_map(|m| m.line..=m.end_line).collect();
     source
         .lines()
         .enumerate()
         .filter(|(i, line)| covered.contains(&(i + 1)) && !line.trim().is_empty())
         .count()
-}
-
-fn group_info(
-    file: &FileContext<'_>,
-    units: &[Unit],
-    groups: &[groups::Group],
-    callers: &BTreeMap<String, BTreeSet<PathBuf>>,
-) -> Vec<GroupInfo> {
-    groups
-        .iter()
-        .map(|g| GroupInfo {
-            id: g.id.clone(),
-            names: g.members.iter().map(|&m| units[m].name.clone()).collect(),
-            users: g
-                .members
-                .iter()
-                .filter_map(|&m| callers.get(&units[m].short_name))
-                .flatten()
-                .filter(|path| path.as_path() != file.path)
-                .cloned()
-                .collect(),
-            locations: g
-                .members
-                .iter()
-                .map(|&m| file.location(units[m].line, units[m].end_line, Some(&units[m].name)))
-                .collect(),
-        })
-        .collect()
 }
 
 /// The file without the lines of units that are not members, such as tests.

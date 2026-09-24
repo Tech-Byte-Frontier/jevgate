@@ -34,10 +34,7 @@ pub use spacetimedb::spacetimedb_module;
 
 use crate::schema::Location;
 use serde_json::Value;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, path::PathBuf};
 
 const PACK_ITEMS: usize = 8;
 /// Tests are sent one per request: seven unrelated tests in the same state
@@ -64,8 +61,6 @@ pub struct GroupInfo {
     pub id: String,
     pub names: Vec<String>,
     pub locations: Vec<Location>,
-    /// Other selected files that import this file and call a member of the group.
-    pub users: BTreeSet<PathBuf>,
 }
 
 /// A top-level block of a function body, offered when locating a split.
@@ -84,6 +79,8 @@ pub enum Detail {
         locate: Option<(Value, Asked)>,
     },
     Outline {
+        /// A test file's cases rather than application members.
+        tests: bool,
         groups: Vec<GroupInfo>,
     },
     Pair {

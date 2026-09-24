@@ -39,12 +39,12 @@ Consider (2):
 
 | Rule | Example finding |
 |---|---|
-| File organization | This file holds two unrelated responsibilities; the upload helpers would be most useful as their own module. |
+| File organization | This file holds several features that would be easier to find apart; the upload helpers would be most useful as their own module. Test files are judged too, at most as a consider. |
 | Function simplification | `sync_accounts` mixes separate jobs in long blocks; lines 40–71 would be most useful as their own function. |
 | Shared logic | `createInvoice` and `createReceipt` perform the same steps; one shared implementation would serve both. |
 | Hardcoded values | Module constants fix a value that differs between deployments; `apply_discount` special-cases one specific customer. |
 
-**Tests** (with `--include-tests`)
+**Tests** (with `--include-tests`; file organization judges test files without it)
 
 | Rule | Example finding |
 |---|---|

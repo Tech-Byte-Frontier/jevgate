@@ -82,28 +82,55 @@ pub fn function_block(blocks: &[String]) -> Value {
     )
 }
 
-pub fn outline_split(source: bool) -> Value {
-    score(
-        "Would moving some of the members in `members` into a separate module make this file easier to understand and maintain?".into(),
-        if source {
-            "`file.source` holds the file. Members are listed by signature and the names they call. `groups` lists members that call each other or share types."
-        } else {
-            "Members are listed by signature and the names they call; bodies are not included. `groups` lists members that call each other or share types."
-        },
-        [
-            "No. The members serve one responsibility, such as one feature, one type and its helpers, one set of related utilities, or one component and its parts.",
-            "Slightly. One small set of members could live elsewhere, but the file is coherent as it is.",
-            "Yes. The file holds two or more unrelated responsibilities, each with its own users, that would be clearer as separate modules.",
-        ],
-    )
+/// Whether a file would be easier to navigate as several modules. `tests`
+/// asks about a test file's cases. Sizes are evidence, never a limit: "areas"
+/// and "kinds of records" as the concern flagged one resource's routes and
+/// models, so the concern names separate features, rules or subjects.
+pub fn outline_split(tests: bool, source: bool) -> Value {
+    let (question, listed, criteria) = if tests {
+        (
+            "Would moving some of the tests in `members` into a separate test file make this file easier to navigate and maintain?",
+            "Members are test cases, with the suite that encloses each one and the functions under test it calls (`subjects`), and the helpers they share; bodies are not included. `groups` lists members that share a suite, a subject or a helper.",
+            [
+                "No. The tests cover one subject, such as one module, one feature, one endpoint group or one component, with the helpers they share, even when the file is long.",
+                "Slightly. A few tests could live elsewhere, but the file is easy to navigate as it is.",
+                "Yes. The file tests several subjects that a reader works on separately, such as unrelated modules, features or commands, and each subject's tests would be easier to find in their own file.",
+            ],
+        )
+    } else {
+        (
+            "Would moving some of the members in `members` into a separate module make this file easier to navigate and maintain?",
+            "Members are listed by signature and the names they call; bodies are not included. `groups` lists members that call each other or share types. `used_by` names a few other files that call a member. A long file that serves one feature is fine.",
+            [
+                "No. The members serve one feature, resource or job, such as one algorithm, one type and its helpers, the routes and queries of one resource, one screen and its parts, or a few small related helpers.",
+                "Slightly. One small set of members could live elsewhere, but the file is easy to navigate as it is.",
+                "Yes. The file holds several features or subsystems, such as separate product features, separate rules or separate integrations, that are read and changed apart, and each would be easier to find in its own module.",
+            ],
+        )
+    };
+    let sizes = "`lines` is each member's length and `file.lines` the whole file's.";
+    let note = if source {
+        format!("`file.source` holds the file. {listed} {sizes}")
+    } else {
+        format!("{listed} {sizes}")
+    };
+    score(question.into(), &note, criteria)
 }
 
-pub fn outline_module(groups: &[String]) -> Value {
+pub fn outline_module(tests: bool, groups: &[String]) -> Value {
     choose_id(
-        "Which group in `groups` would be most useful as its own module?",
+        if tests {
+            "Which group in `groups` would be most useful as its own test file?"
+        } else {
+            "Which group in `groups` would be most useful as its own module?"
+        },
         "Options are the `id` values in `groups`.".into(),
         groups,
-        "No group would be more useful as its own module.",
+        if tests {
+            "No group would be more useful as its own test file."
+        } else {
+            "No group would be more useful as its own module."
+        },
     )
 }
 
@@ -401,9 +428,12 @@ mod tests {
             hardcoded_benign("environment", "functions[0].values", "functions[0].source"),
             hardcoded_benign("magic", "functions[0].values", "functions[0].source"),
             hardcoded_benign("special", "functions[0].values", "functions[0].source"),
-            outline_split(false),
-            outline_split(true),
-            outline_module(&["G1".into(), "G2".into()]),
+            outline_split(false, false),
+            outline_split(false, true),
+            outline_split(true, false),
+            outline_split(true, true),
+            outline_module(false, &["G1".into(), "G2".into()]),
+            outline_module(true, &["G1".into(), "G2".into()]),
             duplicate_same(false),
             duplicate_same(true),
             duplicate_only_differences(),
@@ -481,7 +511,7 @@ mod tests {
         for question in of_type("choice") {
             assert!(question["criteria"].as_object().unwrap().len() >= 3);
         }
-        let module = outline_module(&["G1".into()]);
+        let module = outline_module(false, &["G1".into()]);
         assert!(module["criteria"]["G1"].is_null());
         assert!(module["criteria"]["none"].is_string());
     }
