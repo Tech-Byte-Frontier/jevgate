@@ -188,12 +188,14 @@ impl Session<'_> {
             crate::units::record(file, &asked, body)
         })?;
         // Traces judge where a security concern's values come from; rechecks
-        // settle uncertain units; locate follow-ups then point split findings
-        // at a block. Each depends on the answers before it.
+        // settle uncertain units; an outline still undecided is asked its kind;
+        // locate follow-ups then point split findings at a block. Each depends
+        // on the answers before it.
         for follow_up in [
             crate::units::doc_checks,
             crate::units::traces,
             crate::units::rechecks,
+            crate::units::kinds,
             crate::units::locates,
         ] {
             let tasks: Vec<_> = follow_up(&plan, &report.files)

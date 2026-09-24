@@ -87,11 +87,12 @@ pub(super) fn function_wording(
 }
 
 /// The file-wide concern, naming the group chosen as the module (or, for a
-/// test file, as its own test file) when there is one. A test file's finding
-/// is at most a consider.
+/// test file, as its own test file) when there is one, and the kind of file
+/// when the kind decided it. A test file's finding is at most a consider.
 pub(super) fn outline_wording(
     chosen: Option<&GroupInfo>,
     tests: bool,
+    several: Option<&str>,
     strength: Strength,
     p: f64,
 ) -> Wording {
@@ -132,7 +133,15 @@ pub(super) fn outline_wording(
             "Optional: move that set of members if it grows",
         ),
         Strength::Consider => (
-            format!("Some {parts} of this file could move to a separate {kind} ({p:.2}).{detail}"),
+            match several {
+                Some("per_feature") => format!(
+                    "This file writes out the same kind of code for several features ({p:.2}); each feature's part would be easier to find in its own {kind}.{detail}"
+                ),
+                Some(_) => format!("This file holds several unrelated features ({p:.2}).{detail}"),
+                None => format!(
+                    "Some {parts} of this file could move to a separate {kind} ({p:.2}).{detail}"
+                ),
+            },
             if tests {
                 "Consider moving those tests into their own test file"
             } else {

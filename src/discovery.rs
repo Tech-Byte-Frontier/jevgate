@@ -64,9 +64,11 @@ fn generated_name(name: &str) -> bool {
         || name == "database.types.ts"
 }
 
-/// Test file naming conventions across the supported languages.
+/// Test file naming conventions across the supported languages. Cargo and
+/// Go decide which files are tests, so a `test_*.rs` or `test_*.go` file is
+/// ordinary code, such as a module that locates tests.
 fn test_name(name: &str) -> bool {
-    name.starts_with("test_")
+    (name.starts_with("test_") && !name.ends_with(".rs") && !name.ends_with(".go"))
         || name.contains(".test.")
         || name.contains(".spec.")
         || name.contains("_test.")
@@ -161,6 +163,18 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{generated_header, generated_source};
+    use std::path::Path;
+
+    #[test]
+    fn test_prefixed_names_are_tests_where_the_toolchain_does_not_decide() {
+        let classifier = super::Classifier::new(&Default::default()).unwrap();
+        assert_eq!(classifier.role(Path::new("app/test_orders.py")), "test");
+        assert_eq!(classifier.role(Path::new("src/test_orders.js")), "test");
+        assert_eq!(classifier.role(Path::new("src/test_locations.rs")), "source");
+        assert_eq!(classifier.role(Path::new("pkg/test_helpers.go")), "source");
+        assert_eq!(classifier.role(Path::new("src/orders.test.ts")), "test");
+        assert_eq!(classifier.role(Path::new("pkg/orders_test.go")), "test");
+    }
 
     #[test]
     fn minified_bundles_and_compiled_output_are_generated() {

@@ -134,6 +134,73 @@ pub fn outline_module(tests: bool, groups: &[String]) -> Value {
     )
 }
 
+/// Kinds of files whose members serve several features; every other kind
+/// serves one. Asked with the recheck: when the split Score stays undecided,
+/// the kind decides, since naming what a file holds was decisive where
+/// weighing a split was not.
+pub const SEVERAL_KINDS: [&str; 2] = ["per_feature", "several"];
+
+/// What the members of a file hold, as a Choice among kinds of files.
+pub fn outline_kind(tests: bool) -> Value {
+    let kinds: &[(&str, &str)] = if tests {
+        &[
+            (
+                "one_subject",
+                "Tests of one module, feature, endpoint group or component, with shared helpers.",
+            ),
+            (
+                "per_feature",
+                "Tests of one kind written out for each of several features or commands.",
+            ),
+            (
+                "several",
+                "Tests of several unrelated modules, features or subsystems.",
+            ),
+        ]
+    } else {
+        &[
+            (
+                "algorithm",
+                "One algorithm, process or pipeline stage and the helpers it uses.",
+            ),
+            (
+                "type",
+                "One type, class or object and its methods, or one small family of related types.",
+            ),
+            (
+                "resource",
+                "One resource or domain entity: its routes, handlers, queries or data access.",
+            ),
+            ("component", "One screen, component or view and its parts."),
+            (
+                "definitions",
+                "Definitions of one kind for one area: data types, schemas, constants, configuration or options.",
+            ),
+            ("helpers", "A few small, related helper functions."),
+            (
+                "coordination",
+                "Coordination: code that runs the steps and calls other modules that own each feature.",
+            ),
+            (
+                "per_feature",
+                "The same kind of code written out for each of several features, rules or cases, such as each feature's messages, checks or handlers.",
+            ),
+            (
+                "several",
+                "Several unrelated features, integrations or subsystems.",
+            ),
+        ]
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": "Which best describes what the members in `members` hold?",
+            "note": format!("`file.source` holds the file. {EVIDENCE}"),
+        },
+        "criteria": kinds.iter().map(|(k, v)| (k.to_string(), json!(v))).collect::<Map<_, _>>(),
+    })
+}
+
 /// Asked only after a hardcoded-value finding, to name the value it is about.
 pub fn hardcoded_value(ids: &[String]) -> Value {
     choose_id(
@@ -434,6 +501,8 @@ mod tests {
             outline_split(true, true),
             outline_module(false, &["G1".into(), "G2".into()]),
             outline_module(true, &["G1".into(), "G2".into()]),
+            outline_kind(false),
+            outline_kind(true),
             duplicate_same(false),
             duplicate_same(true),
             duplicate_only_differences(),

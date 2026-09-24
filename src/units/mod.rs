@@ -27,7 +27,7 @@ mod workflows;
 use answers::Questions;
 pub use answers::{Asked, record};
 use evidence::{FileContext, compact, identity, pack, request, unique_ids};
-pub use follow_ups::{doc_checks, locates, rechecks, traces};
+pub use follow_ups::{doc_checks, kinds, locates, rechecks, traces};
 use plan::Scope;
 pub use plan::plan;
 pub use spacetimedb::spacetimedb_module;
@@ -82,6 +82,8 @@ pub enum Detail {
         /// A test file's cases rather than application members.
         tests: bool,
         groups: Vec<GroupInfo>,
+        /// What kind of file it is, asked after a recheck that stays undecided.
+        kind: Option<(Value, Asked)>,
     },
     Pair {
         differences: Vec<crate::analysis::clones::Difference>,
