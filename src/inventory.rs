@@ -294,23 +294,18 @@ fn load(
     }
     if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
         // A copied library or build output is excluded whatever its size.
-        if let Ok(source) = read_source(&path, LOCAL_PARSE_MAX) {
-            if discovery::generated_source(&source) {
-                return Ok(recast(result, "generated", relative));
-            }
-            if discovery::vendored(&path, Some(&source)) {
-                return Ok(recast(result, "vendored", relative));
-            }
-        }
-        return over_read_cap(result, relative, &path, args.max_file_bytes);
+        let copied = read_source(&path, LOCAL_PARSE_MAX)
+            .ok()
+            .and_then(|source| not_written_here(&path, &role, &source));
+        return Ok(match copied {
+            Some(kind) => recast(result, kind, relative),
+            None => over_read_cap(result, relative, &path, args.max_file_bytes)?,
+        });
     }
     let source = read_source(&path, args.max_file_bytes);
     match source {
-        Ok(source) if discovery::generated_source(&source) => {
-            Ok(recast(result, "generated", relative))
-        }
-        Ok(source) if role == "source" && discovery::vendored(&path, Some(&source)) => {
-            Ok(recast(result, "vendored", relative))
+        Ok(source) if let Some(kind) = not_written_here(&path, &role, &source) => {
+            Ok(recast(result, kind, relative))
         }
         Ok(source) => {
             result.source_hash = hash(source.as_bytes());
@@ -396,6 +391,18 @@ fn pending_result(
         findings: Vec::new(),
         error: None,
         classification: None,
+    }
+}
+
+/// Build output, or a library copied into the repository, found from a
+/// file's content: the role it takes instead of the one its path gave.
+fn not_written_here(path: &std::path::Path, role: &str, source: &str) -> Option<&'static str> {
+    if discovery::generated_source(source) {
+        Some("generated")
+    } else if role == "source" && discovery::vendored(path, Some(source)) {
+        Some("vendored")
+    } else {
+        None
     }
 }
 

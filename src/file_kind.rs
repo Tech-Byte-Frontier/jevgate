@@ -607,6 +607,14 @@ mod tests {
 
     const MIXED: &str = "fn production(value: &str) -> String {\n    value.trim().to_string()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::production;\n\n    fn helper(value: &str) -> String {\n        production(value)\n    }\n\n    #[test]\n    fn checks_production() {\n        assert_eq!(helper(\" a \"), \"a\");\n    }\n}\n";
 
+    /// The first and last line of each test range in a view.
+    fn test_line_ranges(view: &View) -> Vec<(usize, usize)> {
+        view.test_lines
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect()
+    }
+
     fn view_of(project: &Project, options: &CheckArgs) -> View {
         let input = crate::inventory::collect(options, &project.context(), &[])
             .unwrap()
@@ -663,11 +671,7 @@ mod tests {
         assert!(view.application && !view.tests);
         assert_eq!(view.classification.kind, "mixed");
         assert_eq!(view.classification.language, "Rust");
-        let lines: Vec<_> = view
-            .test_lines
-            .iter()
-            .map(|r| (r.start_line, r.end_line))
-            .collect();
+        let lines = test_line_ranges(&view);
         assert_eq!(lines, [(5, 17), (22, 25)]);
         let mut options = args();
         options.include_tests = true;
@@ -683,11 +687,7 @@ mod tests {
         );
         let view = view_of(&project, &args());
         assert_eq!(view.classification.kind, "mixed");
-        let lines: Vec<_> = view
-            .test_lines
-            .iter()
-            .map(|r| (r.start_line, r.end_line))
-            .collect();
+        let lines = test_line_ranges(&view);
         assert_eq!(lines, [(3, 6)]);
     }
 
@@ -700,11 +700,7 @@ mod tests {
         );
         let view = view_of(&project, &args());
         assert_eq!(view.classification.kind, "mixed");
-        let lines: Vec<_> = view
-            .test_lines
-            .iter()
-            .map(|r| (r.start_line, r.end_line))
-            .collect();
+        let lines = test_line_ranges(&view);
         assert_eq!(lines, [(9, 11)], "only the statement-level test call");
     }
 
@@ -713,12 +709,7 @@ mod tests {
         let project = Project::new();
         let source = "import unittest\n\ndef total(rows):\n    return sum(rows)\n\nclass TotalChecks(unittest.TestCase):\n    def test_sum(self):\n        self.assertEqual(total([1, 2]), 3)\n\ndef test_empty():\n    assert total([]) == 0\n";
         project.write("lib/checks.py", source);
-        let lines = |view: View| -> Vec<_> {
-            view.test_lines
-                .iter()
-                .map(|r| (r.start_line, r.end_line))
-                .collect()
-        };
+        let lines = |view: View| test_line_ranges(&view);
         // Outside a pytest file only the TestCase class is a test.
         assert_eq!(lines(view_of(&project, &args())), [(6, 8)]);
         // A `Test*` helper class outside a pytest file is library code.

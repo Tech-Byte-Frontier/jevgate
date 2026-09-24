@@ -208,14 +208,16 @@ fn an_undecided_url_is_settled_only_by_a_host_of_the_programs_own() {
 }
 
 #[test]
-fn undecided_error_details_are_settled_by_where_the_text_goes() {
+fn error_details_are_settled_by_where_the_text_goes() {
     let (project, mut options) = security_project(QUERY);
-    let status = |destination: &str, options: &CheckArgs| {
+    // `own` 0.1 names a foreign message, which with a leaning exception would
+    // otherwise raise a consider.
+    let status = |destination: &str, (exception, own): (f64, f64), options: &CheckArgs| {
         let mut eval = scripted(0);
         eval.overrides = vec![
             ("error_details", noul_at(0.3)),
-            ("exception_to_client", noul_at(0.3)),
-            ("own_messages", noul_at(0.5)),
+            ("exception_to_client", noul_at(exception)),
+            ("own_messages", noul_at(own)),
             (
                 "destination",
                 choice_of(
@@ -228,9 +230,14 @@ fn undecided_error_details_are_settled_by_where_the_text_goes() {
             .status
             .clone()
     };
-    assert_eq!(status("local", &options), Status::Clear);
+    assert_eq!(status("local", (0.3, 0.5), &options), Status::Clear);
     options.refresh = true;
-    assert_eq!(status("client", &options), Status::Uncertain);
+    assert_eq!(status("client", (0.3, 0.5), &options), Status::Uncertain);
+    assert_eq!(
+        status("local", (0.6, 0.1), &options),
+        Status::Clear,
+        "a foreign message that stays on the local terminal"
+    );
 }
 
 #[test]
@@ -367,27 +374,6 @@ fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
     assert_eq!(
         note.category.as_deref(),
         Some("CWE-209 error details exposed")
-    );
-}
-
-#[test]
-fn error_text_that_never_reaches_a_client_is_not_a_leak() {
-    let (project, options) = security_project(QUERY);
-    let mut eval = scripted(0);
-    eval.overrides = vec![
-        ("error_details", noul_at(0.3)),
-        ("exception_to_client", noul_at(0.6)),
-        ("own_messages", noul_at(0.1)),
-        (
-            "destination",
-            choice_of("local", &["client", "local", "logs", "caller", "stored"]),
-        ),
-    ];
-    let report = run(&project, &options, &mut eval);
-    assert_eq!(
-        report.files[0].dimensions[catalog::SENSITIVE_DATA].status,
-        Status::Clear,
-        "a foreign message shown only on the local terminal"
     );
 }
 
