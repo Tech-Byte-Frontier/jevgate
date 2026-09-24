@@ -187,17 +187,31 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             };
             get(question).map(|a| cleanup(noul(a)))
         }
-        catalog::DOC_DUPLICATION => ["a_covers", "b_covers", "conflict"]
-            .iter()
-            .map(|q| get(q).map(|a| cleanup(noul(a))))
-            .collect::<Option<Vec<_>>>()
-            .map(|signals| strongest(&signals)),
+        catalog::DOC_DUPLICATION => doc_pair_outcome(&get),
         catalog::AGENT_CONTEXT => {
             section_signals(&get).map(|s| strongest(&s.iter().map(|(_, o)| *o).collect::<Vec<_>>()))
         }
         _ => None,
     };
     result.unwrap_or(Outcome::Missing)
+}
+
+/// A pair of sections repeats itself when either covers the other, unless one
+/// translates the other; a disagreement counts either way, since a
+/// translation that disagrees with its original is out of date.
+fn doc_pair_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
+    let translated = get("translation").is_some_and(|a| matches!(noul(a), Outcome::Review(_)));
+    let covers = if translated {
+        &[][..]
+    } else {
+        &["a_covers", "b_covers"][..]
+    };
+    covers
+        .iter()
+        .chain(&["conflict"])
+        .map(|q| get(q).map(|a| cleanup(noul(a))))
+        .collect::<Option<Vec<_>>>()
+        .map(|signals| strongest(&signals))
 }
 
 /// Policies and grants whose intent may be public data are at most a

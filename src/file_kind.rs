@@ -149,6 +149,7 @@ pub fn language(path: &Path) -> &'static str {
         "zig" => "Zig",
         "vue" => "Vue",
         "svelte" => "Svelte",
+        "astro" => "Astro",
         "sql" => "SQL",
         "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd" => "shell",
         _ => "unknown",

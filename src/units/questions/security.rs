@@ -133,7 +133,7 @@ pub fn security_handler_leaks() -> Value {
         "type": "noul",
         "instructions": {
             "question": "Does the error handler in `error_handler.source` send a remote client anything besides the message and code of errors the program raises itself?",
-            "note": format!("`error_classes` defines the program's own errors, when found. {EVIDENCE}"),
+            "note": format!("`error_classes` defines the program's own errors, when found; `error_handler.helpers` holds functions of its file that it calls. {EVIDENCE}"),
         },
         "criteria": {
             "true": "It sends an error's cause, its stack trace, or the message of an error the program did not create, such as a database or library error.",

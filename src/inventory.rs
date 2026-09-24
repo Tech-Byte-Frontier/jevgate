@@ -19,6 +19,8 @@ pub struct Input {
     /// With access control, for a SpacetimeDB module file (it imports
     /// `spacetimedb/server`), its package and framework version.
     pub framework: Option<Framework>,
+    /// For application and test source, the package it belongs to.
+    pub package: Option<crate::packages::Package>,
 }
 
 /// A SpacetimeDB module's package: the directory of the `package.json` that
@@ -251,6 +253,7 @@ fn load_document(
                 context: Vec::new(),
                 repository: None,
                 framework: None,
+                package: None,
             }
         }
         Err(error) => error_input(result, error),
@@ -291,7 +294,7 @@ fn load(
     }
     let source = read_source(&path, args.max_file_bytes);
     match source {
-        Ok(source) if discovery::generated_header(&source) => {
+        Ok(source) if discovery::generated_source(&source) => {
             result.role = "generated".into();
             result.contains_tests = false;
             Ok(excluded(result, "generated", relative))
@@ -318,6 +321,7 @@ fn load(
                     .collect(),
                 repository: None,
                 framework,
+                package: crate::packages::package(&context.root, relative),
             })
         }
         // Binary and non-UTF-8 files are reported and skipped; they never make a run incomplete.
@@ -402,6 +406,7 @@ fn bare_input(result: FileResult) -> Input {
         context: Vec::new(),
         repository: None,
         framework: None,
+        package: None,
     }
 }
 
@@ -427,6 +432,19 @@ fn keep_module_packages(args: &CheckArgs, inputs: &mut Vec<Input>) {
 /// the manifest's other text.
 fn spacetimedb_package(root: &Path, relative: &Path) -> Framework {
     for directory in relative.ancestors().skip(1) {
+        if let Ok(text) = read_source(&root.join(directory).join("Cargo.toml"), LOCAL_PARSE_MAX)
+            && let Ok(table) = text.parse::<toml::Table>()
+            && let Some(dependency) = table.get("dependencies").and_then(|d| d.get("spacetimedb"))
+        {
+            let version = dependency
+                .as_str()
+                .or_else(|| dependency.get("version")?.as_str())
+                .unwrap_or("");
+            return Framework {
+                root: directory.to_path_buf(),
+                version: version.trim_start_matches(['^', '~', '=', 'v', ' ']).into(),
+            };
+        }
         let manifest = root.join(directory).join("package.json");
         let Ok(text) = read_source(&manifest, LOCAL_PARSE_MAX) else {
             continue;

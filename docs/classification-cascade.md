@@ -13,13 +13,21 @@ signatures, or one candidate pair.
 
 ## Pipeline
 
-1. **Eligibility and purpose.** Deterministic roles, generated-code headers and
-   structural test markers decide which code the application rules and the test
-   rules see. Only a test path without structural tests gets a file-purpose request.
+1. **Eligibility and purpose.** Deterministic roles, generated-code headers,
+   compiled or minified output (a trailing source map reference, or nine tenths
+   of the file in lines of 1,000 bytes or more) and structural test markers
+   decide which code the application rules and the test rules see. Only a test
+   path without structural tests gets a file-purpose request. Astro, Vue and
+   Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
+   contents, with every other byte a space, so lines stay the file's.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
-   and control-flow nesting; callbacks registered through calls; member groups by
-   average linkage; callers that import the file; Type-2 clone candidates grouped
-   by overlapping copies; test cases with their subjects and similar pairs.
+   and control-flow nesting; callbacks registered through calls, including
+   module-level route handlers named by their registration
+   (`app.post('/pages')`); member groups by average linkage; callers that
+   import the file; Type-2 clone candidates grouped by overlapping copies, only
+   within one package or packages linked by a local dependency (copies in side
+   by side templates or example apps are separate projects); test cases with
+   their subjects and similar pairs.
 3. **First pass** (`src/units/`). One dispatch of every unit request. Functions
    are packed eight per request; tests are sent one per request, because unrelated
    tests in the same state left more answers undecided. State uses literal paths
@@ -61,9 +69,14 @@ signatures, or one candidate pair.
    if any, carries another error's text: the response is often written by an
    error handler in another file, and adding the handler to every unit also
    cleared real leaks. Each registered error handler (`.onError(…)`,
-   `.setErrorHandler(…)`, Flask and FastAPI decorators) is asked once whether
-   it sends clients more than the program's own messages and codes, with the
-   program's `…Error` classes.
+   `.setErrorHandler(…)`, Express four-parameter `.use(…)` middleware, Flask
+   and FastAPI decorators, NestJS `@Catch` filters, axum `IntoResponse` and
+   actix-web `ResponseError` for an error type, Rocket catchers) is asked once
+   whether it sends clients more than the program's own messages and codes,
+   with the program's `…Error` classes (Rust enums with their `#[error]`
+   messages) and the functions of its file that it calls. An injection trace
+   also gets the definitions of enums its sites name (`ConfigKey.aiTag`), so
+   a fixed choice does not read as a parameter.
    Agent instruction files (`src/docs/`) are found by name even when hidden
    or ignored. Each file's heading sections, or the top-level blocks of a long
    section, are sent packed beside the nearest manifests, the configured
@@ -83,8 +96,9 @@ signatures, or one candidate pair.
    named paths were deleted, is asked from its headings whether it is a plan;
    a plan with those facts is one finding, and its own candidates are not
    asked. The section check and the pair Nouls (does A state everything B
-   states, and the reverse; do they disagree?) are follow-ups for the other
-   documents. A Score on how two sections relate stayed on its middle level
+   states, and the reverse; do they disagree; is one a translation of the
+   other?) are follow-ups for the other documents. A translation clears the
+   repetition answers but not a disagreement. A Score on how two sections relate stayed on its middle level
    for almost every pair, so it is not asked.
    SQL files (`security/access-control`) are split into statements that honor
    comments, quotes and dollar quotes. Each project's files, grouped above
@@ -97,16 +111,20 @@ signatures, or one candidate pair.
    revokes of EXECUTE; a grant with whether its table has row-level security.
    The criteria name role checks, service roles, restrictive policies and
    trigger functions, which a literal "other users' rows" question flagged.
-   SpacetimeDB TypeScript modules (files that import `spacetimedb/server`)
-   are read for access control too: each public table with the columns that
-   name players, and each view and reducer with up to six functions it calls
-   (two deep, in the module's package). The framework version comes from the
-   package's `package.json`, since scheduled reducers are private in 2.x and
-   callable by clients in 1.x. Each definition gets a Score whose two lower
-   levels are acceptable (the caller's own data; data meant for every player)
+   SpacetimeDB modules (TypeScript files that import `spacetimedb/server`,
+   Rust files with `#[table]`, `#[reducer]` or `#[view]` attributes) are read
+   for access control too, whatever the application: each public table with
+   the columns that name users, and each view and reducer with up to six functions it calls (two
+   deep, in the module's package). Lifecycle reducers are left out; a Rust
+   reducer is sent with the table line that schedules it (`scheduled_by`), since
+   the schedule is declared on the table. The framework version comes from the
+   package's `package.json` or `Cargo.toml`, since scheduled reducers are
+   private in 2.x and callable by clients in 1.x; with no version, both are
+   stated. Each definition gets a Score whose two lower
+   levels are acceptable (the caller's own data; data meant for every user)
    and concern Nouls: for a reducer, two literal checks (a row chosen by an
-   argument without an ownership check; an operator-only change without an
-   operator check). One broad Noul left most real definitions undecided and
+   argument without an ownership check; an admin-only change without checking
+   the owner, an admin or a granting role). One broad Noul left most real definitions undecided and
    most broken reducers under 0.80. When access control is the only code
    rule, only the files of module packages are collected.
    Workflow jobs (`security/workflows`) are split by indentation. The parser

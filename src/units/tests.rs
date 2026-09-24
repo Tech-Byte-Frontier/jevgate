@@ -1846,6 +1846,103 @@ fn a_registered_error_handler_is_one_unit_judged_with_the_error_classes() {
     );
 }
 
+#[test]
+fn framework_error_handlers_are_found_where_they_are_implemented_or_used() {
+    let project = Project::new();
+    project.write(
+        "src/error.rs",
+        "use axum::response::{IntoResponse, Response};\n\n#[derive(thiserror::Error, Debug)]\npub enum Error {\n    #[error(\"request path not found\")]\n    NotFound,\n    #[error(\"an internal server error occurred\")]\n    Anyhow(#[from] anyhow::Error),\n}\n\n#[derive(Debug)]\npub struct TimeoutError;\n\nimpl IntoResponse for Error {\n    fn into_response(self) -> Response {\n        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()\n    }\n}\n\nimpl IntoResponse for Page {\n    fn into_response(self) -> Response {\n        Html(self.0).into_response()\n    }\n}\n",
+    );
+    project.write(
+        "src/server.ts",
+        "const app = express()\napp.use(express.json())\napp.use(cors({ origin: true }))\napp.use((err: Error, req: Request<{}, any>, res: Response, next: NextFunction) => {\n  res.status(500).json({ message: err.message })\n})\n",
+    );
+    project.write(
+        "src/filter.ts",
+        "@Catch(HttpException)\nexport class HttpErrorFilter implements ExceptionFilter {\n  catch(exception: HttpException, host: ArgumentsHost) {\n    host.switchToHttp().getResponse().status(500).json(exception.getResponse())\n  }\n}\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::SENSITIVE_DATA.into()];
+    let (_, plan) = planned(&project, &options);
+    let registered: Vec<String> = plan
+        .files
+        .values()
+        .flat_map(|f| &f.units)
+        .filter_map(|u| match &u.detail {
+            Detail::Handler { registered } => Some(registered.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(registered.len(), 3, "{registered:?}");
+    assert!(
+        registered.contains(&"`impl IntoResponse for Error` (src/error.rs:15)".to_string()),
+        "{registered:?}"
+    );
+    assert!(
+        registered
+            .iter()
+            .any(|r| r.starts_with("`app.use((err: Error"))
+    );
+    assert!(
+        registered.contains(&"`@Catch(…) class HttpErrorFilter` (src/filter.ts:3)".to_string())
+    );
+    let classes = plan
+        .requests
+        .iter()
+        .find(|p| {
+            p.request["state"]["error_handler"]["registered"]
+                .as_str()
+                .is_some_and(|r| r.contains("IntoResponse"))
+        })
+        .unwrap()
+        .request["state"]["error_classes"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        classes.starts_with("#[derive(thiserror::Error, Debug)]\npub enum Error {"),
+        "{classes}"
+    );
+    assert!(classes.contains("an internal server error occurred"));
+    assert!(classes.ends_with("pub struct TimeoutError;"), "{classes}");
+}
+
+#[test]
+fn an_injection_trace_shows_the_enums_its_sites_name() {
+    let project = Project::new();
+    project.write(
+        "server/store.ts",
+        "import { ConfigKey } from '../shared/config'\n\nexport async function setAITagConfig(DB: D1Database, config: AITagConfig): Promise<boolean> {\n  const insertSql = `INSERT INTO stores (key, value) VALUES ('${ConfigKey.aiTag}', ?) ON CONFLICT(key) DO UPDATE SET value = ?`\n  const bindValue = JSON.stringify(config)\n  const result = await DB.prepare(insertSql).bind(bindValue, bindValue).run()\n  return result.success\n}\n",
+    );
+    project.write(
+        "shared/config.ts",
+        "enum ConfigKey {\n  shouldShowRecent = 'config/should_show_recent',\n  aiTag = 'config/ai_tag',\n}\n\nexport { ConfigKey }\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let (_, plan) = planned(&project, &options);
+    let traces: Vec<&Value> = plan
+        .files
+        .values()
+        .flat_map(|f| &f.units)
+        .filter_map(|u| match &u.detail {
+            Detail::Security {
+                trace: Some((request, _)),
+                ..
+            } => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(traces.len(), 1);
+    assert!(
+        traces[0]["state"]["enums_named_in_sites"][0]
+            .as_str()
+            .is_some_and(|e| e.starts_with("enum ConfigKey {")),
+        "{}",
+        traces[0]["state"]
+    );
+}
+
 const STDB_TABLES: &str = "import { table, t } from 'spacetimedb/server'\n\nexport const character = table(\n  { public: true },\n  {\n    id: t.u64().primaryKey(),\n    owner: t.identity(),\n    name: t.string(),\n  },\n)\n\nexport const account = table({ public: false }, { owner: t.identity().primaryKey() })\n";
 const STDB_COMMANDS: &str = "import { t } from 'spacetimedb/server'\nimport { database } from './schema'\nimport { ownedCharacter } from './owned'\n\nexport const renameCharacter = database.reducer({ characterId: t.u64(), name: t.string() }, (ctx, { characterId, name }) => {\n  const row = ownedCharacter(ctx, characterId)\n  ctx.db.character.id.update({ ...row, name })\n})\n\nexport const myCharacters = database.view({ public: true }, t.array(character.rowType), (ctx) => {\n  return [...ctx.db.character.owner.filter(ctx.sender)]\n})\n";
 const STDB_OWNED: &str = "export function ownedCharacter(ctx, id) {\n  const row = ctx.db.character.id.find(id)\n  if (!row || !row.owner.isEqual(ctx.sender)) throw new Error('NOT_OWNER')\n  return row\n}\n";
@@ -1898,7 +1995,7 @@ fn spacetimedb_tables_views_and_reducers_are_judged_with_helpers_and_the_version
         .unwrap();
     assert!(
         note.contains("SpacetimeDB 2.10.0")
-            && note.contains("Scheduled reducers (`onSchedule`) are private")
+            && note.contains("Scheduled reducers (named by a table's `scheduled` option, shown as `scheduled_by`) are private")
     );
     assert_eq!(
         reducer.request["jevgate"]["sources"]
@@ -1913,7 +2010,7 @@ fn spacetimedb_tables_views_and_reducers_are_judged_with_helpers_and_the_version
         .find(|p| p.request["state"]["table"].is_object())
         .unwrap();
     assert_eq!(
-        table.request["state"]["table"]["columns_naming_players"],
+        table.request["state"]["table"]["columns_naming_users"],
         json!(["owner"])
     );
     // Acceptable levels clear; a literal check at review raises the reducer,
