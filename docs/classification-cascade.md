@@ -118,6 +118,26 @@ signatures, or one candidate pair.
    answer that none of the specific checks leans toward names no setting to
    change and is at most a note: on an action marked `[AllowAnonymous]` on
    purpose it was 0.85 while every check stayed at 0.30 or less.
+   In a package that depends on `next`, a file's path names its role
+   (`app/**/route.ts`, `pages/api/**`, `middleware.ts` or `proxy.ts`,
+   `app/**/error.tsx`, pages and layouts, `next.config.*`), and in any
+   package a leading `'use server'` or `'use client'` directive, or a
+   function body that starts with `'use server'`, marks Server Actions or a
+   client component. The role goes into the file state as `framework`, and
+   every question's note points to it: stated only in the state, a
+   client component's role did not clear its browser requests. With it, a
+   Server Action's parameters read as client input (an injection that was a
+   consider on its parameters became a review) and an error boundary as the
+   browser's own page. The injection trace asks one more literal check,
+   whether a redirect target from a variable is checked (CWE-601): without
+   it, `redirect(next)` and `NextResponse.redirect(returnTo)` were notes about
+   URLs "it requests". The SQL check names tagged templates that bind (`sql`,
+   `$queryRaw`) as handled and `$queryRawUnsafe` and `sql.raw` as not, the
+   markup check names `dangerouslySetInnerHTML` (also a site), and the unsafe
+   settings ask whether a secret comes from a variable the build puts into
+   browser code (`NEXT_PUBLIC_`). A `next.config` file's setup is every
+   top-level statement that holds an object, with its innermost objects as
+   sites, since `headers()` settings call nothing.
    A security unit still uncertain after its trace and recheck is asked, in a
    request of its own, one literal Choice that can only clear: where its URLs
    come from (a host of the program's own at 0.80 clears an undecided URL

@@ -64,8 +64,9 @@ fn away_from_clients<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
 }
 
 /// Kinds where a variable is a concern only when another party controls it:
-/// helpers that build a path or URL from their parameters are everywhere.
-const RESOURCE_CHECKS: [&str; 2] = ["path", "url"];
+/// helpers that build a path, URL or redirect target from their parameters
+/// are everywhere.
+const RESOURCE_CHECKS: [&str; 3] = ["path", "url", "redirect"];
 
 /// Presence alone never raises an injection: it only decides whether the
 /// trace is asked. When every specific check clears the unit, it is clear;

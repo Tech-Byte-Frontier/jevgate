@@ -14,6 +14,7 @@ pub mod grouping;
 mod handlers;
 mod hardcoded;
 mod instructions;
+mod nextjs;
 mod outcome;
 pub(crate) mod outline;
 mod plan;

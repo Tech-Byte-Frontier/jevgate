@@ -73,6 +73,11 @@ pub(super) fn plan(
             source_hash: &input.result.source_hash,
             model: args.model(),
             budget,
+            framework: super::nextjs::describe(
+                &input.result.path,
+                input.source.as_deref().unwrap_or(""),
+                input.package.as_ref(),
+            ),
         };
         if let Some(file) = result.files.get_mut(&handler.owner) {
             plan_handler(&context, handler, &classes, file, &mut result.requests);
