@@ -27,7 +27,7 @@ mod workflows;
 use answers::Questions;
 pub use answers::{Asked, record};
 use evidence::{FileContext, compact, identity, pack, request, unique_ids};
-pub use follow_ups::{doc_checks, kinds, locates, rechecks, traces};
+pub use follow_ups::{doc_checks, kinds, locates, rechecks, settles, traces};
 use plan::Scope;
 pub use plan::plan;
 pub use spacetimedb::spacetimedb_module;
@@ -115,6 +115,9 @@ pub enum Detail {
         /// for sensitive-data units.
         messages: Vec<String>,
         trace: Option<(Value, Asked)>,
+        /// Where its URLs come from or its output goes, asked when a check
+        /// stays undecided after the trace and recheck.
+        settle: Option<(Value, Asked)>,
     },
     /// A large document judged by its outline, with its top-level parts
     /// and the follow-up that locates a split.

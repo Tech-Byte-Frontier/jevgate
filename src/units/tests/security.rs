@@ -153,6 +153,86 @@ fn a_parameter_in_a_path_or_url_is_a_note_until_callers_show_another_party() {
     );
 }
 
+const FETCH_QUOTE: &str = "fn quote(client: &Client, base: &Url, symbol: &str) -> String {\n    let url = base.join(&format!(\"quotes/{symbol}\")).unwrap();\n    client.get(url).send().unwrap().text().unwrap()\n}\n";
+
+const URL_PARTS: [&str; 5] = ["own", "forwards", "given", "outside", "none"];
+
+/// Injection status and settle requests with the URL (or path) check at
+/// `check` undecided and the settle Choice answering `parts`.
+fn settled_injection(
+    project: &Project,
+    options: &CheckArgs,
+    check: &'static str,
+    parts: &str,
+) -> (Status, u64) {
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("resource", noul_at(0.95)),
+        (check, noul_at(0.4)),
+        ("origin", spread(0.0, 0.9, 0.1)),
+        ("url_parts", choice_of(parts, &URL_PARTS)),
+    ];
+    let report = run(project, options, &mut eval);
+    (
+        report.files[0].dimensions[catalog::INJECTION]
+            .status
+            .clone(),
+        report
+            .stages
+            .get("settle")
+            .map_or(0, |stage| stage.successful_requests),
+    )
+}
+
+#[test]
+fn an_undecided_url_is_settled_only_by_a_host_of_the_programs_own() {
+    let (project, mut options) = security_project(FETCH_QUOTE);
+    assert_eq!(
+        settled_injection(&project, &options, "url", "own"),
+        (Status::Clear, 1)
+    );
+    for parts in ["forwards", "given", "outside"] {
+        options.refresh = true;
+        assert_eq!(
+            settled_injection(&project, &options, "url", parts).0,
+            Status::Uncertain,
+            "{parts}"
+        );
+    }
+    options.refresh = true;
+    assert_eq!(
+        settled_injection(&project, &options, "path", "own"),
+        (Status::Uncertain, 0),
+        "an undecided path is not settled"
+    );
+}
+
+#[test]
+fn undecided_error_details_are_settled_by_where_the_text_goes() {
+    let (project, mut options) = security_project(QUERY);
+    let status = |destination: &str, options: &CheckArgs| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("error_details", noul_at(0.3)),
+            ("exception_to_client", noul_at(0.3)),
+            ("own_messages", noul_at(0.5)),
+            (
+                "destination",
+                choice_of(
+                    destination,
+                    &["client", "local", "logs", "caller", "stored"],
+                ),
+            ),
+        ];
+        run(&project, options, &mut eval).files[0].dimensions[catalog::SENSITIVE_DATA]
+            .status
+            .clone()
+    };
+    assert_eq!(status("local", &options), Status::Clear);
+    options.refresh = true;
+    assert_eq!(status("client", &options), Status::Uncertain);
+}
+
 #[test]
 fn checks_that_all_clear_rule_out_an_uncertain_presence() {
     let (project, options) = security_project(QUERY);
@@ -490,6 +570,25 @@ fn a_registered_error_handler_is_one_unit_judged_with_the_error_classes() {
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-209 error details exposed")
+    );
+}
+
+#[test]
+fn registrations_named_in_comments_or_strings_register_nothing() {
+    let project = Project::new();
+    project.write(
+        "src/patterns.ts",
+        "// Handlers are found where the program calls `.onError(handler)`.\nexport const REGISTRATIONS = ['.onError(', '.setErrorHandler(']\nexport function describe(app) {\n  return `app.onError(report)` + app.name\n}\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::SENSITIVE_DATA.into()];
+    let (_, plan) = planned(&project, &options);
+    assert!(
+        !plan
+            .files
+            .values()
+            .flat_map(|f| &f.units)
+            .any(|u| matches!(u.detail, Detail::Handler { .. }))
     );
 }
 

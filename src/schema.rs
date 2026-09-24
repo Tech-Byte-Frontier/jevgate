@@ -79,6 +79,9 @@ pub enum Pass {
     Locate,
     /// A follow-up that judges where a security concern's values come from.
     Trace,
+    /// A follow-up that asks where an undecided security check's URL comes
+    /// from or its output goes, and can only clear that check.
+    Settle,
 }
 
 /// A raw typed answer, kept exactly as the provider returned it.

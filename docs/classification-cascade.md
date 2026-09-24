@@ -91,9 +91,18 @@ signatures, or one candidate pair.
    actix-web `ResponseError` for an error type, Rocket catchers) is asked once
    whether it sends clients more than the program's own messages and codes,
    with the program's `…Error` classes (Rust enums with their `#[error]`
-   messages) and the functions of its file that it calls. An injection trace
+   messages) and the functions of its file that it calls. A registration
+   inside a comment or string literal registers nothing. An injection trace
    also gets the definitions of enums its sites name (`ConfigKey.aiTag`), so
    a fixed choice does not read as a parameter.
+   A security unit still uncertain after its trace and recheck is asked, in a
+   request of its own, one literal Choice that can only clear: where its URLs
+   come from (a host of the program's own at 0.80 clears an undecided URL
+   check; a configured host sent another URL to fetch does not), or where its
+   text goes (anywhere but a remote client at 0.80 clears undecided error
+   details). The same question about paths cleared real traversals, reading
+   names stored in an index as the program's own, so path checks stay
+   undecided until callers show more.
    Agent instruction files (`src/docs/`) are found by name even when hidden
    or ignored. Each file's heading sections, or the top-level blocks of a long
    section, are sent packed beside the nearest manifests, the configured
