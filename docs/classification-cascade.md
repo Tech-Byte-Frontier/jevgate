@@ -100,9 +100,15 @@ signatures, or one candidate pair.
    come from (a host of the program's own at 0.80 clears an undecided URL
    check; a configured host sent another URL to fetch does not), or where its
    text goes (anywhere but a remote client at 0.80 clears undecided error
-   details). The same question about paths cleared real traversals, reading
-   names stored in an index as the program's own, so path checks stay
-   undecided until callers show more.
+   details). A sensitive-data consider or note that rests on an undecided
+   error-detail check gets the same question, since it claims the text
+   likely reaches a client. The same question about paths cleared real
+   traversals, reading names stored in an index as the program's own, so path
+   checks stay undecided until callers show more. The SQL check counts
+   identifiers quoted by doubling embedded quotes as handled (identifiers
+   cannot be bound), and the URL check excludes requests a web page sends from
+   the user's browser; on fresh repositories both had flagged such code, while
+   the SQL and SSRF advisory functions kept their answers.
    Agent instruction files (`src/docs/`) are found by name even when hidden
    or ignored. Each file's heading sections, or the top-level blocks of a long
    section, are sent packed beside the nearest manifests, the configured

@@ -248,7 +248,7 @@ pub(in crate::units) fn exposure_outcome<'a>(
 /// message carrying another's error text makes a lean toward a client a
 /// consider, at the probability that the message carries it. A signal still
 /// undecided is clear when the settle Choice sends the text `away` from
-/// remote clients.
+/// remote clients, before a foreign message can raise it.
 fn exposure_signal(
     question: &str,
     answer: &Answer,
@@ -262,12 +262,14 @@ fn exposure_signal(
     }
     match (own, outcome) {
         (Some(Messages::Own), _) => (Outcome::Clear, 0.0),
+        // Text that never reaches a remote client is no error-detail leak,
+        // whatever error text it carries.
+        (_, Outcome::Uncertain(_)) if away => (Outcome::Clear, 0.0),
         (Some(Messages::Foreign(p)), Outcome::Uncertain(_))
             if probability_at_least(lean, LEADING_PROBABILITY) =>
         {
             (Outcome::Consider(p), lean)
         }
-        (_, Outcome::Uncertain(_)) if away => (Outcome::Clear, 0.0),
         _ => (outcome, lean),
     }
 }

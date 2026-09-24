@@ -270,7 +270,7 @@ pub const UNHANDLED: [Check; 6] = [
         id: "sql",
         question: "Does `{code}` put a variable into the text of an SQL query instead of passing it as a bound parameter?",
         yes: "A variable is joined, formatted or interpolated into SQL text that is then run.",
-        no: "Values are passed as bound parameters or placeholders, identifiers come from a fixed list or are quoted by the database library, or it runs no SQL.",
+        no: "Values are passed as bound parameters or placeholders; identifiers such as table and column names come from a fixed list or the database schema, or are quoted by a function that wraps them in double quotes and doubles any double quote inside; or it runs no SQL.",
         no_examples: &[],
     },
     Check {
@@ -308,7 +308,7 @@ pub const UNHANDLED: [Check; 6] = [
         id: "url",
         question: "Does `{code}` request a URL or host taken from a variable without checking the host?",
         yes: "It sends a request to a URL or host that comes from a variable, without checking the host against an allowed list or rejecting private addresses.",
-        no: "The host is fixed, comes from the program's configuration, or is checked, or it requests no URL.",
+        no: "The host is fixed, comes from the program's configuration, or is checked; the request is sent from a web page running in the user's browser, which reaches only what that user can; or it requests no URL.",
         no_examples: &[],
     },
 ];

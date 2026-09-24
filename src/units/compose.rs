@@ -63,7 +63,8 @@ fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'
 }
 
 /// Security units left uncertain after their trace and recheck whose URL or
-/// error-detail check is undecided, and that have not been settled.
+/// error-detail check is undecided, and sensitive-data considers and notes
+/// resting on an undecided error-detail check, that have not been settled.
 pub fn unsettled_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
         .iter()
@@ -83,8 +84,14 @@ pub fn unsettled_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
             } else {
                 &["error_details", "exception_to_client"]
             };
-            matches!(unit_outcome(u, &merged), Outcome::Uncertain(_))
-                && settled.iter().any(|q| undecided(q))
+            // A sensitive-data consider or note from an undecided error signal
+            // rests on text reaching a client, which the settle Choice checks.
+            let open = match unit_outcome(u, &merged) {
+                Outcome::Uncertain(_) => true,
+                Outcome::Consider(_) | Outcome::Note(_) => u.rule == catalog::SENSITIVE_DATA,
+                _ => false,
+            };
+            open && settled.iter().any(|q| undecided(q))
         })
         .map(|u| u.id.clone())
         .collect()
