@@ -316,8 +316,8 @@ pub struct CheckArgs {
     pub base: Option<String>,
     /// Also judge tests: test value, redundancy, and shared logic among tests
     ///
-    /// Test files are otherwise listed as not applicable. Also set by
-    /// `include_tests = true` in jevgate.toml.
+    /// Without it, test files are judged only for file organization. Also set
+    /// by `include_tests = true` in jevgate.toml.
     #[arg(long, help_heading = SCOPE)]
     pub include_tests: bool,
     /// Related file sent as evidence for shared logic, callers and test subjects (repeatable)

@@ -1,8 +1,12 @@
 //! Member groups for file organization: a per-file graph of calls, shared
-//! owners and shared file-declared types or imports, merged deterministically
+//! owners and shared file-declared types or imports (for a test file, shared
+//! suites, subjects and helpers), merged deterministically
 //! by average linkage. Label propagation was tried first and let generic
 //! shared names pull every member into one group.
-use super::units::{Kind, Unit};
+use super::{
+    test_map::TestCase,
+    units::{Kind, Unit},
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAX_GROUPS: usize = 6;
@@ -23,13 +27,77 @@ pub struct Group {
 
 /// Group the selected `members` (indexes into `units`). Deterministic for the same input.
 pub fn groups(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> Vec<Group> {
-    let n = members.len();
+    clusters(weights(units, members, imports))
+        .into_iter()
+        .enumerate()
+        .map(|(i, set)| Group {
+            id: format!("G{}", i + 1),
+            members: set.into_iter().map(|m| members[m]).collect(),
+        })
+        .collect()
+}
+
+/// Group a test file's cases and the support code they share: cases link by
+/// their innermost suite and by the subjects and helpers they share, and a
+/// case that calls a helper links to it. Positions `0..cases.len()` are the
+/// cases, then `support` in order. Deterministic for the same input.
+pub fn test_groups(cases: &[TestCase], support: &[&Unit]) -> Vec<Vec<usize>> {
+    let helpers: BTreeSet<&str> = support.iter().map(|u| u.short_name.as_str()).collect();
+    let names: Vec<BTreeSet<&str>> = cases
+        .iter()
+        .map(|case| {
+            case.subjects
+                .iter()
+                .map(String::as_str)
+                .chain(
+                    case.calls
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|c| helpers.contains(c)),
+                )
+                .collect()
+        })
+        .collect();
+    let mut mentions = BTreeMap::<&str, usize>::new();
+    for name in names.iter().flatten() {
+        *mentions.entry(name).or_default() += 1;
+    }
+    let common = (cases.len() / 2).max(2);
+    let linking: Vec<BTreeSet<&str>> = names
+        .into_iter()
+        .map(|set| set.into_iter().filter(|n| mentions[n] <= common).collect())
+        .collect();
+    let n = cases.len() + support.len();
+    let mut weights = vec![vec![0u32; n]; n];
+    for i in 0..n {
+        for j in i + 1..n {
+            let weight = match (cases.get(i), cases.get(j)) {
+                (Some(a), Some(b)) => {
+                    let suite = !a.suite.is_empty() && a.suite.last() == b.suite.last();
+                    u32::from(suite) * OWNER_WEIGHT
+                        + linking[i].intersection(&linking[j]).count().min(2) as u32
+                }
+                (Some(case), None) => {
+                    u32::from(case.calls.contains(&support[j - cases.len()].short_name))
+                        * CALL_WEIGHT
+                }
+                _ => link(support[i - cases.len()], support[j - cases.len()]),
+            };
+            weights[i][j] = weight;
+            weights[j][i] = weight;
+        }
+    }
+    clusters(weights)
+}
+
+/// Positions merged into at most `MAX_GROUPS` sets, in order of each set's first position.
+fn clusters(weights: Vec<Vec<u32>>) -> Vec<Vec<usize>> {
+    let n = weights.len();
     if n == 0 {
         return Vec::new();
     }
-    let weights = weights(units, members, imports);
     let mut sets: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
-    let mut links = weights.clone();
+    let mut links = weights;
     while let Some((a, b, average)) = strongest(&sets, &links)
         && average >= LINK
     {
@@ -44,13 +112,7 @@ pub fn groups(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> 
         set.sort_unstable();
     }
     sets.sort_by_key(|set| set[0]);
-    sets.into_iter()
-        .enumerate()
-        .map(|(i, set)| Group {
-            id: format!("G{}", i + 1),
-            members: set.into_iter().map(|m| members[m]).collect(),
-        })
-        .collect()
+    sets
 }
 
 /// Connected singletons join the cluster they link to most; members with no

@@ -48,10 +48,10 @@ pub fn rules() -> Vec<Rule> {
             default_enabled: true,
             key: FILE_ORGANIZATION,
             version: rule_version(FILE_ORGANIZATION),
-            scope: "application files with two or more members and 100 or more lines of member code",
-            unit: "file outline: member signatures, callers that import the file, and groups; no bodies",
-            inspection: "Would moving some members into a separate module make the file easier to understand and maintain?",
-            acceptable_example: "One feature, one type and its helpers, or one set of related utilities",
+            scope: "application and test files with two or more members and 100 or more lines of member code",
+            unit: "file outline: member signatures and sizes, callers that import the file, and groups; a test file lists its cases with their suites and subjects; no bodies",
+            inspection: "Would moving some members into a separate module (or tests into a separate test file) make the file easier to navigate and maintain?",
+            acceptable_example: "One algorithm, one type and its helpers, one feature, or the tests of one subject",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,
@@ -257,7 +257,7 @@ pub fn rules() -> Vec<Rule> {
 
 pub fn rule_version(key: &str) -> &'static str {
     match key {
-        FILE_ORGANIZATION => "15",
+        FILE_ORGANIZATION => "16",
         FUNCTION_SIMPLIFICATION => "13",
         SHARED_LOGIC => "19",
         TEST_VALUE => "4",

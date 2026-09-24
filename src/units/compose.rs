@@ -4,7 +4,7 @@ use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, benefit, checks, choice, lowered, noul, open, origin_outcome, score,
-        split_has_users, unit_outcome, value_signals,
+        unit_outcome, value_signals,
     },
     wording::{
         doc_pair_wording, document_wording, function_wording, handler_wording, module_wording,
@@ -592,15 +592,14 @@ fn finding(
             block = located_block(unit, blocks, judgments, "block");
             function_wording(name, strength, p, answers, block)
         }
-        Detail::Outline { groups } => {
+        Detail::Outline { tests, groups } => {
             let module = answers.get("module").copied();
             let chosen = choice(module).and_then(|(id, _)| groups.iter().find(|g| g.id == id));
             symbol = chosen.map(|group| group.id.clone());
             if let Some(group) = chosen {
                 locations = group.locations.clone();
             }
-            let own_users = split_has_users(groups, module);
-            outline_wording(chosen, strength, own_users, p)
+            outline_wording(chosen, *tests, strength, p)
         }
         Detail::Pair {
             differences,

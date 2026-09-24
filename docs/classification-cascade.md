@@ -26,7 +26,14 @@ signatures, or one candidate pair.
    and control-flow nesting; callbacks registered through calls, including
    module-level route handlers named by their registration
    (`app.post('/pages')`); member groups by average linkage; callers that
-   import the file; Type-2 clone candidates grouped by overlapping copies, only
+   import the file (application code only, since tests calling a group do not
+   make it a dependency); for file organization, each member's line count and
+   the file's, and for a test file, its cases with their enclosing
+   `describe`, class or module and the functions under test they call, grouped
+   by shared suite, subject or helper. Test files get this outline without
+   `--include-tests`; their finding is at most a consider. Who calls a group is
+   evidence only: gating a split on callers of its own hid large files whose
+   single caller is the rest of the program; Type-2 clone candidates grouped by overlapping copies, only
    within one package or packages linked by a local dependency (copies in side
    by side templates or example apps are separate projects); test cases with
    their subjects and similar pairs.

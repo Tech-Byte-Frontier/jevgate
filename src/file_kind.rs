@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::Path;
 
-pub const VERSION: &str = "file-kind-v5";
+pub const VERSION: &str = "file-kind-v6";
 const PORTION_PRESENT: f64 = policy::REVIEW_PROBABILITY;
 const PORTION_ABSENT: f64 = 0.20;
 const PURPOSE_UNITS: usize = 24;
@@ -227,12 +227,14 @@ fn document(kind: &str, reason: &str) -> View {
     }
 }
 
-/// The classification kinds of an agent instruction file and project documentation.
+/// The classification kinds of an agent instruction file, project
+/// documentation and a test file.
 pub(crate) const INSTRUCTIONS: &str = "instructions";
 pub(crate) const DOCS: &str = "docs";
+pub(crate) const TESTS: &str = "tests";
 
 fn view(input: &Input, args: &CheckArgs, classification: Classification) -> View {
-    if classification.kind == "tests" {
+    if classification.kind == TESTS {
         let lines = input.source.as_deref().unwrap_or("").lines().count().max(1);
         return View {
             application: false,
@@ -395,43 +397,48 @@ fn settle(
 fn finish_tests(input: &Input, args: &CheckArgs, file: &mut FileResult) -> Option<View> {
     file.contains_tests = true;
     let class = file.classification.as_mut().unwrap();
-    class.kind = "tests".into();
+    class.kind = TESTS.into();
     class.separated_tests.clear();
     class.unresolved_units.clear();
-    if !args.include_tests {
-        class.gate = "excluded".into();
-        class.reason =
-            "Test file. Pass --include-tests or set include_tests = true to judge tests.".into();
+    let (gate, reason) = test_gate(args);
+    class.gate = gate.into();
+    class.reason = reason.into();
+    if gate == "excluded" {
         file.status = Status::NotApplicable;
         return None;
     }
-    class.gate = "tests".into();
-    class.reason = "Test file. Test rules judge this code.".into();
     Some(view(input, args, class.clone()))
 }
 
-/// A test file: judged by the test rules with `--include-tests`, otherwise skipped.
-fn tests_prepared(path: &Path, args: &CheckArgs) -> Prepared {
-    let mut class = classification(
-        "tests",
-        "deterministic",
-        "tests",
-        "Test file. Test rules judge this code.",
-        language(path),
-    );
-    if !args.include_tests {
-        class.gate = "excluded".into();
-        class.reason =
-            "Test file. Pass --include-tests or set include_tests = true to judge tests.".into();
-    }
-    let action = if args.include_tests {
-        Action::Judge
+/// A test file's gate and reason: the test rules judge it with
+/// `--include-tests`; file organization judges its layout either way.
+fn test_gate(args: &CheckArgs) -> (&'static str, &'static str) {
+    if args.include_tests {
+        ("tests", "Test file. Test rules judge this code.")
+    } else if args.enabled(crate::catalog::FILE_ORGANIZATION) {
+        (
+            "tests",
+            "Test file. File organization judges its layout; pass --include-tests or set include_tests = true to judge the tests.",
+        )
     } else {
-        Action::Skip
-    };
+        (
+            "excluded",
+            "Test file. Pass --include-tests or set include_tests = true to judge tests.",
+        )
+    }
+}
+
+/// A test file: judged by the test rules with `--include-tests` and by file
+/// organization, otherwise skipped.
+fn tests_prepared(path: &Path, args: &CheckArgs) -> Prepared {
+    let (gate, reason) = test_gate(args);
     Prepared {
-        classification: class,
-        action,
+        classification: classification(TESTS, "deterministic", gate, reason, language(path)),
+        action: if gate == "excluded" {
+            Action::Skip
+        } else {
+            Action::Judge
+        },
     }
 }
 
@@ -735,7 +742,11 @@ mod tests {
             "tests"
         );
         assert_eq!(report.files[0].status, Status::Clear);
-        assert!(!report.files[0].dimensions.contains_key("file_organization"));
+        assert_eq!(
+            report.files[0].dimensions["file_organization"].status,
+            Status::NotApplicable,
+            "one test is too small to organize"
+        );
     }
 
     const AMBIGUOUS: &str = "fn helper(value: &str) -> String {\n    let trimmed = value.trim();\n    let lower = trimmed.to_lowercase();\n    let joined = lower.replace(' ', \"-\");\n    let limited = joined.chars().take(8).collect::<String>();\n    limited\n}\n\n#[test]\nfn checks_helper() {\n    assert_eq!(helper(\" a \"), \"a\");\n}\n";

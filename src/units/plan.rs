@@ -375,6 +375,13 @@ fn plan_file(
             let parsed = &scope.units[&owner];
             outline::plan(&context, parsed, &members, &callers, &mut file, requests);
         }
+    } else if shared.enabled(catalog::FILE_ORGANIZATION)
+        && view.classification.kind == crate::file_kind::TESTS
+    {
+        file.rules.insert(catalog::FILE_ORGANIZATION, 0);
+        let mut cases = test_map::cases(context.path, context.source).unwrap_or_default();
+        test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
+        outline::plan_tests(&context, &scope.units[&owner], &cases, &mut file, requests);
     }
     if shared.enabled(catalog::HARDCODED_VALUES) && view.application {
         file.rules.insert(catalog::HARDCODED_VALUES, 0);
@@ -400,7 +407,7 @@ fn plan_file(
     if !rules.is_empty() && view.application {
         plan_security(scope, shared, &context, &lines, &rules, &mut file, requests);
     }
-    if shared.enabled(catalog::SHARED_LOGIC) {
+    if shared.enabled(catalog::SHARED_LOGIC) && (view.application || view.tests) {
         file.rules.insert(catalog::SHARED_LOGIC, 0);
         let pairs = &shared.pairs;
         duplicates::plan(
@@ -677,7 +684,10 @@ fn callers(
         if owner == target || !imports[&owner].reach(path) {
             continue;
         }
-        for unit in &scope.units[&owner].units {
+        // Tests exercise a group; only application code makes it a dependency.
+        let tests = scope.test_lines(owner);
+        let units = scope.units[&owner].units.iter();
+        for unit in units.filter(|u| !tests.iter().any(|l| u.overlaps(l))) {
             for call in &unit.calls {
                 callers
                     .entry(call.clone())

@@ -86,15 +86,20 @@ pub(super) fn function_wording(
     }
 }
 
-/// The file-wide concern, naming the group chosen as the module when there is
-/// one. A note says why: the file is coherent as it is, or the proposed group
-/// has no users of its own elsewhere.
+/// The file-wide concern, naming the group chosen as the module (or, for a
+/// test file, as its own test file) when there is one. A test file's finding
+/// is at most a consider.
 pub(super) fn outline_wording(
     chosen: Option<&GroupInfo>,
+    tests: bool,
     strength: Strength,
-    own_users: bool,
     p: f64,
 ) -> Wording {
+    let (kind, parts) = if tests {
+        ("test file", "tests")
+    } else {
+        ("module", "members")
+    };
     let detail = chosen.map_or(String::new(), |group| {
         let shown: Vec<_> = group
             .names
@@ -109,34 +114,39 @@ pub(super) fn outline_wording(
             String::new()
         };
         format!(
-            " {} ({}{more}) would be most useful as its own module.",
+            " {} ({}{more}) would be most useful as its own {kind}.",
             group.id,
             shown.join(", ")
         )
     });
     match strength {
-        Strength::Note if !own_users => (
-            format!(
-                "Some members of this file could live in a separate module, but no other file uses them apart from the rest, so a module would gain little.{detail}"
-            ),
-            "Optional: keep the file whole until another file needs that group alone",
+        // A test file's note may be a lowered consider, so it does not say the file reads well.
+        Strength::Note if tests => (
+            format!("Some tests of this file could move to a separate test file ({p:.2}).{detail}"),
+            "Optional: move those tests when you next change them",
         ),
         Strength::Note => (
             format!(
-                "This file is coherent as it is; a small set of members could live elsewhere.{detail}"
+                "This file is easy to navigate as it is; a small set of {parts} could live elsewhere.{detail}"
             ),
             "Optional: move that set of members if it grows",
         ),
         Strength::Consider => (
-            format!("Some members of this file could live in a separate module ({p:.2}).{detail}"),
-            "Consider moving that set of members into its own module",
+            format!("Some {parts} of this file could move to a separate {kind} ({p:.2}).{detail}"),
+            if tests {
+                "Consider moving those tests into their own test file"
+            } else {
+                "Consider moving that set of members into its own module"
+            },
         ),
         Strength::Review => (
-            format!("This file holds two or more unrelated responsibilities ({p:.2}).{detail}"),
+            format!(
+                "This file holds several features that would be easier to find apart ({p:.2}).{detail}"
+            ),
             if chosen.is_some() {
                 "Move that group into its own module"
             } else {
-                "Split the file along its separate purposes"
+                "Split the file into one module per feature"
             },
         ),
     }

@@ -4,7 +4,7 @@
 //! when the top level is ruled out (its complement reaches it), otherwise
 //! uncertain. Where the middle level says the code is fine as it is, a
 //! consider needs the top level to lead; middle mass alone is an optional note.
-use super::{Access, Detail, GroupInfo, UnitPlan};
+use super::{Access, Detail, UnitPlan};
 use crate::{
     catalog,
     policy::{LEADING_PROBABILITY, LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
@@ -155,9 +155,16 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     let get = |q: &str| answers.get(q).copied();
     let result = match unit.rule {
         catalog::FUNCTION_SIMPLIFICATION => function_outcome(get("split"), get("flatten")),
-        catalog::FILE_ORGANIZATION => {
-            organization_outcome(get("split"), get("module"), &unit.detail)
-        }
+        // Who calls a group is evidence in the outline, not a gate: a module
+        // with one caller still helps a reader find a feature of a large file.
+        // A test file's layout is advice, one level lower.
+        catalog::FILE_ORGANIZATION => get("split").map(benefit).map(|outcome| {
+            if matches!(unit.detail, Detail::Outline { tests: true, .. }) {
+                lowered(outcome)
+            } else {
+                outcome
+            }
+        }),
         catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), &unit.detail),
         catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => get("overlap").map(score),
@@ -663,47 +670,6 @@ fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>) -> (O
             (Outcome::Consider(p), lean)
         }
         _ => (outcome, lean),
-    }
-}
-
-/// A split is suggested only when the proposed group has users of its own in
-/// other files: a group nothing else imports gains little from its own module.
-/// When no member has known users (an entry point, or callers outside the
-/// selected files), the evidence is missing and the answer stands.
-pub(super) fn organization_outcome(
-    split: Option<&Answer>,
-    module: Option<&Answer>,
-    detail: &Detail,
-) -> Option<Outcome> {
-    let outcome = benefit(split?);
-    let Detail::Outline { groups } = detail else {
-        return Some(outcome);
-    };
-    Some(match outcome {
-        Outcome::Review(p) | Outcome::Consider(p) if !split_has_users(groups, module) => {
-            Outcome::Note(p)
-        }
-        other => other,
-    })
-}
-
-/// Whether the chosen group (or, without a choice, any group) has a user that
-/// no other group of the file has; true when no users are known at all.
-pub(super) fn split_has_users(groups: &[GroupInfo], module: Option<&Answer>) -> bool {
-    if groups.iter().all(|g| g.users.is_empty()) {
-        return true;
-    }
-    let own_users = |group: &GroupInfo| {
-        group.users.iter().any(|user| {
-            groups
-                .iter()
-                .filter(|other| other.id != group.id)
-                .all(|other| !other.users.contains(user))
-        })
-    };
-    match choice(module).and_then(|(id, _)| groups.iter().find(|g| g.id == id)) {
-        Some(chosen) => own_users(chosen),
-        None => groups.iter().any(own_users),
     }
 }
 
