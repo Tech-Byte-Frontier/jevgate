@@ -896,4 +896,17 @@ mod tests {
                 .contains("edge protection")
         );
     }
+
+    #[test]
+    fn credential_parser_does_not_execute_shell() {
+        let project = crate::tests::Project::new();
+        project.write(
+            ".env",
+            "export TYPESAFE_API_KEY='literal$(do-not-execute)'\n",
+        );
+        assert_eq!(
+            key_from_file(&project.0.join(".env")).unwrap(),
+            "literal$(do-not-execute)"
+        );
+    }
 }
