@@ -76,6 +76,59 @@ fn test_name(name: &str) -> bool {
         || name == "tests.rs"
 }
 
+/// A third-party library copied into the repository: a release file named
+/// with its version (`jquery-3.6.0.js`, `editor-6.0.1.bundle.js`), the readable
+/// build beside a minified one of the same name (`vue.js` and `vue.min.js`), or
+/// a leading preserved license banner (`/*!` or `@license`) that names a
+/// version. `path` is on disk, for the sibling.
+pub fn vendored(path: &Path, source: Option<&str>) -> bool {
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+    let script = ["js", "mjs", "cjs"].contains(&file_extension(path).as_str());
+    let stem = name.split('.').next().unwrap_or("");
+    let minified_sibling = script
+        && !name.contains(".min.")
+        && path
+            .with_file_name(format!("{stem}.min.{}", file_extension(path)))
+            .is_file();
+    (script && versioned_name(&name)) || minified_sibling || source.is_some_and(license_banner)
+}
+
+/// A file name that carries a release version, such as `lib-1.2.3.min.js`.
+fn versioned_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..bytes.len()).any(|i| {
+        matches!(bytes[i - 1], b'-' | b'.' | b'_')
+            && name[i..]
+                .trim_start_matches('v')
+                .split('.')
+                .take(3)
+                .filter(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+                .count()
+                == 3
+    })
+}
+
+/// The first comment preserves a library's license and names its version:
+/// bundlers keep `/*!` and `@license` comments in the builds they ship.
+fn license_banner(source: &str) -> bool {
+    let head = source.trim_start();
+    let Some(end) = head.strip_prefix("/*").and_then(|rest| rest.find("*/")) else {
+        return false;
+    };
+    let comment = &head[..end + 2];
+    (comment.starts_with("/*!") || comment.contains("@license"))
+        && comment
+            .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .any(|word| {
+                let parts: Vec<&str> = word.trim_matches('.').split('.').collect();
+                parts.len() >= 3 && parts.iter().all(|p| !p.is_empty())
+            })
+}
+
 /// A generated-code marker in the leading comment lines, such as `@generated`,
 /// Go's `Code generated ... DO NOT EDIT.` or "automatically generated".
 pub fn generated_header(source: &str) -> bool {
@@ -177,6 +230,34 @@ mod tests {
         assert_eq!(classifier.role(Path::new("pkg/test_helpers.go")), "source");
         assert_eq!(classifier.role(Path::new("src/orders.test.ts")), "test");
         assert_eq!(classifier.role(Path::new("pkg/orders_test.go")), "test");
+    }
+
+    #[test]
+    fn copied_libraries_are_vendored() {
+        let dir = crate::tests::Project::new();
+        dir.write("static/vue.js", "var a = 1;\n");
+        dir.write("static/vue.min.js", "var a=1;\n");
+        dir.write("static/app.js", "var a = 1;\n");
+        let at = |name: &str| dir.0.join(name);
+        assert!(super::vendored(&at("static/jquery-3.6.0.js"), None));
+        assert!(super::vendored(
+            &at("static/cm-editor-6.0.1.bundle.js"),
+            None
+        ));
+        assert!(
+            super::vendored(&at("static/vue.js"), None),
+            "readable build beside a minified one"
+        );
+        assert!(!super::vendored(&at("static/app.js"), None));
+        assert!(!super::vendored(&at("src/migration-2024.ts"), None));
+        let banner =
+            "/*!\n * Chart helpers v2.6.8\n * Released under the MIT License.\n */\nvar a = 1;\n";
+        assert!(super::vendored(&at("lib/chart.js"), Some(banner)));
+        let own = "/*!\n * Our dashboard. Copyright 2024.\n */\nvar a = 1;\n";
+        assert!(
+            !super::vendored(&at("lib/dashboard.js"), Some(own)),
+            "no version"
+        );
     }
 
     #[test]

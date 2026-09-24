@@ -289,15 +289,28 @@ fn load(
     if !matches!(role.as_str(), "source" | "test") {
         return Ok(excluded(result, &role, relative));
     }
+    if role == "source" && discovery::vendored(&path, None) {
+        return Ok(recast(result, "vendored", relative));
+    }
     if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
+        // A copied library or build output is excluded whatever its size.
+        if let Ok(source) = read_source(&path, LOCAL_PARSE_MAX) {
+            if discovery::generated_source(&source) {
+                return Ok(recast(result, "generated", relative));
+            }
+            if discovery::vendored(&path, Some(&source)) {
+                return Ok(recast(result, "vendored", relative));
+            }
+        }
         return over_read_cap(result, relative, &path, args.max_file_bytes);
     }
     let source = read_source(&path, args.max_file_bytes);
     match source {
         Ok(source) if discovery::generated_source(&source) => {
-            result.role = "generated".into();
-            result.contains_tests = false;
-            Ok(excluded(result, "generated", relative))
+            Ok(recast(result, "generated", relative))
+        }
+        Ok(source) if role == "source" && discovery::vendored(&path, Some(&source)) => {
+            Ok(recast(result, "vendored", relative))
         }
         Ok(source) => {
             result.source_hash = hash(source.as_bytes());
@@ -384,6 +397,13 @@ fn pending_result(
         error: None,
         classification: None,
     }
+}
+
+/// A file found to be build output or a copied library once read.
+fn recast(mut result: FileResult, role: &str, relative: &std::path::Path) -> Input {
+    result.role = role.into();
+    result.contains_tests = false;
+    excluded(result, role, relative)
 }
 
 /// A file outside the reviewed roles, skipped with its reason.

@@ -44,7 +44,8 @@ pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
         return Ok(Vec::new());
     };
     let mut found = Vec::new();
-    visit(tree.root_node(), source, false, &mut found);
+    let pytest = crate::test_locations::pytest_file(path);
+    visit(tree.root_node(), source, pytest, false, &mut found);
     let mut suites = Vec::new();
     collect_suites(tree.root_node(), source, &mut suites);
     for case in &mut found {
@@ -99,7 +100,13 @@ fn suite_call(node: Node<'_>, source: &str) -> Option<String> {
     })
 }
 
-fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<TestCase>) {
+fn visit(
+    node: Node<'_>,
+    source: &str,
+    pytest: bool,
+    in_test_class: bool,
+    found: &mut Vec<TestCase>,
+) {
     match node.kind() {
         "function_item" => {
             let marked = crate::test_locations::preceding_attributes(node, source)
@@ -133,10 +140,10 @@ fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<Test
             return;
         }
         "class_definition" => {
-            let test_class = crate::test_locations::python_test_class(node, source);
+            let test_class = crate::test_locations::python_test_class(node, source, pytest);
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
-                visit(child, source, test_class, found);
+                visit(child, source, pytest, test_class, found);
             }
             return;
         }
@@ -156,7 +163,7 @@ fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<Test
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        visit(child, source, in_test_class, found);
+        visit(child, source, pytest, in_test_class, found);
     }
 }
 
