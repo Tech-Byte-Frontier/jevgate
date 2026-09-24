@@ -102,7 +102,7 @@ pub(super) fn setup_subject<'a>(
         .map(|(range, ..)| &file.source[range.clone()])
         .collect();
     Some(Subject {
-        name: "module setup".into(),
+        name: MODULE_SETUP.into(),
         kind: "module",
         source: source.join("\n"),
         sites: &setup.sites,
@@ -112,6 +112,9 @@ pub(super) fn setup_subject<'a>(
         enums: Vec::new(),
     })
 }
+
+/// The name of the unit that holds a file's top-level setup statements.
+pub(super) const MODULE_SETUP: &str = "module setup";
 
 /// Plan every enabled rule's units for these subjects. Functions are packed;
 /// the module setup, when present, is judged for unsafe settings only.
