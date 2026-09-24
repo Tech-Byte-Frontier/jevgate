@@ -106,56 +106,65 @@ fn registered(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>, owner: usiz
         .chain([MIDDLEWARE_REGISTRATION])
     {
         for (at, _) in source.match_indices(needle) {
-            if tree.as_ref().is_some_and(|tree| in_text(tree, at)) {
-                continue;
-            }
             let line = crate::analysis::line_of(source, at);
-            let open = at + needle.len();
-            let Some(argument) = call_argument(&source[open..]) else {
-                continue;
-            };
-            if lines.iter().any(|l| l.contains(&line)) {
-                continue;
-            }
-            let start = source[..at]
-                .rfind(['\n', ' ', '\t', '('])
-                .map_or(0, |i| i + 1);
-            let registered = format!(
-                "`{}` ({}:{line})",
-                &source[start..open + argument.len() + 1],
-                input.result.path.display()
-            );
-            let named = argument
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
-            let handler = if named {
-                named_handler(scope, imports, owner, argument)
-            } else {
-                let first = crate::analysis::line_of(source, open);
-                let last = crate::analysis::line_of(source, open + argument.len());
-                Some((
-                    owner,
-                    "error handler".into(),
-                    argument.into(),
-                    (first, last),
-                ))
-            };
-            let middleware = needle == MIDDLEWARE_REGISTRATION;
-            if let Some((owner, name, source, lines)) = handler
-                && (!middleware || parameter_count(&source) == Some(MIDDLEWARE_PARAMETERS))
+            if tree.as_ref().is_some_and(|tree| in_text(tree, at))
+                || lines.iter().any(|l| l.contains(&line))
             {
-                found.push(Handler {
-                    owner,
-                    name,
-                    source,
-                    lines,
-                    helpers: Vec::new(),
-                    registered,
-                });
+                continue;
             }
+            found.extend(registration(scope, imports, owner, needle, at));
         }
     }
     found
+}
+
+/// The handler that the registration call `needle` at byte `at` passes: a
+/// function named there, or the function written inside the call. Middleware
+/// counts only with the error-middleware parameter count.
+fn registration(
+    scope: &Scope<'_>,
+    imports: &BTreeMap<usize, Imports>,
+    owner: usize,
+    needle: &str,
+    at: usize,
+) -> Option<Handler> {
+    let input = &scope.inputs[owner];
+    let source = input.source.as_deref().unwrap_or("");
+    let line = crate::analysis::line_of(source, at);
+    let open = at + needle.len();
+    let argument = call_argument(&source[open..])?;
+    let start = source[..at]
+        .rfind(['\n', ' ', '\t', '('])
+        .map_or(0, |i| i + 1);
+    let registered = format!(
+        "`{}` ({}:{line})",
+        &source[start..open + argument.len() + 1],
+        input.result.path.display()
+    );
+    let named = argument
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+    let (owner, name, source, lines) = if named {
+        named_handler(scope, imports, owner, argument)?
+    } else {
+        let first = crate::analysis::line_of(source, open);
+        let last = crate::analysis::line_of(source, open + argument.len());
+        (
+            owner,
+            "error handler".into(),
+            argument.into(),
+            (first, last),
+        )
+    };
+    let middleware = needle == MIDDLEWARE_REGISTRATION;
+    (!middleware || parameter_count(&source) == Some(MIDDLEWARE_PARAMETERS)).then(|| Handler {
+        owner,
+        name,
+        source,
+        lines,
+        helpers: Vec::new(),
+        registered,
+    })
 }
 
 /// Whether byte `at` lies in a comment or a string literal: a registration
