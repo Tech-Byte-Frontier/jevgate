@@ -81,18 +81,21 @@ pub(crate) fn go_test_function(node: Node<'_>, source: &str) -> bool {
         })
 }
 
-/// pytest collects top-level `test*` functions only from `test_*.py` and `*_test.py`.
-fn pytest_file(path: &Path) -> bool {
+/// pytest collects top-level `test*` functions and `Test*` classes only from
+/// `test_*.py` and `*_test.py`.
+pub(crate) fn pytest_file(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     name.ends_with(".py") && (name.starts_with("test_") || name.ends_with("_test.py"))
 }
 
-/// A pytest `Test*` class or a `unittest` `TestCase` subclass.
-pub(crate) fn python_test_class(node: Node<'_>, source: &str) -> bool {
+/// A `unittest` `TestCase` subclass, or a `Test*` class in a file pytest
+/// collects: elsewhere a `TestClient` or `TestResponse` is library code.
+pub(crate) fn python_test_class(node: Node<'_>, source: &str, pytest: bool) -> bool {
     node.kind() == "class_definition"
-        && (node
-            .child_by_field_name("name")
-            .is_some_and(|name| child_text(name, source).starts_with("Test"))
+        && (pytest
+            && node
+                .child_by_field_name("name")
+                .is_some_and(|name| child_text(name, source).starts_with("Test"))
             || node
                 .child_by_field_name("superclasses")
                 .is_some_and(|bases| child_text(bases, source).contains("TestCase")))
@@ -109,7 +112,7 @@ fn python_test_span(node: Node<'_>, source: &str, pytest: bool) -> Option<(usize
     } else {
         return None;
     };
-    let test = python_test_class(definition, source)
+    let test = python_test_class(definition, source, pytest)
         || pytest
             && definition.kind() == "function_definition"
             && node.parent()?.kind() == "module"
@@ -141,7 +144,7 @@ fn javascript_test_span(node: Node<'_>, source: &str) -> Option<(usize, usize)> 
     if node.kind() != "call_expression" || !is_test_call(&callee(node, source)) {
         return None;
     }
-    let statement = statement_span(node);
+    let statement = statement_span(node)?;
     Some((statement.start_byte(), statement.end_byte()))
 }
 
@@ -366,18 +369,20 @@ fn callee(node: Node<'_>, source: &str) -> String {
         .unwrap_or_default()
 }
 
-fn statement_span(node: Node<'_>) -> Node<'_> {
+/// The statement a test call makes up: the call itself, awaited or at the
+/// head of a call chain such as `test.each(rows)("name", fn)`. A call inside
+/// another expression, such as `test && test(value)` in library code, is not
+/// a test declaration.
+fn statement_span(node: Node<'_>) -> Option<Node<'_>> {
     let mut current = node;
     while let Some(parent) = current.parent() {
-        if parent.kind() == "expression_statement" {
-            return parent;
+        match parent.kind() {
+            "expression_statement" => return Some(parent),
+            "call_expression" | "member_expression" | "await_expression" => current = parent,
+            _ => return None,
         }
-        if matches!(parent.kind(), "program" | "source_file" | "module") {
-            break;
-        }
-        current = parent;
     }
-    node
+    None
 }
 
 fn child_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {

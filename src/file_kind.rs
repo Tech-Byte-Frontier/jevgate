@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::Path;
 
-pub const VERSION: &str = "file-kind-v7";
+pub const VERSION: &str = "file-kind-v8";
 const PORTION_PRESENT: f64 = policy::REVIEW_PROBABILITY;
 const PORTION_ABSENT: f64 = 0.20;
 const PURPOSE_UNITS: usize = 24;
@@ -84,6 +84,7 @@ pub fn excluded_reason(role: &str) -> &'static str {
             "Operational script. Maintainability gates apply to application and library source."
         }
         "declarations" => "Type declarations have no implementation for these gates.",
+        "vendored" => "Third-party library copied into the repository. Review it upstream.",
         "generated" => "Generated code. Review its generator or source definitions instead.",
         _ => "Outside source/test semantic scope",
     }
@@ -691,6 +692,23 @@ mod tests {
     }
 
     #[test]
+    fn a_function_named_test_called_inside_code_is_not_a_test() {
+        let project = Project::new();
+        project.write(
+            "lib/match.js",
+            "(function () {\n  const types = [];\n  function find(value) {\n    return types.findIndex(({ test } = {}) => test && test(value));\n  }\n  window.find = find;\n})();\n\ntest.each([[1]])(\"finds %i\", (n) => {\n  expect(n).toBe(1);\n});\n",
+        );
+        let view = view_of(&project, &args());
+        assert_eq!(view.classification.kind, "mixed");
+        let lines: Vec<_> = view
+            .test_lines
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect();
+        assert_eq!(lines, [(9, 11)], "only the statement-level test call");
+    }
+
+    #[test]
     fn python_test_classes_and_pytest_functions_are_structural_tests() {
         let project = Project::new();
         let source = "import unittest\n\ndef total(rows):\n    return sum(rows)\n\nclass TotalChecks(unittest.TestCase):\n    def test_sum(self):\n        self.assertEqual(total([1, 2]), 3)\n\ndef test_empty():\n    assert total([]) == 0\n";
@@ -703,8 +721,18 @@ mod tests {
         };
         // Outside a pytest file only the TestCase class is a test.
         assert_eq!(lines(view_of(&project, &args())), [(6, 8)]);
-        // A pytest file with structural tests is a test file, without a purpose request.
+        // A `Test*` helper class outside a pytest file is library code.
         std::fs::remove_file(project.0.join("lib/checks.py")).unwrap();
+        project.write(
+            "lib/testing.py",
+            "class TestClient:\n    def get(self, path):\n        return path.strip()\n\n\nclass TestResponse:\n    status = 200\n",
+        );
+        assert_eq!(
+            view_of(&project, &args()).classification.kind,
+            "application"
+        );
+        std::fs::remove_file(project.0.join("lib/testing.py")).unwrap();
+        // A pytest file with structural tests is a test file, without a purpose request.
         project.write("lib/test_checks.py", source);
         let mut included = args();
         included.include_tests = true;
