@@ -1,5 +1,6 @@
 //! Follow-up requests that recorded answers call for: traces of security
-//! units, rechecks of undecided units and locating split findings.
+//! units, rechecks of undecided units, the kind of an outline still undecided
+//! and locating split findings.
 use super::{Detail, Plan, Planned, UnitPlan, compose};
 use crate::schema::{FileResult, Judgment, Status};
 use serde_json::Value;
@@ -66,6 +67,16 @@ pub fn traces(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
 pub fn rechecks(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::uncertain_units, |unit| {
         unit.recheck.as_ref()
+    })
+}
+
+/// One kind question per outline whose recheck stayed undecided.
+pub fn kinds(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
+    follow_ups(plan, files, compose::unkinded_units, |unit| {
+        match &unit.detail {
+            Detail::Outline { kind, .. } => kind.as_ref(),
+            _ => None,
+        }
     })
 }
 

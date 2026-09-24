@@ -57,6 +57,50 @@ fn an_uncertain_outline_is_rechecked_once_with_the_application_source() {
 }
 
 #[test]
+fn an_undecided_recheck_is_decided_by_the_kind_of_file() {
+    let project = Project::new();
+    project.write("lib.rs", &two_concerns());
+    let (_, report) = run_rechecked(&project, catalog::FILE_ORGANIZATION, 3);
+    assert_eq!(
+        report.files[0].dimensions["file_organization"].status,
+        Status::Clear,
+        "one algorithm rules a split out"
+    );
+    let asked = |stage: &str| report.stages[stage].successful_requests;
+    assert_eq!(
+        (asked("recheck"), asked("trace")),
+        (1, 1),
+        "the kind is its own request"
+    );
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    options.refresh = true;
+    let mut eval = scripted(3);
+    let mut probabilities: serde_json::Map<String, Value> =
+        questions::outline_kind(false)["criteria"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| (k.clone(), json!(0.0)))
+            .collect();
+    probabilities.insert("per_feature".into(), json!(0.85));
+    probabilities.insert("algorithm".into(), json!(0.15));
+    eval.recheck_overrides = vec![(
+        "kind",
+        json!({"type":"choice","choice":"per_feature","confidence":0.8,"probabilities":probabilities}),
+    )];
+    let finding = &first_finding(&project, &options, &mut eval);
+    assert_eq!(finding.strength, Strength::Consider);
+    assert!(
+        finding
+            .message
+            .contains("same kind of code for several features"),
+        "{}",
+        finding.message
+    );
+}
+
+#[test]
 fn outlines_carry_member_and_file_sizes() {
     let (project, options) = rule_project(&two_concerns(), catalog::FILE_ORGANIZATION);
     let mut mock = Mock::default();

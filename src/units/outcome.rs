@@ -4,7 +4,7 @@
 //! when the top level is ruled out (its complement reaches it), otherwise
 //! uncertain. Where the middle level says the code is fine as it is, a
 //! consider needs the top level to lead; middle mass alone is an optional note.
-use super::{Access, Detail, UnitPlan};
+use super::{Access, Detail, UnitPlan, questions};
 use crate::{
     catalog,
     policy::{LEADING_PROBABILITY, LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
@@ -158,13 +158,15 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         // Who calls a group is evidence in the outline, not a gate: a module
         // with one caller still helps a reader find a feature of a large file.
         // A test file's layout is advice, one level lower.
-        catalog::FILE_ORGANIZATION => get("split").map(benefit).map(|outcome| {
-            if matches!(unit.detail, Detail::Outline { tests: true, .. }) {
-                lowered(outcome)
-            } else {
-                outcome
-            }
-        }),
+        catalog::FILE_ORGANIZATION => {
+            organization_outcome(get("split"), get("kind")).map(|outcome| {
+                if matches!(unit.detail, Detail::Outline { tests: true, .. }) {
+                    lowered(outcome)
+                } else {
+                    outcome
+                }
+            })
+        }
         catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), &unit.detail),
         catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => get("overlap").map(score),
@@ -671,6 +673,55 @@ fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>) -> (O
         }
         _ => (outcome, lean),
     }
+}
+
+/// The split Score, or when it stays undecided, the kind of file: the kinds
+/// that serve one feature ruling a split out clear, the kinds that serve
+/// several reaching the threshold a consider.
+pub(super) fn organization_outcome(
+    split: Option<&Answer>,
+    kind: Option<&Answer>,
+) -> Option<Outcome> {
+    let outcome = benefit(split?);
+    let (Outcome::Uncertain(_), Some(Answer::Choice { probabilities, .. })) = (outcome, kind)
+    else {
+        return Some(outcome);
+    };
+    let mass: f64 = probabilities.values().sum();
+    if mass <= 0.0 {
+        return Some(outcome);
+    }
+    let several: f64 = probabilities
+        .iter()
+        .filter(|(kind, _)| questions::SEVERAL_KINDS.contains(&kind.as_str()))
+        .map(|(_, p)| p / mass)
+        .sum();
+    Some(if at_least(1.0 - several) {
+        Outcome::Clear
+    } else if at_least(several) {
+        Outcome::Consider(several)
+    } else {
+        outcome
+    })
+}
+
+/// The kind of file that decided an undecided split Score toward a split:
+/// the likelier of the kinds that serve several features.
+pub(super) fn several_kind<'a>(
+    split: Option<&Answer>,
+    kind: Option<&'a Answer>,
+) -> Option<&'a str> {
+    if !matches!(split.map(benefit), Some(Outcome::Uncertain(_))) {
+        return None;
+    }
+    let Some(Answer::Choice { probabilities, .. }) = kind else {
+        return None;
+    };
+    probabilities
+        .iter()
+        .filter(|(kind, _)| questions::SEVERAL_KINDS.contains(&kind.as_str()))
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(kind, _)| kind.as_str())
 }
 
 /// Repetition the behavior requires is not a concern. Copies whose every site

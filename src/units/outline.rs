@@ -142,7 +142,7 @@ fn plan_outline(
             .collect(),
         ids: ids.clone(),
     };
-    let (request, asked) = outline.request(file, None);
+    let (request, asked) = outline.request(file, Ask::First);
     let fits = file.budget.fits(&request);
     // A short file is read in one pass; splitting it is not a maintainability gain.
     let small = member_code_lines(file.source, &listed) < MIN_FILE_LINES;
@@ -167,6 +167,9 @@ fn plan_outline(
         identity: identity(&names),
         detail: Detail::Outline {
             tests,
+            kind: judged
+                .then(|| outline.request(file, Ask::Kind(source.clone())))
+                .filter(|(request, _)| file.budget.fits(request)),
             groups: ids
                 .into_iter()
                 .zip(&sets)
@@ -184,7 +187,7 @@ fn plan_outline(
                 .collect(),
         },
         recheck: judged
-            .then(|| outline.request(file, Some(source)))
+            .then(|| outline.request(file, Ask::Recheck(source.clone())))
             .filter(|(request, _)| file.budget.fits(request)),
     });
     if judged {
@@ -207,33 +210,54 @@ struct Outline {
     ids: Vec<String>,
 }
 
+/// The requests about one outline, in the order they may be asked.
+enum Ask {
+    /// Signatures only.
+    First,
+    /// The split again with the file's application source.
+    Recheck(String),
+    /// What kind of file it is, asked only when the recheck stays undecided.
+    Kind(String),
+}
+
 impl Outline {
-    /// The first pass sends signatures only; a recheck adds the file's source.
-    fn request(&self, file: &FileContext<'_>, source: Option<String>) -> (Value, Asked) {
-        let pass = if source.is_some() {
-            Pass::Recheck
-        } else {
-            Pass::First
-        };
+    fn request(&self, file: &FileContext<'_>, ask: Ask) -> (Value, Asked) {
         let mut questions = Questions::default();
-        questions.ask(
-            "split".into(),
-            questions::outline_split(self.tests, source.is_some()),
-            ID,
-            FILE_ORGANIZATION,
-            "split",
-            pass,
-        );
-        if self.ids.len() > 1 {
-            // Speculative location: consumed only when the split Score raises a finding.
+        let (pass, stage, source) = match ask {
+            Ask::First => (Pass::First, "outline", None),
+            Ask::Recheck(source) => (Pass::Recheck, "recheck", Some(source)),
+            Ask::Kind(source) => (Pass::Trace, "trace", Some(source)),
+        };
+        if pass == Pass::Trace {
+            // A separate request, so the kind never moves the split answers.
             questions.ask(
-                "module".into(),
-                questions::outline_module(self.tests, &self.ids),
+                "kind".into(),
+                questions::outline_kind(self.tests),
                 ID,
                 FILE_ORGANIZATION,
-                "module",
+                "kind",
                 pass,
             );
+        } else {
+            questions.ask(
+                "split".into(),
+                questions::outline_split(self.tests, source.is_some()),
+                ID,
+                FILE_ORGANIZATION,
+                "split",
+                pass,
+            );
+            if self.ids.len() > 1 {
+                // Speculative location: consumed only when the split Score raises a finding.
+                questions.ask(
+                    "module".into(),
+                    questions::outline_module(self.tests, &self.ids),
+                    ID,
+                    FILE_ORGANIZATION,
+                    "module",
+                    pass,
+                );
+            }
         }
         let mut state = json!({
             "file": file.file_state(),
@@ -241,13 +265,9 @@ impl Outline {
             "groups": self.groups,
         });
         state["file"]["lines"] = json!(self.lines);
-        let stage = match source {
-            Some(source) => {
-                state["file"]["source"] = json!(source);
-                "recheck"
-            }
-            None => "outline",
-        };
+        if let Some(source) = source {
+            state["file"]["source"] = json!(source);
+        }
         file.request(stage, state, questions)
     }
 }

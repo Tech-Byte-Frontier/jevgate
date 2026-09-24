@@ -51,6 +51,14 @@ signatures, or one candidate pair.
    value "explains itself", it cleared none, even of field names.
    A function or file-organization note whose middle and top levels both
    stay under 0.50 gets the same recheck, and a decisive answer replaces it.
+   An outline whose recheck stays undecided is asked, in a request of its
+   own, what kind of file it is: one algorithm, type, resource, component,
+   set of definitions, helpers or coordination serves one feature; the same
+   kind of code written out per feature, or several unrelated features,
+   serves several. Kinds that serve one feature at 0.80 clear it, and the
+   others at 0.80 raise a consider. Weighing a split stayed near a third per
+   level on such files, while naming the kind was decisive; asked beside the
+   recheck, the kind moved the recheck's own answers.
    A test left undecided on whether it re-implements the code or checks only
    its mocks is asked again with the bodies of the functions it calls and its
    file's imports, mocks and setup hooks (a part too long is left out, never

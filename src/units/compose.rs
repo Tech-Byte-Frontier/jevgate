@@ -4,7 +4,7 @@ use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, benefit, checks, choice, lowered, noul, open, origin_outcome, score,
-        unit_outcome, value_signals,
+        several_kind, unit_outcome, value_signals,
     },
     wording::{
         doc_pair_wording, document_wording, function_wording, handler_wording, module_wording,
@@ -96,7 +96,11 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
     }
     let first = answers(judgments, &unit.id, Pass::First);
     let outcome = unit_outcome(unit, &first);
-    let recheck = answers(judgments, &unit.id, Pass::Recheck);
+    let mut recheck = answers(judgments, &unit.id, Pass::Recheck);
+    if unit.rule == catalog::FILE_ORGANIZATION {
+        // The kind is asked apart from the recheck and read beside its split.
+        recheck.extend(answers(judgments, &unit.id, Pass::Trace));
+    }
     if open(unit, &first, outcome) && !recheck.is_empty() {
         let second = unit_outcome(unit, &recheck);
         if second.decisive() {
@@ -166,6 +170,22 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                 let first = answers(judgments, &u.id, Pass::First);
                 open(u, &first, unit_outcome(u, &first))
             }
+        })
+        .map(|u| u.id.clone())
+        .collect()
+}
+
+/// Outlines whose recheck left the split Score undecided and whose kind has
+/// not been asked yet.
+pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    plan.units
+        .iter()
+        .filter(|u| u.rule == catalog::FILE_ORGANIZATION && u.presence == Presence::Judged)
+        .filter(|u| answers(judgments, &u.id, Pass::Trace).is_empty())
+        .filter(|u| {
+            answers(judgments, &u.id, Pass::Recheck)
+                .get("split")
+                .is_some_and(|a| matches!(benefit(a), Outcome::Uncertain(_)))
         })
         .map(|u| u.id.clone())
         .collect()
@@ -592,14 +612,15 @@ fn finding(
             block = located_block(unit, blocks, judgments, "block");
             function_wording(name, strength, p, answers, block)
         }
-        Detail::Outline { tests, groups } => {
+        Detail::Outline { tests, groups, .. } => {
             let module = answers.get("module").copied();
             let chosen = choice(module).and_then(|(id, _)| groups.iter().find(|g| g.id == id));
             symbol = chosen.map(|group| group.id.clone());
             if let Some(group) = chosen {
                 locations = group.locations.clone();
             }
-            outline_wording(chosen, *tests, strength, p)
+            let several = several_kind(answers.get("split").copied(), answers.get("kind").copied());
+            outline_wording(chosen, *tests, several, strength, p)
         }
         Detail::Pair {
             differences,

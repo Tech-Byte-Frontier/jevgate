@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::Path;
 
-pub const VERSION: &str = "file-kind-v6";
+pub const VERSION: &str = "file-kind-v7";
 const PORTION_PRESENT: f64 = policy::REVIEW_PROBABILITY;
 const PORTION_ABSENT: f64 = 0.20;
 const PURPOSE_UNITS: usize = 24;
