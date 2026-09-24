@@ -19,9 +19,9 @@ pub fn security_interpreted(code: &str) -> Value {
 pub fn security_resource(code: &str) -> Value {
     noul(
         format!(
-            "Does `{code}` open, write or request a file path or URL that is taken or built from a variable?"
+            "Does `{code}` open, write, request or redirect to a file path or URL that is taken or built from a variable?"
         ),
-        "The path of a file it opens, writes or deletes, or the URL it requests, comes from or is built with a variable such as a parameter or a value read from input.",
+        "The path of a file it opens, writes or deletes, the URL it requests, or the URL or path it redirects the client to, comes from or is built with a variable such as a parameter or a value read from input.",
         "Every path and URL it uses is fixed in the code or read from the program's configuration, or it uses none.",
     )
 }
@@ -61,7 +61,8 @@ pub fn security_weakened(code: &str) -> Value {
                     "Passwords hashed with a fast or broken hash such as MD5 or SHA-1",
                     "Tokens, passwords or identifiers that must be unguessable made with a non-cryptographic random generator",
                     "Any origin allowed to send credentialed requests",
-                    "Session cookies set without HttpOnly or Secure"
+                    "Session cookies set without HttpOnly or Secure",
+                    "A secret key read from an environment variable whose prefix, such as NEXT_PUBLIC_, makes the build put it into browser code"
                 ]
             },
             "false": {
@@ -88,7 +89,7 @@ pub fn security_origin(code: &str, callers: bool) -> Value {
         [
             "Only from the program itself: constants, fixed choices, numbers, values checked against an allowed list, the deployment's configuration, or the command line and settings of the person running a local program.",
             "From the function's parameters or other data whose origin this code does not show.",
-            "From another party: a network request, message, uploaded file, or a record other users can edit, used as received.",
+            "From another party: a network request, message, uploaded file, or a record other users can edit, used as received, including the arguments of a function that clients call directly as an endpoint.",
         ],
     )
 }
@@ -265,13 +266,15 @@ const CALLERS: &str = "`callers` holds functions that call it.";
 /// broad question ("is every variable bound, escaped or checked?") stayed
 /// undecided even for `eval` of model output; one literal check per kind
 /// decides, and names the kind.
-pub const UNHANDLED: [Check; 6] = [
+pub const UNHANDLED: [Check; 7] = [
     Check {
         id: "sql",
         question: "Does `{code}` put a variable into the text of an SQL query instead of passing it as a bound parameter?",
-        yes: "A variable is joined, formatted or interpolated into SQL text that is then run.",
+        yes: "A variable is joined, formatted or interpolated into SQL text that is then run, including text passed to `$queryRawUnsafe`, `$executeRawUnsafe`, `Prisma.raw` or `sql.raw`.",
         no: "Values are passed as bound parameters or placeholders; identifiers such as table and column names come from a fixed list or the database schema, or are quoted by a function that wraps them in double quotes and doubles any double quote inside; or it runs no SQL.",
-        no_examples: &[],
+        no_examples: &[
+            "A value placed with ${…} in a tagged template that binds it as a parameter, such as sql`SELECT * FROM posts WHERE id = ${id}` in Drizzle, postgres.js or Vercel Postgres, or Prisma's $queryRaw`…${id}…` and Prisma.sql`…${id}…`",
+        ],
     },
     Check {
         id: "shell",
@@ -284,13 +287,13 @@ pub const UNHANDLED: [Check; 6] = [
         id: "code",
         question: "Does `{code}` evaluate text that holds a variable as code or as a template?",
         yes: "It passes text that holds a variable to eval, exec, new Function, a template compiler or a similar evaluator.",
-        no: "It parses data with a data-only parser such as JSON or a literal parser, or evaluates only fixed code.",
+        no: "It parses data with a data-only parser such as JSON or a literal parser, evaluates only fixed code, or builds a database query or markup, which is not code it evaluates.",
         no_examples: &[],
     },
     Check {
         id: "markup",
         question: "Does `{code}` put a variable into HTML or SVG markup without escaping it?",
-        yes: "A variable is joined into HTML or SVG text, or assigned to innerHTML or a similar raw-markup property, without an escaping function.",
+        yes: "A variable is joined into HTML or SVG text, or assigned to innerHTML, React's dangerouslySetInnerHTML or a similar raw-markup property, without an escaping or sanitizing function.",
         no: "Values go through an escaping function or a template or component that escapes them, or it builds no markup.",
         no_examples: &[
             "Text shown as a JSX child, such as {`Total: ${count}`} inside an element, which React escapes",
@@ -308,13 +311,20 @@ pub const UNHANDLED: [Check; 6] = [
         id: "url",
         question: "Does `{code}` request a URL or host taken from a variable without checking the host?",
         yes: "It sends a request to a URL or host that comes from a variable, without checking the host against an allowed list or rejecting private addresses.",
-        no: "The host is fixed, comes from the program's configuration, or is checked; the request is sent from a web page running in the user's browser, which reaches only what that user can; or it requests no URL.",
+        no: "The host is fixed, comes from the program's configuration, or is checked; the request is sent by code running in the user's browser, such as a web page script or a client component, which reaches only what that user can; the URL is only where it redirects the client; or it requests no URL.",
+        no_examples: &[],
+    },
+    Check {
+        id: "redirect",
+        question: "Does `{code}` redirect the client to a URL or path taken from a variable without checking where it leads?",
+        yes: "A URL or path that can come from a request, form field, query parameter or stored user input is passed to a redirect, such as redirect(), NextResponse.redirect, res.redirect or a Location header, without checking that it is a path on the program's own site or that its host is on an allowed list.",
+        no: "The target is fixed, is the program's own origin joined with a fixed path, is checked to be a path on its own site (a single leading slash) or a host on an allowed list, comes from the program's configuration, or it does not redirect.",
         no_examples: &[],
     },
 ];
 
 /// Specific weak settings, asked when the broad presence question is not clear.
-pub const WEAK_SETTINGS: [Check; 5] = [
+pub const WEAK_SETTINGS: [Check; 6] = [
     Check {
         id: "tls",
         question: "Does `{code}` turn off certificate or host name verification?",
@@ -348,6 +358,13 @@ pub const WEAK_SETTINGS: [Check; 5] = [
         question: "Does `{code}` set or configure a session or authentication cookie without the Secure or HttpOnly flag?",
         yes: "A cookie that holds a session or token is set or configured without Secure or without HttpOnly.",
         no: "Such cookies have both flags, the cookie holds no session or token, or the code sets no cookie.",
+        no_examples: &[],
+    },
+    Check {
+        id: "public_secret",
+        question: "Does `{code}` read a secret from an environment variable that the build puts into browser code?",
+        yes: "A secret API key, service-role key, signing or webhook secret, database URL or password is read from a variable whose prefix makes the build inline it into browser code, such as NEXT_PUBLIC_, VITE_, REACT_APP_, PUBLIC_ or EXPO_PUBLIC_, or is listed under `env` in a Next.js configuration.",
+        no: "Such variables hold only values meant for browsers, such as publishable or anonymous keys, public URLs and site ids; secrets come from variables without such a prefix; or it reads no such variable.",
         no_examples: &[],
     },
 ];

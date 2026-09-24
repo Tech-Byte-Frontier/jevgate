@@ -4,6 +4,7 @@ mod documentation;
 mod duplicates;
 mod functions;
 mod hardcoded;
+mod nextjs;
 mod organization;
 mod security;
 mod test_rules;

@@ -55,9 +55,9 @@ Consider (2):
 
 | Rule | Covers |
 |---|---|
-| Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths or outbound URLs without binding, escaping or checks; in C#, types named by input or chosen by the data being deserialized |
+| Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths, outbound URLs or redirect targets without binding, escaping or checks; in C#, types named by input or chosen by the data being deserialized |
 | Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per error handler (`app.onError`, `setErrorHandler`, Express error middleware, Flask and FastAPI handlers, NestJS filters, axum `IntoResponse` and actix-web `ResponseError` for error types, ASP.NET Core exception handlers) |
-| Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly`; in C#, also developer exception pages outside development, token signature or lifetime checks turned off, signing keys written in the code, and secrets derived from data others know |
+| Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly`, secrets in environment variables the build puts into browser code (`NEXT_PUBLIC_`, `VITE_`); in C#, also developer exception pages outside development, token signature or lifetime checks turned off, signing keys written in the code, and secrets derived from data others know |
 | Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user. SpacetimeDB modules (TypeScript and Rust, any kind of application): public tables of users' private data, views that return other users' rows, reducers that change rows their arguments choose or admin-only settings without checking the caller, and scheduled reducers clients can call in 1.x |
 | Workflows | GitHub Actions `run` scripts that execute text outside people write (`${{ github.event.pull_request.title }}`); `pull_request_target` or `workflow_run` jobs that run pull request code with secrets |
 
@@ -95,6 +95,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 |---|---|
 | Hono, Express, Fastify, Koa | Route handlers written inline (`app.post('/pages', async (c) => …)`); error handlers (`app.onError`, `setErrorHandler`, four-parameter Express middleware) |
 | NestJS | Exception filters (`@Catch`) |
+| Next.js (App Router and Pages Router) | Route handlers (`app/**/route.ts`), Server Actions (`'use server'` files and functions), `pages/api` routes, middleware, client components, error boundaries and pages are named to Jev with who calls them and where they run, so a Server Action's arguments read as client input and a client component's requests as the user's own; `dangerouslySetInnerHTML`, redirects to client-chosen URLs, raw Prisma and Drizzle queries (`$queryRawUnsafe`, `sql.raw`) as opposed to their binding tagged templates, `NEXT_PUBLIC_` secrets, and `next.config` headers |
 | Flask, FastAPI | Error handlers (`@app.errorhandler`, `@app.exception_handler`) |
 | axum, actix-web, Rocket | Error responses (`IntoResponse` or `ResponseError` for an error type, `#[catch]`) |
 | ASP.NET Core | Controller actions, minimal API route handlers (`app.MapGet("/orders", …)`) and inline middleware; exception handlers (`UseExceptionHandler` with a handler, `IExceptionFilter`, `IExceptionHandler`, middleware classes that catch what the pipeline throws); Entity Framework Core raw and interpolated SQL, CORS and cookie options, `UseDeveloperExceptionPage`, JWT validation options and the constants a setup names |

@@ -84,6 +84,7 @@ pub(super) fn plan(
                 source_hash: &input.result.source_hash,
                 model: args.model(),
                 budget,
+                framework: None,
             }
         };
         let mut push = |owner: usize, unit: Unit| {

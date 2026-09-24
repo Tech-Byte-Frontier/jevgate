@@ -70,7 +70,7 @@ pub(in crate::units) fn privilege_wording(
 }
 
 /// Injection kinds: the text a variable is placed into, its weakness and remedy.
-const INJECTIONS: [(&str, &str, &str, &str); 8] = [
+const INJECTIONS: [(&str, &str, &str, &str); 9] = [
     (
         "sql",
         "a database query",
@@ -114,6 +114,12 @@ const INJECTIONS: [(&str, &str, &str, &str); 8] = [
         "Create and deserialize only types fixed in the code or on an allowed list",
     ),
     (
+        "redirect",
+        "a URL it redirects clients to",
+        "CWE-601 open redirect",
+        "Redirect only to paths on this site or to hosts on an allowed list",
+    ),
+    (
         "",
         "text another program interprets",
         "CWE-74 injection",
@@ -122,7 +128,7 @@ const INJECTIONS: [(&str, &str, &str, &str); 8] = [
 ];
 
 /// Weak settings: what the code does, its weakness and remedy.
-const SETTINGS: [(&str, &str, &str, &str); 9] = [
+const SETTINGS: [(&str, &str, &str, &str); 10] = [
     (
         "tls",
         "turns off certificate or signature verification",
@@ -170,6 +176,12 @@ const SETTINGS: [(&str, &str, &str, &str); 9] = [
         "signs or encrypts with a key written in the code",
         "CWE-321 hard-coded cryptographic key",
         "Read the key from configuration or a secret store, and replace the one in the code",
+    ),
+    (
+        "public_secret",
+        "reads a secret from an environment variable the build puts into browser code",
+        "CWE-200 secret exposed to browsers",
+        "Read the secret from a variable without the public prefix, only in server code, and rotate it",
     ),
     (
         "",

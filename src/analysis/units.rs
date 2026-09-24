@@ -103,7 +103,11 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     walk(tree.root_node(), source, "", &mut file);
     file.constants = super::literals::constants(tree.root_node(), source);
     let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
-    file.setup = super::sites::setup(tree.root_node(), source, &spans);
+    file.setup = if framework_config(path) {
+        super::sites::config_setup(tree.root_node(), source)
+    } else {
+        super::sites::setup(tree.root_node(), source, &spans)
+    };
     // A function passed by name, such as `map(parse)`, is used like a call.
     let names: BTreeSet<String> = file.units.iter().map(|u| u.short_name.clone()).collect();
     for unit in &mut file.units {
@@ -117,6 +121,14 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         unit.mentions.clear();
     }
     Ok(file)
+}
+
+/// A framework configuration file whose settings are plain objects, such
+/// as `next.config.mjs`.
+fn framework_config(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|name| name.starts_with("next.config."))
 }
 
 fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {

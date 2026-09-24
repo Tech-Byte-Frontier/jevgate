@@ -139,6 +139,7 @@ fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: &TokenBudget, res
             source_hash: &input.result.source_hash,
             model: args.model(),
             budget,
+            framework: None,
         };
         workflows::plan(&context, &mut file, &mut result.requests);
         result.files.insert(owner, file);
@@ -166,6 +167,7 @@ fn plan_document(
         source_hash: &input.result.source_hash,
         model: args.model(),
         budget,
+        framework: None,
     };
     if input.result.role == crate::inventory::DOCS {
         if args.enabled(catalog::LARGE_DOCS) {
@@ -360,6 +362,11 @@ fn plan_file(
         source_hash: &input.result.source_hash,
         model: args.model(),
         budget,
+        framework: super::nextjs::describe(
+            &input.result.path,
+            input.source.as_deref().unwrap_or(""),
+            input.package.as_ref(),
+        ),
     };
     let mut file = FilePlan {
         path: input.result.path.clone(),

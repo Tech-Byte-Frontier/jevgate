@@ -19,6 +19,9 @@ pub(super) struct FileContext<'a> {
     pub source_hash: &'a str,
     pub model: &'a str,
     pub budget: &'a TokenBudget,
+    /// What a web framework makes of the file, such as a Next.js route
+    /// handler or Server Actions module, sent beside its path.
+    pub framework: Option<String>,
 }
 
 impl FileContext<'_> {
@@ -37,7 +40,12 @@ impl FileContext<'_> {
     }
 
     pub(super) fn file_state(&self) -> Value {
-        json!({"path": self.path, "language": self.language})
+        match &self.framework {
+            Some(framework) => {
+                json!({"path": self.path, "language": self.language, "framework": framework})
+            }
+            None => json!({"path": self.path, "language": self.language}),
+        }
     }
 
     pub(super) fn request(
@@ -65,7 +73,10 @@ pub(super) fn request(
     state: Value,
     questions: Questions,
 ) -> (Value, Asked) {
-    let (questions, asked) = questions.finish();
+    let (mut questions, asked) = questions.finish();
+    if state["file"]["framework"].is_string() {
+        point_to_framework(&mut questions);
+    }
     let sources: Vec<_> = sources
         .iter()
         .map(|(path, hash)| json!({"path": path, "source_hash": hash}))
@@ -77,6 +88,23 @@ pub(super) fn request(
         "jevgate": {"stage": stage, "sources": sources},
     });
     (request, asked)
+}
+
+/// What a note adds when the state names the file's framework role: stated
+/// only in the state, a client component's role did not clear its browser
+/// requests, since the questions never pointed at it.
+const FRAMEWORK_NOTE: &str =
+    "`file.framework` states who calls this file's code and where it runs.";
+
+fn point_to_framework(questions: &mut serde_json::Map<String, Value>) {
+    for body in questions.values_mut() {
+        let instructions = &mut body["instructions"];
+        let note = match instructions["note"].as_str() {
+            Some(note) => format!("{FRAMEWORK_NOTE} {note}"),
+            None => FRAMEWORK_NOTE.to_string(),
+        };
+        instructions["note"] = Value::String(note);
+    }
 }
 
 /// Greedy packing in order: at most `limit` items and `PACK_BYTES` of state.

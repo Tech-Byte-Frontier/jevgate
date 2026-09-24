@@ -180,6 +180,86 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
     }
 }
 
+/// The setup of a framework configuration file such as `next.config.mjs`:
+/// every top-level statement that holds an object literal, whether or not it
+/// calls something, since settings like `headers()` are plain objects. Its
+/// sites are the innermost objects (`{ key: 'Access-Control-Allow-Origin',
+/// value: '*' }`) and the settings of the outermost object that hold a
+/// single value, so a finding can point at the setting.
+pub fn config_setup(root: Node<'_>, source: &str) -> Setup {
+    let mut statements = Vec::new();
+    let mut best = BTreeMap::<usize, (Priority, Node<'_>)>::new();
+    let mut cursor = root.walk();
+    for node in root.named_children(&mut cursor) {
+        if !matches!(
+            node.kind(),
+            "expression_statement"
+                | "lexical_declaration"
+                | "variable_declaration"
+                | "export_statement"
+        ) || !holds_object(node)
+        {
+            continue;
+        }
+        statements.push((
+            node.byte_range(),
+            line_of(source, node.start_byte()),
+            line_of(source, node.end_byte().saturating_sub(1)),
+        ));
+        settings(node, false, &mut best);
+    }
+    Setup {
+        statements,
+        sites: numbered(best, source),
+    }
+}
+
+fn holds_object(node: Node<'_>) -> bool {
+    node.kind() == "object" || {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor).any(holds_object)
+    }
+}
+
+/// Innermost objects, and single-value properties of outermost objects.
+fn settings<'t>(
+    node: Node<'t>,
+    inside_object: bool,
+    best: &mut BTreeMap<usize, (Priority, Node<'t>)>,
+) {
+    if is_comment(node) {
+        return;
+    }
+    if node.kind() == "object" {
+        if !holds_object_below(node) {
+            best.entry(node.start_byte())
+                .or_insert((Priority::FieldAssignment, node));
+            return;
+        }
+        let mut cursor = node.walk();
+        for property in node.named_children(&mut cursor) {
+            let value = property.child_by_field_name("value");
+            match value {
+                Some(value) if !inside_object && !holds_object(value) => {
+                    best.entry(property.start_byte())
+                        .or_insert((Priority::FieldAssignment, property));
+                }
+                _ => settings(property, true, best),
+            }
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        settings(child, inside_object, best);
+    }
+}
+
+fn holds_object_below(object: Node<'_>) -> bool {
+    let mut cursor = object.walk();
+    object.named_children(&mut cursor).any(holds_object)
+}
+
 fn calls_something(node: Node<'_>) -> bool {
     matches!(
         node.kind(),
@@ -218,6 +298,14 @@ fn collect<'t>(
 fn priority(node: Node<'_>, source: &str) -> Option<Priority> {
     match node.kind() {
         "template_string" if has_child(node, "template_substitution") => Some(Priority::BuiltText),
+        // React's raw-markup property: `dangerouslySetInnerHTML={{ __html: value }}`.
+        "jsx_attribute"
+            if node
+                .named_child(0)
+                .is_some_and(|name| text(name, source) == "dangerouslySetInnerHTML") =>
+        {
+            Some(Priority::BuiltText)
+        }
         "string" | "interpolated_string_expression" if has_child(node, "interpolation") => {
             Some(Priority::BuiltText)
         }
@@ -416,6 +504,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(python.setup.statements.len(), 2);
+    }
+
+    #[test]
+    fn react_raw_markup_properties_are_sites() {
+        let found = sites(
+            "page.tsx",
+            "function Post({ post }: Props) {\n  const title = post.title;\n  return (\n    <article>\n      <h1>{title}</h1>\n      <div dangerouslySetInnerHTML={{ __html: post.body }} />\n    </article>\n  );\n}\n",
+        );
+        assert_eq!(
+            found,
+            [(
+                "dangerouslySetInnerHTML={{ __html: post.body }}".to_string(),
+                6
+            )]
+        );
+    }
+
+    #[test]
+    fn next_config_settings_are_module_setup_without_calls() {
+        let source = "import type { NextConfig } from 'next';\n\nconst nextConfig: NextConfig = {\n  reactStrictMode: true,\n  images: { remotePatterns: [{ protocol: 'https', hostname: '**' }] },\n  async headers() {\n    return [\n      {\n        source: '/api/:path*',\n        headers: [{ key: 'Access-Control-Allow-Origin', value: '*' }],\n      },\n    ];\n  },\n};\n\nexport default nextConfig;\n";
+        let file = parse(Path::new("next.config.ts"), source).unwrap();
+        let lines: Vec<(usize, usize)> = file.setup.statements.iter().map(|s| (s.1, s.2)).collect();
+        assert_eq!(
+            lines,
+            [(3, 14)],
+            "the config object, not the import or export"
+        );
+        let texts: Vec<&str> = file.setup.sites.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "reactStrictMode: true",
+                "{ protocol: 'https', hostname: '**' }",
+                "{ key: 'Access-Control-Allow-Origin', value: '*' }",
+            ]
+        );
+        // The same object elsewhere is ordinary code without setup calls.
+        let other = parse(Path::new("config.ts"), source).unwrap();
+        assert!(other.setup.statements.is_empty());
     }
 
     #[test]
