@@ -101,6 +101,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | React | JSX components and hooks as functions; text shown as a JSX child is not treated as markup injection |
 | Monorepos | Copies are compared within a package and across packages linked by a local dependency, not across separate example apps or templates |
 | Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
+| Copied libraries | A library copied into the repository (a versioned file name such as `jquery-3.6.0.js`, the readable build beside a `.min.js`, or a license banner naming a version) is skipped as vendored, whatever its size |
 
 Other files, such as Java, C#, PHP or Ruby, are listed as skipped with the reason and never fail the gate.
 
@@ -151,7 +152,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     env:
-      JEVGATE_VERSION: 0.11.0
+      JEVGATE_VERSION: 0.12.0
     steps:
       - uses: actions/checkout@v7
         with:
@@ -227,7 +228,7 @@ rules = { security = "consider" }        # except these
 | `cache_ttl_secs` | `3600` | Cache lifetime for the `jev-latest` and `jev-preview` aliases; pinned versions never expire |
 | `max_requests` | unlimited | Ceiling on API attempts per invocation |
 | `concurrency` | `6` | Ceiling on simultaneous requests (1–8) |
-| `max_file_bytes` | `262144` | Files larger than this are reported as needs-context, never truncated |
+| `max_file_bytes` | `262144` | Files larger than this are reported as needs-context, never truncated; generated and vendored files are skipped instead |
 | `max_context_bytes` | `32768` | Ceiling on context bytes per request |
 
 Rules are named by ID (`maintainability/shared-logic`), key (`shared_logic`) or group (`maintainability`, `tests`, `security`, `documentation`, `default`, `all`). The same names work in `--rule`, `--skip-rule` and `--fail-on TARGET=LEVEL`, and the most specific entry wins.
