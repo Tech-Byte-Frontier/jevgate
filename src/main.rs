@@ -17,6 +17,7 @@ macro_rules! note {
 
 mod analysis;
 mod auth;
+mod baseline;
 mod boundary;
 mod cancellation;
 mod catalog;
@@ -131,7 +132,7 @@ fn run(command: JevCommand) -> Result<u8> {
             reason,
             action: None,
         } => {
-            let written = gate::write_baseline(&context.root, merge, reason)?;
+            let written = baseline::write(&context.root, merge, reason)?;
             let path = written.path.display();
             if merge {
                 say!(
@@ -176,17 +177,17 @@ fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> 
                         .ok_or_else(|| anyhow::anyhow!("Unknown rule or group: {name}"))?,
                 );
             }
-            let marked = gate::mark(&context.root, reason, &targets, &keys)?;
+            let marked = baseline::mark(&context.root, reason, &targets, &keys)?;
             say!(
                 "Marked {marked} accepted finding(s) as {}",
                 output::label(&reason)
             );
         }
         options::BaselineAction::Stats { format } => {
-            let counts = gate::stats(&context.root)?;
+            let counts = baseline::stats(&context.root)?;
             match format {
                 options::RulesFormat::Json => say!("{}", serde_json::to_string_pretty(&counts)?),
-                options::RulesFormat::Table => say!("{}", gate::stats_table(&counts)),
+                options::RulesFormat::Table => say!("{}", baseline::stats_table(&counts)),
             }
         }
     }

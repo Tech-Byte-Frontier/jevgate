@@ -42,31 +42,7 @@ pub fn groups(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> 
 /// case that calls a helper links to it. Positions `0..cases.len()` are the
 /// cases, then `support` in order. Deterministic for the same input.
 pub fn test_groups(cases: &[TestCase], support: &[&Unit]) -> Vec<Vec<usize>> {
-    let helpers: BTreeSet<&str> = support.iter().map(|u| u.short_name.as_str()).collect();
-    let names: Vec<BTreeSet<&str>> = cases
-        .iter()
-        .map(|case| {
-            case.subjects
-                .iter()
-                .map(String::as_str)
-                .chain(
-                    case.calls
-                        .iter()
-                        .map(String::as_str)
-                        .filter(|c| helpers.contains(c)),
-                )
-                .collect()
-        })
-        .collect();
-    let mut mentions = BTreeMap::<&str, usize>::new();
-    for name in names.iter().flatten() {
-        *mentions.entry(name).or_default() += 1;
-    }
-    let common = (cases.len() / 2).max(2);
-    let linking: Vec<BTreeSet<&str>> = names
-        .into_iter()
-        .map(|set| set.into_iter().filter(|n| mentions[n] <= common).collect())
-        .collect();
+    let linking = case_links(cases, support);
     let n = cases.len() + support.len();
     let mut weights = vec![vec![0u32; n]; n];
     for i in 0..n {
@@ -88,6 +64,36 @@ pub fn test_groups(cases: &[TestCase], support: &[&Unit]) -> Vec<Vec<usize>> {
         }
     }
     clusters(weights)
+}
+
+/// Per case, the subjects and helpers it calls that link cases: not a name
+/// most cases call, such as a shared setup helper.
+fn case_links<'a>(cases: &'a [TestCase], support: &[&'a Unit]) -> Vec<BTreeSet<&'a str>> {
+    let helpers: BTreeSet<&str> = support.iter().map(|u| u.short_name.as_str()).collect();
+    let names: Vec<BTreeSet<&str>> = cases
+        .iter()
+        .map(|case| {
+            case.subjects
+                .iter()
+                .map(String::as_str)
+                .chain(
+                    case.calls
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|c| helpers.contains(c)),
+                )
+                .collect()
+        })
+        .collect();
+    let mut mentions = BTreeMap::<&str, usize>::new();
+    for name in names.iter().flatten() {
+        *mentions.entry(name).or_default() += 1;
+    }
+    let common = (cases.len() / 2).max(2);
+    names
+        .into_iter()
+        .map(|set| set.into_iter().filter(|n| mentions[n] <= common).collect())
+        .collect()
 }
 
 /// Positions merged into at most `MAX_GROUPS` sets, in order of each set's first position.
