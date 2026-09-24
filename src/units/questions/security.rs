@@ -93,6 +93,67 @@ pub fn security_origin(code: &str, callers: bool) -> Value {
     )
 }
 
+/// Options of the URL-parts Choice that rule a URL concern out: a host of the
+/// program's own, or no request.
+pub const OWN_PARTS: [&str; 2] = ["own", "none"];
+
+/// Where the URLs a function requests come from, asked when the URL check
+/// stays undecided: on clients of a fixed or configured service the check
+/// split on a variable path or query, while naming the host decided them. A
+/// host that is sent another URL to fetch is its own option, since internal
+/// proxies fetched what users sent. The same question about paths cleared
+/// real traversals, reading names stored in an index as the program's own,
+/// so paths are not settled this way.
+pub fn security_url_parts(code: &str, callers: bool) -> Value {
+    let shown = if callers {
+        ", in the function or in what `callers` pass it"
+    } else {
+        ""
+    };
+    let note = if callers {
+        format!("{CALLERS} {EVIDENCE}")
+    } else {
+        EVIDENCE.to_string()
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Where do the URLs that `{code}` requests come from?"),
+            "note": note,
+        },
+        "criteria": {
+            "own": format!("A host written in the code or set in the program's configuration or environment, with only ids, names, numbers or search terms from variables in its path or query{shown}."),
+            "forwards": "A host from the code or configuration, with another URL or host from a variable passed in its path or query for that service to fetch.",
+            "given": "A whole URL or host handed to the function as a parameter or field.",
+            "outside": "A URL or host from outside the program, such as a request, message, uploaded file or a record users can edit.",
+            "none": "It requests no URL.",
+        },
+    })
+}
+
+/// The option of the destination Choice that keeps error details a concern.
+pub const CLIENT: &str = "client";
+
+/// Where a function's text goes, asked when an error-detail signal stays
+/// undecided. An error or body shaped for a response counts as the client:
+/// helpers that format errors for a server's callers return them.
+pub fn security_destination(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Where does the text that `{code}` produces or passes on go?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "client": "Into a response to a request from another computer: an HTTP, API or RPC response, a message to a connected client, or an error, status or body shaped for such a response that it builds or returns.",
+            "local": "To the person running a local program: a terminal, console, window, or a report or file on their own machine.",
+            "logs": "To logs, or to the program's own error reporting or monitoring.",
+            "caller": "Back to the code that called it as an ordinary error or value, such as a parse, lookup or validation failure, not shaped as a response.",
+            "stored": "Into a database, queue, cache or job record.",
+        },
+    })
+}
+
 /// Asked in the sensitive-data trace: whether every error message is the
 /// program's own. It can only clear the error-detail signals; functions that
 /// throw the program's typed errors otherwise stayed undecided, since the

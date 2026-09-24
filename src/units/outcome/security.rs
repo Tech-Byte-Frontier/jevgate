@@ -20,15 +20,47 @@ pub(in crate::units) fn origin_outcome(answer: &Answer) -> Outcome {
     }
 }
 
-/// The outcomes of a rule's specific trace checks that were answered.
+/// The outcomes of a rule's specific trace checks that were answered. An
+/// undecided URL check is clear when its settle Choice puts the host among
+/// the program's own at the threshold.
 pub(in crate::units) fn checks<'a>(
     rule: &str,
     get: &impl Fn(&str) -> Option<&'a Answer>,
 ) -> Vec<Outcome> {
     crate::units::security::checks(rule)
         .iter()
-        .filter_map(|check| get(check.id).map(noul))
+        .filter_map(|check| {
+            let outcome = noul(get(check.id)?);
+            let own_host = check.id == "url"
+                && choice_mass(get("url_parts"), &questions::OWN_PARTS).is_some_and(at_least);
+            Some(match outcome {
+                Outcome::Uncertain(_) if own_host => Outcome::Clear,
+                other => other,
+            })
+        })
         .collect()
+}
+
+/// The share of a Choice's probability on `options`, when it was answered.
+fn choice_mass(answer: Option<&Answer>, options: &[&str]) -> Option<f64> {
+    let Answer::Choice { probabilities, .. } = answer? else {
+        return None;
+    };
+    let mass: f64 = probabilities.values().sum();
+    (mass > 0.0).then(|| {
+        probabilities
+            .iter()
+            .filter(|(option, _)| options.contains(&option.as_str()))
+            .map(|(_, p)| p / mass)
+            .sum()
+    })
+}
+
+/// Whether the settle Choice sends a function's text anywhere but a remote
+/// client, at the threshold.
+fn away_from_clients<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    choice_mass(get("destination"), &[questions::CLIENT])
+        .is_some_and(|client| at_least(1.0 - client))
 }
 
 /// Kinds where a variable is a concern only when another party controls it:
@@ -169,7 +201,8 @@ pub(in crate::units) fn exposure_outcome<'a>(
     let own = (rule == catalog::SENSITIVE_DATA)
         .then(|| messages(get))
         .flatten();
-    let judge = |question: &str, answer: &Answer| exposure_signal(question, answer, own);
+    let away = rule == catalog::SENSITIVE_DATA && away_from_clients(get);
+    let judge = |question: &str, answer: &Answer| exposure_signal(question, answer, own, away);
     let presence: Vec<(Outcome, f64)> = questions
         .iter()
         .map(|q| get(q).map(|a| judge(q, a)))
@@ -213,8 +246,15 @@ pub(in crate::units) fn exposure_outcome<'a>(
 /// One exposure answer with its lean. The own-messages check (`own`) settles
 /// error-detail signals: all messages the program's own clears them; a
 /// message carrying another's error text makes a lean toward a client a
-/// consider, at the probability that the message carries it.
-fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>) -> (Outcome, f64) {
+/// consider, at the probability that the message carries it. A signal still
+/// undecided is clear when the settle Choice sends the text `away` from
+/// remote clients.
+fn exposure_signal(
+    question: &str,
+    answer: &Answer,
+    own: Option<Messages>,
+    away: bool,
+) -> (Outcome, f64) {
     let outcome = noul(answer);
     let lean = lean(answer);
     if !ERROR_SIGNALS.contains(&question) {
@@ -227,6 +267,7 @@ fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>) -> (O
         {
             (Outcome::Consider(p), lean)
         }
+        (_, Outcome::Uncertain(_)) if away => (Outcome::Clear, 0.0),
         _ => (outcome, lean),
     }
 }

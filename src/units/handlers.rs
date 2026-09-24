@@ -97,12 +97,18 @@ fn registered(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>, owner: usiz
     let input = &scope.inputs[owner];
     let source = input.source.as_deref().unwrap_or("");
     let lines = scope.test_lines(owner);
+    let tree = crate::syntax::parse(&input.result.path, source)
+        .ok()
+        .flatten();
     let mut found = Vec::new();
     for needle in HANDLER_REGISTRATIONS
         .into_iter()
         .chain([MIDDLEWARE_REGISTRATION])
     {
         for (at, _) in source.match_indices(needle) {
+            if tree.as_ref().is_some_and(|tree| in_text(tree, at)) {
+                continue;
+            }
             let line = crate::analysis::line_of(source, at);
             let open = at + needle.len();
             let Some(argument) = call_argument(&source[open..]) else {
@@ -150,6 +156,20 @@ fn registered(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>, owner: usiz
         }
     }
     found
+}
+
+/// Whether byte `at` lies in a comment or a string literal: a registration
+/// named in documentation or in a list of patterns registers nothing.
+fn in_text(tree: &tree_sitter::Tree, at: usize) -> bool {
+    let mut node = tree.root_node().descendant_for_byte_range(at, at + 1);
+    while let Some(current) = node {
+        let kind = current.kind();
+        if crate::analysis::is_comment(current) || kind.contains("string") {
+            return true;
+        }
+        node = current.parent();
+    }
+    false
 }
 
 /// Python functions a decorator registers as error handlers.

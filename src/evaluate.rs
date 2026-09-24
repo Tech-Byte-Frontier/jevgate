@@ -188,13 +188,15 @@ impl Session<'_> {
             crate::units::record(file, &asked, body)
         })?;
         // Traces judge where a security concern's values come from; rechecks
-        // settle uncertain units; an outline still undecided is asked its kind;
+        // settle uncertain units; a security check still undecided is asked
+        // where its URL comes from or its output goes, and an outline its kind;
         // locate follow-ups then point split findings at a block. Each depends
         // on the answers before it.
         for follow_up in [
             crate::units::doc_checks,
             crate::units::traces,
             crate::units::rechecks,
+            crate::units::settles,
             crate::units::kinds,
             crate::units::locates,
         ] {

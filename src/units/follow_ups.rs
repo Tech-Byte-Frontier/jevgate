@@ -70,6 +70,17 @@ pub fn rechecks(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     })
 }
 
+/// One settle follow-up per security unit whose URL or error-detail check
+/// stayed undecided after its trace and recheck.
+pub fn settles(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
+    follow_ups(plan, files, compose::unsettled_units, |unit| {
+        match &unit.detail {
+            Detail::Security { settle, .. } => settle.as_ref(),
+            _ => None,
+        }
+    })
+}
+
 /// One kind question per outline whose recheck stayed undecided.
 pub fn kinds(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::unkinded_units, |unit| {

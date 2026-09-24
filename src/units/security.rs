@@ -178,6 +178,7 @@ fn push_unit(
     let recheck = (rule == INJECTION)
         .then(|| recheck(file, subject, id))
         .flatten();
+    let settle = settle(file, subject, rule, id).filter(|(request, _)| file.budget.fits(request));
     out.units.push(UnitPlan {
         rule,
         id: id.to_string(),
@@ -195,6 +196,7 @@ fn push_unit(
                 Vec::new()
             },
             trace,
+            settle,
         },
         recheck,
     });
@@ -234,8 +236,9 @@ fn send(
                 let unit = &mut out.units[*index];
                 unit.presence = Presence::NeedsContext;
                 unit.recheck = None;
-                if let Detail::Security { trace, .. } = &mut unit.detail {
+                if let Detail::Security { trace, settle, .. } = &mut unit.detail {
                     *trace = None;
+                    *settle = None;
                 }
             }
         }
@@ -397,6 +400,43 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
     }
     let (request, asked) = file.request("recheck", state, questions);
     file.budget.fits(&request).then_some((request, asked))
+}
+
+/// The follow-up asked when a check stays undecided after the trace and
+/// recheck: where an injection's URLs come from, with its callers when
+/// known, or where a function's text goes for error details. It can only
+/// clear the checks it settles, so it is asked apart from them.
+fn settle(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    rule: &'static str,
+    id: &str,
+) -> Option<(Value, Asked)> {
+    let code = subject.code();
+    let callers = !subject.callers.is_empty();
+    let mut questions = Questions::default();
+    let mut ask = |question: &'static str, body: Value| {
+        questions.ask(question.into(), body, id, rule, question, Pass::Settle);
+    };
+    match rule {
+        INJECTION => ask("url_parts", questions::security_url_parts(&code, callers)),
+        SENSITIVE_DATA => ask("destination", questions::security_destination(&code)),
+        _ => return None,
+    }
+    let mut state = json!({
+        "file": file.file_state(),
+        subject.kind: {"name": subject.name, "source": subject.source},
+    });
+    if rule == INJECTION && callers {
+        state["callers"] = json!(
+            subject
+                .callers
+                .iter()
+                .map(|(name, source)| json!({"name": name, "source": source}))
+                .collect::<Vec<_>>()
+        );
+    }
+    Some(file.request("settle", state, questions))
 }
 
 fn sites(file: &FileContext<'_>, subject: &Subject<'_>) -> Vec<Block> {

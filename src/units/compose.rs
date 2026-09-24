@@ -57,7 +57,37 @@ fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'
             merged.insert(question, answer);
         }
     }
+    // The settle answers sit beside the checks they settle, under their own names.
+    merged.extend(answers(judgments, &unit.id, Pass::Settle));
     merged
+}
+
+/// Security units left uncertain after their trace and recheck whose URL or
+/// error-detail check is undecided, and that have not been settled.
+pub fn unsettled_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    plan.units
+        .iter()
+        .filter(|u| u.presence == Presence::Judged)
+        .filter(|u| [catalog::INJECTION, catalog::SENSITIVE_DATA].contains(&u.rule))
+        .filter(|u| !answers(judgments, &u.id, Pass::Trace).is_empty())
+        .filter(|u| answers(judgments, &u.id, Pass::Settle).is_empty())
+        .filter(|u| {
+            let merged = security_answers(u, judgments);
+            let undecided = |q: &str| {
+                merged
+                    .get(q)
+                    .is_some_and(|a| matches!(noul(a), Outcome::Uncertain(_)))
+            };
+            let settled: &[&str] = if u.rule == catalog::INJECTION {
+                &["url"]
+            } else {
+                &["error_details", "exception_to_client"]
+            };
+            matches!(unit_outcome(u, &merged), Outcome::Uncertain(_))
+                && settled.iter().any(|q| undecided(q))
+        })
+        .map(|u| u.id.clone())
+        .collect()
 }
 
 /// The first-pass outcome, replaced by a decisive recheck when the first pass
