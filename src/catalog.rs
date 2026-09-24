@@ -261,7 +261,7 @@ pub fn rule_version(key: &str) -> &'static str {
         FUNCTION_SIMPLIFICATION => "13",
         SHARED_LOGIC => "19",
         TEST_VALUE => "4",
-        INJECTION | SENSITIVE_DATA => "3",
+        INJECTION | SENSITIVE_DATA => "4",
         HARDCODED_VALUES | ACCESS_CONTROL | DOC_STALENESS | DOC_DUPLICATION => "2",
         _ => "1",
     }

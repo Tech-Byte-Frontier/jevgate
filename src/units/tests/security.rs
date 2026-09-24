@@ -371,6 +371,27 @@ fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
 }
 
 #[test]
+fn error_text_that_never_reaches_a_client_is_not_a_leak() {
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("error_details", noul_at(0.3)),
+        ("exception_to_client", noul_at(0.6)),
+        ("own_messages", noul_at(0.1)),
+        (
+            "destination",
+            choice_of("local", &["client", "local", "logs", "caller", "stored"]),
+        ),
+    ];
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(
+        report.files[0].dimensions[catalog::SENSITIVE_DATA].status,
+        Status::Clear,
+        "a foreign message shown only on the local terminal"
+    );
+}
+
+#[test]
 fn a_foreign_error_message_confirms_an_error_detail_lean_as_a_consider() {
     let (project, options) = security_project(QUERY);
     let report = run_with_nouls(
@@ -473,6 +494,7 @@ fn each_created_error_message_is_asked_about_and_names_the_foreign_one() {
             ("error_details", noul_at(0.3)),
             ("exception_to_client", noul_at(0.6)),
             ("messages", choice_of(chosen, &["m0", "m1", "none"])),
+            to_client(),
         ];
         run(&project, options, &mut eval)
     };

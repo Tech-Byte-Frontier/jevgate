@@ -300,11 +300,23 @@ fn hardcoded_file(path: &str, strength: &str, values: &[&str]) -> crate::schema:
     .unwrap()
 }
 
-/// Run with every answer at the bottom level except the named Nouls.
+/// Run with every answer at the bottom level except the named Nouls; text a
+/// unit produces goes to a remote client, so the settle Choice clears nothing.
 fn run_with_nouls(project: &Project, options: &CheckArgs, nouls: &[(&'static str, f64)]) -> Report {
     let mut eval = scripted(0);
     eval.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
+    eval.overrides.push(to_client());
     run(project, options, &mut eval)
+}
+
+/// The settle Choice sending a unit's text to a remote client.
+fn to_client() -> (&'static str, Value) {
+    let probabilities =
+        json!({"client": 0.9, "local": 0.025, "logs": 0.025, "caller": 0.025, "stored": 0.025});
+    (
+        "destination",
+        json!({"type":"choice","choice":"client","confidence":0.9,"probabilities":probabilities}),
+    )
 }
 
 /// The finding that repeated findings across `files` are grouped into; the
