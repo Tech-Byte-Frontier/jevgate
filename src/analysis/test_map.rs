@@ -62,6 +62,10 @@ fn visit(node: Node<'_>, source: &str, in_test_class: bool, found: &mut Vec<Test
             }
             return;
         }
+        "function_declaration" if crate::test_locations::go_test_function(node, source) => {
+            push(node, node.start_byte(), name(node, source), source, found);
+            return;
+        }
         "function_definition" => {
             let test = name(node, source).starts_with("test");
             let outer = node
@@ -286,6 +290,10 @@ mod tests {
         );
         let python = "from app import total\n\ndef test_adds():\n    assert total([1, 2]) == 3\n\ndef helper():\n    return [1]\n\nclass TestTotal:\n    def test_empty(self):\n        assert total([]) == 0\n\nclass Other:\n    def test_like(self):\n        pass\n";
         assert_eq!(names("test_total.py", python), ["test_adds", "test_empty"]);
+        let go = "package total\n\nimport \"testing\"\n\nfunc TestAdds(t *testing.T) {\n\tif Total([]int{1, 2}) != 3 {\n\t\tt.Fatal(\"sum\")\n\t}\n}\n\nfunc BenchmarkTotal(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t\tTotal(nil)\n\t}\n}\n\nfunc TestHelper() int { return 1 }\n";
+        assert_eq!(names("total_test.go", go), ["TestAdds", "BenchmarkTotal"]);
+        let located = crate::test_locations::locate_tests(Path::new("total_test.go"), go).unwrap();
+        assert_eq!(located.ranges.len(), 2);
     }
 
     #[test]

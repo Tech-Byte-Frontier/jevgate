@@ -519,7 +519,7 @@ fn collect_blocks(
     tokens: &[Token<'_>],
     blocks: &mut Vec<Block>,
 ) {
-    if matches!(node.kind(), "block" | "statement_block")
+    if matches!(node.kind(), "block" | "statement_block" | "statement_list")
         && bodies
             .iter()
             .any(|b| b.start <= node.start_byte() && node.end_byte() <= b.end)

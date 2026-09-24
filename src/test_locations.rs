@@ -1,6 +1,6 @@
 //! Structural tests a parser can locate: Rust test attributes and `cfg(test)`
-//! modules, JavaScript and TypeScript `describe`/`it`/`test` calls, and Python
-//! test classes and pytest functions. Syntax locates tests; it never judges them.
+//! modules, JavaScript and TypeScript `describe`/`it`/`test` calls, Python
+//! test classes and pytest functions, and Go `Test…(t *testing.T)` functions. Syntax locates tests; it never judges them.
 use crate::schema::SourceRange;
 use anyhow::Result;
 use std::path::Path;
@@ -53,6 +53,7 @@ fn walk(node: Node<'_>, source: &str, pytest: bool, spans: &mut Vec<(usize, usiz
     if let Some(span) = rust_test_span(node, source)
         .or_else(|| javascript_test_span(node, source))
         .or_else(|| python_test_span(node, source, pytest))
+        .or_else(|| go_test_function(node, source).then(|| (node.start_byte(), node.end_byte())))
     {
         spans.push(span);
         return;
@@ -61,6 +62,23 @@ fn walk(node: Node<'_>, source: &str, pytest: bool, spans: &mut Vec<(usize, usiz
     for child in node.named_children(&mut cursor) {
         walk(child, source, pytest, spans);
     }
+}
+
+/// A Go test, benchmark or fuzz function: `func TestX(t *testing.T)`.
+pub(crate) fn go_test_function(node: Node<'_>, source: &str) -> bool {
+    node.kind() == "function_declaration"
+        && node.child_by_field_name("name").is_some_and(|name| {
+            let name = child_text(name, source);
+            ["Test", "Benchmark", "Fuzz"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        })
+        && node.child_by_field_name("parameters").is_some_and(|p| {
+            let parameters = child_text(p, source);
+            ["*testing.T", "*testing.B", "*testing.F"]
+                .iter()
+                .any(|kind| parameters.contains(kind))
+        })
 }
 
 /// pytest collects top-level `test*` functions only from `test_*.py` and `*_test.py`.

@@ -124,6 +124,40 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         "use_declaration" | "import_statement" | "import_from_statement" => {
             imports(node, source, &mut file.imports);
         }
+        "import_declaration" => go_imports(node, source, &mut file.imports),
+        // Go: `func (s *Store) Find(…)` is a method of `Store`.
+        "method_declaration" => {
+            let receiver = node
+                .child_by_field_name("receiver")
+                .and_then(|r| r.named_child(0))
+                .and_then(|p| p.child_by_field_name("type"))
+                .map(|t| base_type(text(t, source).trim_start_matches('*')))
+                .unwrap_or_default();
+            function(node, node, source, &receiver, file);
+        }
+        "type_declaration" => {
+            let mut cursor = node.walk();
+            let specs: Vec<Node<'_>> = node
+                .named_children(&mut cursor)
+                .filter(|c| matches!(c.kind(), "type_spec" | "type_alias"))
+                .collect();
+            let single = specs.len() == 1;
+            for spec in specs {
+                let definition = Definition {
+                    outer: if single { node } else { spec },
+                    node: spec,
+                    body: None,
+                };
+                push(
+                    definition,
+                    &name_of(spec, source),
+                    "",
+                    Kind::Type,
+                    source,
+                    file,
+                );
+            }
+        }
         "source_file" | "program" | "module" | "declaration_list" | "class_body"
         | "export_statement" | "statement_block" => children(node, source, owner, file),
         // `export default { async fetch(request, env) { … } }`, as Cloudflare Workers write it.
@@ -565,6 +599,30 @@ impl Facts {
     }
 }
 
+/// Go imports: each package's name, its alias or the last path segment.
+fn go_imports(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
+    if node.kind() == "import_spec" {
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| text(n, source).to_string())
+            .or_else(|| {
+                let path = text(node.child_by_field_name("path")?, source);
+                Some(
+                    path.trim_matches(['"', '`'])
+                        .rsplit('/')
+                        .next()?
+                        .to_string(),
+                )
+            });
+        names.extend(name.filter(|n| !matches!(n.as_str(), "_" | ".")));
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        go_imports(child, source, names);
+    }
+}
+
 fn imports(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
     if matches!(node.kind(), "identifier" | "type_identifier") {
         let name = text(node, source);
@@ -633,6 +691,38 @@ mod tests {
             ]
         );
         assert!(units[0].calls.contains("insertPage"));
+    }
+
+    #[test]
+    fn go_functions_methods_types_and_their_facts_are_units() {
+        let source = "package store\n\nimport (\n\t\"database/sql\"\n\t\"fmt\"\n)\n\nconst maxRows = 500\n\n// Store keeps users.\ntype Store struct {\n\tdb *sql.DB\n}\n\n// Find loads a user.\nfunc (s *Store) Find(name string) (*User, error) {\n\tq := fmt.Sprintf(\"SELECT * FROM users WHERE name = '%s'\", name)\n\tif name == \"\" {\n\t\treturn nil, fmt.Errorf(\"empty name: %w\", ErrInvalid)\n\t} else if name == \"root\" {\n\t\treturn nil, errors.New(\"reserved\")\n\t}\n\tfor i := 0; i < 3; i++ {\n\t\tswitch i {\n\t\tcase 1:\n\t\t\ts.db.Query(q)\n\t\t}\n\t}\n\treturn nil, nil\n}\n\nfunc New(db *sql.DB) *Store { return &Store{db: db} }\n";
+        let file = parse(Path::new("store.go"), source).unwrap();
+        let named: Vec<(&str, &str, usize)> = file
+            .units
+            .iter()
+            .map(|u| (u.name.as_str(), u.owner.as_str(), u.line))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("Store", "", 11),
+                ("Store::Find", "Store", 16),
+                ("New", "", 32)
+            ]
+        );
+        let find = &file.units[1];
+        assert!(file.imports.contains("fmt") && file.imports.contains("sql"));
+        assert!(find.calls.contains("Sprintf") && find.calls.contains("Query"));
+        assert_eq!((find.nesting, find.branch_chain), (2, 2));
+        assert_eq!(
+            find.sites[0].text,
+            "q := fmt.Sprintf(\"SELECT * FROM users WHERE name = '%s'\", name)"
+        );
+        let errors: Vec<&str> = find.errors.iter().map(|e| e.error.as_str()).collect();
+        assert_eq!(errors, ["fmt.Errorf", "errors.New"]);
+        assert!(find.literals.iter().any(|l| l.text == "\"root\""));
+        assert_eq!(file.constants[0].name, "maxRows");
+        assert!(crate::syntax::supported(Path::new("store.go")));
     }
 
     #[test]
@@ -749,7 +839,11 @@ mod tests {
 
     #[test]
     fn unsupported_languages_are_unparsed() {
-        assert!(!parse(Path::new("main.go"), "package main").unwrap().parsed);
+        assert!(
+            !parse(Path::new("Main.java"), "class Main {}")
+                .unwrap()
+                .parsed
+        );
     }
 
     #[test]

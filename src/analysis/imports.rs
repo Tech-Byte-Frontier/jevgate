@@ -46,6 +46,7 @@ fn family(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "rs" => "rust",
         "py" => "python",
+        "go" => "go",
         "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte"
         | "astro" => "javascript",
         _ => "",
