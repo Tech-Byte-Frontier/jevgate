@@ -17,7 +17,9 @@ impl TempDir {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir(&path).unwrap();
-        Self(path)
+        // Resolved like the CLI's repository root: on macOS the temp dir is
+        // under the `/var` symlink, and sources behind symlinks are refused.
+        Self(path.canonicalize().unwrap())
     }
 }
 
