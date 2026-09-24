@@ -15,7 +15,8 @@ pub const MAX_ERRORS: usize = 12;
 
 /// Errors a body creates, in source order: JavaScript and TypeScript
 /// `new …Error(…)` or `new …Exception(…)` and any call or `new` a `throw`
-/// statement makes, and the call a Python `raise` makes. The message is the
+/// statement makes, the call a Python `raise` makes, and Go's `errors.New`
+/// and `fmt.Errorf`. The message is the
 /// first argument, or a Python `detail`, `message` or `msg` keyword. They
 /// are evidence of what the messages say; Jev judges where their text comes from.
 pub fn created_errors(body: Node<'_>, source: &str) -> Vec<CreatedError> {
@@ -42,6 +43,10 @@ fn errors_in(node: Node<'_>, source: &str, found: &mut Vec<CreatedError>) {
         "call" if node.parent().is_some_and(|p| p.kind() == "raise_statement") => {
             node.child_by_field_name("function")
         }
+        // Go: `errors.New("…")` and `fmt.Errorf("…", err)`.
+        "call_expression" => node
+            .child_by_field_name("function")
+            .filter(|f| matches!(text(*f, source), "errors.New" | "fmt.Errorf")),
         _ => None,
     };
     if let Some(callee) = created {

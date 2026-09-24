@@ -38,6 +38,9 @@ enum Priority {
 const LITERALS: &[&str] = &[
     "string",
     "string_literal",
+    "interpreted_string_literal",
+    "int_literal",
+    "nil",
     "raw_string_literal",
     "number",
     "integer",
@@ -59,6 +62,11 @@ const STATEMENTS: &[&str] = &[
     "let_declaration",
     "return_statement",
     "return_expression",
+    "short_var_declaration",
+    "assignment_statement",
+    "var_declaration",
+    "defer_statement",
+    "go_statement",
 ];
 
 /// Rust's standard formatting macros build text from their arguments.
@@ -73,6 +81,9 @@ const FORMAT_MACROS: &[&str] = &[
     "eprintln",
     "concat",
 ];
+
+/// Go functions that build text from a format string and values.
+const GO_FORMAT_CALLS: &[&str] = &["Sprintf", "Sprint", "Sprintln", "Errorf", "Fprintf"];
 
 /// Sites of the body, one per statement, in source order with ids `S1…`.
 pub fn in_node(body: Node<'_>, source: &str) -> Vec<Site> {
@@ -192,6 +203,15 @@ fn priority(node: Node<'_>, source: &str) -> Option<Priority> {
             .map(|name| text(name, source).rsplit("::").next().unwrap_or(""))
             .filter(|name| FORMAT_MACROS.contains(name))
             .map(|_| Priority::BuiltText),
+        "call_expression"
+            if node
+                .child_by_field_name("function")
+                .filter(|f| f.kind() == "selector_expression")
+                .and_then(|f| f.child_by_field_name("field"))
+                .is_some_and(|f| GO_FORMAT_CALLS.contains(&text(f, source))) =>
+        {
+            Some(Priority::BuiltText)
+        }
         "call_expression" | "call" | "new_expression" => Some(
             if node
                 .child_by_field_name("arguments")
@@ -232,7 +252,16 @@ fn concatenates(node: Node<'_>, source: &str) -> bool {
     ) else {
         return false;
     };
-    let string = |n: Node<'_>| matches!(n.kind(), "string" | "string_literal" | "template_string");
+    let string = |n: Node<'_>| {
+        matches!(
+            n.kind(),
+            "string"
+                | "string_literal"
+                | "template_string"
+                | "interpreted_string_literal"
+                | "raw_string_literal"
+        )
+    };
     matches!(operator, "+" | "%")
         && (string(left) || string(right))
         && !(LITERALS.contains(&left.kind()) && LITERALS.contains(&right.kind()))

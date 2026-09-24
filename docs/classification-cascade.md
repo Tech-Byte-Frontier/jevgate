@@ -17,7 +17,9 @@ signatures, or one candidate pair.
    compiled or minified output (a trailing source map reference, or nine tenths
    of the file in lines of 1,000 bytes or more) and structural test markers
    decide which code the application rules and the test rules see. Only a test
-   path without structural tests gets a file-purpose request. Astro, Vue and
+   path without structural tests gets a file-purpose request. Go tests are
+   `Test…`, `Benchmark…` and `Fuzz…` functions taking `*testing.T`, `.B` or `.F`.
+   Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
    contents, with every other byte a space, so lines stay the file's.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references

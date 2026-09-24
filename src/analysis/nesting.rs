@@ -19,6 +19,9 @@ const CONTROL: &[&str] = &[
     "match_expression",
     "match_statement",
     "switch_statement",
+    "expression_switch_statement",
+    "type_switch_statement",
+    "select_statement",
     "try_statement",
     "with_statement",
     "conditional_expression",
@@ -33,6 +36,8 @@ pub(super) fn control(node: Node<'_>) -> (usize, usize) {
         match node.kind() {
             "if_statement" | "if_expression" => parent.is_some_and(|p| {
                 p.kind() == "else_clause"
+                    || (p.kind() == "if_statement"
+                        && p.child_by_field_name("alternative") == Some(node))
                     || (p.kind() == "if_expression"
                         && p.child_by_field_name("alternative") == Some(node))
             }),

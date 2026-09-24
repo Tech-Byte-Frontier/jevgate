@@ -46,8 +46,13 @@ fn wrapper<'a>(statements: &[(usize, Node<'a>)], source: &str) -> Option<(usize,
     })
 }
 
-/// Statements with the start of the comments directly above them.
+/// Statements with the start of the comments directly above them. A Go
+/// block holds its statements in one `statement_list`.
 fn statements(body: Node<'_>) -> Vec<(usize, Node<'_>)> {
+    let body = match body.named_child(0) {
+        Some(list) if body.named_child_count() == 1 && list.kind() == "statement_list" => list,
+        _ => body,
+    };
     let mut cursor = body.walk();
     let mut found = Vec::new();
     let mut comment_start = None;

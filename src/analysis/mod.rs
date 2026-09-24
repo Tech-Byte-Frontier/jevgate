@@ -38,6 +38,7 @@ pub(crate) fn callee_name(node: Node<'_>, source: &str) -> Option<String> {
             "scoped_identifier" => node.child_by_field_name("name")?,
             "field_expression" => node.child_by_field_name("field")?,
             "member_expression" => node.child_by_field_name("property")?,
+            "selector_expression" => node.child_by_field_name("field")?,
             "attribute" => node.child_by_field_name("attribute")?,
             "identifier" | "field_identifier" | "property_identifier" | "type_identifier" => {
                 return Some(text(node, source).to_string());

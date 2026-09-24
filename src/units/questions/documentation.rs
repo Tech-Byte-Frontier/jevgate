@@ -198,12 +198,12 @@ pub fn pair_translation() -> Value {
     json!({
         "type": "noul",
         "instructions": {
-            "question": "Is one of `section_a.text` and `section_b.text` a translation of the other into another human language?",
+            "question": "Are `section_a` and `section_b` the same section of a document written in two human languages, one translating the other?",
             "note": SECTIONS,
         },
         "criteria": {
-            "true": "They are written in different human languages, such as English and Chinese, and one renders the other's content.",
-            "false": "They are written in the same human language, or their content differs.",
+            "true": "Their headings or text are in different human languages, such as English and Chinese, and one renders the other's content; commands and code they share may be identical.",
+            "false": "Both are in the same human language, or their content differs.",
         },
     })
 }

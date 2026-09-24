@@ -82,6 +82,7 @@ fn grammar(path: &Path) -> Option<tree_sitter::Language> {
         "js" | "jsx" | "mjs" | "cjs" => tree_sitter_javascript::LANGUAGE,
         "ts" | "mts" | "cts" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
         "tsx" => tree_sitter_typescript::LANGUAGE_TSX,
+        "go" => tree_sitter_go::LANGUAGE,
         _ => return None,
     };
     Some(language.into())

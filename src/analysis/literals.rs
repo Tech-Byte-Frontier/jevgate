@@ -14,6 +14,8 @@ const MAX_VALUE: usize = 400;
 
 const LITERAL_KINDS: &[&str] = &[
     "string_literal",
+    "interpreted_string_literal",
+    "int_literal",
     "raw_string_literal",
     "integer_literal",
     "float_literal",
@@ -33,6 +35,8 @@ const SKIPPED_KINDS: &[&str] = &[
     "use_declaration",
     "import_statement",
     "import_from_statement",
+    "import_declaration",
+    "package_clause",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -97,7 +101,7 @@ fn docstring(node: Node<'_>) -> bool {
 fn eligible(kind: &str, value: &str) -> bool {
     if matches!(
         kind,
-        "integer_literal" | "float_literal" | "integer" | "float" | "number"
+        "integer_literal" | "int_literal" | "float_literal" | "integer" | "float" | "number"
     ) {
         let digits = value.trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '_');
         return !matches!(digits, "0" | "1" | "2" | "0.0" | "1.0" | "2.0");
@@ -185,6 +189,25 @@ fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
                 .filter_map(|d| {
                     d.child_by_field_name("name")
                         .zip(d.child_by_field_name("value"))
+                })
+                .collect()
+        }
+        // Go: `const maxRows = 500` or a parenthesized group of specs.
+        "const_declaration" | "var_declaration" => {
+            let mut cursor = node.walk();
+            let mut specs: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+            if let [list] = specs[..]
+                && list.kind() == "var_spec_list"
+            {
+                let mut inner = list.walk();
+                specs = list.named_children(&mut inner).collect();
+            }
+            specs
+                .into_iter()
+                .filter(|s| matches!(s.kind(), "const_spec" | "var_spec"))
+                .filter_map(|s| {
+                    s.child_by_field_name("name")
+                        .zip(s.child_by_field_name("value"))
                 })
                 .collect()
         }
