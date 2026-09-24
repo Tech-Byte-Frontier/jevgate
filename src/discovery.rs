@@ -89,6 +89,40 @@ pub fn generated_header(source: &str) -> bool {
         })
 }
 
+/// Output of a bundler, minifier or compiler rather than source a person
+/// edits: a generated-code header, a trailing source map reference, or text
+/// whose lines are almost all longer than people write them.
+pub fn generated_source(source: &str) -> bool {
+    generated_header(source) || source_map_reference(source) || minified(source)
+}
+
+/// Compilers and bundlers end their output with `//# sourceMappingURL=…`.
+fn source_map_reference(source: &str) -> bool {
+    source
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .is_some_and(|line| {
+            line.starts_with("//# sourceMappingURL=") || line.starts_with("/*# sourceMappingURL=")
+        })
+}
+
+/// A line at least this long is not one a person wrote.
+const MINIFIED_LINE_BYTES: usize = 1000;
+
+/// Nine tenths of a file of at least `MINIFIED_LINE_BYTES` in lines of that
+/// length: minified bundles are one or a few such lines. A long data line in
+/// hand-written source leaves the rest of the file below that share.
+fn minified(source: &str) -> bool {
+    let long: usize = source
+        .lines()
+        .filter(|line| line.len() >= MINIFIED_LINE_BYTES)
+        .map(str::len)
+        .sum();
+    source.len() >= MINIFIED_LINE_BYTES && long * 10 >= source.len() * 9
+}
+
 const COMMENT_STARTS: &[&str] = &["//", "#", "/*", "*", "<!--", "--", "\"\"\""];
 const GENERATED_MARKERS: &[&str] = &[
     "@generated",
@@ -118,7 +152,7 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
     [
         "rs", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "kt",
         "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "swift", "dart",
-        "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "sql",
+        "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "astro", "sql",
     ]
     .contains(&extension.as_str())
         || extra.contains(&extension)
@@ -126,7 +160,26 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::generated_header;
+    use super::{generated_header, generated_source};
+
+    #[test]
+    fn minified_bundles_and_compiled_output_are_generated() {
+        let bundle = format!(
+            "const{{a:e}}=globalThis;{}\n",
+            "function t(n){return n+1}".repeat(80)
+        );
+        assert!(generated_source(&bundle));
+        assert!(generated_source(
+            "\"use strict\";\nexports.x = 1;\n//# sourceMappingURL=index.js.map\n"
+        ));
+        let data = format!(
+            "{}\nconst LOGO = \"{}\";\n",
+            "fn main() {}\n".repeat(200),
+            "A".repeat(1200)
+        );
+        assert!(!generated_source(&data));
+        assert!(!generated_source("fn main() {}\n"));
+    }
 
     #[test]
     fn generated_headers_are_recognized_only_in_leading_comments() {

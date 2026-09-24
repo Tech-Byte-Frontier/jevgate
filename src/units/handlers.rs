@@ -1,7 +1,10 @@
 //! Web framework error handlers: found where the program registers them
-//! (`.onError(…)`, `.setErrorHandler(…)`, Flask and FastAPI decorators) and
-//! asked once each whether they send clients more than the program's own
-//! messages and codes, with the program's error classes as evidence.
+//! (`.onError(…)`, `.setErrorHandler(…)`, Express error middleware, Flask and
+//! FastAPI decorators) or implements them (axum `IntoResponse` and actix-web
+//! `ResponseError` for an error type, Rocket catchers, NestJS exception
+//! filters), and asked once each whether they send clients more than the
+//! program's own messages and codes, with the program's error classes as
+//! evidence.
 use super::{
     Detail, FileContext, FilePlan, Plan, Planned, Presence, Questions, UnitPlan, compact, identity,
     plan::Scope, questions,
@@ -22,6 +25,10 @@ use std::{
 /// Calls that register a web framework's error handler, by the method that
 /// takes it; the handler is the function named or written in the call.
 const HANDLER_REGISTRATIONS: [&str; 2] = [".onError(", ".setErrorHandler("];
+/// Express registers a function of four parameters (`err, req, res, next`)
+/// passed to `.use(…)` as its error handler.
+const MIDDLEWARE_REGISTRATION: &str = ".use(";
+const MIDDLEWARE_PARAMETERS: usize = 4;
 /// Python decorators that register the function below them as an error handler.
 const HANDLER_DECORATORS: [&str; 2] = [".exception_handler(", ".errorhandler("];
 /// Error classes shown with a handler question, whole, up to this many bytes.
@@ -69,13 +76,15 @@ fn error_handlers(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>) -> Vec<
         }
         let file = registered(scope, imports, owner)
             .into_iter()
-            .chain(decorated(scope, owner));
+            .chain(decorated(scope, owner))
+            .chain(implemented(scope, owner));
         for handler in file {
             if !found
                 .iter()
                 .any(|h| h.owner == handler.owner && h.lines == handler.lines)
             {
-                found.push(handler);
+                let helpers = handler_helpers(scope, &handler);
+                found.push(Handler { helpers, ..handler });
             }
         }
     }
@@ -89,7 +98,10 @@ fn registered(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>, owner: usiz
     let source = input.source.as_deref().unwrap_or("");
     let lines = scope.test_lines(owner);
     let mut found = Vec::new();
-    for needle in HANDLER_REGISTRATIONS {
+    for needle in HANDLER_REGISTRATIONS
+        .into_iter()
+        .chain([MIDDLEWARE_REGISTRATION])
+    {
         for (at, _) in source.match_indices(needle) {
             let line = crate::analysis::line_of(source, at);
             let open = at + needle.len();
@@ -122,12 +134,16 @@ fn registered(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>, owner: usiz
                     (first, last),
                 ))
             };
-            if let Some((owner, name, source, lines)) = handler {
+            let middleware = needle == MIDDLEWARE_REGISTRATION;
+            if let Some((owner, name, source, lines)) = handler
+                && (!middleware || parameter_count(&source) == Some(MIDDLEWARE_PARAMETERS))
+            {
                 found.push(Handler {
                     owner,
                     name,
                     source,
                     lines,
+                    helpers: Vec::new(),
                     registered,
                 });
             }
@@ -155,6 +171,7 @@ fn decorated(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
                 name: unit.name.clone(),
                 source: text.to_string(),
                 lines: (unit.line, unit.end_line),
+                helpers: Vec::new(),
                 registered: format!(
                     "`{}` ({}:{})",
                     decorator.trim(),
@@ -164,6 +181,136 @@ fn decorated(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
             })
         })
         .collect()
+}
+
+/// Helper functions shown with a handler: at most this many, each whole and
+/// at most `HELPER_BYTES` long.
+const HELPERS: usize = 4;
+const HELPER_BYTES: usize = 3000;
+
+/// Functions in the handler's file that it calls, and those they call: an
+/// axum handler often delegates its body to `self.error_response()`, whose
+/// messages decide what clients see.
+fn handler_helpers(scope: &Scope<'_>, handler: &Handler) -> Vec<String> {
+    let source = scope.inputs[handler.owner].source.as_deref().unwrap_or("");
+    let units = &scope.units[&handler.owner].units;
+    let own = units
+        .iter()
+        .find(|u| u.callable() && (u.line, u.end_line) == handler.lines);
+    let mut calls: Vec<&String> = own.map(|u| u.calls.iter().collect()).unwrap_or_default();
+    let mut found: Vec<&crate::analysis::units::Unit> = Vec::new();
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for name in calls {
+            let callee = units.iter().find(|u| {
+                u.callable()
+                    && &u.short_name == name
+                    && (u.line, u.end_line) != handler.lines
+                    && u.source(source).len() <= HELPER_BYTES
+            });
+            if let Some(callee) = callee
+                && found.len() < HELPERS
+                && !found.iter().any(|f| f.span == callee.span)
+            {
+                found.push(callee);
+                next.extend(callee.calls.iter());
+            }
+        }
+        calls = next;
+    }
+    found.iter().map(|u| u.source(source).to_string()).collect()
+}
+
+/// Methods and functions a web framework calls to turn any error a request
+/// handler returns into a response: axum's `into_response` on an error type,
+/// actix-web's `error_response`, Rocket's `#[catch(…)]` functions and the
+/// `catch` method of a NestJS `@Catch(…)` class.
+fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
+    let input = &scope.inputs[owner];
+    let source = input.source.as_deref().unwrap_or("");
+    let lines = scope.test_lines(owner);
+    let filters = exception_filters(source);
+    scope.units[&owner]
+        .units
+        .iter()
+        .filter(|u| u.callable() && !lines.iter().any(|l| l.contains(&u.line)))
+        .filter_map(|unit| {
+            let text = unit.source(source);
+            let implements = |name: &str| {
+                let registration = format!("impl {name} for {}", unit.owner);
+                source
+                    .contains(&format!("{name} for {} ", unit.owner))
+                    .then_some(registration)
+            };
+            let registration = match unit.short_name.as_str() {
+                "into_response" if error_type(&unit.owner) => implements("IntoResponse")?,
+                "error_response" if !unit.owner.is_empty() => implements("ResponseError")?,
+                "catch" if filters.contains(&unit.owner) => {
+                    format!("@Catch(…) class {}", unit.owner)
+                }
+                _ => text
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| l.starts_with("#[catch(") || l.starts_with("#[rocket::catch("))?
+                    .to_string(),
+            };
+            Some(Handler {
+                owner,
+                name: unit.name.clone(),
+                source: text.to_string(),
+                lines: (unit.line, unit.end_line),
+                helpers: Vec::new(),
+                registered: format!(
+                    "`{registration}` ({}:{})",
+                    input.result.path.display(),
+                    unit.line
+                ),
+            })
+        })
+        .collect()
+}
+
+/// A type whose name marks it as an error, such as `Error`, `ApiError` or `AuthRejection`.
+fn error_type(name: &str) -> bool {
+    ["Error", "Exception", "Rejection"]
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
+}
+
+/// Classes declared after a NestJS `@Catch(…)` decorator.
+fn exception_filters(source: &str) -> Vec<String> {
+    source
+        .match_indices("@Catch(")
+        .filter_map(|(at, _)| {
+            let rest = &source[at..];
+            let class = rest.find("class ")? + "class ".len();
+            Some(
+                rest[class..]
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// How many parameters the first parameter list in `text` declares.
+fn parameter_count(text: &str) -> Option<usize> {
+    let open = text.find('(')?;
+    let mut depth = 0usize;
+    let mut count = 0usize;
+    let mut empty = true;
+    for c in text[open + 1..].chars() {
+        match c {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' if depth == 0 => return Some(if empty { 0 } else { count + 1 }),
+            ')' | ']' | '}' | '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => count += 1,
+            c if !c.is_whitespace() => empty = false,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The text inside a call's parentheses, from just after `(` to its match.
@@ -271,56 +418,102 @@ fn error_classes(scope: &Scope<'_>, hashes: &BTreeMap<PathBuf, String>) -> Error
 }
 
 /// The whole text of each class whose name ends in `Error` or `Exception`:
-/// through its closing brace, or its indented body in Python.
+/// through its closing brace, or its indented body in Python. In Rust, each
+/// such enum or struct with the attributes above it, which hold the
+/// messages `thiserror` writes.
 fn error_class_texts<'a>(path: &Path, source: &'a str) -> Vec<&'a str> {
     let python = path.extension().is_some_and(|e| e == "py");
+    let rust = path.extension().is_some_and(|e| e == "rs");
     let mut found = Vec::new();
     let mut offset = 0;
+    let mut attributes: Option<usize> = None;
     for line in source.split_inclusive('\n') {
-        let start = offset;
+        let line_start = offset;
         offset += line.len();
-        let declaration = line
-            .trim_start_matches("export ")
-            .trim_start_matches("default ")
-            .trim_start_matches("abstract ");
-        let Some(rest) = declaration.strip_prefix("class ") else {
-            continue;
-        };
-        let name: String = rest
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
-            .collect();
-        if !(name.ends_with("Error") || name.ends_with("Exception")) {
+        if rust && line.trim_start().starts_with("#[") {
+            attributes.get_or_insert(line_start);
             continue;
         }
-        let text = &source[start..];
-        let end = if python {
-            let mut end = line.len();
-            for next in text[line.len()..].split_inclusive('\n') {
-                if !next.trim().is_empty() && !next.starts_with([' ', '\t']) {
-                    break;
-                }
-                end += next.len();
-            }
-            Some(end)
+        let start = if rust {
+            attributes.take().unwrap_or(line_start)
         } else {
-            text.find('{').and_then(|open| {
-                let mut depth = 0usize;
-                text[open..].char_indices().find_map(|(i, c)| {
-                    match c {
-                        '{' => depth += 1,
-                        '}' => depth -= 1,
-                        _ => {}
-                    }
-                    (depth == 0).then_some(open + i + 1)
-                })
-            })
+            line_start
+        };
+        let error = declared_class(line, rust)
+            .is_some_and(|name| name.ends_with("Error") || name.ends_with("Exception"));
+        if !error {
+            continue;
+        }
+        let end = if python {
+            Some(indented_end(&source[start..], line.len()))
+        } else if rust && let Some(end) = declaration_end(&source[line_start..]) {
+            Some(line_start - start + end)
+        } else {
+            braced_end(&source[start..])
         };
         if let Some(end) = end {
-            found.push(text[..end].trim_end());
+            found.push(source[start..start + end].trim_end());
         }
     }
     found
+}
+
+/// The class a line declares: a JavaScript, TypeScript or Python class, or
+/// a Rust enum or struct.
+fn declared_class(line: &str, rust: bool) -> Option<String> {
+    let rest = if rust {
+        let visible = line.trim_start().trim_start_matches("pub(crate) ");
+        let visible = visible.trim_start_matches("pub ");
+        visible
+            .strip_prefix("enum ")
+            .or_else(|| visible.strip_prefix("struct "))?
+    } else {
+        line.trim_start_matches("export ")
+            .trim_start_matches("default ")
+            .trim_start_matches("abstract ")
+            .strip_prefix("class ")?
+    };
+    Some(
+        rest.chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+            .collect(),
+    )
+}
+
+/// The end of a Python class: its first line and the indented lines after it.
+fn indented_end(text: &str, first: usize) -> usize {
+    let mut end = first;
+    for next in text[first..].split_inclusive('\n') {
+        if !next.trim().is_empty() && !next.starts_with([' ', '\t']) {
+            break;
+        }
+        end += next.len();
+    }
+    end
+}
+
+/// The end of a declaration through the brace that closes its first `{`.
+fn braced_end(text: &str) -> Option<usize> {
+    let open = text.find('{')?;
+    let mut depth = 0usize;
+    text[open..].char_indices().find_map(|(i, c)| {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        (depth == 0).then_some(open + i + 1)
+    })
+}
+
+/// Where a Rust unit or tuple struct declaration ends: at its `;`, when that
+/// comes before any `{`.
+fn declaration_end(declaration: &str) -> Option<usize> {
+    let semicolon = declaration.find(';')?;
+    declaration
+        .find('{')
+        .is_none_or(|brace| semicolon < brace)
+        .then_some(semicolon + 1)
 }
 
 /// A function a web framework calls for every error a request handler
@@ -332,6 +525,9 @@ pub(super) struct Handler {
     pub lines: (usize, usize),
     /// The registration as written and where: `app.onError(errorHandler)` (src/app.ts:150).
     pub registered: String,
+    /// Functions of its file that it calls, two deep, such as the method
+    /// that builds the response body.
+    pub helpers: Vec<String>,
 }
 
 /// The program's own error classes, as evidence for the handler question:
@@ -363,7 +559,11 @@ fn plan_handler(
     );
     let state = json!({
         "file": file.file_state(),
-        "error_handler": {"registered": handler.registered, "source": handler.source},
+        "error_handler": if handler.helpers.is_empty() {
+            json!({"registered": handler.registered, "source": handler.source})
+        } else {
+            json!({"registered": handler.registered, "source": handler.source, "helpers": handler.helpers})
+        },
         "error_classes": classes.text,
     });
     let mut sources = vec![(file.path, file.source_hash)];

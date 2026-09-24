@@ -93,14 +93,19 @@ fn extension(path: &Path) -> &str {
 
 /// Whether a parser supports this file's language.
 pub(crate) fn supported(path: &Path) -> bool {
-    grammar(path).is_some()
+    grammar(path).is_some() || crate::components::FORMATS.contains(&extension(path))
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
-    let Some(language) = grammar(path) else {
+    let extension = extension(path);
+    let (language, scripts) = if crate::components::FORMATS.contains(&extension) {
+        let (scripts, language) = crate::components::scripts(extension, source);
+        (language, Some(scripts))
+    } else if let Some(language) = grammar(path) {
+        (language, None)
+    } else {
         return Ok(None);
     };
-    let extension = extension(path);
     let key = (extension.to_owned(), crate::schema::hash(source.as_bytes()));
     if let Some(tree) = PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
         return Ok(Some(tree));
@@ -108,7 +113,7 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     let mut parser = Parser::new();
     parser.set_language(&language)?;
     let tree = parser
-        .parse(source, None)
+        .parse(scripts.as_deref().unwrap_or(source), None)
         .ok_or_else(|| anyhow::anyhow!("Parser did not produce a tree"))?;
     ensure!(
         !tree.root_node().has_error(),
@@ -151,6 +156,34 @@ mod tests {
         assert_eq!(
             collect(path, source, Path::new(".")).unwrap().1,
             vec![("before".into(), 1)]
+        );
+    }
+
+    #[test]
+    fn component_scripts_parse_in_place() {
+        let astro = "---\nimport Layout from '../layouts/Layout.astro'\nconst posts = await getPosts()\nfunction title(p) { return p.data.title }\n---\n<Layout>{posts.map(p => <a>{title(p)}</a>)}</Layout>\n<script>\n  function toggle() { document.body.classList.toggle('dark') }\n</script>\n";
+        assert_eq!(
+            collect(Path::new("src/pages/index.astro"), astro, Path::new("."))
+                .unwrap()
+                .1,
+            vec![("title".into(), 4), ("toggle".into(), 8)]
+        );
+        let vue = "<template>\n  <button @click=\"save\">{{ label }}</button>\n</template>\n<script setup lang=\"ts\">\nconst props = defineProps<{ label: string }>()\nfunction save(): void { emit('save') }\n</script>\n<style>.a { color: red }</style>\n";
+        assert_eq!(
+            collect(Path::new("Button.vue"), vue, Path::new("."))
+                .unwrap()
+                .1,
+            vec![("save".into(), 6)]
+        );
+        let svelte = "<script>\n  let count = $state(0)\n  function increment() { count += 1 }\n</script>\n<script type=\"application/ld+json\">{\"a\": 1}</script>\n<button onclick={increment}>{count}</button>\n";
+        let (masked, _) = crate::components::scripts("svelte", svelte);
+        assert_eq!(masked.len(), svelte.len());
+        assert!(!masked.contains("ld+json") && !masked.contains("<button"));
+        assert_eq!(
+            collect(Path::new("Counter.svelte"), svelte, Path::new("."))
+                .unwrap()
+                .1,
+            vec![("increment".into(), 3)]
         );
     }
 

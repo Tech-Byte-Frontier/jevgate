@@ -190,6 +190,24 @@ pub fn pair_covers(first: &str, second: &str) -> Value {
     })
 }
 
+/// Whether one section translates the other: a translation states what its
+/// original states on purpose, so it clears the repetition answers. On
+/// web-archive, every pair of an English page and its Chinese version was
+/// found to repeat the other.
+pub fn pair_translation() -> Value {
+    json!({
+        "type": "noul",
+        "instructions": {
+            "question": "Is one of `section_a.text` and `section_b.text` a translation of the other into another human language?",
+            "note": SECTIONS,
+        },
+        "criteria": {
+            "true": "They are written in different human languages, such as English and Chinese, and one renders the other's content.",
+            "false": "They are written in the same human language, or their content differs.",
+        },
+    })
+}
+
 pub fn pair_conflict() -> Value {
     json!({
         "type": "noul",

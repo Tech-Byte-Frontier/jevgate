@@ -14,6 +14,7 @@ use crate::{
     schema::Pass,
 };
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 /// The presence questions of each rule, in the order they are asked.
 pub(super) const PRESENCE: [(&str, &[&str]); 3] = [
@@ -37,6 +38,10 @@ pub(super) struct Subject<'a> {
     pub lines: (usize, usize),
     /// Functions that call it, as (name, source), for the injection recheck.
     pub callers: Vec<(String, String)>,
+    /// Enums its sites name, such as `ConfigKey` in `'${ConfigKey.aiTag}'`,
+    /// defined in this or another selected file: fixed choices, not
+    /// parameters, which the trace otherwise could not tell apart.
+    pub enums: Vec<String>,
 }
 
 impl Subject<'_> {
@@ -49,6 +54,7 @@ pub(super) fn function_subject<'a>(
     file: &FileContext<'_>,
     unit: &'a Unit,
     callers: Vec<(String, String)>,
+    enums: &BTreeMap<String, String>,
 ) -> Subject<'a> {
     Subject {
         name: unit.name.clone(),
@@ -58,7 +64,30 @@ pub(super) fn function_subject<'a>(
         errors: &unit.errors,
         lines: (unit.line, unit.end_line),
         callers,
+        enums: named_enums(&unit.sites, enums),
     }
+}
+
+/// Enum definitions shown with one subject, at most.
+const ENUMS: usize = 3;
+
+/// The definitions of enums named as `Name.member` or `Name::member` in the sites.
+fn named_enums(sites: &[Site], enums: &BTreeMap<String, String>) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for site in sites {
+        for (name, definition) in enums {
+            let named = site.text.match_indices(name.as_str()).any(|(at, _)| {
+                let before = site.text[..at].chars().next_back();
+                let after = &site.text[at + name.len()..];
+                before.is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+                    && (after.starts_with('.') || after.starts_with("::"))
+            });
+            if named && found.len() < ENUMS && !found.contains(definition) {
+                found.push(definition.clone());
+            }
+        }
+    }
+    found
 }
 
 pub(super) fn setup_subject<'a>(
@@ -80,6 +109,7 @@ pub(super) fn setup_subject<'a>(
         errors: &[],
         lines: (first.1, last.2),
         callers: Vec::new(),
+        enums: Vec::new(),
     })
 }
 
@@ -320,6 +350,9 @@ fn trace(
     if rule == SENSITIVE_DATA && !messages.is_empty() {
         state["messages"] = json!(messages);
     }
+    if rule == INJECTION && !subject.enums.is_empty() {
+        state["enums_named_in_sites"] = json!(subject.enums);
+    }
 
     file.request("trace", state, questions)
 }
@@ -351,11 +384,14 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
             Pass::Recheck,
         );
     }
-    let state = json!({
+    let mut state = json!({
         "file": file.file_state(),
         subject.kind: {"name": subject.name, "source": subject.source},
         "callers": subject.callers.iter().map(|(name, source)| json!({"name": name, "source": source})).collect::<Vec<_>>(),
     });
+    if !subject.enums.is_empty() {
+        state["enums_named_in_sites"] = json!(subject.enums);
+    }
     let (request, asked) = file.request("recheck", state, questions);
     file.budget.fits(&request).then_some((request, asked))
 }
@@ -369,4 +405,32 @@ fn sites(file: &FileContext<'_>, subject: &Subject<'_>) -> Vec<Block> {
             location: file.location(site.line, site.end_line, Some(&subject.name)),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sites_naming_an_enum_carry_its_definition() {
+        let site = |text: &str| Site {
+            id: "S1".into(),
+            text: text.into(),
+            line: 1,
+            end_line: 1,
+        };
+        let enums: BTreeMap<String, String> = [
+            (
+                "ConfigKey".to_string(),
+                "export enum ConfigKey {\n  aiTag = 'ai_tag',\n}".to_string(),
+            ),
+            ("Key".to_string(), "enum Key { A }".to_string()),
+        ]
+        .into();
+        let sites = [site(
+            "`INSERT INTO stores (key, value) VALUES ('${ConfigKey.aiTag}', ?)`",
+        )];
+        assert_eq!(named_enums(&sites, &enums), [enums["ConfigKey"].clone()]);
+        assert!(named_enums(&[site("`SELECT ${MyConfigKey.x} ${key}`")], &enums).is_empty());
+    }
 }

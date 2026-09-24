@@ -183,6 +183,7 @@ impl<'a> Shared<'a> {
                     super::questions::pair_covers("section_b", "section_a"),
                 ),
                 ("conflict", super::questions::pair_conflict()),
+                ("translation", super::questions::pair_translation()),
             ] {
                 questions.ask(key.into(), body, &id, DOC_DUPLICATION, key, Pass::Trace);
             }

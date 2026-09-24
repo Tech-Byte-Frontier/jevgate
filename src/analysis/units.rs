@@ -126,6 +126,26 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         }
         "source_file" | "program" | "module" | "declaration_list" | "class_body"
         | "export_statement" | "statement_block" => children(node, source, owner, file),
+        // `export default { async fetch(request, env) { … } }`, as Cloudflare Workers write it.
+        "object"
+            if node
+                .parent()
+                .is_some_and(|p| p.kind() == "export_statement") =>
+        {
+            children(node, source, owner, file)
+        }
+        "expression_statement" => {
+            let callbacks = registered_callbacks(node, source);
+            let single = callbacks.len() == 1;
+            for (name, function) in callbacks {
+                let definition = Definition {
+                    outer: if single { node } else { function },
+                    node: function,
+                    body: function.child_by_field_name("body"),
+                };
+                push(definition, &name, owner, Kind::Function, source, file);
+            }
+        }
         "block"
             if node
                 .parent()
@@ -216,12 +236,105 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
     }
 }
 
+/// Calls that declare tests or module mocks rather than register
+/// application callbacks, by callee or method name.
+const TEST_CALLS: [&str; 16] = [
+    "describe",
+    "it",
+    "test",
+    "suite",
+    "bench",
+    "context",
+    "specify",
+    "beforeEach",
+    "afterEach",
+    "beforeAll",
+    "afterAll",
+    "fixture",
+    "vi",
+    "jest",
+    "mock",
+    "doMock",
+];
+
+/// Functions a module-level statement registers through a call, such as the
+/// route handler in `app.post('/pages', validator(…), async (c) => …)`, with a
+/// name for each from its registration: `app.post('/pages')`. Each call of a
+/// chain (`router.get(…).post(…)`) registers its last function argument.
+/// Test declarations (`describe`, `it`, `test`) are left to the test rules.
+fn registered_callbacks<'t>(statement: Node<'t>, source: &str) -> Vec<(String, Node<'t>)> {
+    let is_function = |n: &Node<'_>| {
+        matches!(
+            n.kind(),
+            "arrow_function" | "function_expression" | "function"
+        )
+    };
+    let mut found = Vec::new();
+    let mut call = statement
+        .named_child(0)
+        .filter(|e| e.kind() == "call_expression");
+    while let Some(current) = call {
+        let function = current.child_by_field_name("function");
+        let root = function.map(|f| chain_root(f, source)).unwrap_or_default();
+        let method = function
+            .and_then(|f| f.child_by_field_name("property"))
+            .map(|p| text(p, source));
+        let arguments: Vec<Node<'t>> = current
+            .child_by_field_name("arguments")
+            .map(|a| a.named_children(&mut a.walk()).collect())
+            .unwrap_or_default();
+        let test =
+            TEST_CALLS.contains(&root.as_str()) || method.is_some_and(|m| TEST_CALLS.contains(&m));
+        if let Some(handler) = arguments.iter().rev().find(|n| is_function(n))
+            && !test
+        {
+            let path = arguments
+                .first()
+                .filter(|a| matches!(a.kind(), "string" | "template_string"))
+                .map(|a| text(*a, source))
+                .unwrap_or("…");
+            let name = match method {
+                Some(method) => format!("{root}.{method}({path})"),
+                None => format!("{root}({path})"),
+            };
+            found.push((name, *handler));
+        }
+        call = function
+            .filter(|f| f.kind() == "member_expression")
+            .and_then(|f| f.child_by_field_name("object"))
+            .filter(|o| o.kind() == "call_expression");
+    }
+    found.reverse();
+    found
+}
+
+/// The leftmost name of a callee such as `app.get` or `router.route('/x').get`.
+fn chain_root(callee: Node<'_>, source: &str) -> String {
+    let mut node = callee;
+    loop {
+        let next = match node.kind() {
+            "member_expression" => node.child_by_field_name("object"),
+            "call_expression" => node.child_by_field_name("function"),
+            _ => None,
+        };
+        match next {
+            Some(inner) => node = inner,
+            None => return text(node, source).to_string(),
+        }
+    }
+}
+
 /// The function a declaration defines: the value itself, or the last function
 /// argument of a call (as in `useCallback(fn, deps)`), looking through up to
-/// `depth` nested calls.
+/// `depth` nested calls, parentheses and type assertions such as
+/// `(async () => …) satisfies GetStaticPaths`.
 fn callback(value: Node<'_>, depth: usize) -> Option<Node<'_>> {
     match value.kind() {
         "arrow_function" | "function_expression" | "function" => Some(value),
+        "parenthesized_expression"
+        | "satisfies_expression"
+        | "as_expression"
+        | "non_null_expression" => callback(value.named_child(0)?, depth),
         "call_expression" if depth > 0 => {
             let arguments = value.child_by_field_name("arguments")?;
             let mut cursor = arguments.walk();
@@ -501,6 +614,25 @@ mod tests {
             [("myJourney", true), ("save", true), ("Panel", true)]
         );
         assert!(units[0].calls.contains("activeAccount"));
+    }
+
+    #[test]
+    fn callbacks_registered_at_module_level_are_units_named_by_their_registration() {
+        let source = "const app = new Hono()\napp.post('/pages', validator('form', (v, c) => check(v)), async (c) => {\n  const page = await insertPage(c.env.DB)\n  return c.json(page)\n})\nrouter.route('/items').get((req, res) => {\n  res.send(list())\n}).delete(async (req, res) => {\n  await remove(req.params.id)\n})\napp.use(async (c, next) => {\n  await next()\n})\ndescribe('pages', () => {\n  it('saves', () => {})\n})\ntest.beforeEach(async () => {})\nvi.mock('./db', () => ({ query: vi.fn() }))\nexport const getStaticPaths = (async ({ paginate }) => {\n  return paginate(await posts())\n}) satisfies GetStaticPaths\nexport default {\n  async fetch(request, env) {\n    return app.fetch(request, env)\n  },\n}\n";
+        let units = parse(Path::new("routes.ts"), source).unwrap().units;
+        let named: Vec<(&str, usize)> = units.iter().map(|u| (u.name.as_str(), u.line)).collect();
+        assert_eq!(
+            named,
+            [
+                ("app.post('/pages')", 2),
+                ("router.get(…)", 6),
+                ("router.delete(…)", 8),
+                ("app.use(…)", 11),
+                ("getStaticPaths", 19),
+                ("fetch", 23),
+            ]
+        );
+        assert!(units[0].calls.contains("insertPage"));
     }
 
     #[test]

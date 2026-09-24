@@ -28,6 +28,8 @@ pub struct SourceFile<'a> {
     pub units: &'a [Unit],
     /// Lines excluded from comparison, such as test code when tests are not judged.
     pub excluded: Vec<Range<usize>>,
+    /// The package the file belongs to; explicit context has none.
+    pub package: Option<&'a crate::packages::Package>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,8 +125,16 @@ struct Parsed<'a> {
 
 pub fn find(files: &[SourceFile<'_>]) -> Candidates {
     let (parsed, blocks) = statement_blocks(files);
+    let local: BTreeSet<String> = files
+        .iter()
+        .filter_map(|f| f.package?.name.clone())
+        .collect();
     let mut pairs: Vec<Pair> = matching_windows(&blocks)
         .into_iter()
+        .filter(|&((bx, _), (by, _), _)| {
+            let (a, b) = (&files[blocks[bx].file], &files[blocks[by].file]);
+            crate::packages::linked(a.package, b.package, &local)
+        })
         .filter_map(|window| pair(files, &parsed, &blocks, window))
         .collect();
     drop_nested(&mut pairs);
@@ -582,9 +592,45 @@ mod tests {
                 selected: *selected,
                 units: &units.units,
                 excluded: Vec::new(),
+                package: None,
             })
             .collect();
         find(&sources)
+    }
+
+    #[test]
+    fn copies_in_unrelated_packages_are_not_candidates() {
+        let package = |dir: &str, dependencies: &[&str]| crate::packages::Package {
+            dir: dir.into(),
+            name: Some(dir.into()),
+            dependencies: dependencies.iter().map(|d| d.to_string()).collect(),
+        };
+        let (a, b, shared) = (
+            package("a", &["shared"]),
+            package("b", &["shared"]),
+            package("shared", &[]),
+        );
+        let units = super::super::units::parse(Path::new("x.rs"), LOAD).unwrap();
+        let file = |path: &'static str, package| SourceFile {
+            path: Path::new(path),
+            source: LOAD,
+            selected: true,
+            units: &units.units,
+            excluded: Vec::new(),
+            package,
+        };
+        let separate = package("c", &[]);
+        assert!(
+            find(&[file("a/x.rs", Some(&a)), file("c/x.rs", Some(&separate))])
+                .pairs
+                .is_empty()
+        );
+        let linked = find(&[
+            file("a/x.rs", Some(&a)),
+            file("b/x.rs", Some(&b)),
+            file("shared/x.rs", Some(&shared)),
+        ]);
+        assert!(!linked.pairs.is_empty());
     }
 
     const LOAD: &str = "fn load_user(path: &str) -> Result<User> {\n    let text = std::fs::read_to_string(path)?;\n    let value: Value = serde_json::from_str(&text)?;\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    Ok(User { name })\n}\n";

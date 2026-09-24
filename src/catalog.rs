@@ -147,9 +147,9 @@ pub fn rules() -> Vec<Rule> {
             key: ACCESS_CONTROL,
             version: rule_version(ACCESS_CONTROL),
             scope: "SQL files: row-level security policies, SECURITY DEFINER functions and grants, in their final state across migrations; SpacetimeDB TypeScript modules: public tables, views and reducers",
-            unit: "one policy with its table and the functions it calls, one SECURITY DEFINER function, or one grant; one SpacetimeDB public table with its player columns, or one view or reducer with the functions it calls and the framework version",
-            inspection: "Does a policy let every user it applies to reach other users' rows, or trust a value users can change? Does a SECURITY DEFINER function leave search_path open or skip checking the caller? Does a grant open writes or private reads to every user? Does a public table hold players' own data, a view return other players' rows, or a reducer change rows its arguments choose, or operator-only settings, without checking the caller?",
-            acceptable_example: "Policies tied to the user, account or membership; role checks; restrictive policies; public data; grants narrowed by row-level security; reducers that check the caller through `ctx.sender`, an operator or gateway identity, or run only on a schedule",
+            unit: "one policy with its table and the functions it calls, one SECURITY DEFINER function, or one grant; one SpacetimeDB public table with its user columns, or one view or reducer with the functions it calls and the framework version",
+            inspection: "Does a policy let every user it applies to reach other users' rows, or trust a value users can change? Does a SECURITY DEFINER function leave search_path open or skip checking the caller? Does a grant open writes or private reads to every user? Does a public table hold users' own data, a view return other users' rows, or a reducer change rows its arguments choose, or admin-only settings, without checking the caller?",
+            acceptable_example: "Policies tied to the user, account or membership; role checks; restrictive policies; public data; grants narrowed by row-level security; reducers that check the caller through `ctx.sender`, the module owner, an admin or a trusted service identity, or run only on a schedule",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,
@@ -261,7 +261,8 @@ pub fn rule_version(key: &str) -> &'static str {
         FUNCTION_SIMPLIFICATION => "13",
         SHARED_LOGIC => "19",
         TEST_VALUE => "4",
-        HARDCODED_VALUES | INJECTION | SENSITIVE_DATA | ACCESS_CONTROL | DOC_STALENESS => "2",
+        HARDCODED_VALUES | INJECTION | SENSITIVE_DATA | ACCESS_CONTROL | DOC_STALENESS
+        | DOC_DUPLICATION => "2",
         _ => "1",
     }
 }

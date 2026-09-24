@@ -55,9 +55,9 @@ Consider (2):
 | Rule | Covers |
 |---|---|
 | Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths or outbound URLs without binding, escaping or checks |
-| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per registered error handler (`app.onError`, `setErrorHandler`, Flask and FastAPI handlers) |
+| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per error handler (`app.onError`, `setErrorHandler`, Express error middleware, Flask and FastAPI handlers, NestJS filters, axum `IntoResponse` and actix-web `ResponseError` for error types) |
 | Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly` |
-| Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user. SpacetimeDB TypeScript modules: public tables of players' data, views that return other players' rows, reducers that change rows their arguments choose or operator-only settings without checking the caller |
+| Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user. SpacetimeDB modules (TypeScript and Rust, any kind of application): public tables of users' private data, views that return other users' rows, reducers that change rows their arguments choose or admin-only settings without checking the caller, and scheduled reducers clients can call in 1.x |
 | Workflows | GitHub Actions `run` scripts that execute text outside people write (`${{ github.event.pull_request.title }}`); `pull_request_target` or `workflow_run` jobs that run pull request code with secrets |
 
 **Documentation** (opt-in with `--rule documentation`)
@@ -224,7 +224,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 ## How it works
 
-1. **Local analysis, nothing uploaded.** Tree-sitter parsers find functions, methods, types and registered callbacks. They measure nesting, group a file's members, find renamed copies, map tests to the functions they call, and list the statements where a value reaches another program. This evidence locates and scopes; it never decides a finding.
+1. **Local analysis, nothing uploaded.** Tree-sitter parsers find functions, methods, types and registered callbacks, such as route handlers written inline in `app.post('/pages', async (c) => …)`. They measure nesting, group a file's members, find renamed copies, map tests to the functions they call, and list the statements where a value reaches another program. This evidence locates and scopes; it never decides a finding.
 2. **Small, literal questions.** Each request covers one small unit and asks a few questions, such as "Would splitting this function make it easier to understand?" or "Does this function put a variable into the text of an SQL query instead of binding it?"
 3. **Follow-ups only where needed.** When an answer is split, JevGate gathers more evidence (callee signatures, callers, a specific check) and asks once more instead of guessing.
 4. **Composition in code.** Answers become `review`, `consider`, `note`, `clear` or `uncertain` at a 0.80 threshold. Raw probabilities stay in the JSON report.
@@ -241,9 +241,9 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 ## Limits
 
-- **Languages:** Rust, Python, JavaScript and TypeScript. The access-control rule reads SQL files and SpacetimeDB TypeScript modules (files that import `spacetimedb/server`; Rust modules are not read), and the workflow rule reads `.github/workflows`. Other files are listed as skipped, with the reason.
+- **Languages:** Rust, Python, JavaScript and TypeScript, and the scripts of Astro, Vue and Svelte components (their markup is not read). Minified and compiled output is skipped as generated. Copies are compared within a package and packages linked by a local dependency, not across separate example apps or templates. The access-control rule reads SQL files and SpacetimeDB modules (TypeScript files that import `spacetimedb/server`, Rust files with `#[table]` or `#[reducer]` attributes), and the workflow rule reads `.github/workflows`. Other files are listed as skipped, with the reason.
 - **Security scope:** one function plus at most one hop of callers. This is not whole-program data-flow analysis. Access control reads the final state of policies, SECURITY DEFINER functions and grants across a project's SQL files in path order; with `--base`, unchanged migrations are read for that state but not judged. It does not judge application-level authorization or dynamic SQL inside database functions.
-- **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates. Code comments are not judged yet. Token counts are estimates at four bytes per token.
+- **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates; a translation is not a duplicate. Code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
 
 ## Contributing

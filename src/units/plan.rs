@@ -250,6 +250,8 @@ struct Shared<'a> {
     module_helpers: BTreeMap<String, Vec<spacetimedb::Helper>>,
     /// Test cases of each selected file with a test view, inside its test lines.
     cases: BTreeMap<PathBuf, Vec<TestCase>>,
+    /// Enum definitions by name, from selected files and context, for security traces.
+    enums: BTreeMap<String, String>,
     hashes: BTreeMap<PathBuf, String>,
 }
 
@@ -263,6 +265,7 @@ impl<'a> Shared<'a> {
             subject_sources: BTreeMap::new(),
             module_helpers: BTreeMap::new(),
             cases: test_cases(scope),
+            enums: BTreeMap::new(),
             hashes: BTreeMap::new(),
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
@@ -296,6 +299,9 @@ impl<'a> Shared<'a> {
         }
         if shared.enabled(catalog::ACCESS_CONTROL) {
             shared.module_helpers = module_helpers(scope, &shared.hashes);
+        }
+        if shared.enabled(catalog::INJECTION) {
+            shared.enums = enums(scope);
         }
         shared
     }
@@ -462,7 +468,7 @@ fn plan_security(
             } else {
                 Vec::new()
             };
-            security::function_subject(context, unit, callers)
+            security::function_subject(context, unit, callers, &shared.enums)
         })
         .collect();
     let setup = security::setup_subject(context, &parsed.setup)
@@ -560,6 +566,44 @@ fn plan_tests(
     }
 }
 
+/// An enum shown with a security trace is at most this long.
+const ENUM_BYTES: usize = 1500;
+
+/// Enum definitions in selected files and context by name; a name defined
+/// twice is left out, since the site could mean either.
+fn enums(scope: &Scope<'_>) -> BTreeMap<String, String> {
+    let selected = scope.owners.iter().map(|&owner| {
+        (
+            scope.inputs[owner].source.as_deref().unwrap_or(""),
+            &scope.units[&owner].units,
+        )
+    });
+    let context = scope
+        .context
+        .iter()
+        .map(|(_, source, units)| (*source, &units.units));
+    let mut found: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for (source, units) in selected.chain(context) {
+        for unit in units.iter().filter(|u| !u.callable()) {
+            let text = unit.source(source);
+            let declaration = text
+                .lines()
+                .find(|l| l.contains(&unit.short_name))
+                .unwrap_or("");
+            if declaration.contains("enum ") && text.len() <= ENUM_BYTES {
+                found
+                    .entry(unit.short_name.clone())
+                    .and_modify(|d| *d = None)
+                    .or_insert_with(|| Some(text.to_string()));
+            }
+        }
+    }
+    found
+        .into_iter()
+        .filter_map(|(name, text)| Some((name, text?)))
+        .collect()
+}
+
 /// Selected files, with test lines excluded unless tests are judged, then the
 /// explicit context.
 fn duplicate_candidates(scope: &Scope<'_>) -> clones::Candidates {
@@ -573,6 +617,7 @@ fn duplicate_candidates(scope: &Scope<'_>) -> clones::Candidates {
         } else {
             scope.test_lines(owner)
         },
+        package: scope.inputs[owner].package.as_ref(),
     });
     let context = scope
         .context
@@ -583,6 +628,7 @@ fn duplicate_candidates(scope: &Scope<'_>) -> clones::Candidates {
             selected: false,
             units: &units.units,
             excluded: Vec::new(),
+            package: None,
         });
     clones::find(&selected.chain(context).collect::<Vec<_>>())
 }
