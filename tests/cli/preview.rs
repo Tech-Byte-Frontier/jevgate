@@ -91,6 +91,7 @@ fn default_preview_sends_units_without_automatic_context_or_state() {
 #[test]
 fn browser_report_is_local_and_does_not_change_json_or_failure_status() {
     use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
     let project = Project::new();
     std::fs::write(project.0.join("api.py"), "def value(rows):\n    total = 0\n    for row in rows:\n        total += row\n    total *= 2\n    return total\n").unwrap();
     let bin = project.0.join("bin");

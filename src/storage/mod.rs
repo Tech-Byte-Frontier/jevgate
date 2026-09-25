@@ -271,6 +271,7 @@ mod tests {
         assert!(Store::open(&project.0).is_ok());
     }
 
+    #[cfg(unix)]
     #[test]
     fn storage_rejects_symlinked_state_directory() {
         let project = crate::tests::Project::new();

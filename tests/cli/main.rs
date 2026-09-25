@@ -6,12 +6,10 @@ mod preview;
 mod rules;
 #[path = "../support/temp_dir.rs"]
 mod temp_dir;
+#[cfg(unix)]
 mod watch;
 
-use std::{
-    process::{Command, Stdio},
-    time::{Duration, Instant},
-};
+use std::process::{Command, Stdio};
 
 struct Project(temp_dir::TempDir);
 impl Project {
