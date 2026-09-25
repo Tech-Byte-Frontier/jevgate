@@ -1,0 +1,16 @@
+# pre-commit (https://pre-commit.com) hooks. Both review the staged changes
+# (`--base HEAD`) and need TYPESAFE_API_KEY or a key saved by `jevgate auth login`.
+- id: jevgate
+  name: JevGate
+  description: Review staged changes with JevGate, built from source by pre-commit (needs a Rust toolchain)
+  entry: jevgate check --base HEAD
+  language: rust
+  pass_filenames: false
+  require_serial: true
+- id: jevgate-system
+  name: JevGate
+  description: Review staged changes with the jevgate already on PATH (Homebrew, install.sh or cargo)
+  entry: jevgate check --base HEAD
+  language: system
+  pass_filenames: false
+  require_serial: true
