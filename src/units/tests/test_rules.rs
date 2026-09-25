@@ -35,6 +35,44 @@ fn test_rules_need_include_tests_and_summarize_over_tested_subjects() {
 }
 
 #[test]
+fn an_undecided_test_pair_is_asked_again_with_the_body_of_its_subject() {
+    let project = Project::new();
+    project.write("lib.rs", TESTS);
+    let mut options = args();
+    options.include_tests = true;
+    only(&mut options, catalog::TEST_REDUNDANCY);
+    let (_, plan) = planned(&project, &options);
+    let pair = plan.files[&0]
+        .units
+        .iter()
+        .find(|u| u.rule == catalog::TEST_REDUNDANCY)
+        .unwrap();
+    let (request, _) = pair.recheck.as_ref().expect("a recheck");
+    assert_eq!(request["jevgate"]["stage"], "recheck");
+    assert!(
+        request["state"]["subject"]["source"]
+            .as_str()
+            .unwrap()
+            .contains("values.iter().sum()")
+    );
+    let first = plan
+        .requests
+        .iter()
+        .find(|p| p.request["jevgate"]["stage"] == "test-pair")
+        .unwrap();
+    assert!(first.request["state"]["subject"]["source"].is_null());
+    // An even spread over the three levels is settled by the recheck.
+    let mut eval = scripted(3);
+    eval.recheck_level = Some(1);
+    let report = run(&project, &options, &mut eval);
+    assert!(eval.stages.contains(&"recheck".to_string()));
+    assert_eq!(
+        report.files[0].dimensions["test_redundancy"].status,
+        Status::Consider
+    );
+}
+
+#[test]
 fn undecided_weak_test_signals_do_not_block_a_clear_test() {
     let project = Project::new();
     project.write("lib.rs", TESTS);

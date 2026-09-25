@@ -936,20 +936,20 @@ fn plan_tests(
 ) {
     shared.link_routes(&mut cases);
     test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
+    let subjects = test_units::Subjects {
+        signatures: &shared.subjects,
+        sources: &shared.subject_sources,
+        helpers: &shared.helpers,
+        hashes: &shared.hashes,
+        routes: &shared.route_labels,
+    };
     if shared.enabled(catalog::TEST_VALUE) {
         file.rules.insert(catalog::TEST_VALUE, 0);
-        let subjects = test_units::Subjects {
-            signatures: &shared.subjects,
-            sources: &shared.subject_sources,
-            helpers: &shared.helpers,
-            hashes: &shared.hashes,
-            routes: &shared.route_labels,
-        };
         test_units::plan_values(context, &cases, &subjects, test_lines, file, requests);
     }
     if shared.enabled(catalog::TEST_REDUNDANCY) {
         file.rules.insert(catalog::TEST_REDUNDANCY, 0);
-        test_units::plan_pairs(context, &cases, &shared.subjects, file, requests);
+        test_units::plan_pairs(context, &cases, &subjects, file, requests);
     }
 }
 
