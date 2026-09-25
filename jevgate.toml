@@ -1,3 +1,4 @@
+#:schema ./jevgate.schema.json
 # The report renderer's escaping test holds an XSS string that the provider's
 # edge firewall blocks; it is reviewed locally, not uploaded.
 # The promo video under video/ is local only and never judged.

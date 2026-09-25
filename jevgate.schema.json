@@ -1,0 +1,314 @@
+{
+  "$defs": {
+    "Level": {
+      "anyOf": [
+        {
+          "enum": [
+            "review",
+            "consider",
+            "uncertain",
+            "report",
+            "none",
+            "off"
+          ],
+          "type": "string"
+        },
+        {
+          "items": {
+            "enum": [
+              "review",
+              "consider",
+              "uncertain",
+              "report",
+              "none",
+              "off"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ]
+    },
+    "Rules": {
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "maintainability/file-organization",
+              "file_organization",
+              "maintainability/function-simplification",
+              "function_simplification",
+              "maintainability/shared-logic",
+              "shared_logic",
+              "maintainability/hardcoded-values",
+              "hardcoded_values",
+              "security/injection",
+              "injection",
+              "security/sensitive-data",
+              "sensitive_data",
+              "security/unsafe-settings",
+              "unsafe_settings",
+              "security/access-control",
+              "access_control",
+              "security/workflows",
+              "workflows",
+              "tests/value",
+              "test_value",
+              "tests/redundancy",
+              "test_redundancy",
+              "documentation/agent-context",
+              "agent_context",
+              "documentation/large-docs",
+              "large_docs",
+              "documentation/staleness",
+              "doc_staleness",
+              "documentation/duplication",
+              "doc_duplication",
+              "documentation/comments",
+              "comments",
+              "maintainability",
+              "security",
+              "tests",
+              "documentation",
+              "default",
+              "all"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/Level"
+          },
+          "propertyNames": {
+            "enum": [
+              "maintainability/file-organization",
+              "file_organization",
+              "maintainability/function-simplification",
+              "function_simplification",
+              "maintainability/shared-logic",
+              "shared_logic",
+              "maintainability/hardcoded-values",
+              "hardcoded_values",
+              "security/injection",
+              "injection",
+              "security/sensitive-data",
+              "sensitive_data",
+              "security/unsafe-settings",
+              "unsafe_settings",
+              "security/access-control",
+              "access_control",
+              "security/workflows",
+              "workflows",
+              "tests/value",
+              "test_value",
+              "tests/redundancy",
+              "test_redundancy",
+              "documentation/agent-context",
+              "agent_context",
+              "documentation/large-docs",
+              "large_docs",
+              "documentation/staleness",
+              "doc_staleness",
+              "documentation/duplication",
+              "doc_duplication",
+              "documentation/comments",
+              "comments",
+              "maintainability",
+              "security",
+              "tests",
+              "documentation",
+              "default",
+              "all"
+            ]
+          },
+          "type": "object"
+        }
+      ],
+      "description": "`rules = [\"security\"]` selects rules; a `[rules]` table sets each rule's or\ngroup's gate level, or `\"off\"`, on top of the default group."
+    },
+    "Scope": {
+      "additionalProperties": false,
+      "description": "`[[scope]]`: gate levels for the files `paths` match. `fail_on` applies to\nevery rule there, and `rules` to single rules or groups. The last scope\nthat matches a file and addresses a rule wins; other files and rules keep\nthe levels set outside scopes.",
+      "properties": {
+        "fail_on": {
+          "description": "The level for every rule in these files.",
+          "items": {
+            "enum": [
+              "review",
+              "consider",
+              "uncertain",
+              "report",
+              "none"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "paths": {
+          "description": "Globs of the files this scope applies to.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rules": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Level"
+          },
+          "description": "Levels of single rules or groups in these files; `off` is not accepted (use `upload_deny`).",
+          "propertyNames": {
+            "enum": [
+              "maintainability/file-organization",
+              "file_organization",
+              "maintainability/function-simplification",
+              "function_simplification",
+              "maintainability/shared-logic",
+              "shared_logic",
+              "maintainability/hardcoded-values",
+              "hardcoded_values",
+              "security/injection",
+              "injection",
+              "security/sensitive-data",
+              "sensitive_data",
+              "security/unsafe-settings",
+              "unsafe_settings",
+              "security/access-control",
+              "access_control",
+              "security/workflows",
+              "workflows",
+              "tests/value",
+              "test_value",
+              "tests/redundancy",
+              "test_redundancy",
+              "documentation/agent-context",
+              "agent_context",
+              "documentation/large-docs",
+              "large_docs",
+              "documentation/staleness",
+              "doc_staleness",
+              "documentation/duplication",
+              "doc_duplication",
+              "documentation/comments",
+              "comments",
+              "maintainability",
+              "security",
+              "tests",
+              "documentation",
+              "default",
+              "all"
+            ]
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/main/jevgate.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "JevGate configuration. The command line wins over the file, except that upload patterns and budgets in the file are ceilings that flags can only narrow. Unknown keys are errors.",
+  "properties": {
+    "cache_ttl_secs": {
+      "description": "Cache lifetime in seconds for the `jev-latest` and `jev-preview` aliases; pinned versions never expire. Default: 3600.",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "concurrency": {
+      "description": "Ceiling on simultaneous requests (1-8). Default: 6.",
+      "maximum": 8,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "context": {
+      "description": "Files always sent as related evidence, like `--context`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "fail_on": {
+      "description": "The level for rules without their own, like `--fail-on`. Default: [\"review\"].",
+      "items": {
+        "enum": [
+          "review",
+          "consider",
+          "uncertain",
+          "report",
+          "none"
+        ],
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "generated": {
+      "description": "Globs of generated files, which are skipped, in addition to the built-in names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "include_tests": {
+      "description": "Judge tests, like `--include-tests`. Default: false.",
+      "type": "boolean"
+    },
+    "max_context_bytes": {
+      "description": "Ceiling on context bytes per request. Default: 32768.",
+      "minimum": 1,
+      "type": "integer"
+    },
+    "max_file_bytes": {
+      "description": "Files larger than this are reported as needs-context, never truncated. Default: 262144.",
+      "minimum": 1,
+      "type": "integer"
+    },
+    "max_requests": {
+      "description": "Ceiling on API attempts per invocation; flags can only lower it. Default: unlimited.",
+      "minimum": 1,
+      "type": "integer"
+    },
+    "model": {
+      "description": "TypeSafe model; a pinned version keeps results repeatable. `--model` overrides it.",
+      "type": "string"
+    },
+    "rules": {
+      "$ref": "#/$defs/Rules",
+      "description": "A list selects rules; a table gives each group or rule a level. Default: the `default` group."
+    },
+    "scope": {
+      "description": "Gate levels for the files some paths match, such as report-only tooling.",
+      "items": {
+        "$ref": "#/$defs/Scope"
+      },
+      "type": "array"
+    },
+    "tests": {
+      "description": "Globs of additional test files.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "upload_allow": {
+      "description": "Globs of the paths that may be uploaded, including instruction files and context. Default: every path.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "upload_deny": {
+      "description": "Globs never uploaded, even when allowed.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": "jevgate.toml",
+  "type": "object"
+}

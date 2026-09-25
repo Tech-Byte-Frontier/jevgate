@@ -10,25 +10,36 @@ use std::{
 };
 
 #[derive(Default, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Globs of the paths that may be uploaded, including instruction files and context. Default: every path.
     pub upload_allow: Vec<String>,
+    /// Globs never uploaded, even when allowed.
     pub upload_deny: Vec<String>,
+    /// Globs of generated files, which are skipped, in addition to the built-in names.
     pub generated: Vec<String>,
+    /// Globs of additional test files.
     pub tests: Vec<String>,
+    /// Files always sent as related evidence, like `--context`.
     pub context: Vec<PathBuf>,
+    /// A list selects rules; a table gives each group or rule a level. Default: the `default` group.
     pub rules: Rules,
+    /// Ceiling on API attempts per invocation; flags can only lower it. Default: unlimited.
     pub max_requests: Option<u32>,
+    /// Ceiling on simultaneous requests (1-8). Default: 6.
     pub concurrency: Option<u32>,
+    /// Files larger than this are reported as needs-context, never truncated. Default: 262144.
     pub max_file_bytes: Option<u64>,
+    /// Ceiling on context bytes per request. Default: 32768.
     pub max_context_bytes: Option<u64>,
-    /// Default `--fail-on` values when none are passed.
+    /// The level for rules without their own, like `--fail-on`. Default: ["review"].
     pub fail_on: Vec<String>,
-    /// The model when `--model` is not passed.
+    /// TypeSafe model; a pinned version keeps results repeatable. `--model` overrides it.
     pub model: Option<String>,
-    /// Cache lifetime for model aliases when `--cache-ttl-secs` is not passed.
+    /// Cache lifetime in seconds for the `jev-latest` and `jev-preview` aliases; pinned versions never expire. Default: 3600.
     pub cache_ttl_secs: Option<u64>,
-    /// Judge tests as if `--include-tests` were passed.
+    /// Judge tests, like `--include-tests`. Default: false.
     pub include_tests: bool,
     /// Gate levels for the files some paths match, such as report-only tooling.
     pub scope: Vec<Scope>,
@@ -39,11 +50,15 @@ pub struct Config {
 /// that matches a file and addresses a rule wins; other files and rules keep
 /// the levels set outside scopes.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Scope {
+    /// Globs of the files this scope applies to.
     pub paths: Vec<String>,
+    /// The level for every rule in these files.
     #[serde(default)]
     pub fail_on: Vec<String>,
+    /// Levels of single rules or groups in these files; `off` is not accepted (use `upload_deny`).
     #[serde(default)]
     pub rules: BTreeMap<String, Level>,
 }
@@ -51,6 +66,7 @@ pub struct Scope {
 /// `rules = ["security"]` selects rules; a `[rules]` table sets each rule's or
 /// group's gate level, or `"off"`, on top of the default group.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum Rules {
     List(Vec<String>),
@@ -64,6 +80,7 @@ impl Default for Rules {
 }
 
 #[derive(Clone, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum Level {
     One(String),
