@@ -107,13 +107,44 @@ pub fn missing(
     scripts: &BTreeSet<String>,
 ) -> Vec<Missing> {
     let base = doc.parent().unwrap_or(Path::new(""));
+    let mut found = BTreeSet::new();
+    let mut out = missing_paths(root, base, text, history, &mut found);
+    drop_ignored(root, base, &mut out);
+    for m in &mut out {
+        if m.fate == Fate::Absent
+            && let Some(path) = nearby(base, &m.name, history)
+        {
+            m.fate = Fate::Nearby(path);
+        }
+    }
+    if !scripts.is_empty() {
+        for script in commands(text) {
+            if !scripts.contains(&script) && found.insert(format!("script:{script}")) {
+                out.push(Missing {
+                    name: script,
+                    fate: Fate::NoScript,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The paths `text` names that the repository lacks, each once, with what
+/// Git shows about them; `found` collects the names seen.
+fn missing_paths(
+    root: &Path,
+    base: &Path,
+    text: &str,
+    history: &History,
+    found: &mut BTreeSet<String>,
+) -> Vec<Missing> {
     let top: BTreeSet<&str> = history
         .tracked
         .iter()
         .filter_map(|p| p.iter().next()?.to_str())
         .collect();
     let shown = shown(text, &top);
-    let mut found = BTreeSet::new();
     let mut out = Vec::new();
     for token in code_spans(text).into_iter().chain(link_targets(text)) {
         let Some(name) = path_like(&token, &top) else {
@@ -143,50 +174,45 @@ pub fn missing(
         }
         out.push(Missing { name, fate });
     }
-    // A name ending in `/`, or without an extension, may be a directory,
-    // which `dir/` patterns match: `backend/app/frontend` is a build output
-    // that `backend/app/frontend/` ignores.
-    let forms = |name: &str| {
-        let directory = name.ends_with('/');
-        let name = name.trim_end_matches('/');
-        let bare = Path::new(name).extension().is_none();
-        [normal(Path::new(name)), normal(&base.join(name))]
-            .into_iter()
-            .flat_map(|p| {
-                let dir = PathBuf::from(format!("{}/", p.display()));
-                match (directory, bare) {
-                    (true, _) => vec![dir],
-                    (false, true) => vec![p, dir],
-                    (false, false) => vec![p],
-                }
-            })
-            .collect::<Vec<PathBuf>>()
-    };
+    out
+}
+
+/// Leave out the names Git never had that the ignore files cover.
+fn drop_ignored(root: &Path, base: &Path, out: &mut Vec<Missing>) {
     let absent: Vec<PathBuf> = out
         .iter()
         .filter(|m| m.fate == Fate::Absent)
-        .flat_map(|m| forms(&m.name))
+        .flat_map(|m| ignorable_forms(base, &m.name))
         .collect();
     let ignored = super::history::ignored(root, &absent);
-    out.retain(|m| m.fate != Fate::Absent || !forms(&m.name).iter().any(|p| ignored.contains(p)));
-    for m in &mut out {
-        if m.fate == Fate::Absent
-            && let Some(path) = nearby(base, &m.name, history)
-        {
-            m.fate = Fate::Nearby(path);
-        }
-    }
-    if !scripts.is_empty() {
-        for script in commands(text) {
-            if !scripts.contains(&script) && found.insert(format!("script:{script}")) {
-                out.push(Missing {
-                    name: script,
-                    fate: Fate::NoScript,
-                });
+    out.retain(|m| {
+        m.fate != Fate::Absent
+            || !ignorable_forms(base, &m.name)
+                .iter()
+                .any(|p| ignored.contains(p))
+    });
+}
+
+/// The paths an ignore pattern may match for `name`, from the repository
+/// root and from the document's directory. A name ending in `/`, or without
+/// an extension, may be a directory, which `dir/` patterns match:
+/// `backend/app/frontend` is a build output that `backend/app/frontend/`
+/// ignores.
+fn ignorable_forms(base: &Path, name: &str) -> Vec<PathBuf> {
+    let directory = name.ends_with('/');
+    let name = name.trim_end_matches('/');
+    let bare = Path::new(name).extension().is_none();
+    [normal(Path::new(name)), normal(&base.join(name))]
+        .into_iter()
+        .flat_map(|p| {
+            let dir = PathBuf::from(format!("{}/", p.display()));
+            match (directory, bare) {
+                (true, _) => vec![dir],
+                (false, true) => vec![p, dir],
+                (false, false) => vec![p],
             }
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 /// Extensions a file keeps its role under, such as `.ts` renamed to `.tsx`.
@@ -391,33 +417,45 @@ fn shown(text: &str, top: &BTreeSet<&str>) -> BTreeSet<String> {
         if !fenced {
             continue;
         }
-        for key in ["filename=", "title=", "file="] {
-            if let Some(value) = trimmed.split(key).nth(1) {
-                let value = value.trim_start_matches(['"', '\'']);
-                let end = value.find(['"', '\'', ' ']).unwrap_or(value.len());
-                out.extend(path_like(&value[..end], top));
-            }
-        }
-        // The paragraph before, past blank lines and directive lines.
-        let mut j = i;
-        while j > 0 && (blank_or_directive(lines[j - 1])) {
-            j -= 1;
-        }
-        let mut named = BTreeSet::new();
-        while j > 0 && !lines[j - 1].trim().is_empty() && !is_fence(lines[j - 1]) {
-            j -= 1;
-            named.extend(
-                line_spans(lines[j])
-                    .into_iter()
-                    .filter(|(before, _)| role(before).is_none_or(|r| PATH_ROLES.contains(&r)))
-                    .filter_map(|(_, span)| path_like(span, top)),
-            );
-        }
-        if named.len() == 1 {
-            out.extend(named);
-        }
+        out.extend(titled(trimmed, top));
+        out.extend(introduced(&lines, i, top));
     }
     out
+}
+
+/// The paths a code fence's opening line titles the block with.
+fn titled(fence: &str, top: &BTreeSet<&str>) -> Vec<String> {
+    ["filename=", "title=", "file="]
+        .into_iter()
+        .filter_map(|key| {
+            let value = fence.split(key).nth(1)?;
+            let value = value.trim_start_matches(['"', '\'']);
+            let end = value.find(['"', '\'', ' ']).unwrap_or(value.len());
+            path_like(&value[..end], top)
+        })
+        .collect()
+}
+
+/// The one path the paragraph before the code block opening at line `open`
+/// names, past blank lines and directive lines; none when it names several.
+fn introduced(lines: &[&str], open: usize, top: &BTreeSet<&str>) -> Option<String> {
+    let mut j = open;
+    while j > 0 && (blank_or_directive(lines[j - 1])) {
+        j -= 1;
+    }
+    let mut named = BTreeSet::new();
+    while j > 0 && !lines[j - 1].trim().is_empty() && !is_fence(lines[j - 1]) {
+        j -= 1;
+        named.extend(
+            line_spans(lines[j])
+                .into_iter()
+                .filter(|(before, _)| role(before).is_none_or(|r| PATH_ROLES.contains(&r)))
+                .filter_map(|(_, span)| path_like(span, top)),
+        );
+    }
+    let mut named = named.into_iter();
+    let first = named.next()?;
+    named.next().is_none().then_some(first)
 }
 
 fn is_fence(line: &str) -> bool {
