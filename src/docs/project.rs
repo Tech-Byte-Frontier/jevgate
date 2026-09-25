@@ -58,7 +58,10 @@ pub fn read(root: &Path, visited: &BTreeSet<PathBuf>) -> Project {
 fn manifests(root: &Path, base: &Path, linters: &mut BTreeSet<String>) -> Vec<Value> {
     let dir = root.join(base);
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).ok();
-    let path = |name: &str| base.join(name).to_string_lossy().into_owned();
+    let path = |name: &str| match base.to_string_lossy() {
+        base if base.is_empty() => name.to_string(),
+        base => format!("{base}/{name}"),
+    };
     for (file, tool) in CONFIG_FILES {
         if dir.join(file).is_file() {
             linters.insert((*tool).into());
