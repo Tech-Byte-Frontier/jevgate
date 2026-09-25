@@ -122,6 +122,9 @@ const TEACHING: [&str; 8] = [
     "all comments in this project",
 ];
 
+/// Bytes of a README or CONTRIBUTING file read for the teaching phrases.
+const TEACHING_READ_BYTES: u64 = 262_144;
+
 /// Whether the repository at `root` says its code is written for learners,
 /// so comments that explain what code does are its purpose.
 pub fn teaching(root: &std::path::Path) -> bool {
@@ -131,7 +134,7 @@ pub fn teaching(root: &std::path::Path) -> bool {
     entries.flatten().any(|entry| {
         let name = entry.file_name().to_string_lossy().to_lowercase();
         (name.starts_with("readme") || name.starts_with("contributing"))
-            && crate::inventory::read_source(&entry.path(), 262_144).is_ok_and(|text| {
+            && crate::inventory::read_source(&entry.path(), TEACHING_READ_BYTES).is_ok_and(|text| {
                 let text = text.to_lowercase();
                 TEACHING.iter().any(|phrase| text.contains(phrase))
             })

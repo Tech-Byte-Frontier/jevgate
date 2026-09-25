@@ -1153,95 +1153,109 @@ fn located_block<'a>(
     blocks.iter().find(|b| b.id == id)
 }
 
+/// Tests linked by overlapping pairs on one subject, with where they are,
+/// the lowest probability of their pairs, and their pairs' findings.
+struct Cluster<'a> {
+    subject: &'a String,
+    tests: BTreeSet<&'a String>,
+    locations: Vec<crate::schema::Location>,
+    p: f64,
+    findings: Vec<Option<usize>>,
+}
+
 /// Three or more tests linked by overlapping pairs on one subject: the tests
 /// a chain of such pairs connects. Two pairs of one subject that share no
 /// test stay two pairs; grouped by subject alone, sinatra's pair of redirect
 /// tests and pair of deny tests of `get` read as four overlapping tests.
-/// Also returns the indices of the consider pair findings each group reports.
+/// Also returns the indices of the pair findings each group reports.
 fn over_tested(plan: &FilePlan, redundant: &[Redundant<'_>]) -> (Vec<Finding>, BTreeSet<usize>) {
-    type Cluster<'a> = (
-        &'a String,
-        BTreeSet<&'a String>,
-        Vec<crate::schema::Location>,
-        f64,
-        Vec<Option<usize>>,
-    );
-    let mut clusters: Vec<Cluster<'_>> = Vec::new();
-    for Redundant {
-        unit,
-        names,
-        subject,
-        p,
-        finding,
-    } in redundant
-    {
-        let mut joined: Cluster<'_> = (subject, BTreeSet::new(), Vec::new(), *p, vec![*finding]);
+    let clusters = clusters(redundant);
+    let grouped = clusters
+        .iter()
+        .flat_map(|c| c.findings.iter().flatten().copied())
+        .collect();
+    let groups = clusters
+        .into_iter()
+        .map(|cluster| group_finding(plan, cluster))
+        .collect();
+    (groups, grouped)
+}
+
+/// The clusters of three or more tests that overlapping pairs connect.
+fn clusters<'a>(redundant: &'a [Redundant<'_>]) -> Vec<Cluster<'a>> {
+    let mut clusters: Vec<Cluster<'a>> = Vec::new();
+    for pair in redundant {
+        let mut joined = Cluster {
+            subject: pair.subject,
+            tests: BTreeSet::new(),
+            locations: Vec::new(),
+            p: pair.p,
+            findings: vec![pair.finding],
+        };
         let mut index = 0;
         while index < clusters.len() {
-            let (other, tests, ..) = &clusters[index];
-            if *other == *subject && names.iter().any(|name| tests.contains(name)) {
-                let (_, tests, locations, q, findings) = clusters.remove(index);
-                joined.1.extend(tests);
-                joined.2.extend(locations);
-                joined.3 = joined.3.min(q);
-                joined.4.extend(findings);
+            let other = &clusters[index];
+            if other.subject == pair.subject && pair.names.iter().any(|n| other.tests.contains(n)) {
+                let other = clusters.remove(index);
+                joined.tests.extend(other.tests);
+                joined.locations.extend(other.locations);
+                joined.p = joined.p.min(other.p);
+                joined.findings.extend(other.findings);
             } else {
                 index += 1;
             }
         }
-        for (name, location) in names.iter().zip(&unit.locations) {
-            if joined.1.insert(name) {
-                joined.2.push(location.clone());
+        for (name, location) in pair.names.iter().zip(&pair.unit.locations) {
+            if joined.tests.insert(name) {
+                joined.locations.push(location.clone());
             }
         }
         clusters.push(joined);
     }
-    clusters.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-    clusters.retain(|(_, tests, ..)| tests.len() >= 3);
-    let grouped = clusters
+    clusters.sort_by(|a, b| (a.subject, &a.tests).cmp(&(b.subject, &b.tests)));
+    clusters.retain(|c| c.tests.len() >= 3);
+    clusters
+}
+
+/// The consider that names a cluster's tests.
+fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
+    let Cluster {
+        subject,
+        tests,
+        mut locations,
+        p,
+        ..
+    } = cluster;
+    locations.sort();
+    let names: Vec<String> = tests.iter().map(|t| format!("`{t}`")).collect();
+    let lines = locations
         .iter()
-        .flat_map(|(.., findings)| findings.iter().flatten().copied())
+        .map(|l| l.end_line + 1 - l.start_line)
+        .sum();
+    let identity: Vec<&str> = std::iter::once(subject.as_str())
+        .chain(tests.iter().map(|t| t.as_str()))
         .collect();
-    let groups = clusters
-        .into_iter()
-        .map(|(subject, tests, mut locations, p, _)| {
-            locations.sort();
-            let names: Vec<String> = tests.iter().map(|t| format!("`{t}`")).collect();
-            let lines = locations
-                .iter()
-                .map(|l| l.end_line + 1 - l.start_line)
-                .sum();
-            let identity: Vec<&str> = std::iter::once(subject.as_str())
-                .chain(tests.iter().map(|t| t.as_str()))
-                .collect();
-            Finding {
-                rule: catalog::id(catalog::TEST_REDUNDANCY).into(),
-                strength: Strength::Consider,
-                line: locations.first().map_or(1, |l| l.start_line),
-                message: format!(
-                    "{} tests of `{subject}` overlap: {} ({p:.2}).",
-                    tests.len(),
-                    names.join(", ")
-                ),
-                action: "Consider one parameterized test for these cases".into(),
-                symbol: Some(subject.clone()),
-                rule_version: catalog::rule_version(catalog::TEST_REDUNDANCY).into(),
-                concern_probability: p,
-                locations,
-                quote: None,
-                category: None,
-                values: Vec::new(),
-                fingerprint: fingerprint(
-                    catalog::TEST_REDUNDANCY,
-                    plan,
-                    &super::identity(&identity),
-                ),
-                rank: rank(p, lines),
-                baselined: false,
-            }
-        })
-        .collect();
-    (groups, grouped)
+    Finding {
+        rule: catalog::id(catalog::TEST_REDUNDANCY).into(),
+        strength: Strength::Consider,
+        line: locations.first().map_or(1, |l| l.start_line),
+        message: format!(
+            "{} tests of `{subject}` overlap: {} ({p:.2}).",
+            tests.len(),
+            names.join(", ")
+        ),
+        action: "Consider one parameterized test for these cases".into(),
+        symbol: Some(subject.clone()),
+        rule_version: catalog::rule_version(catalog::TEST_REDUNDANCY).into(),
+        concern_probability: p,
+        locations,
+        quote: None,
+        category: None,
+        values: Vec::new(),
+        fingerprint: fingerprint(catalog::TEST_REDUNDANCY, plan, &super::identity(&identity)),
+        rank: rank(p, lines),
+        baselined: false,
+    }
 }
 
 fn documented(unit: &UnitPlan) -> bool {

@@ -59,15 +59,14 @@ fn jsx_components_count_as_calls() {
 #[test]
 fn functions_an_object_literal_holds_are_methods_of_its_binding() {
     let source = "export const actions = {\n  default: async ({ cookies, request }) => {\n    const data = await request.formData()\n    cookies.set('jwt', data.get('token'), { path: '/' })\n  },\n  'sign-out': function () {\n    return clear()\n  },\n  async remove(event) {\n    await drop(event)\n  },\n  label: 'x',\n} satisfies Actions\nconst options = { retries: 3 }\n";
-    let units = parse(Path::new("+page.server.ts"), source).unwrap().units;
-    let named: Vec<(&str, usize)> = units.iter().map(|u| (u.name.as_str(), u.line)).collect();
-    assert_eq!(
-        named,
-        [
+    let units = assert_named(
+        "+page.server.ts",
+        source,
+        &[
             ("actions::default", 2),
             ("actions::sign-out", 6),
-            ("actions::remove", 9)
-        ]
+            ("actions::remove", 9),
+        ],
     );
     assert!(units[0].calls.contains("formData"));
 }
@@ -75,14 +74,21 @@ fn functions_an_object_literal_holds_are_methods_of_its_binding() {
 #[test]
 fn functions_assigned_to_properties_are_methods_of_their_object() {
     let source = "var res = Object.create(http.ServerResponse.prototype)\n\n/**\n * Set status `code`.\n */\nres.status = function status(code) {\n  this.statusCode = code\n  return this\n}\n\nRouter.prototype.handle = function (req, res) {\n  return next(req, res)\n}\n\nmodule.exports = function createApplication() {\n  return new App()\n}\n";
-    let units = parse(Path::new("response.js"), source).unwrap().units;
-    let named: Vec<(&str, usize)> = units.iter().map(|u| (u.name.as_str(), u.line)).collect();
-    assert_eq!(
-        named,
-        [
+    assert_named(
+        "response.js",
+        source,
+        &[
             ("res::status", 6),
             ("Router::handle", 11),
-            ("createApplication", 15)
-        ]
+            ("createApplication", 15),
+        ],
     );
+}
+
+/// The units `source` parses to, after checking their names and lines.
+fn assert_named(path: &str, source: &str, expected: &[(&str, usize)]) -> Vec<Unit> {
+    let units = parse(Path::new(path), source).unwrap().units;
+    let named: Vec<(&str, usize)> = units.iter().map(|u| (u.name.as_str(), u.line)).collect();
+    assert_eq!(named, expected);
+    units
 }

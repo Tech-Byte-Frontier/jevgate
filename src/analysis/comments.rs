@@ -242,10 +242,12 @@ fn first_code_byte(root: Node<'_>, blocks: &[Block]) -> usize {
 /// each configuration section and route file: `|------|`, a title, then an
 /// explanation. It documents the section below it, like a docstring.
 pub fn banner(text: &str) -> bool {
+    /// Dashes a banner's rule holds at least, so a table row is not one.
+    const RULE_DASHES: usize = 10;
     text.lines().any(|line| {
         let rule = line.trim().trim_start_matches(['/', '*', '#', ' ']);
         rule.strip_prefix('|')
-            .is_some_and(|rest| rest.len() >= 10 && rest.chars().all(|c| c == '-'))
+            .is_some_and(|rest| rest.len() >= RULE_DASHES && rest.chars().all(|c| c == '-'))
     })
 }
 
