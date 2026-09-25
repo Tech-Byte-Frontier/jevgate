@@ -36,11 +36,7 @@ fn test_rules_need_include_tests_and_summarize_over_tested_subjects() {
 
 #[test]
 fn an_undecided_test_pair_is_asked_again_with_the_body_of_its_subject() {
-    let project = Project::new();
-    project.write("lib.rs", TESTS);
-    let mut options = args();
-    options.include_tests = true;
-    only(&mut options, catalog::TEST_REDUNDANCY);
+    let (project, options) = tests_project(&[("lib.rs", TESTS)], catalog::TEST_REDUNDANCY);
     let (_, plan) = planned(&project, &options);
     let pair = plan.files[&0]
         .units
@@ -55,12 +51,8 @@ fn an_undecided_test_pair_is_asked_again_with_the_body_of_its_subject() {
             .unwrap()
             .contains("values.iter().sum()")
     );
-    let first = plan
-        .requests
-        .iter()
-        .find(|p| p.request["jevgate"]["stage"] == "test-pair")
-        .unwrap();
-    assert!(first.request["state"]["subject"]["source"].is_null());
+    let first = first_request(&plan, "test-pair");
+    assert!(first["state"]["subject"]["source"].is_null());
     // An even spread over the three levels is settled by the recheck.
     let mut eval = scripted(3);
     eval.recheck_level = Some(1);
@@ -74,11 +66,7 @@ fn an_undecided_test_pair_is_asked_again_with_the_body_of_its_subject() {
 
 #[test]
 fn undecided_weak_test_signals_do_not_block_a_clear_test() {
-    let project = Project::new();
-    project.write("lib.rs", TESTS);
-    let mut options = args();
-    options.include_tests = true;
-    options.rules = vec![catalog::TEST_VALUE.into()];
+    let (project, mut options) = tests_project(&[("lib.rs", TESTS)], catalog::TEST_VALUE);
     let mut eval = scripted(0);
     eval.overrides
         .push(("internal", json!({"type":"noul","noul":0.45})));
@@ -110,18 +98,12 @@ const PROFILE: &str = "export async function getProfile(id: string) {\n  if (!id
 
 #[test]
 fn an_undecided_test_is_asked_again_with_its_subjects_and_setup() {
-    let project = Project::new();
-    project.write("src/profile.ts", PROFILE);
-    project.write("src/profile.test.ts", VITEST);
-    let mut options = args();
-    options.include_tests = true;
-    only(&mut options, catalog::TEST_VALUE);
+    let (project, mut options) = tests_project(
+        &[("src/profile.ts", PROFILE), ("src/profile.test.ts", VITEST)],
+        catalog::TEST_VALUE,
+    );
     let (_, plan) = planned(&project, &options);
-    let file = plan
-        .files
-        .values()
-        .find(|f| f.path.ends_with("profile.test.ts"))
-        .unwrap();
+    let file = file_plan(&plan, "profile.test.ts");
     let (request, _) = file.units[0].recheck.as_ref().expect("a recheck");
     let state = &request["state"];
     assert!(
@@ -142,13 +124,9 @@ fn an_undecided_test_is_asked_again_with_its_subjects_and_setup() {
         2,
         "the subject's file is checked for freshness"
     );
-    let first = plan
-        .requests
-        .iter()
-        .find(|p| p.request["jevgate"]["stage"] == "tests")
-        .unwrap();
+    let first = first_request(&plan, "tests");
     assert!(
-        first.request["state"]["subjects"][0]["source"].is_null(),
+        first["state"]["subjects"][0]["source"].is_null(),
         "the first pass sends signatures only"
     );
     let test_value = |report: &Report| {
@@ -193,28 +171,20 @@ fn a_test_files_setup_is_its_head_and_hooks_and_long_parts_are_left_out() {
 }
 
 const INVOICE_RB: &str = "class Invoice\n  def initialize(rows)\n    @rows = rows\n  end\n\n  def total\n    @rows.sum { |row| row * 2 }\n  end\nend\n";
+/// An RSpec file of `Invoice` and the class it tests.
+const INVOICE: &[(&str, &str)] = &[
+    ("lib/invoice.rb", INVOICE_RB),
+    ("spec/invoice_spec.rb", INVOICE_SPEC),
+];
 const INVOICE_SPEC: &str = "require 'spec_helper'\n\nRSpec.describe Invoice do\n  def build_rows(count)\n    Array.new(count) { 1 }\n  end\n\n  let(:rows) { build_rows(2) }\n  let(:unused) { build_rows(9) }\n  subject { Invoice.new(rows) }\n\n  it \"doubles each row\" do\n    expect(subject.total).to eq 4\n  end\n\n  it \"doubles each row again\" do\n    expect(subject.total).to eq 4\n  end\nend\n";
 
 #[test]
 fn a_ruby_test_is_rechecked_with_its_groups_the_setup_it_reads_and_its_helpers() {
-    let project = Project::new();
-    project.write("lib/invoice.rb", INVOICE_RB);
-    project.write("spec/invoice_spec.rb", INVOICE_SPEC);
-    let mut options = args();
-    options.include_tests = true;
-    only(&mut options, catalog::TEST_VALUE);
+    let (project, options) = tests_project(INVOICE, catalog::TEST_VALUE);
     let (_, plan) = planned(&project, &options);
-    let file = plan
-        .files
-        .values()
-        .find(|f| f.path.ends_with("invoice_spec.rb"))
-        .unwrap();
-    let first = plan
-        .requests
-        .iter()
-        .find(|p| p.request["jevgate"]["stage"] == "tests")
-        .unwrap();
-    assert_eq!(first.request["state"]["tests"][0]["suite"], "Invoice");
+    let file = file_plan(&plan, "invoice_spec.rb");
+    let first = first_request(&plan, "tests");
+    assert_eq!(first["state"]["tests"][0]["suite"], "Invoice");
     let (request, _) = file.units[0].recheck.as_ref().expect("a recheck");
     let setup = request["state"]["setup"].as_str().unwrap();
     assert_eq!(
@@ -266,27 +236,15 @@ fn a_ruby_helper_is_found_in_the_tests_file_or_the_nearest_support_file() {
 
 #[test]
 fn ruby_pairs_are_a_review_only_when_neither_test_checks_something_the_other_does_not() {
-    let project = Project::new();
-    project.write("lib/invoice.rb", INVOICE_RB);
-    project.write("spec/invoice_spec.rb", INVOICE_SPEC);
-    let mut options = args();
-    options.include_tests = true;
-    only(&mut options, catalog::TEST_REDUNDANCY);
+    let (project, mut options) = tests_project(INVOICE, catalog::TEST_REDUNDANCY);
     let (_, plan) = planned(&project, &options);
-    let pair = plan
-        .requests
-        .iter()
-        .find(|p| p.request["jevgate"]["stage"] == "test-pair")
-        .unwrap();
-    assert!(pair.request["questions"]["distinct"].is_object());
-    let note = pair.request["questions"]["overlap"]["instructions"]["note"]
+    let pair = first_request(&plan, "test-pair");
+    assert!(pair["questions"]["distinct"].is_object());
+    let note = pair["questions"]["overlap"]["instructions"]["note"]
         .as_str()
         .unwrap();
     assert!(note.contains("an alias and its original"), "{note}");
-    let strength = |distinct: f64, refresh: bool| {
-        let mut options = args();
-        options.include_tests = true;
-        only(&mut options, catalog::TEST_REDUNDANCY);
+    let mut strength = |distinct: f64, refresh: bool| {
         options.refresh = refresh;
         let mut eval = scripted(2);
         eval.overrides = vec![("distinct", noul_at(distinct))];
@@ -309,11 +267,7 @@ const TWO_PAIRS: &str = "fn total(values: &[i32]) -> i32 {\n    values.iter().su
 #[test]
 fn overlapping_tests_are_grouped_only_when_their_pairs_connect_them() {
     let redundancy = |source: &str| {
-        let project = Project::new();
-        project.write("lib.rs", source);
-        let mut options = args();
-        options.include_tests = true;
-        only(&mut options, catalog::TEST_REDUNDANCY);
+        let (project, options) = tests_project(&[("lib.rs", source)], catalog::TEST_REDUNDANCY);
         let report = run(&project, &options, &mut scripted(1));
         report.files[0]
             .findings

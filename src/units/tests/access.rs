@@ -5,17 +5,6 @@ const FIRST_MIGRATION: &str = "create table public.notes (id uuid primary key, o
 const SECOND_MIGRATION: &str = "drop policy \"read notes\" on public.notes;\ncreate policy \"read own notes\" on public.notes for select using (owner_id = auth.uid());\ncreate function public.note_count(uid uuid) returns bigint language sql security definer as $$ select count(*) from public.notes where owner_id = uid $$;\ngrant select on public.notes to authenticated;\n";
 const WORKFLOW_FILE: &str = "on:\n  pull_request_target:\njobs:\n  greet:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo \"${{ github.event.pull_request.title }}\"\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n";
 
-/// A project holding `files`, checked for `rules` only.
-fn project_with(files: &[(&str, &str)], rules: &[&str]) -> (Project, CheckArgs) {
-    let project = Project::new();
-    for (path, text) in files {
-        project.write(path, text);
-    }
-    let mut options = args();
-    options.rules = rules.iter().map(|r| r.to_string()).collect();
-    (project, options)
-}
-
 fn configuration_project() -> (Project, CheckArgs) {
     project_with(
         &[

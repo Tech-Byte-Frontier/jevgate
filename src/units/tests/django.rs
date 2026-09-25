@@ -10,17 +10,18 @@ const URLS: &str = "from django.urls import path\n\nfrom shop import views\n\nur
 const PLAIN: &str = "import subprocess\n\n\ndef archive(name):\n    subprocess.run('tar czf ' + name + '.tgz ' + name, shell=True)\n    return open(name + '.tgz', 'rb').read()\n";
 
 fn django_project() -> (Project, CheckArgs) {
-    let project = Project::new();
-    project.write("shop/views.py", VIEWS);
-    project.write("shop/urls.py", URLS);
-    project.write("tools/archive.py", PLAIN);
-    project.write(
-        "shop/templates/orders/search.html",
-        "<h1>Results for {{ term|safe }}</h1>\n",
-    );
-    let mut options = args();
-    options.rules = catalog::SECURITY.iter().map(|r| r.to_string()).collect();
-    (project, options)
+    project_with(
+        &[
+            ("shop/views.py", VIEWS),
+            ("shop/urls.py", URLS),
+            ("tools/archive.py", PLAIN),
+            (
+                "shop/templates/orders/search.html",
+                "<h1>Results for {{ term|safe }}</h1>\n",
+            ),
+        ],
+        &catalog::SECURITY,
+    )
 }
 
 /// The trace request of the injection unit of the function `name`.
@@ -152,30 +153,31 @@ fn a_django_management_command_is_marked_as_run_by_hand() {
 /// A settings project: shared settings, a development module the manage
 /// script selects, and a production module the container selects.
 fn settings_project() -> (Project, CheckArgs) {
-    let project = Project::new();
-    project.write(
-        "site/settings/base.py",
-        "import os\n\nSECRET_KEY = 'dev-key-1234'\nDEBUG = True\nINSTALLED_APPS = ['shop']\nCORS_ALLOW_ALL_ORIGINS = True\n",
-    );
-    project.write(
-        "site/settings/dev.py",
-        "from .base import *  # noqa\n\nDEBUG = True\nALLOWED_HOSTS = ['*']\n",
-    );
-    project.write(
-        "site/settings/production.py",
-        "import os\n\nfrom .base import *  # noqa\n\nDEBUG = False\nSECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n",
-    );
-    project.write(
-        "manage.py",
-        "import os\n\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site.settings.dev')\n",
-    );
-    project.write(
-        "Dockerfile",
-        "FROM python:3.12\nENV DJANGO_SETTINGS_MODULE=site.settings.production\n",
-    );
-    let mut options = args();
-    options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
-    (project, options)
+    project_with(
+        &[
+            (
+                "site/settings/base.py",
+                "import os\n\nSECRET_KEY = 'dev-key-1234'\nDEBUG = True\nINSTALLED_APPS = ['shop']\nCORS_ALLOW_ALL_ORIGINS = True\n",
+            ),
+            (
+                "site/settings/dev.py",
+                "from .base import *  # noqa\n\nDEBUG = True\nALLOWED_HOSTS = ['*']\n",
+            ),
+            (
+                "site/settings/production.py",
+                "import os\n\nfrom .base import *  # noqa\n\nDEBUG = False\nSECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n",
+            ),
+            (
+                "manage.py",
+                "import os\n\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site.settings.dev')\n",
+            ),
+            (
+                "Dockerfile",
+                "FROM python:3.12\nENV DJANGO_SETTINGS_MODULE=site.settings.production\n",
+            ),
+        ],
+        &[catalog::UNSAFE_SETTINGS],
+    )
 }
 
 fn module_request<'p>(plan: &'p Plan, path: &str) -> &'p Value {
@@ -367,18 +369,8 @@ fn django_error_views_middleware_and_the_rest_framework_handler_are_error_handle
     let mut options = args();
     options.rules = vec![catalog::SENSITIVE_DATA.into()];
     let (_, plan) = planned(&project, &options);
-    let mut registered: Vec<String> = plan
-        .files
-        .values()
-        .flat_map(|f| &f.units)
-        .filter_map(|u| match &u.detail {
-            Detail::Handler { registered } => Some(registered.clone()),
-            _ => None,
-        })
-        .collect();
-    registered.sort();
     assert_eq!(
-        registered,
+        registered_handlers(&plan),
         [
             "`'EXCEPTION_HANDLER': 'shop.api.handle',` (shop/settings.py:3)",
             "`Django middleware Errors.process_exception` (shop/middleware.py:5)",

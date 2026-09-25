@@ -5,12 +5,7 @@ use super::*;
 fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
     let (project, options) = hardcoded_project();
     let (_, plan) = planned(&project, &options);
-    let stages: Vec<_> = plan
-        .requests
-        .iter()
-        .map(|p| p.request["jevgate"]["stage"].as_str().unwrap())
-        .collect();
-    assert_eq!(stages, ["values", "constants"]);
+    assert_eq!(stages(&plan), ["values", "constants"]);
     let values = &plan.requests[0].request["state"]["functions"];
     assert_eq!(
         values.as_array().unwrap().len(),

@@ -5,6 +5,7 @@ mod django;
 mod documentation;
 mod duplicates;
 mod functions;
+mod handlers;
 mod hardcoded;
 mod nextjs;
 mod organization;
@@ -203,13 +204,82 @@ fn only(options: &mut CheckArgs, rule: &str) {
     options.rules = vec![rule.into()];
 }
 
+/// A project of `files`, each a path and its text, checked for `rules` only.
+fn project_with(files: &[(&str, &str)], rules: &[&str]) -> (Project, CheckArgs) {
+    let project = Project::new();
+    for (path, text) in files {
+        project.write(path, text);
+    }
+    let mut options = args();
+    options.rules = rules.iter().map(|r| r.to_string()).collect();
+    (project, options)
+}
+
 /// A project whose `lib.rs` holds `source`, checked for one rule only.
 fn rule_project(source: &str, rule: &str) -> (Project, CheckArgs) {
-    let project = Project::new();
-    project.write("lib.rs", source);
-    let mut options = args();
-    only(&mut options, rule);
+    project_with(&[("lib.rs", source)], &[rule])
+}
+
+/// A project of `files` whose tests are judged, checked for one test rule.
+fn tests_project(files: &[(&str, &str)], rule: &str) -> (Project, CheckArgs) {
+    let (project, mut options) = project_with(files, &[rule]);
+    options.include_tests = true;
     (project, options)
+}
+
+/// The stage of each planned request, in order.
+fn stages(plan: &Plan) -> Vec<&str> {
+    plan.requests
+        .iter()
+        .map(|p| p.request["jevgate"]["stage"].as_str().unwrap())
+        .collect()
+}
+
+/// The first planned request of `stage`.
+fn first_request<'p>(plan: &'p Plan, stage: &str) -> &'p Value {
+    &plan
+        .requests
+        .iter()
+        .find(|p| p.request["jevgate"]["stage"] == stage)
+        .unwrap_or_else(|| panic!("a {stage} request"))
+        .request
+}
+
+/// The plan of the file whose path ends with `name`.
+fn file_plan<'p>(plan: &'p Plan, name: &str) -> &'p FilePlan {
+    plan.files
+        .values()
+        .find(|f| f.path.ends_with(name))
+        .unwrap_or_else(|| panic!("a plan for {name}"))
+}
+
+/// How each planned error handler is registered, sorted.
+fn registered_handlers(plan: &Plan) -> Vec<String> {
+    let mut registered: Vec<String> = plan
+        .files
+        .values()
+        .flat_map(|f| &f.units)
+        .filter_map(|u| match &u.detail {
+            Detail::Handler { registered } => Some(registered.clone()),
+            _ => None,
+        })
+        .collect();
+    registered.sort();
+    registered
+}
+
+/// The dimension of `rule` and the findings of the file at `path`.
+fn dimension_of(
+    report: Report,
+    path: &str,
+    rule: &str,
+) -> (crate::schema::Dimension, Vec<crate::schema::Finding>) {
+    let file = report
+        .files
+        .into_iter()
+        .find(|f| f.path == std::path::Path::new(path))
+        .unwrap_or_else(|| panic!("a result for {path}"));
+    (file.dimensions[rule].clone(), file.findings)
 }
 
 fn function_rule_project(source: &str) -> (Project, CheckArgs) {

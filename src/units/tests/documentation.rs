@@ -157,12 +157,18 @@ fn a_finished_plan_covers_its_section_checks() {
     assert_eq!(dimension.units.covered, 1, "{}", dimension.decision_basis);
 }
 
-fn plan_file(path: &str) -> crate::schema::FileResult {
+/// A file whose one consider finding is of `rule`, in the dimension `key`.
+fn consider_file(path: &str, key: &str, rule: &str) -> crate::schema::FileResult {
     let mut file = hardcoded_file(path, "consider", &[]);
     let dimension = file.dimensions.remove("hardcoded_values").unwrap();
-    file.dimensions.insert("doc_staleness".into(), dimension);
+    file.dimensions.insert(key.into(), dimension);
+    file.findings[0].rule = rule.into();
+    file
+}
+
+fn plan_file(path: &str) -> crate::schema::FileResult {
+    let mut file = consider_file(path, "doc_staleness", "documentation/staleness");
     let finding = &mut file.findings[0];
-    finding.rule = "documentation/staleness".into();
     finding.category = Some(super::grouping::FINISHED_PLAN.into());
     finding.message = format!("`{path}` is a plan whose work is finished: tag v1 (0.95).");
     file
@@ -207,12 +213,8 @@ fn finished_plans_in_one_directory_are_one_finding_named_by_the_directory() {
 /// A repetition finding in `path` between its section at `line` and a
 /// section of `other`.
 fn repeat_file(path: &str, line: usize, other: (&str, usize)) -> crate::schema::FileResult {
-    let mut file = plan_file(path);
-    let dimension = file.dimensions.remove("doc_staleness").unwrap();
-    file.dimensions.insert("doc_duplication".into(), dimension);
+    let mut file = consider_file(path, "doc_duplication", "documentation/duplication");
     let finding = &mut file.findings[0];
-    finding.rule = "documentation/duplication".into();
-    finding.category = None;
     finding.line = line;
     finding.message = format!(
         "Section `Setup` states everything section `Setup` of `{}` states (0.98).",
@@ -379,24 +381,18 @@ fn pair_answered(
     let overrides = std::iter::once(("relation", torn_relation()))
         .chain(overrides)
         .collect();
-    let project = Project::new();
     let shared = "Install the dependencies, start the local database, copy the example environment file and run the development server before opening a pull request";
-    project.write("README.md", &format!("# Setup\n{shared}.\n"));
-    project.write("docs/guide.md", &format!("# Getting started\n{shared}.\n"));
-    let mut options = args();
-    only(&mut options, catalog::DOC_DUPLICATION);
+    let (project, options) = project_with(
+        &[
+            ("README.md", &format!("# Setup\n{shared}.\n")),
+            ("docs/guide.md", &format!("# Getting started\n{shared}.\n")),
+        ],
+        &[catalog::DOC_DUPLICATION],
+    );
     let mut eval = scripted(0);
     eval.overrides = overrides;
     let report = run(&project, &options, &mut eval);
-    let readme = report
-        .files
-        .into_iter()
-        .find(|f| f.path == std::path::Path::new("README.md"))
-        .unwrap();
-    (
-        readme.dimensions[catalog::DOC_DUPLICATION].clone(),
-        readme.findings,
-    )
+    dimension_of(report, "README.md", catalog::DOC_DUPLICATION)
 }
 
 #[test]
@@ -490,29 +486,23 @@ fn instruction_dimension(
     overrides: Vec<(&'static str, Value)>,
     kind: Value,
 ) -> (crate::schema::Dimension, Vec<crate::schema::Finding>) {
-    let mut options = args();
-    only(&mut options, catalog::AGENT_CONTEXT);
     // A fresh project each time, so no answer comes from the cache.
-    let project = Project::new();
-    project.write("Cargo.toml", "[package]\nname = \"demo\"\n");
-    project.write("src/lib.rs", "");
-    project.write(
-        "AGENTS.md",
-        "# Testing\nTests live beside the code and use the fixtures in `testdata/`.\n",
+    let (project, options) = project_with(
+        &[
+            ("Cargo.toml", "[package]\nname = \"demo\"\n"),
+            ("src/lib.rs", ""),
+            (
+                "AGENTS.md",
+                "# Testing\nTests live beside the code and use the fixtures in `testdata/`.\n",
+            ),
+        ],
+        &[catalog::AGENT_CONTEXT],
     );
     let mut eval = scripted(0);
     eval.overrides = overrides;
     eval.recheck_overrides = vec![("kind", kind)];
     let report = run(&project, &options, &mut eval);
-    let file = report
-        .files
-        .into_iter()
-        .find(|f| f.path == std::path::Path::new("AGENTS.md"))
-        .unwrap();
-    (
-        file.dimensions[catalog::AGENT_CONTEXT].clone(),
-        file.findings,
-    )
+    dimension_of(report, "AGENTS.md", catalog::AGENT_CONTEXT)
 }
 
 const SECTION_KINDS: [&str; 5] = [
