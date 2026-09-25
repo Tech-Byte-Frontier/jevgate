@@ -6,6 +6,7 @@ use super::{
         Answers, Outcome, benefit, checks, choice, lowered, noul, open, origin_outcome, score,
         several_kind, unit_outcome, value_signals,
     },
+    wording::{comment_reason, comment_wording},
     wording::{
         doc_pair_wording, document_wording, function_wording, handler_wording, module_wording,
         outline_wording, pair_wording, plan_wording, privilege_wording, question_label,
@@ -138,6 +139,24 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
         merged.extend(answers(judgments, &unit.id, Pass::Settle));
         return (unit_outcome(unit, &merged), merged);
     }
+    // A comment's recheck replaces its first answers when the first stayed
+    // open and the recheck decides, or neither decides; the kind of comment,
+    // asked when it stays undecided, sits beside them.
+    if unit.rule == catalog::COMMENTS {
+        let first = answers(judgments, &unit.id, Pass::First);
+        let before = unit_outcome(unit, &first);
+        let recheck = answers(judgments, &unit.id, Pass::Recheck);
+        let mut merged = if !recheck.is_empty()
+            && open(unit, &first, before)
+            && (unit_outcome(unit, &recheck).decisive() || !before.decisive())
+        {
+            recheck
+        } else {
+            first
+        };
+        merged.extend(answers(judgments, &unit.id, Pass::Settle));
+        return (unit_outcome(unit, &merged), merged);
+    }
     // A test recheck asks the hollow-test questions again with the code under
     // test and the setup; each answer replaces the first one unless only the
     // first is decisive.
@@ -255,6 +274,15 @@ pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Strin
         })
         .filter(|u| matches!(resolved(u, judgments).0, Outcome::Uncertain(_)))
         .map(|u| u.id.clone());
+    // Comments still undecided after their recheck, or without one.
+    let comments = plan
+        .units
+        .iter()
+        .filter(|u| matches!(u.detail, Detail::Comment { .. }) && u.presence == Presence::Judged)
+        .filter(|u| answers(judgments, &u.id, Pass::Settle).is_empty())
+        .filter(|u| u.recheck.is_none() || !answers(judgments, &u.id, Pass::Recheck).is_empty())
+        .filter(|u| matches!(resolved(u, judgments).0, Outcome::Uncertain(_)))
+        .map(|u| u.id.clone());
     plan.units
         .iter()
         .filter(|u| {
@@ -274,6 +302,7 @@ pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Strin
         })
         .map(|u| u.id.clone())
         .chain(pairs)
+        .chain(comments)
         .collect()
 }
 
@@ -323,7 +352,9 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
     let mut concern = BTreeMap::<&str, f64>::new();
     let mut findings = Vec::new();
     let mut redundant = Vec::new();
+    let mut commented = Vec::new();
     let mut undecided = BTreeMap::<&str, Vec<Undecided>>::new();
+    let few = few_comment_lines(plan, judgments);
     for (rule, omitted) in &plan.rules {
         counts.entry(rule).or_default().omitted = *omitted;
     }
@@ -333,7 +364,7 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
             continue;
         }
         let (outcome, answers) = resolved(unit, judgments);
-        let outcome = if unnamed_value(unit, judgments) {
+        let outcome = if unnamed_value(unit, judgments) || few.contains(unit.id.as_str()) {
             lowered(outcome)
         } else {
             outcome
@@ -347,7 +378,16 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
                     Strength::Consider => &mut count.consider,
                     Strength::Note => &mut count.note,
                 } += 1;
-                findings.push(finding(plan, unit, strength, p, &answers, judgments));
+                if unit.rule == catalog::COMMENTS {
+                    commented.push((
+                        unit,
+                        strength,
+                        p,
+                        comment_reason(&answers, documented(unit)),
+                    ));
+                } else {
+                    findings.push(finding(plan, unit, strength, p, &answers, judgments));
+                }
             }
             None if outcome == Outcome::Clear => count.clear += 1,
             None => {
@@ -365,6 +405,7 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         }
     }
     findings.extend(over_tested(plan, &redundant));
+    findings.extend(comment_findings(plan, &commented));
     let dimensions = plan
         .rules
         .keys()
@@ -424,6 +465,7 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
         catalog::FILE_ORGANIZATION => &["split"],
         catalog::SHARED_LOGIC => &["same"],
         catalog::HARDCODED_VALUES => &["environment", "magic", "special"],
+        catalog::COMMENTS => &["restates", "verbose", "history", "disabled"],
         catalog::TEST_VALUE => &["own_logic", "mock_only"],
         catalog::INJECTION => &[
             "interpreted",
@@ -624,6 +666,7 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::SHARED_LOGIC => "candidate pair",
         catalog::TEST_VALUE => "test",
         catalog::HARDCODED_VALUES => "value unit",
+        catalog::COMMENTS => "comment",
         catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::UNSAFE_SETTINGS => "security unit",
         catalog::ACCESS_CONTROL => "access statement",
         catalog::WORKFLOWS => "workflow job",
@@ -834,6 +877,10 @@ fn finding(
                 (message, action)
             }
         }
+        Detail::Comment { .. } => {
+            let reason = comment_reason(answers, documented(unit));
+            comment_wording(name, &[(&unit.locations[0], reason)], strength, p)
+        }
         Detail::Test => test_wording(name, strength, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;
@@ -986,6 +1033,95 @@ fn over_tested(
                     plan,
                     &super::identity(&identity),
                 ),
+                rank: rank(p, lines),
+                baselined: false,
+            }
+        })
+        .collect()
+}
+
+fn documented(unit: &UnitPlan) -> bool {
+    matches!(
+        unit.detail,
+        Detail::Comment {
+            documentation: true,
+            ..
+        }
+    )
+}
+
+/// Lines a unit's comments may span in all and still be few: a comment or
+/// two a reader skips in a moment cost little.
+const FEW_COMMENT_LINES: usize = 3;
+
+/// Comments raised to a consider whose unit's considered comments span
+/// fewer than `FEW_COMMENT_LINES` lines in all: their finding is a note.
+fn few_comment_lines<'a>(plan: &'a FilePlan, judgments: &[Judgment]) -> BTreeSet<&'a str> {
+    let mut considered = BTreeMap::<&str, Vec<&UnitPlan>>::new();
+    for unit in &plan.units {
+        if let Detail::Comment { owner, .. } = &unit.detail
+            && unit.presence == Presence::Judged
+            && matches!(resolved(unit, judgments).0, Outcome::Consider(_))
+        {
+            considered.entry(owner.as_str()).or_default().push(unit);
+        }
+    }
+    considered
+        .into_values()
+        .filter(|units| units.iter().map(|u| u.lines).sum::<usize>() < FEW_COMMENT_LINES)
+        .flatten()
+        .map(|u| u.id.as_str())
+        .collect()
+}
+
+/// One finding per unit and strength for its comments a reader could do
+/// without, listing each with what makes it so, at the lowest probability
+/// among them.
+fn comment_findings(
+    plan: &FilePlan,
+    commented: &[(&UnitPlan, Strength, f64, &'static str)],
+) -> Vec<Finding> {
+    let mut grouped =
+        BTreeMap::<(&str, Strength), Vec<&(&UnitPlan, Strength, f64, &'static str)>>::new();
+    for entry in commented {
+        let Detail::Comment { owner, .. } = &entry.0.detail else {
+            continue;
+        };
+        grouped
+            .entry((owner.as_str(), entry.1))
+            .or_default()
+            .push(entry);
+    }
+    grouped
+        .into_iter()
+        .map(|((owner, strength), mut entries)| {
+            entries.sort_by_key(|(unit, ..)| unit.locations[0].start_line);
+            let p = entries.iter().map(|(_, _, p, _)| *p).fold(1.0, f64::min);
+            let listed: Vec<(&crate::schema::Location, &'static str)> = entries
+                .iter()
+                .map(|(unit, _, _, reason)| (&unit.locations[0], *reason))
+                .collect();
+            let (message, action) = comment_wording(owner, &listed, strength, p);
+            let locations: Vec<crate::schema::Location> =
+                listed.iter().map(|(l, _)| (*l).clone()).collect();
+            let lines = entries.iter().map(|(unit, ..)| unit.lines).sum();
+            let identities: Vec<&str> = std::iter::once(owner)
+                .chain(entries.iter().map(|(unit, ..)| unit.identity.as_str()))
+                .collect();
+            Finding {
+                rule: catalog::id(catalog::COMMENTS).into(),
+                strength,
+                line: locations[0].start_line,
+                message,
+                action: action.into(),
+                symbol: (owner != super::comments::TOP_LEVEL).then(|| owner.to_string()),
+                rule_version: catalog::rule_version(catalog::COMMENTS).into(),
+                concern_probability: p,
+                locations,
+                quote: entries[0].0.quote.clone(),
+                category: None,
+                values: Vec::new(),
+                fingerprint: fingerprint(catalog::COMMENTS, plan, &super::identity(&identities)),
                 rank: rank(p, lines),
                 baselined: false,
             }

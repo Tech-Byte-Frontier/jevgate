@@ -14,8 +14,9 @@ pub(super) struct Scope<'a> {
 }
 
 use super::{
-    FileContext, FilePlan, Plan, Planned, access, documents, drift, duplicates, functions,
-    handlers, hardcoded, instructions, outline, security, spacetimedb, test_units, workflows,
+    FileContext, FilePlan, Plan, Planned, access, comments, documents, drift, duplicates,
+    functions, handlers, hardcoded, instructions, outline, security, spacetimedb, test_units,
+    workflows,
 };
 use crate::{
     analysis::{
@@ -541,6 +542,18 @@ fn plan_file(
             .cloned()
             .collect();
         hardcoded::plan(&context, &units, &constants, &mut file, requests);
+    }
+    if shared.enabled(catalog::COMMENTS) && view.application {
+        file.rules.insert(catalog::COMMENTS, 0);
+        let parsed = &scope.units[&owner];
+        let found =
+            crate::analysis::comments::comments(context.path, context.source, &parsed.units)
+                .unwrap_or_default();
+        let found: Vec<_> = found
+            .into_iter()
+            .filter(|c| !lines.iter().any(|l| l.contains(&c.line)))
+            .collect();
+        comments::plan(&context, &parsed.units, &found, &mut file, requests);
     }
     let rules: Vec<&'static str> = catalog::SECURITY
         .into_iter()

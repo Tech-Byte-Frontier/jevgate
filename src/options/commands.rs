@@ -19,7 +19,7 @@ pub enum JevCommand {
     ///
     /// Parses the selected files locally, sends small evidence units (a
     /// function, a file outline, a pair of copies, a test, a documentation
-    /// section) with short questions, and composes the answers into findings.
+    /// section, a code comment) with short questions, and composes the answers into findings.
     /// Unchanged units are answered from `.jevgate/cache`, so a re-run only pays
     /// for what changed. Every run writes the full report to
     /// `.jevgate/latest.json`, whatever the output format.
@@ -191,7 +191,8 @@ Examples:
   jevgate check src/billing --verbose              One directory, with notes and per-file detail
   jevgate check --base origin/main --format json   Changed files only, machine-readable
   jevgate check --rule default --rule security     Add the opt-in security group
-  jevgate check --rule documentation               Only agent instruction files and project docs
+  jevgate check --rule documentation               Agent instruction files, project docs and code comments
+  jevgate check --rule comments                    Only code comments: repeated code, filler, narrated edits
   jevgate check --include-tests                    Also judge test value and redundancy
   jevgate check --fail-on none                     Advisory: never exits 1; exits 2 when incomplete
   jevgate check --fail-on review --fail-on security=consider

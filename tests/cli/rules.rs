@@ -34,7 +34,8 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "agent_context",
             "large_docs",
             "doc_staleness",
-            "doc_duplication"
+            "doc_duplication",
+            "comments"
         ]
     );
     for arguments in [

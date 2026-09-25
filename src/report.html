@@ -39,7 +39,7 @@
 const data=JSON.parse(document.getElementById('data').textContent);
 const $=id=>document.getElementById(id);
 const labels={review:'Needs review',consider:'Consider',note:'Note',clear:'Clear',uncertain:'Uncertain','needs-context':'Needs context','not-applicable':'Not applicable',error:'Error',pending:'Pending',skipped:'Skipped'};
-const names={file_organization:'File organization',function_simplification:'Function simplification',shared_logic:'Shared logic',hardcoded_values:'Hardcoded values',injection:'Injection',sensitive_data:'Sensitive data',unsafe_settings:'Unsafe settings',test_value:'Test value',test_redundancy:'Test redundancy',agent_context:'Agent context',large_docs:'Large docs',doc_staleness:'Stale docs',doc_duplication:'Duplicated docs'};
+const names={file_organization:'File organization',function_simplification:'Function simplification',shared_logic:'Shared logic',hardcoded_values:'Hardcoded values',injection:'Injection',sensitive_data:'Sensitive data',unsafe_settings:'Unsafe settings',test_value:'Test value',test_redundancy:'Test redundancy',agent_context:'Agent context',large_docs:'Large docs',doc_staleness:'Stale docs',doc_duplication:'Duplicated docs',comments:'Code comments'};
 const rules=new Map();for(const r of data.rules){rules.set(r.key,r);rules.set(r.id,r)}
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n}
 function badge(status){return el('span',labels[status]||status,'badge '+(Object.hasOwn(labels,status)?status:''))}

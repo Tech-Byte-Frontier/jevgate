@@ -3,8 +3,9 @@
 use super::{
     Block, Detail, GroupInfo,
     outcome::{
-        Answers, Outcome, benefit, disagreement, document_split, noul, origin_outcome, repeated,
-        section_signals, settled_checks, value_signals,
+        Answers, Outcome, benefit, comment_concern_kind, comment_signals, disagreement,
+        document_split, noul, origin_outcome, repeated, section_signals, settled_checks,
+        value_signals,
     },
 };
 use crate::catalog;
@@ -16,7 +17,8 @@ mod security;
 mod test_rules;
 
 pub(super) use documentation::{
-    doc_pair_wording, document_wording, plan_wording, section_wording, stale_wording,
+    comment_reason, comment_wording, doc_pair_wording, document_wording, plan_wording,
+    section_wording, stale_wording,
 };
 pub(super) use maintainability::{function_wording, outline_wording, pair_wording, values_wording};
 pub(super) use security::{handler_wording, module_wording, privilege_wording, security_wording};
@@ -44,6 +46,9 @@ pub(super) fn question_label(question: &str) -> &str {
         "environment" => "environment value",
         "magic" => "unnamed value",
         "special" => "special case",
+        "restates" => "repeats its code",
+        "verbose" => "sentences that add nothing",
+        "disabled" => "code turned off",
         "interpreted" => "variable in interpreted text",
         "resource" => "variable in a path or URL",
         "origin" => "origin of values",

@@ -3,6 +3,7 @@
 //! Jev answers short literal questions, and `compose` turns answers into results.
 mod access;
 mod answers;
+mod comments;
 pub mod compose;
 mod documents;
 mod drift;
@@ -112,6 +113,17 @@ pub enum Detail {
         /// chooses among; that follow-up is sent only after a review or consider.
         choices: Vec<String>,
         locate: Option<(Value, Asked)>,
+    },
+    /// A comment of application code and the unit it documents or sits in.
+    Comment {
+        /// The name of that unit, or `top-level code`: a finding lists the
+        /// comments of one unit together.
+        owner: String,
+        /// Documentation of a declaration or file, which a documentation
+        /// tool may render even when it repeats the signature.
+        documentation: bool,
+        /// What kind of comment it is, asked when its questions stay undecided.
+        kind: Option<(Value, Asked)>,
     },
     /// A file's module-level constants and the literal values they hold.
     Constants {

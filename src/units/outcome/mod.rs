@@ -22,7 +22,8 @@ use access::access_outcome;
 use documentation::doc_pair_outcome;
 use documentation::stale_outcome;
 pub(super) use documentation::{
-    disagreement, document_outcome, document_split, pair_signals, repeated, section_signals,
+    comment_concern_kind, comment_outcome, comment_signals, disagreement, document_outcome,
+    document_split, pair_signals, repeated, section_signals,
 };
 pub(super) use maintainability::{
     benign_key, function_outcome, organization_outcome, several_kind, shared_outcome,
@@ -119,11 +120,12 @@ pub(super) fn torn(answer: &Answer) -> bool {
 }
 
 /// Whether a unit's first outcome calls for its recheck: undecided, or a
-/// note from a torn function or file-organization answer.
+/// note from a torn function, file-organization or comment answer.
 pub(super) fn open(unit: &UnitPlan, answers: &Answers<'_>, outcome: Outcome) -> bool {
     let benefit_questions: &[&str] = match unit.rule {
         catalog::FUNCTION_SIMPLIFICATION => &["split", "flatten"],
         catalog::FILE_ORGANIZATION => &["split"],
+        catalog::COMMENTS => &["restates", "verbose"],
         _ => &[],
     };
     match outcome {
@@ -195,6 +197,16 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             get("overlap").map(|overlap| redundancy_outcome(overlap, get("distinct")))
         }
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
+        catalog::COMMENTS => comment_outcome(
+            &get,
+            matches!(
+                unit.detail,
+                Detail::Comment {
+                    documentation: true,
+                    ..
+                }
+            ),
+        ),
         catalog::INJECTION => injection_outcome(&get),
         catalog::SENSITIVE_DATA if matches!(unit.detail, Detail::Handler { .. }) => {
             get("handler_leaks").map(noul)

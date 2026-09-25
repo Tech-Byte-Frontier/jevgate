@@ -1,5 +1,6 @@
 //! Unit planning and composition tests, by rule family; shared helpers here.
 mod access;
+mod comments;
 mod django;
 mod documentation;
 mod duplicates;

@@ -24,6 +24,7 @@ pub const FILE_ORGANIZATION: &str = "file_organization";
 pub const FUNCTION_SIMPLIFICATION: &str = "function_simplification";
 pub const SHARED_LOGIC: &str = "shared_logic";
 pub const HARDCODED_VALUES: &str = "hardcoded_values";
+pub const COMMENTS: &str = "comments";
 pub const INJECTION: &str = "injection";
 pub const SENSITIVE_DATA: &str = "sensitive_data";
 pub const UNSAFE_SETTINGS: &str = "unsafe_settings";
@@ -248,6 +249,20 @@ pub fn rules() -> Vec<Rule> {
             unit: "one candidate pair of sections",
             inspection: "Does one section state everything the other states, or do the two give different values or instructions for the same thing?",
             acceptable_example: "Sections on the same subject where each adds something",
+            requires_tests: false,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "documentation/comments",
+            group: "documentation",
+            default_enabled: false,
+            key: COMMENTS,
+            version: rule_version(COMMENTS),
+            scope: "comments and docstrings of application code, except license headers, tool directives and type annotations",
+            unit: "one comment with the code it is about: the declaration it documents, the lines below it or the line it ends; then the whole definition it sits in",
+            inspection: "Does a comment only repeat its code, hold sentences that add nothing, narrate an edit instead of the code as it is, or hold code turned off?",
+            acceptable_example: "Reasons, constraints, caveats, references, and documentation of what a definition returns or guarantees beyond its signature",
             requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,

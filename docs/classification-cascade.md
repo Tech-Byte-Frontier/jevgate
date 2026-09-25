@@ -409,6 +409,38 @@ signatures, or one candidate pair.
    section most of them name, listing the others. A Score on how much two
    sections overlap, asked of every pair, stayed on its middle level for
    almost every pair, so it is not asked.
+   Code comments (`documentation/comments`) are collected from the parse
+   tree of application code, outside tests: runs of line comments on
+   consecutive lines are one comment, and Python docstrings are comments of
+   the definition or module they open. License headers, tool directives
+   (`eslint-disable`, `# noqa`, `//go:`), JSDoc type annotations, shebangs
+   and comments without letters are left out. Each comment is sent with the
+   code it is about: the declaration it documents (its signature when
+   longer than 40 lines), the lines below it up to a blank line, another
+   comment or the end of its block, the line it ends, or for a file's own
+   documentation the signatures of its definitions; with where it sits and
+   the signature of the definition it sits in. Comments are packed eight per
+   request and asked whether they only repeat that code (a Score whose
+   middle level holds headings over a group of lines), whether sentences
+   could go without losing anything (only comments of 20 or more words),
+   whether they describe an edit instead of the code as it is, and whether
+   they are code turned off (only comments whose lines read like
+   statements). Asked of every comment, those two stayed near 0.5 on
+   two-word trailing comments and on docstrings holding usage examples;
+   asked only where they apply, psf/requests' undecided comments went from
+   78 of 519 to 63 with the code check and to 35 with the wordiness one. The first
+   wording of the wordiness question ("could it say the same in far fewer
+   words?") called every multi-line JSDoc block that explains a rounding
+   rule or a matching strategy wordy; asked whether sentences add nothing,
+   with parameter entries named by whether the signature writes their
+   types, the Sphinx `:param` entries of untyped functions stopped reading
+   as filler while `numerator: The numerator value.` still does. A flag's
+   meaning (`"-x",  # Extract audio`), a unit (`// 14px` beside
+   `0.875rem`) and a category heading (`// Fixed` above fixed costs) are
+   named as acceptable. A comment left undecided is asked again with the
+   whole definition it sits in, then, alone, what kind of comment it is (a
+   reason, caveat, reference, usage, summary or heading, against repeating
+   the code, narrating steps, an edit or code turned off).
    SQL files (`security/access-control`) are split into statements that honor
    comments, quotes and dollar quotes. Each project's files, grouped above
    their `supabase` or `migrations` directory, are read in path order, so a
@@ -453,7 +485,13 @@ signatures, or one candidate pair.
    held both real positives of the labeled set. When the own-messages check
    finds another error's text in an error message, an error-detail answer
    leaning toward a client is a consider. Instruction sections are
-   cleanups, so their findings are at most a consider. Undecided answers do not
+   cleanups, so their findings are at most a consider. Comments are cleanups
+   too: at most a consider, and documentation that only repeats the
+   declaration it documents is at most a note, since documentation tools and docstring
+   linters expect a summary even when it says what the name says. A
+   definition's comments that reach a consider are one finding, listing
+   each comment with what is wrong with it, and when they span fewer than
+   three lines in all they are a note. Undecided answers do not
    lean into notes, because on the labeled set that added notes to kept sections.
    A large document's undecided history answer does lean into a note. Policies,
    grants and an open `search_path` are at most a consider, since a policy
