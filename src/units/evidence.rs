@@ -1,8 +1,9 @@
 //! Request building shared by every planner: one file's facts, the request
 //! envelope, packing, and stable identities.
-use super::{Asked, Questions};
+use super::{Asked, PACK_ITEMS, Questions};
 use crate::{schema::Location, token_budget::TokenBudget};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::Path};
 
 /// Packed requests stay well below the provider's state limit so each
@@ -132,6 +133,42 @@ pub(super) fn pack<T>(items: Vec<T>, limit: usize, state: impl Fn(&T) -> &Value)
             }
         }
     }
+    packs
+}
+
+/// One in this many keys ends a run of items packed together.
+const RUN_ENDS: u8 = 4;
+
+/// Packing within runs of consecutive items: a run ends after the last item
+/// of a key (a definition's name, a section's heading) whose SHA-256 first
+/// byte is a multiple of `RUN_ENDS`, so where runs end depends on keys
+/// rather than positions, and an item added, removed or resized re-packs
+/// only its own run. Packed greedily in file order, one such edit shifted
+/// every later pack of the file and none of them hit the cache; packing
+/// each key alone kept the others too, but doubled to quadrupled requests.
+pub(super) fn pack_runs<T>(
+    items: Vec<T>,
+    key: impl Fn(&T) -> &str,
+    state: impl Fn(&T) -> &Value,
+) -> Vec<Vec<T>> {
+    let ends: Vec<bool> = items
+        .iter()
+        .enumerate()
+        .map(|(at, item)| {
+            let own = key(item);
+            let last = items.get(at + 1).is_none_or(|next| key(next) != own);
+            last && Sha256::digest(own.as_bytes())[0] % RUN_ENDS == 0
+        })
+        .collect();
+    let mut packs = Vec::new();
+    let mut run = Vec::new();
+    for (item, end) in items.into_iter().zip(ends) {
+        run.push(item);
+        if end {
+            packs.extend(pack(std::mem::take(&mut run), PACK_ITEMS, &state));
+        }
+    }
+    packs.extend(pack(run, PACK_ITEMS, &state));
     packs
 }
 

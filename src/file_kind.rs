@@ -868,7 +868,8 @@ mod tests {
         );
     }
 
-    const SUPPORT: &str = "fn helper(value: &str) -> String {\n    let trimmed = value.trim();\n    let lower = trimmed.to_lowercase();\n    let joined = lower.replace(' ', \"-\");\n    let limited = joined.chars().take(8).collect::<String>();\n    limited\n}\n\nfn fixture() -> String {\n    let value = helper(\" a \");\n    let again = helper(&value);\n    let joined = format!(\"{value}{again}\");\n    let trimmed = joined.trim().to_string();\n    trimmed\n}\n";
+    /// `slug_helper` does not end a run, so both functions share a request.
+    const SUPPORT: &str = "fn slug_helper(value: &str) -> String {\n    let trimmed = value.trim();\n    let lower = trimmed.to_lowercase();\n    let joined = lower.replace(' ', \"-\");\n    let limited = joined.chars().take(8).collect::<String>();\n    limited\n}\n\nfn fixture() -> String {\n    let value = slug_helper(\" a \");\n    let again = slug_helper(&value);\n    let joined = format!(\"{value}{again}\");\n    let trimmed = joined.trim().to_string();\n    trimmed\n}\n";
 
     #[test]
     fn test_paths_without_structural_tests_are_classified_before_the_rules() {
@@ -887,7 +888,7 @@ mod tests {
             let mut eval = PurposeEval::new(mode);
             let judged = run(&project, &options, &mut eval);
             assert_eq!(eval.calls, 2, "{mode}: purpose and functions");
-            assert!(eval.functions.contains("fn helper"), "{mode}");
+            assert!(eval.functions.contains("fn slug_helper"), "{mode}");
             assert_eq!(judged.files[0].classification.as_ref().unwrap().kind, mode);
         }
     }

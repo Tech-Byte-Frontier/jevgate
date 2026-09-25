@@ -163,3 +163,29 @@ fn a_literal_repeated_across_files_is_one_finding_and_its_repeats_are_notes() {
     // A short shared value such as `0` never links findings.
     assert_eq!(files[2].findings[0].strength, Strength::Consider);
 }
+
+#[test]
+fn a_value_added_to_one_run_of_functions_leaves_the_other_runs_alone() {
+    // Runs end after `v3` and `v8`, whose names hash to an end; `total`
+    // is a unit only once it holds a value.
+    let source = |added: bool| -> String {
+        let mut source = String::new();
+        for i in 0..10 {
+            source += &format!(
+                "fn v{i}() -> Client {{\n    Client::new(\"db.internal:5432\", 30_000)\n}}\n\n"
+            );
+            if i == 5 && added {
+                source += "fn total() -> Client {\n    Client::new(\"cache.internal:6379\", 5_000)\n}\n\n";
+            } else if i == 5 {
+                source += "fn total(values: &[i32]) -> i32 {\n    values.iter().sum()\n}\n\n";
+            }
+        }
+        source
+    };
+    let rules = [catalog::HARDCODED_VALUES];
+    let (sizes, before) = packs(&[("lib.rs", &source(false))], &rules, "values");
+    assert_eq!(sizes, [4, 5, 1]);
+    let (sizes, after) = packs(&[("lib.rs", &source(true))], &rules, "values");
+    assert_eq!(sizes, [4, 6, 1]);
+    only_changed(&before, &after, 1);
+}

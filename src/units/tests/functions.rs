@@ -175,3 +175,23 @@ fn a_function_clears_when_the_split_level_is_ruled_out() {
     );
     assert_eq!(status(spread(0.35, 0.05, 0.6)), Status::Uncertain);
 }
+
+#[test]
+fn a_function_added_to_one_run_leaves_the_other_runs_alone() {
+    // Runs end after `f2`, `f4` and `f8`, whose names hash to an end.
+    let source = |added: bool| -> String {
+        (0..14)
+            .map(|i| match i {
+                3 if added => format!("{}{}", function("f3"), function("g")),
+                _ => function(&format!("f{i}")),
+            })
+            .collect()
+    };
+    let rules = [catalog::FUNCTION_SIMPLIFICATION];
+    let (sizes, before) = packs(&[("lib.rs", &source(false))], &rules, "functions");
+    assert_eq!(sizes, [3, 2, 4, 5]);
+    let (sizes, after) = packs(&[("lib.rs", &source(true))], &rules, "functions");
+    assert_eq!(sizes, [3, 3, 4, 5]);
+    // Packed in file order, the requests after it changed too.
+    only_changed(&before, &after, 1);
+}

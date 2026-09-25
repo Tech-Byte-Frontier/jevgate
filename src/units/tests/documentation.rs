@@ -671,3 +671,37 @@ fn an_undecided_stale_section_settles_by_what_it_treats_the_name_as() {
     let decided = stale_answered(noul_at(0.95), choice_of("example", &ROLES));
     assert_eq!(decided.units.consider, 1, "{}", decided.decision_basis);
 }
+
+#[test]
+fn a_section_added_to_one_run_leaves_the_other_runs_alone() {
+    // Runs end after `Release` and `Deploy`, whose headings hash to an end.
+    let agents = |added: bool| -> String {
+        let mut headings = vec!["Stack", "Web", "Release", "Build", "Test", "Deploy"];
+        headings.extend(["Style", "Notes"]);
+        if added {
+            headings.insert(4, "Layout");
+        }
+        headings
+            .iter()
+            .map(|h| format!("# {h}\nKeep the {} notes in `docs/`.\n\n", h.to_lowercase()))
+            .collect()
+    };
+    let files = |added: bool| {
+        [
+            ("Cargo.toml", "[package]\nname = \"demo\"\n".to_string()),
+            ("src/lib.rs", String::new()),
+            ("AGENTS.md", agents(added)),
+        ]
+    };
+    let rules = [catalog::AGENT_CONTEXT];
+    let requests = |added: bool| {
+        let files = files(added);
+        let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (*p, t.as_str())).collect();
+        packs(&files, &rules, "instructions")
+    };
+    let (sizes, before) = requests(false);
+    assert_eq!(sizes, [3, 3, 2]);
+    let (sizes, after) = requests(true);
+    assert_eq!(sizes, [3, 4, 2]);
+    only_changed(&before, &after, 1);
+}

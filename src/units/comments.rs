@@ -5,8 +5,8 @@
 //! turned off. An undecided comment is asked again with the whole definition
 //! it sits in, then, alone, what kind of comment it is.
 use super::{
-    Asked, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, UnitPlan,
-    compact, identity, pack, questions,
+    Asked, Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, compact,
+    identity, pack_runs, questions,
 };
 use crate::{
     analysis::{
@@ -17,7 +17,6 @@ use crate::{
     schema::Pass,
 };
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
 /// Comments judged per file, at most; the rest are counted as omitted.
 pub(super) const MAX_COMMENTS: usize = 80;
@@ -39,9 +38,9 @@ pub(super) fn plan(
     let omitted = comments.len().saturating_sub(MAX_COMMENTS);
     *out.rules.entry(COMMENTS).or_default() += omitted;
     let mut seen = std::collections::BTreeMap::<String, usize>::new();
-    // Packed by runs of definitions, so a comment added or removed re-asks
-    // only its own run: packed in file order, it shifted every later pack
-    // of the file and none of them hit the cache.
+    // Comments are grouped by the definition they belong to, then packed
+    // by runs of definitions, so a comment added or removed re-asks only
+    // its own run.
     let mut by_owner: Vec<(String, Vec<(usize, Entry)>)> = Vec::new();
     for comment in comments.iter().take(MAX_COMMENTS) {
         let unit = comment.unit.map(|i| &units[i]);
@@ -97,35 +96,20 @@ pub(super) fn plan(
             None => by_owner.push((owner.to_string(), vec![(out.units.len() - 1, entry)])),
         }
     }
-    for run in runs(by_owner) {
-        for group in pack(run, PACK_ITEMS, |(_, entry)| &entry.state) {
-            send(file, group, out, requests);
-        }
+    let items = by_owner.into_iter().flat_map(|(owner, items)| {
+        items
+            .into_iter()
+            .map(move |(index, entry)| (owner.clone(), index, entry))
+    });
+    let packs = pack_runs(
+        items.collect(),
+        |(owner, _, _)| owner,
+        |(_, _, entry)| &entry.state,
+    );
+    for group in packs {
+        let group = group.into_iter().map(|(_, index, entry)| (index, entry));
+        send(file, group.collect(), out, requests);
     }
-}
-
-/// One in this many definitions ends a run of definitions packed together.
-const RUN_ENDS: u8 = 4;
-
-/// Runs of consecutive definitions whose comments are packed together. A
-/// run ends after a definition whose name hashes to an end, so where runs
-/// end depends on names rather than positions: a comment added or removed
-/// re-asks only its own run. Packing each definition alone kept that too,
-/// but a definition with one documentation comment was a request of its
-/// own, and requests doubled to quadrupled.
-fn runs(by_owner: Vec<(String, Vec<(usize, Entry)>)>) -> Vec<Vec<(usize, Entry)>> {
-    let mut runs = Vec::new();
-    let mut run = Vec::new();
-    for (owner, items) in by_owner {
-        run.extend(items);
-        if Sha256::digest(owner.as_bytes())[0] % RUN_ENDS == 0 {
-            runs.push(std::mem::take(&mut run));
-        }
-    }
-    if !run.is_empty() {
-        runs.push(run);
-    }
-    runs
 }
 
 /// One request for a pack of comments; a pack that is too large is sent one

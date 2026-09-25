@@ -6,8 +6,8 @@
 //! unit for unsafe settings; a PHP file's top-level statements are a page
 //! script, judged like a function by every rule.
 use super::{
-    Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, Settle,
-    UnitPlan, compact, identity, pack, questions, unique_ids,
+    Asked, Block, Detail, FileContext, FilePlan, Planned, Presence, Questions, Settle, UnitPlan,
+    compact, identity, pack_runs, questions, unique_ids,
 };
 use crate::{
     analysis::{errors::CreatedError, sites::Site, units::Unit},
@@ -221,7 +221,13 @@ pub(super) fn plan(
             .collect();
         items.push((units, subject.state()));
     }
-    for group in pack(items, PACK_ITEMS, |(_, state)| state) {
+    // Runs end after subjects' names, so a function added, removed or
+    // resized re-asks only its own run.
+    for group in pack_runs(
+        items,
+        |(_, state)| state["name"].as_str().unwrap_or_default(),
+        |(_, state)| state,
+    ) {
         send(file, group, "functions", django, out, requests);
     }
     if let Some(setup) = setup.filter(|s| !s.sites.is_empty())

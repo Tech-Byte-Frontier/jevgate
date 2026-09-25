@@ -87,8 +87,15 @@ signatures, or one candidate pair.
    values, and neither does an initial capacity (`new ArrayList<>(4)`) or the
    number a method returns whole (`int cost() { return 7; }`), which the
    method's name already names.
-3. **First pass** (`src/units/`). One dispatch of every unit request. Functions
-   are packed eight per request; tests are sent one per request, because unrelated
+3. **First pass** (`src/units/`). One dispatch of every unit request. Functions,
+   for simplification, hardcoded values and security, are packed eight per
+   request within runs of functions, a run ending after a function whose name
+   hashes to one of four values, so a function added, removed or resized
+   re-asks only its run: packed in file order, one added function re-sent
+   every later pack of the file (5 of 5 simplification requests of
+   `compose.rs`, against 1 now). Runs add requests (25% to 106%) but barely
+   any tokens (0.4% to 1.6%), since every question is asked per function.
+   Tests are sent one per request, because unrelated
    tests in the same state left more answers undecided. State uses literal paths
    such as `functions[2].source`; group IDs are Choice options. Stage and freshness
    hashes stay in local `jevgate` metadata that is not uploaded.
@@ -328,7 +335,9 @@ signatures, or one candidate pair.
    and Roo Code rules, each loaded by its harness's documented rules (a Kiro
    `inclusion`, a Roo Code mode folder, Junie's precedence of its own
    `AGENTS.md`). Each file's heading sections, or the top-level blocks of a
-   long section, are sent packed beside the nearest manifests (with the
+   long section, are sent packed, within runs of sections that end after a
+   heading hashing to one of four values (a long section's blocks share its
+   heading and stay together), beside the nearest manifests (with the
    runtime versions they require: `engines`, `packageManager`,
    `requires-python`, `rust-version`), the configured linters and the
    directories. A section whose signals stay undecided is asked, alone,

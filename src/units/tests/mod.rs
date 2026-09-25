@@ -63,7 +63,7 @@ fn numbers_in(value: &Value) -> bool {
 
 #[test]
 fn requests_use_literal_paths_and_upload_no_numbers_hashes_or_local_metadata() {
-    // Fourteen functions: two function packs, and enough lines for an outline.
+    // Fourteen functions in four runs, and enough lines for an outline.
     let project = functions_project(14);
     let options = args();
     let (inputs, plan) = planned(&project, &options);
@@ -72,18 +72,11 @@ fn requests_use_literal_paths_and_upload_no_numbers_hashes_or_local_metadata() {
         .iter()
         .filter(|p| p.request["jevgate"]["stage"] == "functions")
         .collect();
-    assert_eq!(
-        functions.len(),
-        2,
-        "fourteen functions pack into two requests"
-    );
-    assert_eq!(
-        functions[0].request["state"]["functions"]
-            .as_array()
-            .unwrap()
-            .len(),
-        PACK_ITEMS
-    );
+    let sizes: Vec<usize> = functions
+        .iter()
+        .map(|p| p.request["state"]["functions"].as_array().unwrap().len())
+        .collect();
+    assert_eq!(sizes, [3, 2, 4, 5], "runs end after `f2`, `f4` and `f8`");
     let budget = TokenBudget::default();
     for planned in &plan.requests {
         let request = &planned.request;
@@ -233,6 +226,52 @@ fn stages(plan: &Plan) -> Vec<&str> {
         .iter()
         .map(|p| p.request["jevgate"]["stage"].as_str().unwrap())
         .collect()
+}
+
+/// The number of units in each request of `stage` planned for `files`, and
+/// each request's state, in order.
+fn packs(files: &[(&str, &str)], rules: &[&str], stage: &str) -> (Vec<usize>, Vec<String>) {
+    let (project, options) = project_with(files, rules);
+    let (_, plan) = planned(&project, &options);
+    plan.requests
+        .iter()
+        .filter(|p| p.request["jevgate"]["stage"] == stage)
+        .map(|p| {
+            let state = &p.request["state"];
+            let units = state["functions"]
+                .as_array()
+                .or(state["sections"].as_array())
+                .map_or(0, Vec::len);
+            (units, state.to_string())
+        })
+        .unzip()
+}
+
+/// Requests of one stage before and after an edit: only the `edited` one
+/// changed, and every other one is answered from the cache.
+fn only_changed(before: &[String], after: &[String], edited: usize) {
+    assert_eq!(before.len(), after.len());
+    for (index, (before, after)) in before.iter().zip(after).enumerate() {
+        assert_eq!(before == after, index != edited, "request {index}");
+    }
+}
+
+#[test]
+fn a_run_ends_after_the_last_item_of_a_key_that_ends_runs() {
+    // `count` ends a run; `total` and `other` do not.
+    let state = json!({});
+    let items = vec!["total", "count", "count", "other", "total"];
+    let packs = pack_runs(items, |key| *key, |_| &state);
+    assert_eq!(
+        packs,
+        [vec!["total", "count", "count"], vec!["other", "total"]]
+    );
+    let long: Vec<&str> = (0..10).map(|_| "total").collect();
+    let packs = pack_runs(long, |key| *key, |_| &state);
+    assert_eq!(
+        packs.iter().map(Vec::len).collect::<Vec<_>>(),
+        [PACK_ITEMS, 2]
+    );
 }
 
 /// The first planned request of `stage`.

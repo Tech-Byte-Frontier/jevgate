@@ -4,8 +4,8 @@
 //! a Noul on whether the function special-cases one identity. A unit left
 //! undecided is asked, alone, whether every value is of an acceptable kind.
 use super::{
-    Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, UnitPlan, compact,
-    identity, pack, questions, unique_ids,
+    Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, compact, identity,
+    pack_runs, questions, unique_ids,
 };
 use crate::{
     analysis::{literals::Constant, units::Unit},
@@ -60,7 +60,13 @@ pub(super) fn plan(
         });
         items.push((out.units.len() - 1, id, state));
     }
-    for group in pack(items, PACK_ITEMS, |(_, _, state)| state) {
+    // Runs end after the names of the functions holding the values, so a
+    // value added or removed re-asks only its function's run.
+    for group in pack_runs(
+        items,
+        |(_, _, state)| state["name"].as_str().unwrap_or_default(),
+        |(_, _, state)| state,
+    ) {
         send_or_split(file, group, out, requests);
     }
     if !constants.is_empty() {

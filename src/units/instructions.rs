@@ -1,12 +1,12 @@
-//! Agent instruction files: each heading section is a unit, packed by file,
+//! Agent instruction files: each heading section is a unit, packed by runs,
 //! beside what the repository's own files show. Per section, a Score on
 //! whether an agent could learn it from those files and Nouls on generic
 //! advice, past work and rules linters check; for text loaded in every
 //! session, a Choice on whether it applies to one directory only. A section
 //! whose signals stay undecided is asked, alone, what kind of section it is.
 use super::{
-    Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, UnitPlan, compact,
-    identity, pack, questions, unique_ids,
+    Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, compact, identity,
+    pack_runs, questions, unique_ids,
 };
 use crate::{
     catalog::AGENT_CONTEXT,
@@ -77,7 +77,14 @@ pub(super) fn plan(
             out.units[*index].recheck = Some((request, asked));
         }
     }
-    for group in pack(items, PACK_ITEMS, |(_, _, state)| state) {
+    // Runs end after headings, never after a unit's name, which names a
+    // long section's blocks by line: a section added, removed or edited
+    // re-asks only its own run, and blocks of one section stay together.
+    for group in pack_runs(
+        items,
+        |(_, _, state)| state["heading"].as_str().unwrap_or_default(),
+        |(_, _, state)| state,
+    ) {
         send_or_split(file, &evidence, group, out, requests);
     }
 }

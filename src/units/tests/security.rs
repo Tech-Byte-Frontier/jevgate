@@ -1075,3 +1075,30 @@ fn a_decided_check_asks_no_settle_choice() {
     assert_eq!(settles, 0, "a markup check at review is not second-guessed");
     assert_eq!(status, Status::Consider);
 }
+
+#[test]
+fn a_function_added_to_one_run_is_the_only_security_request_asked_again() {
+    // Runs end after `f2`, `f4` and `f8`, whose names hash to an end.
+    let query = |name: &str| {
+        format!(
+            "fn {name}(conn: &Connection, name: &str) -> Result<Row> {{\n    let sql = format!(\"SELECT id FROM users WHERE name = '{{name}}'\");\n    conn.query_row(&sql, [], Row::from)\n}}\n\n"
+        )
+    };
+    let source = |added: bool| -> String {
+        (0..14)
+            .map(|i| match i {
+                3 if added => format!("{}{}", query("f3"), query("g")),
+                _ => query(&format!("f{i}")),
+            })
+            .collect()
+    };
+    let (sizes, before) = packs(
+        &[("lib.rs", &source(false))],
+        &catalog::SECURITY,
+        "security",
+    );
+    assert_eq!(sizes, [3, 2, 4, 5]);
+    let (sizes, after) = packs(&[("lib.rs", &source(true))], &catalog::SECURITY, "security");
+    assert_eq!(sizes, [3, 3, 4, 5]);
+    only_changed(&before, &after, 1);
+}

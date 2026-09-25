@@ -3,8 +3,8 @@
 //! nesting or a long branch chain, a Score on whether flattening would help.
 //! A split finding is then located with one Choice among the body's blocks.
 use super::{
-    Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, Scope,
-    UnitPlan, compact, identity, pack, questions, unique_ids,
+    Asked, Block, Detail, FileContext, FilePlan, Planned, Presence, Questions, Scope, UnitPlan,
+    compact, identity, pack_runs, questions, unique_ids,
 };
 use crate::{analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, schema::Pass};
 use serde_json::{Value, json};
@@ -55,7 +55,13 @@ pub(super) fn plan(
             });
         }
     }
-    for group in pack(judged, PACK_ITEMS, |item| &item.state) {
+    // Runs end after names, so a function added, removed or resized
+    // re-asks only its own run.
+    for group in pack_runs(
+        judged,
+        |item| item.state["name"].as_str().unwrap_or_default(),
+        |item| &item.state,
+    ) {
         let (request, asked) = build(file, &group, None);
         if file.budget.fits(&request) {
             requests.push(Planned {
