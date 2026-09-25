@@ -273,3 +273,23 @@ fn spacetimedb_tables_views_and_reducers_are_judged_with_helpers_and_the_version
             .starts_with("Public table `character` likely lets every client read")
     );
 }
+
+#[test]
+fn a_definer_is_sent_with_the_project_functions_it_calls_and_uninstall_scripts_are_left_out() {
+    let install = "create function public.is_claims_admin() returns bool language plpgsql as $$ begin return coalesce(auth.jwt() ->> 'claims_admin', 'false')::bool; end; $$;\ncreate function public.set_claim(uid uuid, claim text, value jsonb) returns text language plpgsql security definer set search_path = public as $$ begin if not is_claims_admin() then return 'error: access denied'; end if; update auth.users set raw_app_meta_data = raw_app_meta_data || json_build_object(claim, value)::jsonb where id = uid; return 'OK'; end; $$;\n";
+    let uninstall = "drop function is_claims_admin;\ndrop function set_claim;\n";
+    let (project, options) = project_with(
+        &[("install.sql", install), ("uninstall.sql", uninstall)],
+        &[catalog::ACCESS_CONTROL],
+    );
+    let (_, plan) = planned(&project, &options);
+    let request = plan
+        .requests
+        .iter()
+        .find(|p| p.request["state"]["function"]["name"] == "set_claim")
+        .expect("the definer is judged although uninstall.sql drops it");
+    assert_eq!(
+        request.request["state"]["functions"][0]["name"],
+        "is_claims_admin"
+    );
+}

@@ -109,10 +109,17 @@ pub(super) fn plan(
     }
 }
 
-/// Later statements replace or drop earlier ones with the same name.
+/// Later statements replace or drop earlier ones with the same name. A file
+/// that undoes the others, such as an extension's `uninstall.sql` or a down
+/// migration, is not part of the state they build: sorted after
+/// `install.sql`, supabase-custom-claims' uninstall script dropped every
+/// function it had just defined, and none was judged.
 fn final_state(members: &[(usize, &Input)]) -> State {
     let mut state = State::default();
     for &(owner, input) in members {
+        if teardown(&input.result.path) {
+            continue;
+        }
         for statement in sql::statements(input.source.as_deref().unwrap_or("")) {
             match sql::classify(&statement.source) {
                 Kind::Policy { name, table } => {
@@ -155,6 +162,25 @@ fn final_state(members: &[(usize, &Input)]) -> State {
     state
 }
 
+/// A script that undoes the others: `uninstall.sql`, `teardown.sql`,
+/// `rollback.sql`, or a down migration (`0003_add_claims.down.sql`).
+fn teardown(path: &std::path::Path) -> bool {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    ["uninstall", "teardown", "rollback", "down"]
+        .iter()
+        .any(|word| {
+            stem == *word
+                || stem.starts_with(&format!("{word}_"))
+                || stem.starts_with(&format!("{word}-"))
+        })
+        || [".down", "_down", "-down"]
+            .iter()
+            .any(|end| stem.ends_with(end))
+}
+
 /// A question's key and its body.
 type Asked = (&'static str, fn() -> Value);
 
@@ -167,15 +193,18 @@ struct Unit {
     questions: Vec<Asked>,
 }
 
+/// Whether SQL `source` calls `function`.
+fn calls(source: &str, function: &str) -> bool {
+    let text = source.to_lowercase();
+    text.match_indices(function).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + function.len()..].trim_start();
+        before.is_none_or(|c| !(c.is_alphanumeric() || c == '_')) && after.starts_with('(')
+    })
+}
+
 fn policy_unit(state: &State, table: &str, name: &str, statement: &Statement) -> Unit {
-    let calls = |function: &str| {
-        let text = statement.source.to_lowercase();
-        text.match_indices(function).any(|(at, _)| {
-            let before = text[..at].chars().next_back();
-            let after = text[at + function.len()..].trim_start();
-            before.is_none_or(|c| !(c.is_alphanumeric() || c == '_')) && after.starts_with('(')
-        })
-    };
+    let calls = |function: &str| calls(&statement.source, function);
     // A claim read from the token is only as trustworthy as what sets it,
     // such as a custom access token hook that writes `claims`.
     let claims = sql::jwt_claims(&statement.source);
@@ -219,12 +248,26 @@ fn definer_unit(state: &State, name: &str, statement: &Statement) -> Unit {
         .flatten()
         .map(|s| s.source.as_str())
         .collect();
+    let mut evidence =
+        json!({"function": {"name": name, "source": statement.source, "privileges": privileges}});
+    // The project's functions it calls, such as the `is_claims_admin()` check
+    // supabase-custom-claims' definers make first: without them, whether the
+    // caller is checked stayed undecided.
+    let called: Vec<Value> = state
+        .functions
+        .iter()
+        .filter(|(function, _)| function.as_str() != name && calls(&statement.source, function))
+        .map(|(function, (_, s, _))| json!({"name": function, "source": s.source}))
+        .collect();
+    if !called.is_empty() {
+        evidence["functions"] = json!(called);
+    }
     Unit {
         id: format!("function:{name}"),
         name: name.into(),
         statement: statement.clone(),
         access: Access::Definer,
-        state: json!({"function": {"name": name, "source": statement.source, "privileges": privileges}}),
+        state: evidence,
         questions: vec![
             ("search_path", questions::definer_search_path),
             ("unchecked", questions::definer_unchecked),
@@ -292,8 +335,27 @@ fn push_unit(file: &FileContext<'_>, unit: Unit, plan: &mut FilePlan, requests: 
 
 #[cfg(test)]
 mod tests {
-    use super::project;
+    use super::{project, teardown};
     use std::path::Path;
+
+    #[test]
+    fn scripts_that_undo_the_others_are_teardowns() {
+        for path in [
+            "uninstall.sql",
+            "db/rollback.sql",
+            "migrations/0003_claims.down.sql",
+            "down.sql",
+        ] {
+            assert!(teardown(Path::new(path)), "{path}");
+        }
+        for path in [
+            "install.sql",
+            "migrations/0003_countdown.sql",
+            "download_stats.sql",
+        ] {
+            assert!(!teardown(Path::new(path)), "{path}");
+        }
+    }
 
     #[test]
     fn migrations_group_by_the_project_that_holds_them() {

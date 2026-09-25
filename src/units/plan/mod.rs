@@ -79,15 +79,19 @@ impl Scope<'_> {
     }
 }
 
+/// Plan every selected file's units; `root` is the repository, whose README
+/// says whether its comments are written for learners.
 pub fn plan(
     inputs: &[Input],
     views: &BTreeMap<usize, View>,
     args: &CheckArgs,
     budget: &TokenBudget,
+    root: &std::path::Path,
 ) -> Plan {
     let mut result = Plan::default();
     let scope = parsed_scope(inputs, views, &mut result.skipped);
-    let shared = Shared::new(&scope, args);
+    let mut shared = Shared::new(&scope, args);
+    shared.teaching = crate::docs::teaching(root);
     for &owner in &scope.owners {
         let file = plan_file(&scope, &shared, owner, args, budget, &mut result.requests);
         result.files.insert(owner, file);

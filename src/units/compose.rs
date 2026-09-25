@@ -404,6 +404,7 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         !grouped.contains(&(index - 1))
     });
     findings.extend(groups);
+    drop_copies_of_redundant_tests(&mut findings);
     findings.extend(comment_findings(plan, &commented));
     let dimensions = plan
         .rules
@@ -435,6 +436,28 @@ struct Tally<'p> {
     redundant: Vec<Redundant<'p>>,
     commented: Vec<(&'p UnitPlan, Strength, f64, &'static str)>,
     undecided: BTreeMap<&'p str, Vec<Undecided>>,
+}
+
+/// A shared-logic finding whose every copy lies inside tests a redundancy
+/// finding already names says the same thing twice: on sqlite-utils, 12
+/// test pairs were reported by both rules. The redundancy finding stays,
+/// since it says which test to merge or delete.
+fn drop_copies_of_redundant_tests(findings: &mut Vec<Finding>) {
+    let tests: Vec<crate::schema::Location> = findings
+        .iter()
+        .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY) && f.strength != Strength::Note)
+        .flat_map(|f| f.locations.iter().cloned())
+        .collect();
+    let named = |l: &crate::schema::Location| {
+        tests
+            .iter()
+            .any(|t| t.path == l.path && t.start_line <= l.start_line && l.end_line <= t.end_line)
+    };
+    findings.retain(|f| {
+        f.rule != catalog::id(catalog::SHARED_LOGIC)
+            || f.locations.is_empty()
+            || !f.locations.iter().all(named)
+    });
 }
 
 /// A redundant test pair, with the index of its finding when it is a

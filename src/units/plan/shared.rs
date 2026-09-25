@@ -48,6 +48,8 @@ pub(super) struct Shared<'a> {
     /// C# constants by field name, as `Class.Field = value`, for security traces.
     pub(super) constants: BTreeMap<String, Vec<String>>,
     pub(super) hashes: BTreeMap<PathBuf, String>,
+    /// The project says its comments are written for learners.
+    pub(super) teaching: bool,
 }
 
 impl<'a> Shared<'a> {
@@ -109,6 +111,7 @@ impl<'a> Shared<'a> {
             enums: BTreeMap::new(),
             constants: BTreeMap::new(),
             hashes: source_hashes(scope),
+            teaching: false,
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
             shared.pairs = duplicate_candidates(scope);

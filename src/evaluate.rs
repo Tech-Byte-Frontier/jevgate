@@ -143,7 +143,7 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
             Err(error) => report.errors.push(error.to_string()),
         }
     }
-    let plan = crate::units::plan(inputs, &views, args, budget);
+    let plan = crate::units::plan(inputs, &views, args, budget, root);
     for (owner, reason) in &plan.skipped {
         skip(&mut report.files[*owner], reason);
     }
@@ -176,7 +176,7 @@ impl Session<'_> {
         if !purpose.is_empty() {
             self.resolve_purposes(inputs, report, purpose, &mut views)?;
         }
-        let plan = crate::units::plan(inputs, &views, self.args, &self.budget);
+        let plan = crate::units::plan(inputs, &views, self.args, &self.budget, &self.context.root);
         for (owner, reason) in &plan.skipped {
             skip(&mut report.files[*owner], reason);
         }

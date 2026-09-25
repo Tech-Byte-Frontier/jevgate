@@ -121,6 +121,8 @@ struct Statement {
     hash: u64,
     /// Part of the frame of a walk rather than its work.
     frame: Option<Frame>,
+    /// Go's error check or deferred cleanup, which every call site repeats.
+    idiom: bool,
 }
 
 /// The frame of a tree walk: the statements every walk has, whatever it
@@ -157,6 +159,7 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         .filter(|&((bx, _), (by, _), _)| {
             let (a, b) = (&files[blocks[bx].file], &files[blocks[by].file]);
             crate::packages::linked(a.package, b.package, &local)
+                && !separate_examples(a.path, b.path)
         })
         .filter_map(|window| pair(files, &parsed, &blocks, window))
         .collect();
@@ -166,6 +169,50 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
     // Groups rank by size times their number of copies.
     pairs.sort_by(by_rank);
     capped(one_per_function_pair(pairs))
+}
+
+/// A directory of example code: `examples`, `demo`, `tutorial`, or a name
+/// such as `blog_examples`.
+fn example_directory(part: &str) -> bool {
+    let part = part.to_ascii_lowercase();
+    [
+        "example",
+        "examples",
+        "demo",
+        "demos",
+        "tutorial",
+        "tutorials",
+    ]
+    .contains(&part.as_str())
+        || part.ends_with("_examples")
+        || part.ends_with("-examples")
+}
+
+/// Whether a file is example code, written to be read beside other examples.
+pub(crate) fn example_code(path: &Path) -> bool {
+    path.parent().is_some_and(|dir| {
+        dir.iter()
+            .any(|part| example_directory(&part.to_string_lossy()))
+    })
+}
+
+/// Whether two files are separate variants of one example, kept side by
+/// side on purpose: under the same `examples` (or `demo`, `tutorial`)
+/// directory, in different directories below it. django-styleguide shows a
+/// Google login flow written by hand in `blog_examples/…/raw` and with the
+/// SDK in `…/sdk`; their copies are the point.
+fn separate_examples(a: &Path, b: &Path) -> bool {
+    let example = |part: &str| example_directory(part);
+    let dirs = |p: &Path| -> Vec<String> {
+        p.parent()
+            .map(|d| d.iter().map(|c| c.to_string_lossy().into_owned()).collect())
+            .unwrap_or_default()
+    };
+    let (a, b) = (dirs(a), dirs(b));
+    let Some(root) = a.iter().zip(&b).position(|(x, y)| x == y && example(x)) else {
+        return false;
+    };
+    a[..=root] == b[..=root] && a[root + 1..] != b[root + 1..]
 }
 
 /// Two copied windows of the same two functions, split by one differing
@@ -289,7 +336,11 @@ fn pair(
         compact(&files[fx].source[span_x.clone()]).min(compact(&files[fy].source[span_y.clone()]));
     // A repeated pair of statements is usually an idiom, such as a call and
     // its check.
-    if n < MIN_CLONE_STATEMENTS || size < MIN_BYTES || only_frame(files, blocks, window) {
+    if n < MIN_CLONE_STATEMENTS
+        || size < MIN_BYTES
+        || only_frame(files, blocks, window)
+        || mostly_guards(files, blocks, window)
+    {
         return None;
     }
     let normalized = crate::schema::hash(
@@ -351,6 +402,65 @@ fn only_frame(files: &[SourceFile<'_>], blocks: &[Block], window: Window) -> boo
         .sum::<usize>()
         .min(work.iter().map(|(_, b)| bytes(blocks[by].file, b)).sum());
     work.len() < MIN_STATEMENTS && size < MIN_BYTES / 2
+}
+
+/// Part of two Go functions that is mostly error checks and deferred
+/// cleanups: `if err != nil { return err }` after each call and
+/// `defer tx.Rollback()`. wtf's per-entity store functions shared a
+/// transaction's begin, rollback and error checks around calls to their own
+/// type's functions, which read as copies. A copy of part of them needs as
+/// much other work as a copy of a walk's frame does; a copy of the whole of
+/// both functions is still one.
+fn mostly_guards(files: &[SourceFile<'_>], blocks: &[Block], window: Window) -> bool {
+    let ((bx, kx), (by, ky), n) = window;
+    let x = &blocks[bx].statements[kx..kx + n];
+    let y = &blocks[by].statements[ky..ky + n];
+    let whole = |b: usize, k: usize| blocks[b].whole && k == 0 && n == blocks[b].statements.len();
+    if !x.iter().any(|s| s.idiom) || whole(bx, kx) && whole(by, ky) {
+        return false;
+    }
+    let work: Vec<(&Statement, &Statement)> = x
+        .iter()
+        .zip(y)
+        .filter(|(a, b)| !a.idiom || !b.idiom)
+        .collect();
+    let bytes = |file: usize, s: &Statement| compact(&files[file].source[s.span.clone()]);
+    let size = work
+        .iter()
+        .map(|(a, _)| bytes(blocks[bx].file, a))
+        .sum::<usize>()
+        .min(work.iter().map(|(_, b)| bytes(blocks[by].file, b)).sum());
+    work.len() < MIN_CLONE_STATEMENTS && size < MIN_BYTES
+}
+
+/// Go's `if err != nil { return …, err }` or a `defer` statement.
+fn go_idiom(statement: Node<'_>, source: &str) -> bool {
+    match statement.kind() {
+        "defer_statement" => true,
+        "if_statement" => {
+            let checks_err = statement
+                .child_by_field_name("condition")
+                .is_some_and(|c| compact_text(&source[c.byte_range()]) == "err!=nil");
+            let returns = statement
+                .child_by_field_name("consequence")
+                .is_some_and(|block| {
+                    // Newer Go grammars wrap a block's statements in a list.
+                    let list = block
+                        .named_child(0)
+                        .filter(|c| c.kind() == "statement_list")
+                        .unwrap_or(block);
+                    let mut cursor = list.walk();
+                    let body: Vec<Node<'_>> = list.named_children(&mut cursor).collect();
+                    !body.is_empty() && body.iter().all(|s| s.kind() == "return_statement")
+                });
+            checks_err && returns && statement.child_by_field_name("alternative").is_none()
+        }
+        _ => false,
+    }
+}
+
+fn compact_text(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 /// Drop pairs whose sites both lie inside a larger pair's sites.
@@ -936,6 +1046,7 @@ fn block_statements(
             tokens: start..end,
             hash: fast_hash(&key),
             frame: frame(child, tokens),
+            idiom: go_idiom(child, file.source),
         }));
     }
     statements
@@ -1352,6 +1463,57 @@ mod tests {
             b: "fetch".into(),
         };
         assert!(differences_between(("cache.rs", &a), ("mirror.rs", &b)).contains(&renamed));
+    }
+
+    #[test]
+    fn go_functions_sharing_only_error_checks_and_cleanups_are_not_copies() {
+        let store = |name: &str, find: &str, kind: &str, tail: &str| {
+            format!(
+                "package sqlite\n\nfunc (s *Service) {name}(ctx context.Context, id int) (*wtf.{kind}, error) {{\n\ttx, err := s.db.BeginTransactionWithOptions(ctx, nil)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\tdefer tx.Rollback()\n\trecord, err := {find}(ctx, tx, id)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\t{tail}\n\treturn record, nil\n}}\n"
+            )
+        };
+        let (a, b) = (
+            store(
+                "FindAuthByID",
+                "findAuthByID",
+                "Auth",
+                "record.LastSeen = time.Now()",
+            ),
+            store(
+                "FindDialByID",
+                "findDialByID",
+                "Dial",
+                "go notify(record.ID, s.events)",
+            ),
+        );
+        assert_eq!(pairs_between(("auth.go", &a), ("dial.go", &b)), 0);
+        // With more work between them, the error checks do not hide a copy.
+        let (a, b) = (
+            a.replace("\trecord, err", "\tlog.Printf(\"loading one stored record by its identifier\")\n\tmetrics.Count(\"store.find\", 1)\n\trecord, err"),
+            b.replace("\trecord, err", "\tlog.Printf(\"loading one stored record by its identifier\")\n\tmetrics.Count(\"store.find\", 1)\n\trecord, err"),
+        );
+        assert_eq!(pairs_between(("auth.go", &a), ("dial.go", &b)), 1);
+    }
+
+    #[test]
+    fn variants_of_one_example_are_not_compared() {
+        let flow = |dir: &str| format!("examples/login/{dir}/apis.py");
+        assert!(super::separate_examples(
+            Path::new(&flow("raw")),
+            Path::new(&flow("sdk"))
+        ));
+        assert!(super::separate_examples(
+            Path::new("app/blog_examples/raw/views.py"),
+            Path::new("app/blog_examples/sdk/views.py")
+        ));
+        assert!(!super::separate_examples(
+            Path::new("examples/login/raw/apis.py"),
+            Path::new("examples/login/raw/views.py")
+        ));
+        assert!(!super::separate_examples(
+            Path::new("src/billing/raw/apis.py"),
+            Path::new("src/billing/sdk/apis.py")
+        ));
     }
 
     #[test]

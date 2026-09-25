@@ -397,3 +397,32 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
     let report = run(&project, &options, &mut eval);
     assert_eq!(report.files[0].findings[0].strength, Strength::Note);
 }
+
+#[test]
+fn copies_inside_tests_a_redundancy_finding_names_are_reported_once() {
+    let case = |name: &str, text: &str, sum: i32| {
+        format!(
+            "    #[test]\n    fn {name}() {{\n        let text = \"{text}\";\n        let parts: Vec<&str> = text.split(',').map(|v| v.trim()).collect();\n        let values: Vec<i32> = parts.iter().map(|v| v.parse().unwrap()).collect();\n        let count = values.len();\n        let sum = total(&values);\n        assert_eq!(count, 2, \"both parsed values are kept\");\n        assert_eq!(sum, {sum}, \"the total of the parsed values\");\n    }}\n"
+        )
+    };
+    let source = format!(
+        "fn total(values: &[i32]) -> i32 {{\n    values.iter().sum()\n}}\n\n#[cfg(test)]\nmod tests {{\n    use super::*;\n\n{}\n{}}}\n",
+        case("totals_small", "1, 2", 3),
+        case("totals_large", "40, 50", 90)
+    );
+    let (project, mut options) = tests_project(&[("lib.rs", &source)], catalog::TEST_REDUNDANCY);
+    options.rules.push(catalog::SHARED_LOGIC.into());
+    let mut eval = scripted(2);
+    eval.overrides = vec![
+        ("overlap", spread(0.0, 0.9, 0.1)),
+        ("required", noul_at(0.05)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let rules: Vec<&str> = report.files[0]
+        .findings
+        .iter()
+        .filter(|f| f.strength != Strength::Note)
+        .map(|f| f.rule.as_str())
+        .collect();
+    assert_eq!(rules, [catalog::id(catalog::TEST_REDUNDANCY)], "{rules:?}");
+}

@@ -156,3 +156,23 @@ fn duplicate_pairs_across_files_quote_both_sites_and_respect_required_repetition
         Status::Clear
     );
 }
+
+#[test]
+fn copies_in_example_code_are_notes() {
+    let project = Project::new();
+    project.write("examples/login/apis.rs", LOAD);
+    project.write(
+        "examples/login/views.rs",
+        &LOAD
+            .replace("load_user", "load_team")
+            .replace("\"name\"", "\"title\""),
+    );
+    let mut options = args();
+    only(&mut options, catalog::SHARED_LOGIC);
+    let mut same = scripted(2);
+    same.overrides
+        .push(("required", json!({"type":"noul","noul":0.05})));
+    let report = run(&project, &options, &mut same);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Note);
+}

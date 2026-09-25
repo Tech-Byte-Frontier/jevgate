@@ -120,7 +120,7 @@ fn packing_and_cache_identity_do_not_depend_on_token_calibration() {
                 _ => unreachable!(),
             },
         )]);
-        plan(&inputs, &views, &options, &budget)
+        plan(&inputs, &views, &options, &budget, &project.0)
             .requests
             .iter()
             .map(|p| crate::requests::judgment_key(&p.request))

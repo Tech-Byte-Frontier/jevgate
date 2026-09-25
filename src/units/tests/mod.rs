@@ -38,7 +38,7 @@ fn planned(project: &Project, options: &CheckArgs) -> (Vec<Input>, Plan) {
             },
         )
         .collect();
-    let plan = plan(&inputs, &views, options, &budget);
+    let plan = plan(&inputs, &views, options, &budget, &project.0);
     (inputs, plan)
 }
 

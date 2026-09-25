@@ -51,7 +51,14 @@ pub(super) fn plan_file(
         plan_values(&scope.units[&owner], &context, &lines, &mut file, requests);
     }
     if shared.enabled(catalog::COMMENTS) && view.application {
-        plan_comments(&scope.units[&owner], &context, &lines, &mut file, requests);
+        let comments = (&lines[..], shared.teaching);
+        plan_comments(
+            &scope.units[&owner],
+            &context,
+            comments,
+            &mut file,
+            requests,
+        );
     }
     let rules: Vec<&'static str> = catalog::SECURITY
         .into_iter()
@@ -176,10 +183,11 @@ fn plan_values(
 }
 
 /// Comments outside tests.
+/// `teaching` when the project writes its comments for learners.
 fn plan_comments(
     parsed: &FileUnits,
     context: &FileContext<'_>,
-    lines: &[Range<usize>],
+    (lines, teaching): (&[Range<usize>], bool),
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -190,7 +198,7 @@ fn plan_comments(
         .into_iter()
         .filter(|c| !lines.iter().any(|l| l.contains(&c.line)))
         .collect();
-    comments::plan(context, &parsed.units, &found, file, requests);
+    comments::plan(context, (&parsed.units, teaching), &found, file, requests);
 }
 
 /// A SpacetimeDB module file, whose definitions are sent with the helpers

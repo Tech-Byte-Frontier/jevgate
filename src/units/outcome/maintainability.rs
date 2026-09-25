@@ -134,7 +134,15 @@ pub(in crate::units) fn shared_outcome(
         .locations
         .iter()
         .all(|l| l.end_line + 1 - l.start_line <= SHORT_COPY_LINES);
+    // Examples spell a flow out on purpose, often once per variant:
+    // django-styleguide shows each Google login step as a DRF API and as a
+    // plain Django view.
+    let examples = unit
+        .locations
+        .iter()
+        .all(|l| crate::analysis::clones::example_code(&l.path));
     Some(match (&unit.detail, same) {
+        (_, Outcome::Review(p) | Outcome::Consider(p)) if examples => Outcome::Note(p),
         (Detail::Pair { in_cases: true, .. }, _) if short => lowered(lowered(same)),
         (Detail::Pair { in_cases: true, .. }, _) => lowered(same),
         (_, Outcome::Review(p)) if short => Outcome::Consider(p),

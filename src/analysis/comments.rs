@@ -318,6 +318,10 @@ const DIRECTIVES: &[&str] = &[
     "@refresh",
     "@license",
     "@preserve",
+    // Javadoc blocks of authorship alone, as Spring's samples keep on classes.
+    "@author",
+    "@since",
+    "@version",
     "sourcemappingurl",
     "cspell:",
     "spell-checker:",
@@ -723,6 +727,8 @@ mod tests {
             texts,
             ["// Retry once: the first request after a deploy is often refused."]
         );
+        let java = "/**\n * @author Juergen Hoeller\n * @author Ken Krebs\n */\nclass OwnerController {\n    void list() {}\n}\n";
+        assert!(found("OwnerController.java", java).is_empty());
     }
 
     #[test]

@@ -545,8 +545,9 @@ fn reads(node: Node<'_>, source: &str) -> bool {
                 .map_or("", |f| text(f, source));
             matches!(
                 callee,
-                "require" | "import" | "os.getenv" | "os.environ.get" | "ENV"
+                "require" | "import" | "os.getenv" | "os.environ.get" | "ENV" | "env" | "config"
             ) || callee.starts_with("document.")
+                || callee.starts_with("env.")
         }
         "member_expression"
         | "subscript_expression"
@@ -656,7 +657,7 @@ mod tests {
             .map(|c| c.name)
             .collect();
         assert_eq!(names, ["LIMIT"]);
-        let python = "TIMEOUT = 30\nname = 'service'\nPORT = os.getenv('PORT', '8000')\nHOME = os.environ['HOME']\ndef f():\n    pass\n";
+        let python = "TIMEOUT = 30\nname = 'service'\nPORT = os.getenv('PORT', '8000')\nHOME = os.environ['HOME']\nDSN = env('SENTRY_DSN', default='')\nDEBUG = env.bool('DEBUG', default=False)\nKEY = config('SECRET_KEY')\ndef f():\n    pass\n";
         let tree = crate::syntax::parse(Path::new("a.py"), python)
             .unwrap()
             .unwrap();

@@ -28,9 +28,11 @@ pub(super) const TOP_LEVEL: &str = "top-level code";
 /// `disabled` only of one that reads like code.
 pub(super) const QUESTIONS: [&str; 4] = ["restates", "verbose", "history", "disabled"];
 
+/// `teaching` when the project writes its comments for learners: comments
+/// that say what the code does are then at most a note, as documentation is.
 pub(super) fn plan(
     file: &FileContext<'_>,
-    units: &[Unit],
+    (units, teaching): (&[Unit], bool),
     comments: &[Comment],
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
@@ -77,10 +79,9 @@ pub(super) fn plan(
             identity: identity(&[owner, &compact(&comment.text)]),
             detail: Detail::Comment {
                 owner: owner.to_string(),
-                documentation: matches!(
-                    comment.placement,
-                    Placement::Declaration | Placement::File
-                ) || crate::analysis::comments::banner(&comment.text),
+                documentation: teaching
+                    || matches!(comment.placement, Placement::Declaration | Placement::File)
+                    || crate::analysis::comments::banner(&comment.text),
                 kind,
             },
             recheck,
