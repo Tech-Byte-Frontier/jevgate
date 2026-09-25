@@ -1,0 +1,42 @@
+name: Bug report
+description: A crash, a wrong exit code, a failed install, or the CLI not doing what its help says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a finding that looks mistaken, use the **Wrong finding** template. For a vulnerability, see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: JevGate version
+      description: The output of `jevgate --version`
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15 arm64, Ubuntu 24.04 in GitHub Actions
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command, its exit code and its output. Remove any key or private code.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: jevgate.toml
+      description: If the repository has one
+      render: toml

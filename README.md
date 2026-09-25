@@ -300,7 +300,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 ## Contributing
 
-Issues and pull requests are welcome. Run `cargo fmt`, `cargo clippy --all-targets` and `cargo test` before opening a pull request. When changing questions, validate on small, frozen sets of real code, and keep the probabilities and uncertainty visible.
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Report a finding that looks wrong with the [wrong finding](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml) template, and a vulnerability as [SECURITY.md](SECURITY.md) describes. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

@@ -38,6 +38,7 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$TAG is not on main"; exit 1; }
           git tag -l --format='%(contents:body)' "$TAG" > "$RUNNER_TEMP/notes.md"
           grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md" || { echo "::error::$TAG has no release notes in its message body"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Check crates.io
         run: |

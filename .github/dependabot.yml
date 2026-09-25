@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    # Every dependency is pinned with `=`; one grouped pull request a month
+    # keeps upgrades reviewable. Security updates still arrive on their own.
+    groups:
+      tree-sitter:
+        patterns: ["tree-sitter*"]
+      dependencies:
+        patterns: ["*"]
+        exclude-patterns: ["tree-sitter*"]

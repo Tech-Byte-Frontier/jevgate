@@ -1,4 +1,6 @@
 # The report renderer's escaping test holds an XSS string that the provider's
 # edge firewall blocks; it is reviewed locally, not uploaded.
 # The promo video under video/ is local only and never judged.
-upload_deny = ["src/html_report.rs", "video/**"]
+# README.md and CONTRIBUTING.md are written for people new to the project and
+# overlap on purpose, so the documentation rules leave them out.
+upload_deny = ["src/html_report.rs", "video/**", "README.md", "CONTRIBUTING.md"]

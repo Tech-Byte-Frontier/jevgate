@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/Tech-Byte-Frontier/jevgate/security/advisories/new
+    about: Report it privately, not in a public issue
+  - name: Questions and ideas
+    url: https://github.com/Tech-Byte-Frontier/jevgate/discussions
+    about: Ask how to use JevGate or share an idea before it becomes an issue

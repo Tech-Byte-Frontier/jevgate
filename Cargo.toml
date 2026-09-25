@@ -10,7 +10,7 @@ documentation = "https://github.com/Tech-Byte-Frontier/jevgate#readme"
 readme = "README.md"
 keywords = ["code-review", "ci", "static-analysis", "maintainability", "security"]
 categories = ["command-line-utilities", "development-tools"]
-include = ["/src/**", "/tests/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-*", "/NOTICE"]
+include = ["/src/**", "/tests/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE-*", "/NOTICE"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]

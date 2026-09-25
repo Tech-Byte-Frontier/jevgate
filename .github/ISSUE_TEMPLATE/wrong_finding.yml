@@ -1,0 +1,60 @@
+name: Wrong finding
+description: A finding that is mistaken, missing, at the wrong level or unclear
+labels: ["finding"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reports from real code are the main way the rules improve. Share only code you are allowed to make public; a small reduced example is often enough.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong
+      options:
+        - A finding that should not be there (false positive)
+        - A problem JevGate did not report (missed finding)
+        - The right finding at the wrong level (review, consider, note)
+        - The message or next step is unclear or misleading
+        - A file or unit stays uncertain or needs-context
+    validations:
+      required: true
+  - type: input
+    id: rule
+    attributes:
+      label: Rule
+      placeholder: maintainability/shared-logic
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: JevGate version and model
+      description: The output of `jevgate --version`, and the model if it isn't the default
+      placeholder: jevgate 0.16.0, jev-1.13.0
+    validations:
+      required: true
+  - type: input
+    id: language
+    attributes:
+      label: Language and framework
+      placeholder: TypeScript, Next.js App Router
+  - type: textarea
+    id: finding
+    attributes:
+      label: The finding
+      description: The finding's entry from `.jevgate/latest.json` (or `--format json`), including its probabilities
+      render: json
+  - type: textarea
+    id: code
+    attributes:
+      label: The code
+      description: The code the finding is about, or the code where one was missed
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is wrong
+      description: What the right answer is, and why
+    validations:
+      required: true
