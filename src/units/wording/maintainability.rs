@@ -283,7 +283,7 @@ pub(in crate::units) fn values_wording(
         })
         .collect();
     let subject = if name == "module constants" {
-        "Module constants".to_string()
+        "One of this file's constants".to_string()
     } else {
         format!("`{name}`")
     };

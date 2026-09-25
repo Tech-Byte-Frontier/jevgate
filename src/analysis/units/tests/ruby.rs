@@ -60,3 +60,10 @@ fn ruby_test_blocks_are_left_to_the_test_rules_but_their_helpers_are_units() {
         .collect();
     assert_eq!(names, ["build_rows"]);
 }
+
+#[test]
+fn a_block_on_a_long_receiver_is_named_with_its_arguments_shortened() {
+    let source = "Comment.where(\n  \"id > ?\", last_id\n).order(:id).find_each do |comment|\n  notify(comment)\n  comment.touch\nend\n";
+    let file = parse(Path::new("script/mail.rb"), source).unwrap();
+    assert_eq!(file.units[0].name, "Comment.where(…).order(…).find_each");
+}

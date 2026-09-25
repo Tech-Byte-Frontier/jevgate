@@ -3,7 +3,7 @@ use super::*;
 
 #[test]
 fn php_functions_methods_closures_and_their_facts_are_units() {
-    let source = "<?php\nnamespace App\\Store;\n\nuse App\\Domain\\User\\UserRepository;\nuse Psr\\Log\\{LoggerInterface, NullLogger as Quiet};\n\nconst MAX_ROWS = 500;\n\n/** Finds a user. */\nfunction find_user($db, $name) {\n    $sql = \"SELECT * FROM users WHERE name = '$name'\";\n    if ($name === '') {\n        throw new InvalidArgumentException('empty name');\n    } elseif ($name === 'root') {\n        return null;\n    } elseif ($name === 'admin') {\n        return null;\n    }\n    foreach ([1, 2] as $i) {\n        $db->query($sql);\n    }\n    return Row::from(new Cursor($db));\n}\n\nabstract class Store extends Base {\n    public function __construct(private PDO $pdo) {}\n    public function load(int $id): ?User { return $this->pdo->prepare('x')->execute([$id]); }\n}\ntrait Cached { public function flush() { cache_clear(); } }\ninterface Finder { public function find(int $id): ?array; }\nenum Suit: string { case Hearts = 'H'; }\n$app->get('/users/{id}', function (Request $request, Response $response) {\n    return $response;\n});\nRoute::post('/pages', fn () => save());\n$handler = function ($e) { report($e); };\n";
+    let source = "<?php\nnamespace App\\Store;\n\nuse App\\Domain\\User\\UserRepository;\nuse Psr\\Log\\{LoggerInterface, NullLogger as Quiet};\n\nconst MAX_ROWS = 500;\n\n/** Finds a user. */\nfunction find_user($db, $name) {\n    $sql = \"SELECT * FROM users WHERE name = '$name'\";\n    if ($name === '') {\n        throw new InvalidArgumentException('empty name');\n    } elseif ($name === 'root') {\n        return null;\n    } elseif ($name === 'admin') {\n        return null;\n    }\n    foreach ([1, 2] as $i) {\n        $db->query($sql);\n    }\n    return Row::from(new Cursor($db));\n}\n\nabstract class Store extends Base {\n    public function __construct(private PDO $pdo) {}\n    public function load(int $id): ?User { return $this->pdo->prepare('x')->execute([$id]); }\n}\ntrait Cached { public function flush() { cache_clear(); } }\ninterface Finder { public function find(int $id): ?array; }\nenum Suit: string { case Hearts = 'H'; }\n$app->get('/users/{id}', function (Request $request, Response $response) {\n    return $response;\n});\nRoute::post('/pages', fn () => save());\n$handler = function ($e) { report($e); };\n$factory->define(App\\User::class, function (Faker $faker) {\n    return ['name' => $faker->name];\n});\n";
     let file = parse(Path::new("store.php"), source).unwrap();
     let named: Vec<(&str, Kind, usize)> = file
         .units
@@ -22,6 +22,7 @@ fn php_functions_methods_closures_and_their_facts_are_units() {
             ("$app->get('/users/{id}')", Kind::Function, 32),
             ("Route::post('/pages')", Kind::Function, 35),
             ("$handler", Kind::Function, 36),
+            ("$factory->define(App\\User::class)", Kind::Function, 37),
         ]
     );
     let find = &file.units[0];

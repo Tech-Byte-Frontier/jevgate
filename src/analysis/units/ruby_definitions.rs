@@ -60,7 +60,7 @@ pub(super) fn ruby_call(node: Node<'_>, source: &str, owner: &str, file: &mut Fi
     }
     let receiver = node
         .child_by_field_name("receiver")
-        .map(|r| format!("{}.", text(r, source)))
+        .map(|r| format!("{}.", short_receiver(text(r, source))))
         .unwrap_or_default();
     let argument = match ruby::first_argument(node) {
         Some(first)
@@ -81,6 +81,34 @@ pub(super) fn ruby_call(node: Node<'_>, source: &str, owner: &str, file: &mut Fi
     };
     let name = format!("{receiver}{method}{argument}");
     push(definition, &name, owner, Kind::Function, source, file);
+}
+
+/// A receiver as a name: argument lists shortened to `(…)` and whitespace
+/// collapsed, so `Comment.where(\n  "id > ?", last)` names a block as
+/// `Comment.where(…).find_each`.
+fn short_receiver(receiver: &str) -> String {
+    let mut name = String::new();
+    let mut depth = 0usize;
+    for c in receiver.chars() {
+        match c {
+            '(' => {
+                if depth == 0 {
+                    name.push_str("(…");
+                }
+                depth += 1;
+            }
+            ')' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    name.push(')');
+                }
+            }
+            _ if depth > 0 => {}
+            c if c.is_whitespace() => {}
+            c => name.push(c),
+        }
+    }
+    name
 }
 
 /// Definitions inside the blocks of Ruby test declarations, such as a helper

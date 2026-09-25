@@ -61,12 +61,18 @@ pub(crate) fn registered_callbacks<'t>(
 }
 
 /// The name of the closure a call registers: the chain's receiver, the
-/// method and the first string argument, as `$app->get('/users/{id}')` or
-/// `Route::post('/pages')`.
+/// method and the first string or class argument, as
+/// `$app->get('/users/{id}')`, `Route::post('/pages')` or
+/// `$factory->define(App\User::class)`.
 fn registration(call: Node<'_>, values: &[Node<'_>], source: &str) -> String {
     let path = values
         .first()
-        .filter(|a| matches!(a.kind(), "string" | "encapsed_string"))
+        .filter(|a| {
+            matches!(
+                a.kind(),
+                "string" | "encapsed_string" | "class_constant_access_expression"
+            )
+        })
         .map_or("…", |a| text(*a, source));
     let receiver = call
         .child_by_field_name("object")

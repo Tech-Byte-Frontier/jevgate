@@ -450,6 +450,9 @@ fn place(
         comment.unit = enclosing(units, &comment);
         comment.code = nearby(lines, &comment, starts);
     }
+    if comment.unit.is_none() && comment.definition.is_none() {
+        comment.definition = member_of(units, &comment, lines);
+    }
     comment
 }
 
@@ -545,6 +548,27 @@ fn innermost(units: &[Unit], holds: impl Fn(&Unit) -> bool) -> Option<usize> {
 }
 
 /// The innermost unit whose definition holds the comment.
+/// The type whose body holds a comment among its members, such as a PHP
+/// property's docblock: a type with methods has no unit of its own, so the
+/// comment read as the file's top-level code. The owner of the members
+/// around it, or of the member after an indented comment.
+fn member_of(units: &[Unit], comment: &Comment, lines: &[&str]) -> Option<String> {
+    let before = units
+        .iter()
+        .filter(|u| u.end_line < comment.line)
+        .max_by_key(|u| u.end_line);
+    let after = units
+        .iter()
+        .filter(|u| u.line > comment.end_line)
+        .min_by_key(|u| u.line)?;
+    let indented = lines
+        .get(comment.line - 1)
+        .is_some_and(|line| indent(line) > 0);
+    let same = before.is_some_and(|u| u.owner == after.owner);
+    (!after.owner.is_empty() && (same || indented && before.is_none_or(|u| u.owner.is_empty())))
+        .then(|| after.owner.clone())
+}
+
 fn enclosing(units: &[Unit], comment: &Comment) -> Option<usize> {
     innermost(units, |u| {
         u.line <= comment.line
@@ -707,6 +731,16 @@ mod tests {
             "// Retry once: the first request is often refused."
         ));
         assert!(!code_like("// Mutations"));
+    }
+
+    #[test]
+    fn comments_among_a_type_s_members_belong_to_the_type() {
+        let source = "<?php\n\nclass ArticleController extends Controller\n{\n    /**\n     * The transformer used to shape every article this controller returns.\n     */\n    protected $transformer;\n\n    public function index()\n    {\n        return $this->respond();\n    }\n\n    // Articles are listed newest first, whatever the filter says.\n    protected $order = 'desc';\n\n    public function show()\n    {\n        return $this->respond();\n    }\n}\n";
+        let comments = found("ArticleController.php", source);
+        assert_eq!(comments.len(), 2);
+        for comment in &comments {
+            assert_eq!(comment.definition.as_deref(), Some("ArticleController"));
+        }
     }
 
     #[test]
