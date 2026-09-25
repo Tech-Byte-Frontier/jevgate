@@ -7,6 +7,7 @@ rules.md comes from `jevgate rules --format json`, configuration.md from
 jevgate.schema.json, and cli.md from each command's --help, so the pages
 always describe the binary they were built with.
 """
+import html
 import json
 import subprocess
 import sys
@@ -52,16 +53,16 @@ def rules_page(binary):
         anchor = rule["id"].replace("/", "-")
         lines += [
             "",
-            f'<a id="{anchor}"></a>',
+            f'<a id="{html.escape(anchor)}"></a>',
             f"### `{rule['id']}`",
             "",
-            f"**Question:** {rule['inspection']}",
+            f"**Question:** {text(rule['inspection'])}",
             "",
             f"- **Key:** `{rule['key']}` · **Version:** {rule['version']}"
             + (" · **Needs tests:** yes" if rule["requires_tests"] else ""),
-            f"- **Looks at:** {rule['scope']}",
-            f"- **Evidence unit:** {rule['unit']}",
-            f"- **Acceptable:** {rule['acceptable_example']}",
+            f"- **Looks at:** {text(rule['scope'])}",
+            f"- **Evidence unit:** {text(rule['unit'])}",
+            f"- **Acceptable:** {text(rule['acceptable_example'])}",
         ]
     policy = rules[0]["decision_policy"]
     lines += [
@@ -137,8 +138,13 @@ def cli_page(binary):
     return "\n".join(lines) + "\n"
 
 
-def cell(text):
-    return text.replace("|", "\\|").replace("\n", " ")
+def text(value):
+    """Catalog and schema text as page text: markup characters are escaped."""
+    return html.escape(value, quote=False)
+
+
+def cell(value):
+    return text(value).replace("|", "\\|").replace("\n", " ")
 
 
 def main():
