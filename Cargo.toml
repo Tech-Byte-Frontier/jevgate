@@ -13,6 +13,15 @@ categories = ["command-line-utilities", "development-tools"]
 include = ["/src/**", "/tests/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE-*", "/NOTICE"]
 license = "MIT OR Apache-2.0"
 
+# `cargo binstall jevgate` downloads the archives the release workflow attaches.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [dependencies]
 anyhow = "=1.0.104"
 clap = { version = "=4.6.6", features = ["derive"] }
