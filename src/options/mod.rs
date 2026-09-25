@@ -87,10 +87,9 @@ pub struct CheckArgs {
     ///
     /// Without paths, JevGate walks the repository (respecting .gitignore) and
     /// selects application source in Rust, Python, JavaScript, TypeScript, Go,
-    /// C#, Ruby and PHP.
-    /// Tests, generated code and vendored files are classified and skipped with
-    /// a reason. `upload_allow`/`upload_deny` in jevgate.toml still bound what
-    /// is sent.
+    /// C#, Ruby, PHP and Java. Tests, generated code and vendored files are
+    /// classified and skipped with a reason. `upload_allow`/`upload_deny` in
+    /// jevgate.toml still bound what is sent.
     pub paths: Vec<PathBuf>,
     /// Review only files changed against this Git revision (commit, branch or tag)
     ///
