@@ -165,7 +165,7 @@ Every command documents itself: `jevgate --help` gives the workflow, exit codes,
 
 ## Continuous integration
 
-A pull request review on GitHub Actions:
+A pull request review on GitHub Actions, with the [JevGate action](https://github.com/Tech-Byte-Frontier/jevgate-action):
 
 ```yaml
 name: JevGate
@@ -175,26 +175,17 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
-    env:
-      JEVGATE_VERSION: 0.17.0
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # --base compares with the fork point
-      - uses: actions/cache@v4
+      - uses: Tech-Byte-Frontier/jevgate-action@v1
         with:
-          path: ~/.cargo/bin/jevgate
-          key: jevgate-${{ env.JEVGATE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
-      - run: command -v jevgate || cargo install jevgate --version "$JEVGATE_VERSION" --locked
-      - uses: actions/cache@v4
-        with:
-          path: .jevgate/cache
-          key: jevgate-answers-${{ github.sha }}
-          restore-keys: jevgate-answers-
-      - run: jevgate check --base "${{ github.event.pull_request.base.sha }}" --format github
-        env:
-          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          version: 0.17.0
 ```
+
+The action installs a checked release binary, keeps `.jevgate/cache` in the Actions cache and runs `jevgate check --base <pull request base> --format github`; `args` passes more flags, such as `--rule security`. It runs on Linux, macOS and Windows runners.
 
 `--format github` annotates the changed lines with each finding. A finding that fails the gate is an error; the others are warnings. A Markdown table goes to the job summary, and the usual text goes to the log. The full JSON report is always at `.jevgate/latest.json` if you want to keep it as an artifact.
 
@@ -213,7 +204,7 @@ jobs:
 - **Transient failures:** rate limits, overload and server or edge errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts; a timeout or dropped connection is retried once, since the first send may have run.
 - **Report-only paths:** give tooling its own level with `[[scope]]` (below), so scripts are reported while product code gates.
 
-Other CI systems work the same way: set `TYPESAFE_API_KEY`, keep `.jevgate/cache` between runs, and read the exit code or the JSON report.
+Other CI systems work the same way: install with `install.sh` or `cargo binstall`, set `TYPESAFE_API_KEY`, keep `.jevgate/cache` between runs, and read the exit code or the JSON report.
 
 ## Configuration
 
