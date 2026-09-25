@@ -592,7 +592,9 @@ fn block_statements(
             continue;
         }
         let line = line_of(file.source, child.start_byte());
-        if file.excluded.iter().any(|r| r.contains(&line)) {
+        if file.excluded.iter().any(|r| r.contains(&line))
+            || node.kind() == "constructor_body" && field_initializer(child)
+        {
             statements.push(None);
             continue;
         }
@@ -610,6 +612,32 @@ fn block_statements(
         }));
     }
     statements
+}
+
+/// A Java constructor statement that stores a parameter, another object's
+/// field or a literal in a field, as in `this.name = name;` or
+/// `timeout = copy.timeout;`. A run of them is how a constructor fills its
+/// fields: two constructors assigning different fields matched as copies.
+fn field_initializer(statement: Node<'_>) -> bool {
+    let Some(assignment) = statement.named_child(0).filter(|a| {
+        statement.kind() == "expression_statement" && a.kind() == "assignment_expression"
+    }) else {
+        return false;
+    };
+    let simple = |side: Option<Node<'_>>, value: bool| {
+        side.is_some_and(|n| match n.kind() {
+            "identifier" => true,
+            "field_access" => n
+                .child_by_field_name("object")
+                .is_some_and(|o| matches!(o.kind(), "this" | "identifier")),
+            kind => value && (kind.ends_with("_literal") || matches!(kind, "true" | "false")),
+        })
+    };
+    assignment
+        .child_by_field_name("operator")
+        .is_some_and(|o| o.kind() == "=")
+        && simple(assignment.child_by_field_name("left"), false)
+        && simple(assignment.child_by_field_name("right"), true)
 }
 
 #[cfg(test)]
@@ -726,6 +754,29 @@ mod tests {
             functions,
             [(Some("Position::describe"), Some("Range::describe"))]
         );
+    }
+
+    #[test]
+    fn java_constructors_filling_their_fields_are_not_copies() {
+        let position = "class Position {\n\tPosition(int sourceLineNumber, int sourceColumnNumber, int sourceByteOffset, int sourceCharacterOffset, int trackedPosition) {\n\t\tthis.sourceLineNumber = sourceLineNumber;\n\t\tthis.sourceColumnNumber = sourceColumnNumber;\n\t\tthis.sourceByteOffset = sourceByteOffset;\n\t\tthis.sourceCharacterOffset = sourceCharacterOffset;\n\t\tthis.trackedPosition = trackedPosition;\n\t\tthis.valid = true;\n\t}\n\n\tPosition(Position copy) {\n\t\tsourceLineNumber = copy.sourceLineNumber;\n\t\tsourceColumnNumber = copy.sourceColumnNumber;\n\t\tsourceByteOffset = copy.sourceByteOffset;\n\t\tsourceCharacterOffset = copy.sourceCharacterOffset;\n\t\ttrackedPosition = copy.trackedPosition;\n\t}\n}\n";
+        let range = position
+            .replace("Position", "Range")
+            .replace("line", "start")
+            .replace("column", "end");
+        let found = run(&[
+            ("Position.java", position, true),
+            ("Range.java", &range, true),
+        ]);
+        assert!(found.pairs.is_empty());
+        // Work beyond storing fields is still compared.
+        let worker = |name: &str| {
+            format!(
+                "class {name} {{\n\t{name}(Map<String, String> fields) {{\n\t\tString text = fields.get(\"text\");\n\t\tString trimmed = text.trim();\n\t\tString lower = trimmed.toLowerCase();\n\t\tfields.put(\"text\", lower);\n\t\tfields.put(\"length\", String.valueOf(lower.length()));\n\t\tthis.fields = fields;\n\t}}\n}}\n"
+            )
+        };
+        let (a, b) = (worker("Position"), worker("Range"));
+        let found = run(&[("Position.java", &a, true), ("Range.java", &b, true)]);
+        assert_eq!(found.pairs.len(), 1);
     }
 
     #[test]

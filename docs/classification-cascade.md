@@ -66,6 +66,13 @@ signatures, or one candidate pair.
    only. Closures registered through calls (`$app->get('/users', …)`,
    `Route::post(…)`) or returned by a configuration file
    (`return function (App $app) {…}`) are functions of their own.
+   A Java constructor's statements that store
+   a parameter, another object's field or a literal in a field break a copy:
+   two constructors filling different fields matched as copies and stayed
+   undecided. Java `equals` and `hashCode` overrides offer no copies or
+   values, and neither does an initial capacity (`new ArrayList<>(4)`) or the
+   number a method returns whole (`int cost() { return 7; }`), which the
+   method's name already names.
 3. **First pass** (`src/units/`). One dispatch of every unit request. Functions
    are packed eight per request; tests are sent one per request, because unrelated
    tests in the same state left more answers undecided. State uses literal paths

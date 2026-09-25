@@ -84,6 +84,7 @@ fn collect(node: Node<'_>, source: &str, found: &mut Vec<Literal>) {
         || SKIPPED_KINDS.contains(&node.kind())
         || docstring(node)
         || super::ruby::required(node, source).is_some()
+        || capacity_hint(node, source)
     {
         return;
     }
@@ -104,6 +105,50 @@ fn collect(node: Node<'_>, source: &str, found: &mut Vec<Literal>) {
     for child in node.named_children(&mut cursor) {
         collect(child, source, found);
     }
+}
+
+/// Java collection and builder types whose one number argument is an initial
+/// capacity, as in `new ArrayList<>(4)` or `new StringBuilder(64)`.
+const CAPACITY_TYPES: &[&str] = &[
+    "List", "Map", "Set", "Builder", "Buffer", "Deque", "Queue", "Stack", "Vector", "Table",
+];
+
+/// The arguments of `new ArrayList<>(4)`: a size hint that changes no
+/// behavior, so the number has nothing to name.
+fn capacity_hint(node: Node<'_>, source: &str) -> bool {
+    node.kind() == "argument_list"
+        && node.named_child_count() == 1
+        && node
+            .named_child(0)
+            .is_some_and(|a| a.kind() == "decimal_integer_literal")
+        && node
+            .parent()
+            .filter(|p| p.kind() == "object_creation_expression")
+            .and_then(|p| p.child_by_field_name("type"))
+            .and_then(|t| super::callee_name(t, source))
+            .is_some_and(|name| CAPACITY_TYPES.iter().any(|kind| name.ends_with(kind)))
+}
+
+/// A Java method whose whole body returns one number, as in
+/// `int cost() { return 7; }`: the method's name names the value. A returned
+/// string stays a candidate, since it may be an address or other setting.
+pub fn returns_constant(node: Node<'_>) -> bool {
+    node.kind() == "method_declaration"
+        && node
+            .child_by_field_name("body")
+            .filter(|body| body.named_child_count() == 1)
+            .and_then(|body| body.named_child(0))
+            .filter(|statement| statement.kind() == "return_statement")
+            .and_then(|statement| statement.named_child(0))
+            .is_some_and(|value| {
+                let value = if value.kind() == "unary_expression" {
+                    value.child_by_field_name("operand").unwrap_or(value)
+                } else {
+                    value
+                };
+                value.kind().ends_with("integer_literal")
+                    || value.kind().ends_with("floating_point_literal")
+            })
 }
 
 /// A Python docstring: a string that is the first statement of a body or module.
