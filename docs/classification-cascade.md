@@ -58,7 +58,12 @@ signatures, or one candidate pair.
    by shared suite, subject or helper. A subject that one type in scope owns
    is named with it (`StringUtil::isBlank`); a Java test file's top-level
    class is not a suite, since every case would share it, while `@Nested`
-   classes are. Test files get this outline without
+   classes are. A pair of similar tests is about a function they share that
+   is neither a camelCase getter or setter nor called by most of the file's
+   tests (a fixture or client every test uses), and that the fewest tests
+   call: the first shared name made `setBirthDate` the subject of validator
+   tests and grouped unrelated pairs under a shared `create_user` fixture.
+   Test files get this outline without
    `--include-tests`; their finding is at most a consider. Who calls a group is
    evidence only: gating a split on callers of its own hid large files whose
    single caller is the rest of the program; Type-2 clone candidates grouped by overlapping copies, only
@@ -130,7 +135,14 @@ signatures, or one candidate pair.
    predicates of one record were otherwise reviews.
    A controller method a test reaches through a request carries that route.
    The first pass names a literal worked out by hand, even with the
-   arithmetic in a comment, as not re-implementing the code.
+   arithmetic in a comment, as not re-implementing the code. Its "checks only
+   its mocks" question names tests without any stub (a setter read back, a
+   round trip, a benchmark), and tests checking which stub the code chose or
+   the view and status a handler chose for stubbed data, as not hollow: those
+   stayed near a third, as if every assertion were about the mocks.
+   A pair of tests whose overlap spreads over the three levels is asked
+   again with the body of the function both call: whether it throws before
+   the rest of a test runs is in that body.
    Then one locate Choice per split finding picks the body block to extract,
    and one per hardcoded-value review or consider names the value it is about.
    Special-case findings in different files that name the same identity

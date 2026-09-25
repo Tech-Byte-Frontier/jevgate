@@ -1,6 +1,7 @@
 //! Test quality: one request per test for value checks and one per candidate
 //! redundant pair. A test whose value stays undecided is asked again with the
-//! bodies of the functions it calls and its file's imports, mocks and setup.
+//! bodies of the functions it calls and its file's imports, mocks and setup;
+//! an undecided pair, with the body of the function both tests call.
 use super::{
     Asked, Detail, FileContext, FilePlan, Planned, Presence, Questions, TEST_PACK_ITEMS, UnitPlan,
     compact, identity, pack, questions, unique_ids,
@@ -542,7 +543,7 @@ fn value_request(
 pub(super) fn plan_pairs(
     file: &FileContext<'_>,
     cases: &[TestCase],
-    subjects: &BTreeMap<String, String>,
+    subjects: &Subjects<'_>,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -574,7 +575,7 @@ pub(super) fn plan_pairs(
         let mut state = json!({
             "test_a": {"name": a.name, "source": a.source(file.source)},
             "test_b": {"name": b.name, "source": b.source(file.source)},
-            "subject": subject_state(&[&pair.subject], subjects).remove(0),
+            "subject": subject_state(&[&pair.subject], subjects.signatures).remove(0),
         });
         // Tests in different groups can run on different setup: two RSpec
         // examples that read alike may build different records first.
@@ -590,6 +591,7 @@ pub(super) fn plan_pairs(
                 state["test_b"]["setup"] = json!(setup_b);
             }
         }
+        let recheck = pair_recheck(file, &id, &state, &pair.subject, subjects, ruby);
         let (request, asked) = file.request("test-pair", state, questions);
         let fits = file.budget.fits(&request);
         out.units.push(UnitPlan {
@@ -617,7 +619,7 @@ pub(super) fn plan_pairs(
                 names: [a.name.clone(), b.name.clone()],
                 subject: pair.subject.clone(),
             },
-            recheck: None,
+            recheck: recheck.filter(|_| fits),
         });
         if fits {
             requests.push(Planned {
@@ -627,4 +629,48 @@ pub(super) fn plan_pairs(
             });
         }
     }
+}
+
+/// The overlap question again for an undecided pair, with the body of the
+/// function both tests call: whether a call throws before the rest of a test
+/// runs, or which inputs it tells apart, is in that body. None when the body
+/// is unknown or too long.
+fn pair_recheck(
+    file: &FileContext<'_>,
+    id: &str,
+    state: &Value,
+    subject: &str,
+    subjects: &Subjects<'_>,
+    ruby: bool,
+) -> Option<(Value, Asked)> {
+    let found = subjects
+        .sources
+        .get(subject)
+        .filter(|found| found.source.len() <= SUBJECT_SOURCE_BYTES)?;
+    let hash = subjects.hashes.get(&found.path)?;
+    let mut state = state.clone();
+    state["subject"]["source"] = json!(found.source);
+    let mut questions = Questions::default();
+    // A decisive recheck replaces the first answers, so a Ruby pair is asked
+    // again whether each test checks something the other does not.
+    let distinct = ruby.then(|| ("distinct", questions::test_pair_distinct()));
+    for (question, body) in [("overlap", questions::test_pair_overlap_recheck(ruby))]
+        .into_iter()
+        .chain(distinct)
+    {
+        questions.ask(
+            question.into(),
+            body,
+            id,
+            TEST_REDUNDANCY,
+            question,
+            Pass::Recheck,
+        );
+    }
+    let mut paths = vec![(file.path, file.source_hash)];
+    if found.path != file.path {
+        paths.push((found.path.as_path(), hash.as_str()));
+    }
+    let (request, asked) = super::request(file.model, "recheck", &paths, state, questions);
+    file.budget.fits(&request).then_some((request, asked))
 }

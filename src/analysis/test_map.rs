@@ -7,7 +7,11 @@
 //! methods of a `TestCase`).
 use super::{call_name, callee_name, fast_hash, is_comment, line_of, macro_calls, ruby, text};
 use anyhow::Result;
-use std::{collections::BTreeSet, ops::Range, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Range,
+    path::Path,
+};
 use tree_sitter::Node;
 
 /// Candidate redundant pairs per test file.
@@ -617,15 +621,36 @@ pub fn link(cases: &mut [TestCase], scope: &BTreeSet<String>) {
     }
 }
 
+/// A camelCase getter or setter, such as Java's `setBirthDate` or `isNew`.
+fn accessor(name: &str) -> bool {
+    ["get", "set", "is"].iter().any(|prefix| {
+        name.strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_uppercase()))
+    })
+}
+
 /// Pairs that share a subject and look alike, most similar first, capped.
 pub fn pairs(cases: &[TestCase]) -> (Vec<TestPair>, usize) {
+    let mut uses = BTreeMap::<&str, usize>::new();
+    for subject in cases.iter().flat_map(|c| &c.subjects) {
+        *uses.entry(subject).or_default() += 1;
+    }
     let mut found = Vec::new();
     for a in 0..cases.len() {
         for b in a + 1..cases.len() {
+            // Tests set up their objects through setters, fixtures and
+            // clients that most of the file's tests call, such as
+            // `setBirthDate` or `create_user`; the function a pair checks is
+            // another one it shares, the one the fewest tests call.
+            let setup = |s: &str| {
+                let common = uses[s] * 2 > cases.len();
+                (accessor(s), common, if common { 0 } else { uses[s] })
+            };
             let Some(subject) = cases[a]
                 .subjects
                 .iter()
-                .find(|s| cases[b].subjects.contains(s))
+                .filter(|s| cases[b].subjects.contains(s))
+                .min_by_key(|s| setup(s))
             else {
                 continue;
             };
@@ -887,5 +912,48 @@ mod tests {
         let located =
             crate::test_locations::locate_tests(Path::new("Totals.java"), application).unwrap();
         assert!(located.ranges.is_empty());
+    }
+
+    #[test]
+    fn a_pair_is_about_the_function_its_tests_check_not_the_setters_they_call() {
+        let java = "class PetValidatorTests {\n\t@Test\n\tvoid validateWithInvalidPetName() {\n\t\tpet.setBirthDate(birthDate);\n\t\tpet.setName(\"\");\n\t\tvalidator.validate(pet, errors);\n\t\tassertTrue(errors.hasFieldErrors(\"name\"));\n\t}\n\n\t@Test\n\tvoid validateWithLongPetName() {\n\t\tpet.setBirthDate(birthDate);\n\t\tpet.setName(\"A\".repeat(31));\n\t\tvalidator.validate(pet, errors);\n\t\tassertTrue(errors.hasFieldErrors(\"name\"));\n\t}\n}\n";
+        let mut found = cases(Path::new("PetValidatorTests.java"), java).unwrap();
+        link(
+            &mut found,
+            &BTreeSet::from(["setBirthDate".into(), "setName".into(), "validate".into()]),
+        );
+        let (pairs, _) = pairs(&found);
+        assert_eq!(pairs[0].subject, "validate");
+        // Accessors alone are still a shared subject.
+        link(
+            &mut found,
+            &BTreeSet::from(["setBirthDate".into(), "setName".into()]),
+        );
+        assert_eq!(pairs_of(&found), ["setBirthDate"]);
+        assert!(!accessor("settle") && !accessor("isolate") && accessor("isNew"));
+        // A function most of the file's tests call is setup: all four build
+        // a document, two of them transcode bytes first.
+        let decoding = "class DataUtilTest {\n\t@Test\n\tvoid discardsMark() {\n\t\tDocument doc = Documents.build(Codec.transcode(bytes, \"UTF-8\"));\n\t\tassertEquals(\"One\", doc.title());\n\t}\n\n\t@Test\n\tvoid discardsMarkWithoutCharset() {\n\t\tDocument doc = Documents.build(Codec.transcode(bytes, null));\n\t\tassertEquals(\"One\", doc.title());\n\t}\n\n\t@Test\n\tvoid readsTitle() {\n\t\tDocument doc = Documents.build(text);\n\t\tassertEquals(\"OK\", doc.title());\n\t}\n\n\t@Test\n\tvoid readsBody() {\n\t\tDocument doc = Documents.build(html);\n\t\tassertEquals(\"Two\", doc.body());\n\t}\n\n}\n";
+        let mut found = cases(Path::new("DataUtilTest.java"), decoding).unwrap();
+        link(
+            &mut found,
+            &BTreeSet::from(["build".into(), "transcode".into()]),
+        );
+        let (found_pairs, _) = super::pairs(&found);
+        let decoded = found_pairs.iter().find(|p| (p.a, p.b) == (0, 1)).unwrap();
+        assert_eq!(decoded.subject, "transcode");
+        // Among names most tests call, none is more the subject than another:
+        // the first in order stays.
+        link(
+            &mut found,
+            &BTreeSet::from(["build".into(), "title".into()]),
+        );
+        let (found_pairs, _) = super::pairs(&found);
+        let first = found_pairs.iter().find(|p| (p.a, p.b) == (0, 1)).unwrap();
+        assert_eq!(first.subject, "build");
+    }
+
+    fn pairs_of(found: &[TestCase]) -> Vec<String> {
+        pairs(found).0.into_iter().map(|p| p.subject).collect()
     }
 }
