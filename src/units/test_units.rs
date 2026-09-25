@@ -45,6 +45,9 @@ pub(super) struct Subjects<'a> {
     pub helpers: &'a BTreeMap<String, Vec<SubjectSource>>,
     /// Source hashes of selected and context files, for freshness checks.
     pub hashes: &'a BTreeMap<PathBuf, String>,
+    /// Controller methods by full name, with the route that reaches each,
+    /// such as `GET /owners/{ownerId}`.
+    pub routes: &'a BTreeMap<String, String>,
 }
 
 fn subject_state(names: &[&String], subjects: &BTreeMap<String, String>) -> Vec<Value> {
@@ -147,6 +150,15 @@ fn value_recheck(
     }
     let names: Vec<&String> = case.subjects.iter().collect();
     let mut listed = subject_state(&names, subjects.signatures);
+    // A controller method the test reaches through a request, not a call.
+    for subject in &mut listed {
+        if let Some(route) = subject["name"]
+            .as_str()
+            .and_then(|name| subjects.routes.get(name))
+        {
+            subject["route"] = json!(route);
+        }
+    }
     for subject in listed.iter_mut().take(SOURCED_SUBJECTS) {
         let Some(found) = subject["name"]
             .as_str()

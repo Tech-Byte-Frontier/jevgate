@@ -34,6 +34,8 @@ pub struct TestCase {
     /// Names its hooks call, for the test helpers they use. Only Ruby cases
     /// have these.
     pub hook_calls: BTreeSet<String>,
+    /// Requests the test sends to a web route, such as MockMvc's `get("/owners")`.
+    pub requests: Vec<super::routes::Route>,
     shingles: BTreeSet<u64>,
 }
 
@@ -418,7 +420,13 @@ fn ruby_context(node: Node<'_>, source: &str, found: &mut [TestCase]) {
             used.push(*definition);
             identifiers(*definition, source, &mut read);
             let mut calls = BTreeSet::new();
-            walk(*definition, source, &mut calls, &mut Vec::new());
+            walk(
+                *definition,
+                source,
+                &mut calls,
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
             case.calls.extend(calls);
             let mut names = Vec::new();
             identifiers(*definition, source, &mut names);
@@ -436,7 +444,13 @@ fn ruby_context(node: Node<'_>, source: &str, found: &mut [TestCase]) {
     hooks.sort_by_key(|hook| hook.start_byte());
     hooks.dedup();
     for hook in &hooks {
-        walk(*hook, source, &mut case.hook_calls, &mut Vec::new());
+        walk(
+            *hook,
+            source,
+            &mut case.hook_calls,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        );
         let mut names = Vec::new();
         identifiers(*hook, source, &mut names);
         case.hook_calls
@@ -507,7 +521,8 @@ fn name(node: Node<'_>, source: &str) -> String {
 fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Vec<TestCase>) {
     let mut calls = BTreeSet::new();
     let mut tokens = Vec::new();
-    walk(node, source, &mut calls, &mut tokens);
+    let mut requests = Vec::new();
+    walk(node, source, &mut calls, &mut tokens, &mut requests);
     let shingles = tokens.windows(3).map(fast_hash).collect();
     found.push(TestCase {
         name,
@@ -519,6 +534,7 @@ fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Ve
         suite: Vec::new(),
         hooks: Vec::new(),
         hook_calls: BTreeSet::new(),
+        requests,
         shingles,
     });
 }
@@ -528,6 +544,7 @@ fn walk<'a>(
     source: &'a str,
     calls: &mut BTreeSet<String>,
     tokens: &mut Vec<&'a str>,
+    requests: &mut Vec<super::routes::Route>,
 ) {
     if is_comment(node) {
         return;
@@ -542,6 +559,7 @@ fn walk<'a>(
             if let Some(name) = node.child_by_field_name("name") {
                 calls.insert(text(name, source).to_string());
             }
+            requests.extend(super::routes::request(node, source));
         }
         // C#, PHP and Java: constructing the class under test calls its constructor.
         "object_creation_expression" => {
@@ -583,7 +601,7 @@ fn walk<'a>(
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk(child, source, calls, tokens);
+        walk(child, source, calls, tokens, requests);
     }
 }
 

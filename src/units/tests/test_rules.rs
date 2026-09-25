@@ -307,3 +307,40 @@ fn a_java_test_classs_setup_holds_its_mocks_and_setup_method() {
         "package app;\n\nimport org.junit.jupiter.api.BeforeEach;\n\n@ExtendWith(MockitoExtension.class)\nclass FormatterTests {\n\n\t@Mock\n\tprivate TypeRepository types;\n\n@BeforeEach\n\tvoid setup() {\n\t\tthis.formatter = new Formatter(types);\n\t}"
     );
 }
+
+#[test]
+fn a_mockmvc_test_is_rechecked_with_the_controller_method_its_request_reaches() {
+    let project = Project::new();
+    for (controller, entity) in [("OwnerController", "owners"), ("VetController", "vets")] {
+        project.write(
+            &format!("src/main/java/app/{controller}.java"),
+            &format!("package app;\n\n@Controller\n@RequestMapping(\"/{entity}\")\nclass {controller} {{\n\t@GetMapping(\"/{{id}}\")\n\tpublic String show(@PathVariable int id, Model model) {{\n\t\tmodel.addAttribute(\"{entity}\", this.repository.findById(id));\n\t\treturn \"{entity}/details\";\n\t}}\n\n\t@PostMapping(\"/{{id}}\")\n\tpublic String update(@PathVariable int id) {{\n\t\treturn \"redirect:/{entity}\";\n\t}}\n}}\n"),
+        );
+    }
+    project.write(
+        "src/test/java/app/OwnerControllerTests.java",
+        "package app;\n\n@WebMvcTest(OwnerController.class)\nclass OwnerControllerTests {\n\t@Test\n\tvoid showsOwner() throws Exception {\n\t\tmockMvc.perform(get(\"/owners/{id}\", 1))\n\t\t\t.andExpect(status().isOk())\n\t\t\t.andExpect(model().attributeExists(\"owners\"));\n\t}\n}\n",
+    );
+    let mut options = args();
+    options.include_tests = true;
+    options.rules = vec![catalog::TEST_VALUE.into()];
+    let (_, plan) = planned(&project, &options);
+    let recheck = plan
+        .files
+        .values()
+        .flat_map(|f| &f.units)
+        .find(|u| u.name == "showsOwner")
+        .and_then(|u| u.recheck.as_ref())
+        .map(|(request, _)| request["state"]["subjects"].clone())
+        .unwrap();
+    let subjects = recheck.as_array().unwrap();
+    assert_eq!(subjects.len(), 1, "{subjects:?}");
+    assert_eq!(subjects[0]["name"], "OwnerController::show");
+    assert_eq!(subjects[0]["route"], "GET /owners/{id}");
+    assert!(
+        subjects[0]["source"]
+            .as_str()
+            .unwrap()
+            .contains("return \"owners/details\"")
+    );
+}
