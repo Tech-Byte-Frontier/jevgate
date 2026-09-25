@@ -64,6 +64,39 @@ fn copies_across_test_cases_are_one_level_lower_than_copies_in_support_code() {
 }
 
 #[test]
+fn short_copies_are_at_most_a_consider() {
+    let body = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\treturn StringUtil.releaseBuilder(builder);\n";
+    let longer = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\tbuilder.append(tagName).append(attributes.size());\n\t\treturn StringUtil.releaseBuilder(builder);\n";
+    let mut options = args();
+    only(&mut options, catalog::SHARED_LOGIC);
+    let strength = |body: &str| {
+        let project = Project::new();
+        for class in ["Attribute", "Attributes"] {
+            project.write(
+                &format!("src/main/java/app/{class}.java"),
+                &format!("package app;\n\nclass {class} {{\n\tString html() {{\n{body}\t}}\n}}\n"),
+            );
+        }
+        let mut same = scripted(2);
+        same.overrides
+            .push(("required", json!({"type":"noul","noul":0.05})));
+        let report = run(&project, &options, &mut same);
+        let finding = report
+            .files
+            .iter()
+            .flat_map(|f| &f.findings)
+            .next()
+            .unwrap()
+            .clone();
+        (finding.strength, finding.message)
+    };
+    let (short, message) = strength(body);
+    assert_eq!(short, Strength::Consider);
+    assert!(message.contains("a person should decide"), "{message}");
+    assert_eq!(strength(longer).0, Strength::Review);
+}
+
+#[test]
 fn duplicate_pairs_across_files_quote_both_sites_and_respect_required_repetition() {
     let project = Project::new();
     project.write("a.rs", LOAD);

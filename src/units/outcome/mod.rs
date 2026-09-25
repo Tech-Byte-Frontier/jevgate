@@ -186,7 +186,7 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
                 }
             })
         }
-        catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), &unit.detail),
+        catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), unit),
         catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => {
             get("overlap").map(|overlap| redundancy_outcome(overlap, get("distinct")))

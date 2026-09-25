@@ -109,20 +109,31 @@ pub(in crate::units) fn several_kind<'a>(
         .map(|(kind, _)| kind.as_str())
 }
 
+/// Lines a copy may span and still be short: sharing it saves little.
+const SHORT_COPY_LINES: usize = 3;
+
 /// Repetition the behavior requires is not a concern. Copies whose every site
 /// is inside test cases are one level lower: spelling out each case is how
 /// tests are written, so a table of cases or a fixture is a style choice.
+/// Short copies are at most a consider: three lines, such as a pooled
+/// builder borrowed and released around one call, repeat in two places as an
+/// idiom as often as they hide a missing helper.
 pub(in crate::units) fn shared_outcome(
     required: Option<&Answer>,
     same: Option<&Answer>,
-    detail: &Detail,
+    unit: &UnitPlan,
 ) -> Option<Outcome> {
     if matches!(noul(required?), Outcome::Review(_)) {
         return Some(Outcome::Clear);
     }
     let same = score(same?);
-    Some(match detail {
-        Detail::Pair { in_cases: true, .. } => lowered(same),
+    let short = unit
+        .locations
+        .iter()
+        .all(|l| l.end_line + 1 - l.start_line <= SHORT_COPY_LINES);
+    Some(match (&unit.detail, same) {
+        (Detail::Pair { in_cases: true, .. }, _) => lowered(same),
+        (_, Outcome::Review(p)) if short => Outcome::Consider(p),
         _ => same,
     })
 }

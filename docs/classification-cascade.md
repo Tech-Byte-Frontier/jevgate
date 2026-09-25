@@ -378,13 +378,16 @@ signatures, or one candidate pair.
    labeled set, no living document leaned past 0.50. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
    Jev does not count reliably and reads "tasks" literally. Copies inside test
-   cases are one level lower. A test that checks several unrelated behaviors is at
-   most a note: on labeled tests, tables of inputs and browser journeys rated
-   as high as tests that really mix behaviors. Overlapping test pairs of one
-   subject become one consider for three or more tests only when the pairs
-   connect them: two pairs that share no test stay two pairs (a pair of
-   redirect tests and a pair of deny tests of `get` are not four overlapping
-   tests). A review always carries a finding.
+   cases are one level lower. Copies of three lines or fewer are at most a
+   consider: in Java such a copy was as often an idiom, a pooled builder
+   borrowed and released around one call, as a missing helper. A test that
+   checks several unrelated behaviors is at most a note: on labeled tests,
+   tables of inputs and browser journeys rated as high as tests that really
+   mix behaviors. Overlapping test pairs of one subject become one consider
+   for three or more tests only when the pairs connect them: two pairs that
+   share no test stay two pairs (a pair of redirect tests and a pair of deny
+   tests of `get` are not four overlapping tests). A review always carries a
+   finding.
 6. **Gate.** `--fail-on`, `[[scope]]` levels per path and the baseline act on
    composed findings only. Baseline entries can carry a reason (`intended`,
    `later`, `wrong`) that survives rewrites; `baseline stats` counts them.
