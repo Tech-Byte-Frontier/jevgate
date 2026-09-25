@@ -485,10 +485,9 @@ impl<'p> Tally<'p> {
             return;
         }
         let (outcome, answers) = resolved(unit, judgments);
-        let outcome = if unnamed_value(unit, judgments)
-            || unnamed_outline(unit, judgments)
-            || few.contains(unit.id.as_str())
-        {
+        let outcome = if unnamed_value(unit, judgments) {
+            lowered(lowered(outcome))
+        } else if unnamed_outline(unit, judgments) || few.contains(unit.id.as_str()) {
             lowered(outcome)
         } else {
             outcome
@@ -908,7 +907,9 @@ fn finding(
             p,
         ),
         Detail::Values { .. } | Detail::Constants { .. } => {
-            let unnamed = unnamed_value(unit, judgments);
+            let unnamed = unnamed_value(unit, judgments)
+                .then(|| strength_of(resolved(unit, judgments).0).map(|(s, _)| s))
+                .flatten();
             let (message, action) =
                 values_wording(name, &unit.detail, (strength, unnamed), p, answers);
             match located_value(unit, judgments) {
@@ -1044,8 +1045,8 @@ fn finding(
 
 /// A function's hardcoded-value review or consider whose value was not
 /// named: the locate Choice picked none clearly, or there were too many
-/// values to offer. Its finding is one level lower, since a reader cannot
-/// tell what to change.
+/// values to offer. Its finding is a note, since a reader cannot tell what
+/// to change: one level lower, 8 of lobsters' 10 such considers were wrong.
 fn unnamed_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     matches!(unit.detail, Detail::Values { .. })
         && located_value(unit, judgments).is_none()

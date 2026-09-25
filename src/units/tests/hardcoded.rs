@@ -45,25 +45,20 @@ fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
         vec![("special", json!({"type":"noul","noul":0.9}))],
     );
     // The locate follow-up offered none clearly, so no value is named and
-    // the review is one level lower.
+    // the review is a note.
     let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Consider);
+    assert_eq!(finding.strength, Strength::Note);
     assert_eq!(finding.rule, "maintainability/hardcoded-values");
     assert!(
         finding.message.starts_with(
-            "`connect` special-cases one specific identity (0.90). No single value stood out"
+            "`connect` special-cases one specific identity. No single value stood out, so it is a note"
         ),
         "{}",
         finding.message
     );
-    assert!(finding.action.contains("data or configuration"));
+    assert!(finding.action.starts_with("Optional"));
     assert!(finding.values.is_empty());
-    assert_eq!(
-        report.files[0].dimensions["hardcoded_values"]
-            .units
-            .consider,
-        1
-    );
+    assert_eq!(report.files[0].dimensions["hardcoded_values"].units.note, 1);
     options.refresh = true;
     let chosen = json!({"type":"choice","choice":"v0","confidence":1.0,
         "probabilities":{"v0":1.0,"v1":0.0,"none":0.0}});

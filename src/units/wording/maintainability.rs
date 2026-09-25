@@ -244,17 +244,15 @@ const VALUE_SIGNALS: [ValueSignal; 3] = [
 pub(in crate::units) fn values_wording(
     name: &str,
     detail: &Detail,
-    (strength, unnamed): (Strength, bool),
+    (strength, unnamed): (Strength, Option<Strength>),
     p: f64,
     answers: &Answers<'_>,
 ) -> Wording {
     let get = |q: &str| answers.get(q).copied();
     let signals = value_signals(&get, detail, true).unwrap_or_default();
-    let reached_at = match (strength, unnamed) {
-        (Strength::Consider, true) => Strength::Review,
-        (Strength::Note, true) => Strength::Consider,
-        _ => strength,
-    };
+    // An unnamed value's finding is lower than the strength its signals reached.
+    let reached_at = unnamed.unwrap_or(strength);
+    let unnamed = unnamed.is_some();
     let reached: Vec<(&ValueSignal, bool)> = signals
         .iter()
         .filter(|(_, outcome, _)| {
@@ -293,7 +291,7 @@ pub(in crate::units) fn values_wording(
         ""
     };
     let unnamed = if unnamed {
-        " No single value stood out, so it is one level lower."
+        " No single value stood out, so it is a note."
     } else {
         ""
     };
