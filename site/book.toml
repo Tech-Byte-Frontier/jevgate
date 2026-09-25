@@ -1,0 +1,19 @@
+[book]
+title = "JevGate"
+description = "A code-review gate for CI and coding agents"
+authors = ["Tech Byte Frontier"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+site-url = "/jevgate/"
+git-repository-url = "https://github.com/Tech-Byte-Frontier/jevgate"
+edit-url-template = "https://github.com/Tech-Byte-Frontier/jevgate/edit/main/site/{path}"
+no-section-label = true
+
+[output.html.search]
+limit-results = 20

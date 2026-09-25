@@ -38,6 +38,10 @@ JevGate asks the model small questions and decides findings in code. When you ch
 
 [docs/classification-cascade.md](docs/classification-cascade.md) describes the evidence units and composition rules.
 
+## Documentation site
+
+The site at <https://tech-byte-frontier.github.io/jevgate/> is built from `site/` with [mdBook](https://rust-lang.github.io/mdBook/): `site/build.sh` generates the rules, configuration and command-line reference pages from a release build, then builds the book into `site/book`. Guide pages are in `site/src`; the reference pages are generated, so change the rule catalog, the configuration types or the `--help` text instead.
+
 ## Pull requests
 
 - Keep a pull request to one change, with tests.

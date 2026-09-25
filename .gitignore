@@ -29,3 +29,7 @@ GEMINI.md
 *.log
 /video/
 /roadmap.md
+
+# The documentation site is built by site/build.sh; its reference pages are generated.
+/site/book/
+/site/src/reference/
