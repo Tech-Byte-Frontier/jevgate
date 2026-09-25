@@ -279,11 +279,23 @@ fn matching_windows(blocks: &[Block]) -> Vec<Window> {
                 for t in 0..n {
                     covered.insert((diagonal, kx + t));
                 }
+                if bx == by && one_run(&blocks[bx].statements[kx.min(ky)..kx.max(ky) + n]) {
+                    continue;
+                }
                 found.push(((bx, kx), (by, ky), n));
             }
         }
     }
     found
+}
+
+/// Statements that all read alike, such as sqlite-utils' nine
+/// `x = self.value_or_default("x", x)` lines or a list of lazy imports: a
+/// list of one kind of statement, which matches itself shifted by one.
+fn one_run(statements: &[Statement]) -> bool {
+    statements
+        .windows(2)
+        .all(|pair| pair[0].hash == pair[1].hash)
 }
 
 /// Every place a pair of consecutive statement hashes occurs.
@@ -1493,6 +1505,12 @@ mod tests {
             b.replace("\trecord, err", "\tlog.Printf(\"loading one stored record by its identifier\")\n\tmetrics.Count(\"store.find\", 1)\n\trecord, err"),
         );
         assert_eq!(pairs_between(("auth.go", &a), ("dial.go", &b)), 1);
+    }
+
+    #[test]
+    fn a_list_of_alike_statements_is_not_a_copy_of_itself() {
+        let source = "def create(self, a=None, b=None, c=None, d=None, e=None, f=None):\n    a = self.value_or_default(\"alpha_setting\", a)\n    b = self.value_or_default(\"beta_setting\", b)\n    c = self.value_or_default(\"gamma_setting\", c)\n    d = self.value_or_default(\"delta_setting\", d)\n    e = self.value_or_default(\"epsilon_setting\", e)\n    f = self.value_or_default(\"zeta_setting\", f)\n    return self.build(a, b, c, d, e, f)\n";
+        assert!(run(&[("db.py", source, true)]).pairs.is_empty());
     }
 
     #[test]
