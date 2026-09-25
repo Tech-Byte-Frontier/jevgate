@@ -260,20 +260,7 @@ fn plan_file(
 ) -> FilePlan {
     let input = &scope.inputs[owner];
     let view = &scope.views[&owner];
-    let context = FileContext {
-        owner,
-        path: &input.result.path,
-        language: crate::file_kind::language(&input.result.path),
-        source: input.source.as_deref().unwrap_or(""),
-        source_hash: &input.result.source_hash,
-        model: args.model(),
-        budget,
-        framework: super::nextjs::describe(
-            &input.result.path,
-            input.source.as_deref().unwrap_or(""),
-            input.package.as_ref(),
-        ),
-    };
+    let context = file_context(input, owner, args, budget);
     let mut file = FilePlan {
         path: input.result.path.clone(),
         ..Default::default()
@@ -283,57 +270,14 @@ fn plan_file(
     if shared.enabled(catalog::FUNCTION_SIMPLIFICATION) {
         plan_functions(scope, &context, view, &lines, &cases, &mut file, requests);
     }
-    if shared.enabled(catalog::FILE_ORGANIZATION) && view.application {
-        let units = &scope.units[&owner].units;
-        let members: Vec<usize> = (0..units.len())
-            .filter(|&i| !lines.iter().any(|l| units[i].overlaps(l)))
-            .collect();
-        file.rules.insert(catalog::FILE_ORGANIZATION, 0);
-        if members.len() >= 2 {
-            let callers = callers(scope, &shared.imports, owner);
-            let parsed = &scope.units[&owner];
-            outline::plan(&context, parsed, &members, &callers, &mut file, requests);
-        }
-    } else if shared.enabled(catalog::FILE_ORGANIZATION)
-        && view.classification.kind == crate::file_kind::TESTS
-    {
-        file.rules.insert(catalog::FILE_ORGANIZATION, 0);
-        let mut cases = test_map::cases(context.path, context.source).unwrap_or_default();
-        shared.link_routes(&mut cases);
-        test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
-        if java(context.path) {
-            shared.qualify_subjects(&mut cases);
-        }
-        outline::plan_tests(&context, &scope.units[&owner], &cases, &mut file, requests);
+    if shared.enabled(catalog::FILE_ORGANIZATION) {
+        plan_outline(scope, shared, &context, view, &lines, &mut file, requests);
     }
     if shared.enabled(catalog::HARDCODED_VALUES) && view.application {
-        file.rules.insert(catalog::HARDCODED_VALUES, 0);
-        let parsed = &scope.units[&owner];
-        let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
-        let units: Vec<&Unit> = parsed
-            .units
-            .iter()
-            .filter(|u| u.callable() && outside_tests(u.line))
-            .collect();
-        let constants: Vec<_> = parsed
-            .constants
-            .iter()
-            .filter(|c| outside_tests(c.line))
-            .cloned()
-            .collect();
-        hardcoded::plan(&context, &units, &constants, &mut file, requests);
+        plan_values(&scope.units[&owner], &context, &lines, &mut file, requests);
     }
     if shared.enabled(catalog::COMMENTS) && view.application {
-        file.rules.insert(catalog::COMMENTS, 0);
-        let parsed = &scope.units[&owner];
-        let found =
-            crate::analysis::comments::comments(context.path, context.source, &parsed.units)
-                .unwrap_or_default();
-        let found: Vec<_> = found
-            .into_iter()
-            .filter(|c| !lines.iter().any(|l| l.contains(&c.line)))
-            .collect();
-        comments::plan(&context, &parsed.units, &found, &mut file, requests);
+        plan_comments(&scope.units[&owner], &context, &lines, &mut file, requests);
     }
     let rules: Vec<&'static str> = catalog::SECURITY
         .into_iter()
@@ -362,26 +306,136 @@ fn plan_file(
         && view.application
         && let Some(framework) = &input.framework
     {
-        // A helper of the same name in the module's package, nearest the file.
-        let lookup = |name: &str| {
-            shared.module_helpers.get(name).and_then(|candidates| {
-                candidates
-                    .iter()
-                    .filter(|h| h.path.starts_with(&framework.root))
-                    .max_by_key(|h| {
-                        let shared_parts = h
-                            .path
-                            .iter()
-                            .zip(context.path.iter())
-                            .take_while(|(a, b)| a == b)
-                            .count();
-                        (shared_parts, std::cmp::Reverse(h.path.clone()))
-                    })
-            })
-        };
-        spacetimedb::plan(&context, &framework.version, lookup, &mut file, requests);
+        plan_module(shared, &context, framework, &mut file, requests);
     }
     file
+}
+
+/// One selected code file's facts, with the role a web framework gives it.
+fn file_context<'a>(
+    input: &'a Input,
+    owner: usize,
+    args: &'a CheckArgs,
+    budget: &'a TokenBudget,
+) -> FileContext<'a> {
+    FileContext {
+        owner,
+        path: &input.result.path,
+        language: crate::file_kind::language(&input.result.path),
+        source: input.source.as_deref().unwrap_or(""),
+        source_hash: &input.result.source_hash,
+        model: args.model(),
+        budget,
+        framework: super::nextjs::describe(
+            &input.result.path,
+            input.source.as_deref().unwrap_or(""),
+            input.package.as_ref(),
+        ),
+    }
+}
+
+/// An application file's members outside tests, or a test file's cases.
+fn plan_outline(
+    scope: &Scope<'_>,
+    shared: &Shared<'_>,
+    context: &FileContext<'_>,
+    view: &View,
+    lines: &[Range<usize>],
+    file: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let owner = context.owner;
+    if view.application {
+        let units = &scope.units[&owner].units;
+        let members: Vec<usize> = (0..units.len())
+            .filter(|&i| !lines.iter().any(|l| units[i].overlaps(l)))
+            .collect();
+        file.rules.insert(catalog::FILE_ORGANIZATION, 0);
+        if members.len() >= 2 {
+            let callers = callers(scope, &shared.imports, owner);
+            let parsed = &scope.units[&owner];
+            outline::plan(context, parsed, &members, &callers, file, requests);
+        }
+    } else if view.classification.kind == crate::file_kind::TESTS {
+        file.rules.insert(catalog::FILE_ORGANIZATION, 0);
+        let mut cases = test_map::cases(context.path, context.source).unwrap_or_default();
+        shared.link_routes(&mut cases);
+        test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
+        if java(context.path) {
+            shared.qualify_subjects(&mut cases);
+        }
+        outline::plan_tests(context, &scope.units[&owner], &cases, file, requests);
+    }
+}
+
+/// Callables and module constants outside tests.
+fn plan_values(
+    parsed: &FileUnits,
+    context: &FileContext<'_>,
+    lines: &[Range<usize>],
+    file: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    file.rules.insert(catalog::HARDCODED_VALUES, 0);
+    let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
+    let units: Vec<&Unit> = parsed
+        .units
+        .iter()
+        .filter(|u| u.callable() && outside_tests(u.line))
+        .collect();
+    let constants: Vec<_> = parsed
+        .constants
+        .iter()
+        .filter(|c| outside_tests(c.line))
+        .cloned()
+        .collect();
+    hardcoded::plan(context, &units, &constants, file, requests);
+}
+
+/// Comments outside tests.
+fn plan_comments(
+    parsed: &FileUnits,
+    context: &FileContext<'_>,
+    lines: &[Range<usize>],
+    file: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    file.rules.insert(catalog::COMMENTS, 0);
+    let found = crate::analysis::comments::comments(context.path, context.source, &parsed.units)
+        .unwrap_or_default();
+    let found: Vec<_> = found
+        .into_iter()
+        .filter(|c| !lines.iter().any(|l| l.contains(&c.line)))
+        .collect();
+    comments::plan(context, &parsed.units, &found, file, requests);
+}
+
+/// A SpacetimeDB module file, whose definitions are sent with the helpers
+/// they call: of each name, the one in the module's package nearest the file.
+fn plan_module(
+    shared: &Shared<'_>,
+    context: &FileContext<'_>,
+    framework: &crate::inventory::Framework,
+    file: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let lookup = |name: &str| {
+        shared.module_helpers.get(name).and_then(|candidates| {
+            candidates
+                .iter()
+                .filter(|h| h.path.starts_with(&framework.root))
+                .max_by_key(|h| {
+                    let shared_parts = h
+                        .path
+                        .iter()
+                        .zip(context.path.iter())
+                        .take_while(|(a, b)| a == b)
+                        .count();
+                    (shared_parts, std::cmp::Reverse(h.path.clone()))
+                })
+        })
+    };
+    spacetimedb::plan(context, &framework.version, lookup, file, requests);
 }
 
 /// Callable units: application code with the application view, and test

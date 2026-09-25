@@ -7,6 +7,7 @@ use crate::{
         imports::Imports,
         routes::Route,
         test_map::{self, TestCase},
+        units::Unit,
     },
     catalog,
     options::CheckArgs,
@@ -14,7 +15,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 /// Facts that span files: clone groups, imports, callable subjects and hashes.
@@ -104,68 +105,15 @@ impl<'a> Shared<'a> {
             cases,
             enums: BTreeMap::new(),
             constants: BTreeMap::new(),
-            hashes: BTreeMap::new(),
+            hashes: source_hashes(scope),
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
             shared.pairs = duplicate_candidates(scope);
         }
         for (path, source, unit) in scope.scope_units() {
-            shared
-                .subjects
-                .entry(unit.short_name.clone())
-                .or_insert_with(|| unit.signature.clone());
-            if java(path) {
-                shared
-                    .subject_owners
-                    .entry(unit.short_name.clone())
-                    .or_default()
-                    .insert(unit.owner.clone());
-            }
-            shared
-                .subject_sources
-                .entry(unit.short_name.clone())
-                .or_insert_with(|| test_units::SubjectSource {
-                    path: path.to_path_buf(),
-                    source: unit.source(source).to_string(),
-                    shared: true,
-                });
+            shared.add_subject(path, source, unit);
             if !unit.routes.is_empty() {
-                shared
-                    .subjects
-                    .insert(unit.name.clone(), unit.signature.clone());
-                shared.subject_sources.insert(
-                    unit.name.clone(),
-                    test_units::SubjectSource {
-                        path: path.to_path_buf(),
-                        source: unit.source(source).to_string(),
-                        shared: true,
-                    },
-                );
-                for route in &unit.routes {
-                    shared.routes.push((route.clone(), unit.name.clone()));
-                }
-                let first = &unit.routes[0];
-                let method = if first.method.is_empty() {
-                    "ANY".to_string()
-                } else {
-                    first.method.to_uppercase()
-                };
-                shared
-                    .route_labels
-                    .insert(unit.name.clone(), format!("{method} {}", first.path));
-            }
-        }
-        for &owner in &scope.owners {
-            let result = &scope.inputs[owner].result;
-            shared
-                .hashes
-                .insert(result.path.clone(), result.source_hash.clone());
-        }
-        if let Some(first) = scope.owners.first() {
-            for context in &scope.inputs[*first].context {
-                shared
-                    .hashes
-                    .insert(context.file.path.clone(), context.file.source_hash.clone());
+                shared.add_routes(path, source, unit);
             }
         }
         if shared.enabled(catalog::ACCESS_CONTROL) {
@@ -180,9 +128,72 @@ impl<'a> Shared<'a> {
         shared
     }
 
+    /// A callable as a test subject by its short name, the first of that
+    /// name winning; a Java method also names the type that owns it.
+    fn add_subject(&mut self, path: &Path, source: &str, unit: &Unit) {
+        self.subjects
+            .entry(unit.short_name.clone())
+            .or_insert_with(|| unit.signature.clone());
+        if java(path) {
+            self.subject_owners
+                .entry(unit.short_name.clone())
+                .or_default()
+                .insert(unit.owner.clone());
+        }
+        self.subject_sources
+            .entry(unit.short_name.clone())
+            .or_insert_with(|| test_units::SubjectSource {
+                path: path.to_path_buf(),
+                source: unit.source(source).to_string(),
+                shared: true,
+            });
+    }
+
+    /// A controller method as a subject by its full name, since controllers
+    /// share method names, with the routes that reach it and its first route
+    /// as a label.
+    fn add_routes(&mut self, path: &Path, source: &str, unit: &Unit) {
+        self.subjects
+            .insert(unit.name.clone(), unit.signature.clone());
+        self.subject_sources.insert(
+            unit.name.clone(),
+            test_units::SubjectSource {
+                path: path.to_path_buf(),
+                source: unit.source(source).to_string(),
+                shared: true,
+            },
+        );
+        for route in &unit.routes {
+            self.routes.push((route.clone(), unit.name.clone()));
+        }
+        let first = &unit.routes[0];
+        let method = if first.method.is_empty() {
+            "ANY".to_string()
+        } else {
+            first.method.to_uppercase()
+        };
+        self.route_labels
+            .insert(unit.name.clone(), format!("{method} {}", first.path));
+    }
+
     pub(super) fn enabled(&self, key: &str) -> bool {
         self.rules.iter().any(|r| r == key || r == catalog::id(key))
     }
+}
+
+/// The source hash of every selected file and explicit context file.
+fn source_hashes(scope: &Scope<'_>) -> BTreeMap<PathBuf, String> {
+    let mut hashes = BTreeMap::new();
+    for &owner in &scope.owners {
+        let result = &scope.inputs[owner].result;
+        hashes.insert(result.path.clone(), result.source_hash.clone());
+    }
+    if let Some(first) = scope.owners.first() {
+        for context in &scope.inputs[*first].context {
+            hashes.insert(context.file.path.clone(), context.file.source_hash.clone());
+        }
+    }
+    hashes
 }
 
 /// Ruby methods inside the test lines of selected files, by short name: the

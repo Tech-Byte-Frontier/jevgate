@@ -108,68 +108,87 @@ pub fn unsettled(unit: &UnitPlan, judgments: &[Judgment]) -> BTreeSet<&'static s
         .collect()
 }
 
-/// The first-pass outcome, replaced by a decisive recheck when the first pass
-/// called for one.
+/// A unit's outcome and the answers it rests on: its first-pass answers with
+/// the follow-ups its rule reads beside or in place of them.
 fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers<'a>) {
-    if security(unit.rule) {
-        let merged = security_answers(unit, judgments);
-        return (unit_outcome(unit, &merged), merged);
-    }
-    // Follow-ups whose questions sit beside the first answers under their own
-    // ids: document section and pair checks, the kind of a large document,
-    // and benign-kind value checks.
-    let beside = if [
+    let merged = if security(unit.rule) {
+        security_answers(unit, judgments)
+    } else if let Some(pass) = beside(unit.rule) {
+        beside_answers(unit, judgments, pass)
+    } else if unit.rule == catalog::COMMENTS {
+        comment_answers(unit, judgments)
+    } else if unit.rule == catalog::TEST_VALUE {
+        test_value_answers(unit, judgments)
+    } else {
+        return rechecked(unit, judgments);
+    };
+    (unit_outcome(unit, &merged), merged)
+}
+
+/// The pass of the follow-ups whose questions sit beside the first answers
+/// under their own ids: document section and pair checks, the kind of a
+/// large document, and benign-kind value checks.
+fn beside(rule: &str) -> Option<Pass> {
+    if [
         catalog::DOC_STALENESS,
         catalog::DOC_DUPLICATION,
         catalog::LARGE_DOCS,
     ]
-    .contains(&unit.rule)
+    .contains(&rule)
     {
         Some(Pass::Trace)
-    } else if [catalog::HARDCODED_VALUES, catalog::AGENT_CONTEXT].contains(&unit.rule) {
+    } else if [catalog::HARDCODED_VALUES, catalog::AGENT_CONTEXT].contains(&rule) {
         Some(Pass::Recheck)
     } else {
         None
+    }
+}
+
+fn beside_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment], pass: Pass) -> Answers<'a> {
+    let mut merged = answers(judgments, &unit.id, Pass::First);
+    merged.extend(answers(judgments, &unit.id, pass));
+    // How a pair's sections relate, or what a section treats its missing
+    // names as, asked when its checks stay undecided.
+    merged.extend(answers(judgments, &unit.id, Pass::Settle));
+    merged
+}
+
+/// A comment's recheck replaces its first answers when the first stayed open
+/// and the recheck decides, or neither decides; the kind of comment, asked
+/// when it stays undecided, sits beside them.
+fn comment_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'a> {
+    let first = answers(judgments, &unit.id, Pass::First);
+    let before = unit_outcome(unit, &first);
+    let recheck = answers(judgments, &unit.id, Pass::Recheck);
+    let mut merged = if !recheck.is_empty()
+        && open(unit, &first, before)
+        && (unit_outcome(unit, &recheck).decisive() || !before.decisive())
+    {
+        recheck
+    } else {
+        first
     };
-    if let Some(pass) = beside {
-        let mut merged = answers(judgments, &unit.id, Pass::First);
-        merged.extend(answers(judgments, &unit.id, pass));
-        // How a pair's sections relate, or what a section treats its missing
-        // names as, asked when its checks stay undecided.
-        merged.extend(answers(judgments, &unit.id, Pass::Settle));
-        return (unit_outcome(unit, &merged), merged);
-    }
-    // A comment's recheck replaces its first answers when the first stayed
-    // open and the recheck decides, or neither decides; the kind of comment,
-    // asked when it stays undecided, sits beside them.
-    if unit.rule == catalog::COMMENTS {
-        let first = answers(judgments, &unit.id, Pass::First);
-        let before = unit_outcome(unit, &first);
-        let recheck = answers(judgments, &unit.id, Pass::Recheck);
-        let mut merged = if !recheck.is_empty()
-            && open(unit, &first, before)
-            && (unit_outcome(unit, &recheck).decisive() || !before.decisive())
-        {
-            recheck
-        } else {
-            first
-        };
-        merged.extend(answers(judgments, &unit.id, Pass::Settle));
-        return (unit_outcome(unit, &merged), merged);
-    }
-    // A test recheck asks the hollow-test questions again with the code under
-    // test and the setup; each answer replaces the first one unless only the
-    // first is decisive.
-    if unit.rule == catalog::TEST_VALUE {
-        let mut merged = answers(judgments, &unit.id, Pass::First);
-        for (question, answer) in answers(judgments, &unit.id, Pass::Recheck) {
-            let first = merged.get(question).map(|a| noul(a));
-            if noul(answer).decisive() || !first.is_some_and(Outcome::decisive) {
-                merged.insert(question, answer);
-            }
+    merged.extend(answers(judgments, &unit.id, Pass::Settle));
+    merged
+}
+
+/// A test recheck asks the hollow-test questions again with the code under
+/// test and the setup; each answer replaces the first one unless only the
+/// first is decisive.
+fn test_value_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'a> {
+    let mut merged = answers(judgments, &unit.id, Pass::First);
+    for (question, answer) in answers(judgments, &unit.id, Pass::Recheck) {
+        let first = merged.get(question).map(|a| noul(a));
+        if noul(answer).decisive() || !first.is_some_and(Outcome::decisive) {
+            merged.insert(question, answer);
         }
-        return (unit_outcome(unit, &merged), merged);
     }
+    merged
+}
+
+/// The first-pass outcome, or the recheck's when the first called for one
+/// and the recheck decides.
+fn rechecked<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers<'a>) {
     let first = answers(judgments, &unit.id, Pass::First);
     let outcome = unit_outcome(unit, &first);
     let mut recheck = answers(judgments, &unit.id, Pass::Recheck);
@@ -261,49 +280,51 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
 /// section pairs and stale sections whose checks stayed undecided and whose
 /// settle has not been asked yet.
 pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
-    let pairs = plan
-        .units
-        .iter()
-        .filter(|u| {
-            matches!(u.detail, Detail::DocPair { .. } | Detail::Stale { .. })
-                && u.presence == Presence::Judged
-        })
-        .filter(|u| {
-            !answers(judgments, &u.id, Pass::Trace).is_empty()
-                && answers(judgments, &u.id, Pass::Settle).is_empty()
-        })
-        .filter(|u| matches!(resolved(u, judgments).0, Outcome::Uncertain(_)))
-        .map(|u| u.id.clone());
-    // Comments still undecided after their recheck, or without one.
-    let comments = plan
-        .units
-        .iter()
-        .filter(|u| matches!(u.detail, Detail::Comment { .. }) && u.presence == Presence::Judged)
-        .filter(|u| answers(judgments, &u.id, Pass::Settle).is_empty())
-        .filter(|u| u.recheck.is_none() || !answers(judgments, &u.id, Pass::Recheck).is_empty())
-        .filter(|u| matches!(resolved(u, judgments).0, Outcome::Uncertain(_)))
-        .map(|u| u.id.clone());
     plan.units
         .iter()
-        .filter(|u| {
-            [catalog::FILE_ORGANIZATION, catalog::LARGE_DOCS].contains(&u.rule)
-                && u.presence == Presence::Judged
-        })
-        .filter(|u| answers(judgments, &u.id, Pass::Trace).is_empty())
-        .filter(|u| {
-            let pass = if u.recheck.is_some() && u.rule != catalog::LARGE_DOCS {
-                Pass::Recheck
-            } else {
-                Pass::First
-            };
-            answers(judgments, &u.id, pass)
-                .get("split")
-                .is_some_and(|a| matches!(benefit(a), Outcome::Uncertain(_)))
+        .filter(|u| u.presence == Presence::Judged)
+        .filter(|u| match u.detail {
+            Detail::DocPair { .. } | Detail::Stale { .. } => unsettled_check(u, judgments),
+            Detail::Comment { .. } => unsettled_comment(u, judgments),
+            _ => unkinded_split(u, judgments),
         })
         .map(|u| u.id.clone())
-        .chain(pairs)
-        .chain(comments)
         .collect()
+}
+
+/// An outline or large document not yet asked its kind whose split Score
+/// stayed undecided: the recheck's for an outline that has one, else the
+/// first.
+fn unkinded_split(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    if ![catalog::FILE_ORGANIZATION, catalog::LARGE_DOCS].contains(&unit.rule)
+        || !answers(judgments, &unit.id, Pass::Trace).is_empty()
+    {
+        return false;
+    }
+    let pass = if unit.recheck.is_some() && unit.rule != catalog::LARGE_DOCS {
+        Pass::Recheck
+    } else {
+        Pass::First
+    };
+    answers(judgments, &unit.id, pass)
+        .get("split")
+        .is_some_and(|a| matches!(benefit(a), Outcome::Uncertain(_)))
+}
+
+/// A section pair or stale section whose checks were asked, stayed
+/// undecided, and whose settle has not been asked.
+fn unsettled_check(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    !answers(judgments, &unit.id, Pass::Trace).is_empty()
+        && answers(judgments, &unit.id, Pass::Settle).is_empty()
+        && matches!(resolved(unit, judgments).0, Outcome::Uncertain(_))
+}
+
+/// A comment still undecided after its recheck, or without one, whose kind
+/// has not been asked.
+fn unsettled_comment(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    answers(judgments, &unit.id, Pass::Settle).is_empty()
+        && (unit.recheck.is_none() || !answers(judgments, &unit.id, Pass::Recheck).is_empty())
+        && matches!(resolved(unit, judgments).0, Outcome::Uncertain(_))
 }
 
 /// Documents whose plan question found a plan whose work Git shows finished.

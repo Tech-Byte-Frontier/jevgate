@@ -197,6 +197,27 @@ fn settings_extended_by(scope: &Scope<'_>, owner: usize) -> Vec<serde_json::Valu
     if !setup.settings {
         return Vec::new();
     }
+    // The security settings this module sets, which an extending module may
+    // assign again.
+    let names: Vec<&str> = setup
+        .assigned
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .filter(|name| {
+            crate::analysis::django::security_setting(name)
+                || crate::analysis::django::secret_name(name)
+        })
+        .collect();
+    extending_modules(scope, owner)
+        .into_iter()
+        .take(EXTENDING_MODULES)
+        .map(|other| extending_entry(scope, other, &names))
+        .collect()
+}
+
+/// The other settings modules that import `owner`, directly or through
+/// others, in path order.
+fn extending_modules(scope: &Scope<'_>, owner: usize) -> Vec<usize> {
     let candidates: Vec<usize> = scope
         .owners
         .iter()
@@ -225,38 +246,28 @@ fn settings_extended_by(scope: &Scope<'_>, owner: usize) -> Vec<serde_json::Valu
     }
     extending.sort_by_key(|&other| &scope.inputs[other].result.path);
     extending
-        .into_iter()
-        .take(EXTENDING_MODULES)
-        .map(|other| {
-            // Its own assignments of the security settings this module sets.
-            let names: Vec<&str> = setup
-                .assigned
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .filter(|name| {
-                    crate::analysis::django::security_setting(name)
-                        || crate::analysis::django::secret_name(name)
-                })
-                .collect();
-            let mut again: Vec<&str> = scope.units[&other]
-                .setup
-                .assigned
-                .iter()
-                .filter(|(name, _)| names.contains(&name.as_str()))
-                .map(|(_, shown)| shown.as_str())
-                .collect();
-            again.dedup();
-            let mut entry = serde_json::json!({
-                "module": scope.inputs[other].result.path.display().to_string(),
-                "sets_these_settings_again": again,
-            });
-            let selected = selections(&scope.inputs[other].settings_selected_by);
-            if !selected.is_empty() {
-                entry["selected_as_the_settings_to_run_with_by"] = serde_json::json!(selected);
-            }
-            entry
-        })
-        .collect()
+}
+
+/// One extending module, its own assignments of `names` and the lines that
+/// select it to run with.
+fn extending_entry(scope: &Scope<'_>, other: usize, names: &[&str]) -> serde_json::Value {
+    let mut again: Vec<&str> = scope.units[&other]
+        .setup
+        .assigned
+        .iter()
+        .filter(|(name, _)| names.contains(&name.as_str()))
+        .map(|(_, shown)| shown.as_str())
+        .collect();
+    again.dedup();
+    let mut entry = serde_json::json!({
+        "module": scope.inputs[other].result.path.display().to_string(),
+        "sets_these_settings_again": again,
+    });
+    let selected = selections(&scope.inputs[other].settings_selected_by);
+    if !selected.is_empty() {
+        entry["selected_as_the_settings_to_run_with_by"] = serde_json::json!(selected);
+    }
+    entry
 }
 
 /// Lines that select a settings module to run with, as `path:line: text`.
