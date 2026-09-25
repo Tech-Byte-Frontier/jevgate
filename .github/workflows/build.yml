@@ -1,0 +1,79 @@
+name: Build
+# Release binaries for every supported platform. The release workflow calls
+# this and attaches the archives to the GitHub release; pull requests that
+# change the build or the dependencies run it too, so a platform that stops
+# building is caught before a tag.
+on:
+  workflow_call:
+  pull_request:
+    paths: [".github/workflows/build.yml", "Cargo.toml", "Cargo.lock"]
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            # Cross-compiled on Apple silicon; runs only under Rosetta.
+            cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      TARGET: ${{ matrix.target }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --target "$TARGET"
+      - name: Install musl
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo +stable build --release --locked --target "$TARGET"
+      - name: Package
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          name="jevgate-$version-$TARGET"
+          exe=jevgate
+          [[ "$TARGET" == *windows* ]] && exe=jevgate.exe
+          mkdir -p "dist/$name"
+          cp "target/$TARGET/release/$exe" README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT NOTICE "dist/$name/"
+          cd dist
+          if [[ "$TARGET" == *windows* ]]; then
+            archive="$name.zip"
+            7z a -tzip "$archive" "$name" > /dev/null
+          else
+            archive="$name.tar.gz"
+            tar -czf "$archive" "$name"
+          fi
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          echo "BINARY=dist/$name/$exe" >> "$GITHUB_ENV"
+      - name: Smoke test
+        if: ${{ !matrix.cross }}
+        run: |
+          "$BINARY" --version
+          "$BINARY" rules > /dev/null
+          "$BINARY" check --dry-run src/main.rs > /dev/null
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
