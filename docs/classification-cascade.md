@@ -87,7 +87,10 @@ signatures, or one candidate pair.
    serves several. Kinds that serve one feature at 0.80 clear it, and the
    others at 0.80 raise a consider. Weighing a split stayed near a third per
    level on such files, while naming the kind was decisive; asked beside the
-   recheck, the kind moved the recheck's own answers.
+   recheck, the kind moved the recheck's own answers. A file too long to send
+   whole gets no recheck, so its undecided first answer is asked the kind
+   from the outline alone; large Java classes and their test files otherwise
+   stayed uncertain.
    A test left undecided on whether it re-implements the code or checks only
    its mocks is asked again with the bodies of the functions it calls and its
    file's imports, mocks and setup hooks (a part too long is left out, never
