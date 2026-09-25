@@ -4,8 +4,11 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-25
+
 - Release binaries for Linux (x86_64 and arm64, static), macOS (Apple silicon and Intel) and Windows (x86_64), with SHA-256 checksums and build provenance (`gh attestation verify`). `install.sh` installs a checked binary on Linux and macOS, and `cargo binstall jevgate` finds the archives on every platform.
 - Windows: files are named with forward slashes, as on other platforms, so path rules (Next.js routes, Django modules, documentation roles) match there, and reports and baselines name a file the same way everywhere. Requests on Linux and macOS are unchanged, so cached answers stay valid.
+- The project has a security policy with private reporting, a contributing guide, this changelog, and issue templates, including one for reporting a wrong finding.
 
 ## [0.16.0] - 2026-09-25
 
@@ -139,7 +142,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.14.0...v0.14.1
