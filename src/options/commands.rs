@@ -6,16 +6,17 @@ use clap::{Subcommand, ValueEnum};
 pub enum JevCommand {
     /// Save, inspect or remove your TypeSafe API credential
     ///
-    /// A check finds its key in this order: the TYPESAFE_API_KEY environment
-    /// variable, then the file named by `check --env-file` (by default the
-    /// repository's `.env`), then the key saved by `jevgate auth login`. In CI, set TYPESAFE_API_KEY
-    /// from a secret; nothing needs to be saved.
+    /// TypeSafe credentials are checked in this order: the TYPESAFE_API_KEY
+    /// environment variable, then the file named by `check --env-file` (by
+    /// default the repository's `.env`), then the key saved by `jevgate auth login`.
     #[command(after_long_help = AUTH_EXAMPLES)]
     Auth {
         #[command(subcommand)]
         command: crate::auth::AuthCommand,
     },
-    /// Review code with TypeSafe Jev; exit 1 when the gate fails, 2 when the run is incomplete
+    /// Review code with Jev; TypeSafe is the default provider
+    ///
+    /// Exits 1 when the gate fails and 2 when the run is incomplete
     ///
     /// Parses the selected files locally, sends small evidence units (a
     /// function, a file outline, a pair of copies, a test, a documentation
@@ -178,7 +179,8 @@ Files (at the repository root):
   .jevgate/report.html    HTML dashboard, with --report
 
 Environment:
-  TYPESAFE_API_KEY          API key; takes precedence over every saved credential
+  TYPESAFE_API_KEY          TypeSafe API key; takes precedence over saved credentials
+  OPENROUTER_API_KEY        OpenRouter key when --provider openrouter is selected
   JEVGATE_CREDENTIAL_STORE  Where `auth login` saves: auto, keyring or file
   JEVGATE_CONFIG_DIR        Absolute directory for file-stored credentials
   CI                        When set, --report writes the dashboard without opening a browser
@@ -196,7 +198,8 @@ Examples:
   jevgate check --fail-on none                     Advisory: never exits 1; exits 2 when incomplete
   jevgate check --fail-on review --fail-on security=consider
   jevgate check --dry-run --show-requests          Exactly what would be uploaded, offline
-  jevgate check --cache-only                       Replay cached answers; never contact TypeSafe
+  jevgate check --provider openrouter              Use OpenRouter's Jev route
+  jevgate check --cache-only                       Replay cached answers; never contact the provider
 
 Reading the JSON report (--format json or .jevgate/latest.json):
   complete           false when any selected file was not judged; the exit code is then 2

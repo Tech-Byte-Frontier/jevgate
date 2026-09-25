@@ -7,7 +7,7 @@
 
 **JevGate is a code-review gate. It asks small, precise questions about your code and turns the answers into findings you can act on.**
 
-JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, a probability and a concrete next step, so an agent or CI job can act on it and a person can check it quickly.
+JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test or a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. TypeSafe is the default provider. Set `provider = "openrouter"` or pass `--provider openrouter` to use OpenRouter instead. Code combines the answers into a verdict. Each finding has a location, a probability and a concrete next step, so an agent or CI job can act on it and a person can check it quickly.
 
 ```text
 JevGate: consider · gate passed · 42 files · 118 API requests · 263410 input tokens · ~$0.0111
@@ -127,7 +127,7 @@ Other files, such as Kotlin, are listed as skipped with the reason and never fai
 cargo install jevgate --locked
 ```
 
-JevGate needs Rust 1.90 or later to build, and a [TypeSafe API key](https://console.typesafe.ai/settings/keys) to review. Git is needed only for `--base` and the staleness rule.
+JevGate needs Rust 1.90 or later to build. Reviews use a [TypeSafe API key](https://console.typesafe.ai/settings/keys) by default, or an OpenRouter API key when the OpenRouter provider is selected. Git is needed only for `--base` and the staleness rule.
 
 ## Quick start
 
@@ -136,6 +136,7 @@ jevgate init                              # write a commented jevgate.toml for t
 jevgate auth login                        # validate and save your TypeSafe API key
 jevgate check --dry-run --show-requests   # see exactly what would be uploaded; free and offline
 jevgate check --report                    # review, then open a local HTML dashboard
+jevgate check --provider openrouter       # opt into OpenRouter Jev
 jevgate baseline                          # accept today's findings; later checks fail only on new ones
 ```
 
@@ -185,7 +186,10 @@ jobs:
           restore-keys: jevgate-answers-
       - run: jevgate check --base "${{ github.event.pull_request.base.sha }}" --format github
         env:
+          # Default provider; use this when provider is not set to openrouter.
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          # Set provider = "openrouter" in jevgate.toml (or pass --provider openrouter).
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 ```
 
 `--format github` annotates the changed lines with each finding. A finding that fails the gate is an error; the others are warnings. A Markdown table goes to the job summary, and the usual text goes to the log. The full JSON report is always at `.jevgate/latest.json` if you want to keep it as an artifact.
@@ -205,13 +209,14 @@ jobs:
 - **Transient failures:** rate limits, overload and server or edge errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts; a timeout or dropped connection is retried once, since the first send may have run.
 - **Report-only paths:** give tooling its own level with `[[scope]]` (below), so scripts are reported while product code gates.
 
-Other CI systems work the same way: set `TYPESAFE_API_KEY`, keep `.jevgate/cache` between runs, and read the exit code or the JSON report.
+Other CI systems work the same way: set `TYPESAFE_API_KEY` for the default TypeSafe route, or select OpenRouter and set `OPENROUTER_API_KEY`. Keep `.jevgate/cache` between runs, and read the exit code or JSON report.
 
 ## Configuration
 
 `jevgate init` writes a commented `jevgate.toml` at the repository root. The command line wins over the file, except that upload patterns and budgets in the file are ceilings that flags can only narrow. Unknown keys are errors.
 
 ```toml
+provider = "openrouter"                 # optional; TypeSafe is the default
 upload_allow = ["src/**", "tests/**"]   # only these paths may be uploaded
 upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 include_tests = true
@@ -240,8 +245,9 @@ rules = { security = "consider" }        # except these
 | `[[scope]]` | none | `paths` (globs), with `fail_on` for every rule and `rules` for rules or groups, as above; `off` is not accepted (use `upload_deny`). The last scope that matches a file and addresses a rule wins; flags win over scopes |
 | `fail_on` | `["review"]` | The level for rules without their own, like `--fail-on` |
 | `include_tests` | `false` | Judge tests, like `--include-tests` |
-| `model` | `jev-1.13.0` | TypeSafe model; a pinned version keeps results repeatable |
-| `cache_ttl_secs` | `3600` | Cache lifetime for the `jev-latest` and `jev-preview` aliases; pinned versions never expire |
+| `provider` | `typesafe` | `typesafe` (default) or `openrouter`; `--provider` overrides it |
+| `model` | `jev-1.13.0` | TypeSafe model, or `typesafe/jev-latest` for OpenRouter; a pinned version keeps results repeatable |
+| `cache_ttl_secs` | `3600` | Cache lifetime for the `jev-latest`, `jev-preview`, `typesafe/jev-latest` and `typesafe/jev-preview` aliases; pinned versions never expire |
 | `max_requests` | unlimited | Ceiling on API attempts per invocation |
 | `concurrency` | `6` | Ceiling on simultaneous requests (1–8) |
 | `max_file_bytes` | `262144` | Files larger than this are reported as needs-context, never truncated; generated and vendored files are skipped instead |
@@ -283,8 +289,8 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 - **What is uploaded:** only the selected units of source, bounded by `upload_allow` and `upload_deny`. `--dry-run --show-requests` prints every initial request body without credentials or network access.
 - **Instruction files:** uploaded only when a documentation rule is selected, and still bounded by the upload patterns.
-- **Credentials:** a check reads `TYPESAFE_API_KEY` from the environment, then `--env-file` or the repository's `.env`, then the key saved by `jevgate auth login` (OS credential store, or an owner-only file). The key is never printed or written to reports.
-- **Cost:** every run prints its input tokens and an estimated cost. Cached answers cost nothing.
+- **Credentials:** TypeSafe reads `TYPESAFE_API_KEY` from the environment, then `--env-file` or the repository's `.env`, then the key saved by `jevgate auth login`. OpenRouter reads `OPENROUTER_API_KEY` from the environment, then the selected credential file or repository `.env`. It does not use a saved TypeSafe key. JevGate never prints keys or writes them to reports.
+- **Cost:** every run prints its input tokens; TypeSafe's pinned model has an estimated cost. Cached answers cost nothing.
 - **Secrets:** out of scope on purpose, because judging secrets would mean uploading them. Use a local secret scanner.
 
 ## Limits

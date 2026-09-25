@@ -10,7 +10,7 @@ pub(crate) struct Unsent;
 impl std::error::Error for Unsent {}
 impl std::fmt::Display for Unsent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cannot connect to TypeSafe; request was not sent")
+        write!(f, "Cannot connect to the provider; request was not sent")
     }
 }
 
@@ -22,7 +22,7 @@ pub(crate) struct Interrupted;
 impl std::error::Error for Interrupted {}
 impl std::fmt::Display for Interrupted {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TypeSafe request timed out or its connection dropped")
+        write!(f, "Provider request timed out or its connection dropped")
     }
 }
 
@@ -35,6 +35,7 @@ pub(crate) fn retryable(status: u16) -> bool {
 
 #[derive(Debug)]
 pub(crate) struct ProviderError {
+    pub provider: &'static str,
     pub status: u16,
     pub context_limit: bool,
     /// A Cloudflare `error code: 10xx` page: the edge refused the client.
@@ -57,7 +58,7 @@ impl std::fmt::Display for ProviderError {
         } else {
             "; request was not retried"
         };
-        write!(f, "TypeSafe HTTP {}{detail}{retried}", self.status)
+        write!(f, "{} HTTP {}{detail}{retried}", self.provider, self.status)
     }
 }
 
@@ -66,9 +67,19 @@ pub(crate) fn provider_error(
     body: Option<&str>,
     retry_after: Option<u64>,
 ) -> ProviderError {
+    provider_error_for("TypeSafe", status, body, retry_after)
+}
+
+pub(crate) fn provider_error_for(
+    provider: &'static str,
+    status: u16,
+    body: Option<&str>,
+    retry_after: Option<u64>,
+) -> ProviderError {
     // Recognize only verified machine codes; do not echo arbitrary provider text.
     let json = body.and_then(|text| serde_json::from_str::<Value>(text).ok());
     ProviderError {
+        provider,
         status,
         context_limit: status == 400
             && json.is_some_and(|body| body["detail"]["error_type"] == "max_tokens_exceeded"),

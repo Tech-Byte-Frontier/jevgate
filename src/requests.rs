@@ -1,5 +1,5 @@
 //! Cached, validated and budgeted TypeSafe requests. One cache entry per uploaded request.
-use crate::{evaluate::Session, response, schema};
+use crate::{evaluate::Session, options::Provider, response, schema};
 use anyhow::{Result, ensure};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -15,6 +15,30 @@ pub(super) fn provider_request(request: &Value) -> std::borrow::Cow<'_, Value> {
     let mut copy = request.clone();
     copy.as_object_mut().unwrap().remove("jevgate");
     std::borrow::Cow::Owned(copy)
+}
+
+/// Map local requests to the selected provider's accepted request shape.
+pub(super) fn provider_request_for(
+    request: &Value,
+    provider: Provider,
+) -> std::borrow::Cow<'_, Value> {
+    let clean = provider_request(request);
+    // OpenRouter's System One API accepts bare aliases and maps them to the
+    // `typesafe/` namespace; the route configuration keeps the explicit slug.
+    let alias = clean["model"]
+        .as_str()
+        .and_then(|model| model.strip_prefix("typesafe/"))
+        .filter(|model| matches!(*model, "jev-latest" | "jev-preview"))
+        .map(str::to_owned);
+    if provider == Provider::OpenRouter
+        && let Some(alias) = alias
+    {
+        let mut copy = clean.into_owned();
+        copy["model"] = Value::String(alias);
+        std::borrow::Cow::Owned(copy)
+    } else {
+        clean
+    }
 }
 
 pub(super) fn evidence_bytes(request: &Value) -> u64 {
@@ -64,14 +88,23 @@ pub(super) fn stage(request: &Value) -> &'static str {
 }
 
 /// One cache entry per request: the model, state and questions it uploads.
-pub(super) fn judgment_key(request: &Value) -> String {
-    schema::hash(&serde_json::to_vec(&(schema::RUBRIC, provider_request(request))).unwrap())
+pub(super) fn judgment_key(request: &Value, provider: Provider) -> String {
+    let clean = provider_request(request);
+    if provider == Provider::OpenRouter {
+        schema::hash(&serde_json::to_vec(&(schema::RUBRIC, "openrouter", clean)).unwrap())
+    } else {
+        schema::hash(&serde_json::to_vec(&(schema::RUBRIC, clean)).unwrap())
+    }
 }
 
 /// Aliases move to new model versions, so their answers expire. A pinned
 /// version answers the same request the same way; its entries never expire.
 fn cache_ttl(model: &str, ttl: u64) -> Option<u64> {
-    matches!(model, "jev-latest" | "jev-preview").then_some(ttl)
+    matches!(
+        model,
+        "jev-latest" | "jev-preview" | "typesafe/jev-latest" | "typesafe/jev-preview"
+    )
+    .then_some(ttl)
 }
 
 /// A valid, unexpired cached answer to `request`, read through `load`; none
@@ -85,7 +118,7 @@ fn cached_answer(
         return None;
     }
     load(
-        &judgment_key(request),
+        &judgment_key(request, args.provider()),
         cache_ttl(args.model(), args.cache_ttl_secs()),
     )
     .filter(|(b, _)| response::validate(b, request).is_ok())
@@ -178,7 +211,7 @@ impl Session<'_> {
                 let (i, request) = pending[index];
                 *requests_count += u32::from(outcome.attempted);
                 let receipt = &mut receipts[i];
-                record(store, request, outcome, receipt);
+                record(store, request, self.args.provider(), outcome, receipt);
                 *paid.0 += receipt.metrics.input_tokens;
                 *paid.1 += receipt.metrics.output_tokens;
                 if receipt.metrics.evaluated_judgments > 0 {
@@ -195,6 +228,7 @@ impl Session<'_> {
 fn record(
     store: &crate::storage::Store,
     request: &Value,
+    provider: Provider,
     outcome: crate::transport::Outcome,
     receipt: &mut Receipt,
 ) {
@@ -211,7 +245,7 @@ fn record(
         response::validate(&body, request)?;
         let timestamp = schema::now();
         store.save(
-            &judgment_key(request),
+            &judgment_key(request, provider),
             &response::cache_value(&body, request),
             timestamp,
         )?;
@@ -302,6 +336,7 @@ mod tests {
         }
         assert!(store.load("old", cache_ttl("jev-latest", 86_400)).is_some());
         assert!(store.load("other", None).is_none());
+        assert_eq!(cache_ttl("typesafe/jev-latest", 3600), Some(3600));
     }
 
     #[test]
@@ -310,7 +345,37 @@ mod tests {
         let mut tagged = plain.clone();
         tagged["jevgate"] = serde_json::json!({"stage":"functions","sources":[]});
         assert_eq!(*provider_request(&tagged), plain);
-        assert_eq!(judgment_key(&tagged), judgment_key(&plain));
+        let default_openrouter = serde_json::json!({
+            "model":"typesafe/jev-latest",
+            "state":{"a":1},
+            "questions":{
+                "kind":{"type":"choice","criteria":{"ball":"Ball","book":"Book"}},
+                "size":{"type":"score","criteria":["Small","Medium","Large"]}
+            },
+            "jevgate":{"stage":"functions","sources":[]}
+        });
+        let mapped = provider_request_for(&default_openrouter, Provider::OpenRouter);
+        assert_eq!(mapped["model"], "jev-latest");
+        let preview = serde_json::json!({"model":"typesafe/jev-preview"});
+        assert_eq!(
+            provider_request_for(&preview, Provider::OpenRouter)["model"],
+            "jev-preview"
+        );
+        assert_eq!(mapped["state"], default_openrouter["state"]);
+        assert_eq!(mapped["questions"], default_openrouter["questions"]);
+        assert!(mapped.get("jevgate").is_none());
+        assert_eq!(
+            provider_request_for(&default_openrouter, Provider::TypeSafe)["model"],
+            "typesafe/jev-latest"
+        );
+        assert_eq!(
+            judgment_key(&tagged, Provider::TypeSafe),
+            judgment_key(&plain, Provider::TypeSafe)
+        );
+        assert_ne!(
+            judgment_key(&plain, Provider::TypeSafe),
+            judgment_key(&plain, Provider::OpenRouter)
+        );
         assert_eq!(stage(&tagged), "functions");
     }
 }

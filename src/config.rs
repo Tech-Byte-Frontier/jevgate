@@ -1,6 +1,6 @@
 use crate::{
     catalog,
-    options::{CheckArgs, FailOn},
+    options::{CheckArgs, FailOn, Provider},
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
@@ -24,6 +24,8 @@ pub struct Config {
     pub max_context_bytes: Option<u64>,
     /// Default `--fail-on` values when none are passed.
     pub fail_on: Vec<String>,
+    /// The API provider when `--provider` is not passed.
+    pub provider: Option<Provider>,
     /// The model when `--model` is not passed.
     pub model: Option<String>,
     /// Cache lifetime for model aliases when `--cache-ttl-secs` is not passed.
@@ -139,6 +141,7 @@ impl ConfigContext {
             args.context.push(self.root.join(path));
         }
         args.include_tests |= self.config.include_tests;
+        args.provider = args.provider.or(self.config.provider);
         args.model = args.model.take().or_else(|| self.config.model.clone());
         args.cache_ttl_secs = args.cache_ttl_secs.or(self.config.cache_ttl_secs);
         self.configure_rules(args)?;
@@ -524,7 +527,26 @@ mod tests {
         context.configure(&mut args).unwrap();
         assert_eq!((args.model(), args.cache_ttl_secs()), ("jev-preview", 5));
         let defaults = configured("", &[], &[]).unwrap();
+        assert_eq!(defaults.provider(), Provider::TypeSafe);
         assert_eq!(defaults.model(), crate::options::DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn provider_selection_is_opt_in_and_controls_the_default_model() {
+        let args = configured("provider = \"openrouter\"", &[], &[]).unwrap();
+        assert_eq!(args.provider(), Provider::OpenRouter);
+        assert_eq!(args.model(), crate::options::OPENROUTER_DEFAULT_MODEL);
+
+        let context = ConfigContext {
+            invocation_dir: PathBuf::from("."),
+            root: PathBuf::from("."),
+            config: toml::from_str("provider = \"openrouter\"").unwrap(),
+        };
+        let mut args = crate::tests::args();
+        args.provider = Some(Provider::TypeSafe);
+        context.configure(&mut args).unwrap();
+        assert_eq!(args.provider(), Provider::TypeSafe);
+        assert_eq!(args.model(), crate::options::DEFAULT_MODEL);
     }
 
     #[test]

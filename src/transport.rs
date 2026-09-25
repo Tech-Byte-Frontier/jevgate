@@ -1,4 +1,9 @@
-use crate::provider_error::{Interrupted, ProviderError, Unsent, provider_error, retryable};
+use crate::{
+    options::Provider,
+    provider_error::{
+        Interrupted, ProviderError, Unsent, provider_error, provider_error_for, retryable,
+    },
+};
 use anyhow::{Result, bail};
 use serde_json::Value;
 use std::{
@@ -121,11 +126,12 @@ pub struct Client {
     key_file: std::path::PathBuf,
     key: Option<crate::auth::sources::Credential>,
     explicit_file: bool,
+    provider: Provider,
     access: ProviderAccess,
 }
 
 impl Client {
-    pub fn new(key_file: &Path, explicit_file: bool) -> Self {
+    pub fn new(key_file: &Path, explicit_file: bool, provider: Provider) -> Self {
         Self {
             agent: ureq::Agent::config_builder()
                 .timeout_global(Some(Duration::from_secs(60)))
@@ -136,13 +142,15 @@ impl Client {
             key_file: key_file.into(),
             key: None,
             explicit_file,
-            access: ProviderAccess::default(),
+            provider,
+            access: ProviderAccess::for_provider(provider),
         }
     }
 
     fn credential(&mut self) -> Result<&str> {
         if self.key.is_none() {
-            self.key = Some(crate::auth::sources::resolve(
+            self.key = Some(crate::auth::sources::resolve_for(
+                self.provider,
                 &self.key_file,
                 self.explicit_file,
             )?);
@@ -162,7 +170,9 @@ impl Evaluator for Client {
     fn evaluate(&mut self, request: &Value) -> Result<Value> {
         self.access.check()?;
         let agent = self.agent.clone();
-        let result = send(&agent, self.credential()?, request);
+        let provider = self.provider;
+        let credential = self.credential()?;
+        let result = send(&agent, credential, request, provider);
         self.access.observe(&result);
         result
     }
@@ -194,11 +204,12 @@ impl Evaluator for Client {
             }
         }
         let key = self.key.as_ref().unwrap().key.expose();
+        let provider = self.provider;
         self.access.evaluate_queue(
             requests,
             concurrency,
             before,
-            |request| send(&agent, key, request),
+            |request| send(&agent, key, request, provider),
             completed,
         );
     }
@@ -218,6 +229,7 @@ const PER_MILLE: u32 = 1000;
 /// Completed and in-flight requests keep their individual results; caches bypass this gate.
 /// Rate-limit and overload responses pause every worker through one shared cooldown.
 struct ProviderAccess {
+    provider_name: &'static str,
     rejected: AtomicU16,
     /// The rejection came from the provider's edge protection, not the account.
     edge: std::sync::atomic::AtomicBool,
@@ -231,6 +243,7 @@ struct ProviderAccess {
 impl Default for ProviderAccess {
     fn default() -> Self {
         Self {
+            provider_name: "TypeSafe",
             rejected: AtomicU16::new(0),
             edge: std::sync::atomic::AtomicBool::new(false),
             edge_blocks: AtomicU16::new(0),
@@ -241,6 +254,13 @@ impl Default for ProviderAccess {
 }
 
 impl ProviderAccess {
+    fn for_provider(provider: Provider) -> Self {
+        Self {
+            provider_name: provider.name(),
+            ..Default::default()
+        }
+    }
+
     fn reset(&mut self) -> bool {
         *self.cooldown.lock().unwrap() = None;
         self.edge_blocks.store(0, Ordering::Release);
@@ -252,12 +272,15 @@ impl ProviderAccess {
         let status = self.rejected.load(Ordering::Acquire);
         if status != 0 && self.edge.load(Ordering::Acquire) {
             bail!(
-                "TypeSafe request not sent after HTTP {status} from the provider's edge protection; wait before rerunning, and contact TypeSafe if it persists"
+                "{} request not sent after HTTP {status} from the provider's edge protection; wait before rerunning, and contact {} if it persists",
+                self.provider_name,
+                self.provider_name
             );
         }
         if status != 0 {
             bail!(
-                "TypeSafe request not sent after HTTP {status}; restore account access and rerun the review"
+                "{} request not sent after HTTP {status}; restore account access and rerun the review",
+                self.provider_name
             );
         }
         Ok(())
@@ -323,7 +346,12 @@ impl ProviderAccess {
         loop {
             self.wait();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| send(request)))
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("TypeSafe request worker failed")));
+                .unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "{} request worker failed",
+                        self.provider_name
+                    ))
+                });
             self.observe(&result);
             let Some((delay, attempts)) = result.as_ref().err().and_then(retry_delay) else {
                 return (result, retry);
@@ -427,16 +455,23 @@ impl Outcome {
 
 /// Compact JSON: ureq's `send_json` pretty-prints, and the provider's edge
 /// blocks indented bodies carrying JSX that it accepts when compact.
-fn request_body(request: &Value) -> Result<Vec<u8>> {
+fn request_body(request: &Value, provider: Provider) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec(
-        crate::requests::provider_request(request).as_ref(),
+        crate::requests::provider_request_for(request, provider).as_ref(),
     )?)
 }
 
-fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
-    let body = request_body(request)?;
+fn endpoint(provider: Provider) -> &'static str {
+    match provider {
+        Provider::TypeSafe => "https://api.typesafe.ai/v1/systemone",
+        Provider::OpenRouter => "https://openrouter.ai/api/v1/systemone",
+    }
+}
+
+fn send(agent: &ureq::Agent, key: &str, request: &Value, provider: Provider) -> Result<Value> {
+    let body = request_body(request, provider)?;
     let response = agent
-        .post("https://api.typesafe.ai/v1/systemone")
+        .post(endpoint(provider))
         .header("Authorization", format!("Bearer {key}"))
         .header(
             "User-Agent",
@@ -451,13 +486,20 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
     let mut response = match response {
         Ok(response) => response,
         Err(ureq::Error::StatusCode(status)) => {
-            return Err(provider_error(status, None, None).into());
+            let error = match provider {
+                Provider::TypeSafe => provider_error(status, None, None),
+                Provider::OpenRouter => provider_error_for(provider.name(), status, None, None),
+            };
+            return Err(error.into());
         }
         Err(ureq::Error::HostNotFound | ureq::Error::ConnectionFailed) => {
             return Err(Unsent.into());
         }
         Err(ureq::Error::Timeout(_) | ureq::Error::Io(_)) => return Err(Interrupted.into()),
-        Err(_) => bail!("TypeSafe transport failure; request was not retried"),
+        Err(_) => bail!(
+            "{} transport failure; request was not retried",
+            provider.name()
+        ),
     };
     if !response.status().is_success() {
         let status = response.status().as_u16();
@@ -472,7 +514,13 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
             .limit(65_536)
             .read_to_string()
             .ok();
-        return Err(provider_error(status, body.as_deref(), retry_after).into());
+        let error = match provider {
+            Provider::TypeSafe => provider_error(status, body.as_deref(), retry_after),
+            Provider::OpenRouter => {
+                provider_error_for(provider.name(), status, body.as_deref(), retry_after)
+            }
+        };
+        return Err(error.into());
     }
     // Error bodies and headers may echo credentials or source; never render them.
     response
@@ -482,7 +530,7 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
         .read_json()
         .map_err(|error| match error {
             ureq::Error::Timeout(_) | ureq::Error::Io(_) => Interrupted.into(),
-            _ => anyhow::anyhow!("TypeSafe returned invalid or oversized JSON"),
+            _ => anyhow::anyhow!("{} returned invalid or oversized JSON", provider.name()),
         })
 }
 
@@ -496,6 +544,7 @@ pub(super) fn key_from_file(path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider_error::provider_error;
     use serde_json::json;
 
     fn fast() -> ProviderAccess {
@@ -861,8 +910,16 @@ mod tests {
     #[test]
     fn request_bodies_are_compact_without_local_metadata() {
         let request = json!({"model": "m", "state": {"source": "<a b={c} />"}, "jevgate": {}});
-        let body = String::from_utf8(request_body(&request).unwrap()).unwrap();
+        let body = String::from_utf8(request_body(&request, Provider::TypeSafe).unwrap()).unwrap();
         assert_eq!(body, r#"{"model":"m","state":{"source":"<a b={c} />"}}"#);
+        assert_eq!(
+            endpoint(Provider::TypeSafe),
+            "https://api.typesafe.ai/v1/systemone"
+        );
+        assert_eq!(
+            endpoint(Provider::OpenRouter),
+            "https://openrouter.ai/api/v1/systemone"
+        );
     }
 
     #[test]

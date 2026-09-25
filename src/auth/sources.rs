@@ -2,6 +2,7 @@ use super::{
     secret::Secret,
     store::{NativeBackend, SavedCredentials, StorageMode},
 };
+use crate::options::Provider;
 use anyhow::{Context, Result, bail, ensure};
 use std::{io::Read, path::Path};
 
@@ -11,18 +12,31 @@ pub struct Credential {
 }
 
 pub fn resolve(path: &Path, explicit: bool) -> Result<Credential> {
-    let environment = environment()?;
-    resolve_with(environment, path, explicit, || {
-        SavedCredentials::<NativeBackend>::native(StorageMode::configured()?)?.get()
-    })
+    resolve_for(Provider::TypeSafe, path, explicit)
+}
+
+pub fn resolve_for(provider: Provider, path: &Path, explicit: bool) -> Result<Credential> {
+    let environment = environment_for(provider)?;
+    if provider == Provider::TypeSafe {
+        resolve_with(environment, path, explicit, || {
+            SavedCredentials::<NativeBackend>::native(StorageMode::configured()?)?.get()
+        })
+    } else {
+        resolve_with_named(environment, path, explicit, provider, || Ok(None))
+    }
 }
 
 pub fn environment() -> Result<Option<String>> {
-    match std::env::var("TYPESAFE_API_KEY") {
+    environment_for(Provider::TypeSafe)
+}
+
+fn environment_for(provider: Provider) -> Result<Option<String>> {
+    let name = provider.api_key_env();
+    match std::env::var(name) {
         Ok(value) if value.trim().is_empty() => Ok(None),
         Ok(value) => Ok(Some(value)),
         Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(_) => bail!("TYPESAFE_API_KEY must contain UTF-8 text"),
+        Err(_) => bail!("{name} must contain UTF-8 text"),
     }
 }
 
@@ -32,13 +46,24 @@ pub fn resolve_with(
     explicit: bool,
     saved: impl FnOnce() -> Result<Option<(Secret, String)>>,
 ) -> Result<Credential> {
+    resolve_with_named(environment, path, explicit, Provider::TypeSafe, saved)
+}
+
+pub(super) fn resolve_with_named(
+    environment: Option<String>,
+    path: &Path,
+    explicit: bool,
+    provider: Provider,
+    saved: impl FnOnce() -> Result<Option<(Secret, String)>>,
+) -> Result<Credential> {
+    let key_name = provider.api_key_env();
     if let Some(value) = environment {
         return Ok(Credential {
             key: Secret::parse(value)?,
-            source: "TYPESAFE_API_KEY environment variable".into(),
+            source: format!("{key_name} environment variable"),
         });
     }
-    if let Some(key) = key_from_file(path)? {
+    if let Some(key) = key_from_file_for(provider, path)? {
         return Ok(Credential {
             key,
             source: format!(
@@ -52,23 +77,38 @@ pub fn resolve_with(
             ),
         });
     }
-    ensure!(
-        !explicit,
-        "Selected --env-file is missing or has no TYPESAFE_API_KEY; correct the path or run jevgate auth login without --env-file"
-    );
+    if explicit {
+        let login = if key_name == "TYPESAFE_API_KEY" {
+            " or run jevgate auth login without --env-file"
+        } else {
+            ""
+        };
+        bail!("Selected --env-file is missing or has no {key_name}; correct the path{login}");
+    }
     match saved()
         .context("Saved credential unavailable; run jevgate auth login or set TYPESAFE_API_KEY")?
     {
         Some((key, source)) => Ok(Credential { key, source }),
-        None => bail!(
+        None if key_name == "TYPESAFE_API_KEY" => bail!(
             "No API key configured. Run jevgate auth login, set TYPESAFE_API_KEY, or provide --env-file PATH"
+        ),
+        None => bail!(
+            "No OpenRouter API key configured. Set OPENROUTER_API_KEY or provide --env-file PATH with an OPENROUTER_API_KEY entry"
         ),
     }
 }
 
 pub fn key_from_file(path: &Path) -> Result<Option<Secret>> {
+    key_from_file_named(path, "TYPESAFE_API_KEY")
+}
+
+fn key_from_file_for(provider: Provider, path: &Path) -> Result<Option<Secret>> {
+    key_from_file_named(path, provider.api_key_env())
+}
+
+fn key_from_file_named(path: &Path, key_name: &str) -> Result<Option<Secret>> {
     match read_limited(path)? {
-        Some(text) => parse_key(&text),
+        Some(text) => parse_key(&text, key_name),
         None => Ok(None),
     }
 }
@@ -97,20 +137,20 @@ fn read_limited(path: &Path) -> Result<Option<zeroize::Zeroizing<String>>> {
     Ok(Some(text))
 }
 
-/// The single `TYPESAFE_API_KEY=` definition, optionally exported or quoted.
-fn parse_key(text: &str) -> Result<Option<Secret>> {
+/// The single provider-key definition, optionally exported or quoted.
+fn parse_key(text: &str, key_name: &str) -> Result<Option<Secret>> {
     let mut key = None;
     for line in text.lines() {
         let line = line.trim().strip_prefix("export ").unwrap_or(line.trim());
         let Some((name, value)) = line.split_once('=') else {
             continue;
         };
-        if name.trim() != "TYPESAFE_API_KEY" {
+        if name.trim() != key_name {
             continue;
         }
         ensure!(
             key.is_none(),
-            "Credential file contains duplicate TYPESAFE_API_KEY definitions"
+            "Credential file contains duplicate {key_name} definitions"
         );
         let value = value.trim().trim_matches(['\'', '"']);
         key = Some(Secret::parse(value.to_owned())?);

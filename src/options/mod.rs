@@ -78,8 +78,37 @@ const WATCH: &str = "Watch";
 
 /// The model used when neither `--model` nor `model` in jevgate.toml names one.
 pub const DEFAULT_MODEL: &str = "jev-1.13.0";
+/// OpenRouter's default model alias.
+pub const OPENROUTER_DEFAULT_MODEL: &str = "typesafe/jev-latest";
 /// Cache lifetime for the `jev-latest` and `jev-preview` aliases, in seconds.
 pub const DEFAULT_CACHE_TTL_SECS: u64 = 3600;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum, serde::Deserialize)]
+pub enum Provider {
+    #[default]
+    #[value(name = "typesafe")]
+    #[serde(rename = "typesafe")]
+    TypeSafe,
+    #[value(name = "openrouter")]
+    #[serde(rename = "openrouter")]
+    OpenRouter,
+}
+
+impl Provider {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::TypeSafe => "TypeSafe",
+            Self::OpenRouter => "OpenRouter",
+        }
+    }
+
+    pub const fn api_key_env(self) -> &'static str {
+        match self {
+            Self::TypeSafe => "TYPESAFE_API_KEY",
+            Self::OpenRouter => "OPENROUTER_API_KEY",
+        }
+    }
+}
 
 #[derive(Args, Debug)]
 pub struct CheckArgs {
@@ -171,7 +200,10 @@ pub struct CheckArgs {
     /// Follow-up requests depend on answers and are not known in advance.
     #[arg(long, requires = "dry_run", help_heading = OUTPUT)]
     pub show_requests: bool,
-    /// TypeSafe model; pin a version for repeatable results [default: jev-1.13.0]
+    /// Provider to use [default: typesafe; can also be set in jevgate.toml]
+    #[arg(long, value_enum, help_heading = BUDGETS)]
+    pub provider: Option<Provider>,
+    /// Model to use; defaults to jev-1.13.0 for TypeSafe or typesafe/jev-latest for OpenRouter
     ///
     /// Also set by `model` in jevgate.toml. Answers are cached per model, so
     /// changing it re-asks every unit.
@@ -184,7 +216,7 @@ pub struct CheckArgs {
     /// ceiling this flag can only lower.
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000), help_heading = BUDGETS)]
     pub max_requests: Option<u32>,
-    /// Maximum simultaneous TypeSafe requests (1-8)
+    /// Maximum simultaneous provider requests (1-8)
     #[arg(long, value_name = "N", default_value_t = 6, value_parser = clap::value_parser!(u32).range(1..=MAX_CONCURRENCY as i64), help_heading = BUDGETS)]
     pub concurrency: u32,
     /// Per-file read limit; a larger file is reported as needs-context, never truncated
@@ -202,12 +234,12 @@ pub struct CheckArgs {
     /// Ignore cached answers for this invocation and ask again
     #[arg(long, help_heading = BUDGETS)]
     pub refresh: bool,
-    /// Use cached answers only and never contact TypeSafe; unanswered units leave the run incomplete
+    /// Use cached answers only and never contact the provider; unanswered units leave the run incomplete
     #[arg(long, conflicts_with = "refresh", help_heading = BUDGETS)]
     pub cache_only: bool,
-    /// Credential file holding TYPESAFE_API_KEY [default: <repository root>/.env]
+    /// Credential file holding the selected provider's API key [default: <repository root>/.env]
     ///
-    /// The TYPESAFE_API_KEY environment variable takes precedence.
+    /// The selected provider's environment variable takes precedence.
     #[arg(long, value_name = "FILE", help_heading = BUDGETS)]
     pub env_file: Option<PathBuf>,
     /// Keep running and re-check the selected files after each save
@@ -332,9 +364,17 @@ impl CheckArgs {
             .collect()
     }
 
-    /// The model to ask: `--model`, else configuration, else [`DEFAULT_MODEL`].
+    /// The selected provider, defaulting to TypeSafe.
+    pub fn provider(&self) -> Provider {
+        self.provider.unwrap_or_default()
+    }
+
+    /// The model to ask: `--model`, else configuration, else the provider default.
     pub fn model(&self) -> &str {
-        self.model.as_deref().unwrap_or(DEFAULT_MODEL)
+        self.model.as_deref().unwrap_or(match self.provider() {
+            Provider::TypeSafe => DEFAULT_MODEL,
+            Provider::OpenRouter => OPENROUTER_DEFAULT_MODEL,
+        })
     }
 
     pub fn cache_ttl_secs(&self) -> u64 {

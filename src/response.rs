@@ -46,18 +46,54 @@ fn validate_model(response: &Value, request: &Value) -> Result<()> {
     ensure!(
         !model.is_empty()
             && model.len() <= 128
-            && model
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)),
+            && model.matches('/').count() <= 1
+            && model.split('/').all(|part| {
+                !part.is_empty()
+                    && part
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+            }),
         "Invalid model identity"
     );
     if let Some(requested) = request["model"].as_str() {
         ensure!(
-            matches!(requested, "jev-latest" | "jev-preview") || model == requested,
+            model_matches_request(model, requested),
             "Provider returned a different pinned model"
         );
     }
     Ok(())
+}
+
+fn model_matches_request(model: &str, requested: &str) -> bool {
+    if matches!(requested, "jev-latest" | "jev-preview") || model == requested {
+        return true;
+    }
+    if matches!(requested, "typesafe/jev-latest" | "typesafe/jev-preview") {
+        return dated_typesafe_model(model);
+    }
+    let Some(version) = requested
+        .strip_prefix("typesafe/")
+        .unwrap_or(requested)
+        .strip_prefix("jev-")
+    else {
+        return false;
+    };
+    dated_typesafe_version(model, version)
+}
+
+fn dated_typesafe_model(model: &str) -> bool {
+    model
+        .strip_prefix("typesafe/jev-")
+        .and_then(|s| s.rsplit_once('-'))
+        .is_some_and(|(version, date)| {
+            !version.is_empty() && date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit())
+        })
+}
+
+fn dated_typesafe_version(model: &str, version: &str) -> bool {
+    model
+        .strip_prefix(&format!("typesafe/jev-{version}-"))
+        .is_some_and(|date| date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn probability(value: &Value) -> Result<f64> {
@@ -174,4 +210,49 @@ fn typed_fields(answer: &Value, kind: &str) -> Value {
             .map(|f| (f.to_string(), answer[*f].clone()))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn openrouter_alias_accepts_its_versioned_typed_answers() {
+        let request = json!({
+            "model":"typesafe/jev-latest",
+            "questions":{
+                "kind":{"type":"choice","criteria":{"ball":"Ball","book":"Book"}},
+                "size":{"type":"score","criteria":["Small","Medium","Large"]}
+            }
+        });
+        let response = json!({
+            "model":"typesafe/jev-1.13-20260917",
+            "answers":{
+                "kind":{"type":"choice","choice":"ball","confidence":1.0,
+                    "probabilities":{"ball":1.0,"book":0.0}},
+                "size":{"type":"score","score":0.0,"confidence":1.0,
+                    "probabilities":{"0":1.0,"1":0.0,"2":0.0},
+                    "legend":{"0":"Small","1":"Medium","2":"Large"}}
+            },
+            "usage":{"input_tokens":354,"output_tokens":45,"cost":0.000014868}
+        });
+        assert!(validate(&response, &request).is_ok());
+    }
+
+    #[test]
+    fn openrouter_versioned_models_require_the_requested_version() {
+        let response = json!({
+            "model":"typesafe/jev-1.13-20260917",
+            "answers":{},
+            "usage":{"input_tokens":1,"output_tokens":1}
+        });
+        let wrong = json!({"model":"typesafe/jev-1.14-20260917","answers":{},
+            "usage":{"input_tokens":1,"output_tokens":1}});
+        for requested in ["typesafe/jev-1.13", "jev-1.13"] {
+            let request = json!({"model":requested,"questions":{}});
+            assert!(validate(&response, &request).is_ok());
+            assert!(validate(&wrong, &request).is_err());
+        }
+    }
 }

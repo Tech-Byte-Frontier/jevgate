@@ -53,6 +53,23 @@ fn preview_sends_one_request_per_candidate_pair_without_local_metadata() {
 }
 
 #[test]
+fn openrouter_preview_maps_the_default_model_for_systemone_without_network() {
+    let project = Project::new();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+    let report = project.preview(&[
+        "check",
+        "lib.rs",
+        "--provider",
+        "openrouter",
+        "--dry-run",
+        "--show-requests",
+    ]);
+    assert_eq!(report["initial_requests"][0]["model"], "jev-latest");
+    assert_eq!(report["api_requests"], 0);
+    assert!(!project.0.join(".jevgate").exists());
+}
+
+#[test]
 fn default_preview_sends_units_without_automatic_context_or_state() {
     let project = Project::new();
     std::fs::write(

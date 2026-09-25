@@ -121,6 +121,9 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # File organization judges test files either way.
 # include_tests = true
 
+# TypeSafe is the default provider; select OpenRouter to use its Jev route.
+# provider = "openrouter"
+
 # The model, pinned so results stay repeatable; --model overrides it.
 # model = "{model}"
 

@@ -161,9 +161,9 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
             stage.planned_tokens += budget.request_tokens(&request) as u64;
         }
         if args.show_requests {
-            report
-                .initial_requests
-                .push(crate::requests::provider_request(&request).into_owned());
+            report.initial_requests.push(
+                crate::requests::provider_request_for(&request, args.provider()).into_owned(),
+            );
         }
     }
 }

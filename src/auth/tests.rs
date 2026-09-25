@@ -154,6 +154,53 @@ fn precedence_is_environment_then_selected_file_then_saved_credentials() {
 }
 
 #[test]
+fn openrouter_uses_its_own_environment_and_env_file_key_before_any_saved_key() {
+    let project = crate::tests::Project::new();
+    let file = project.0.join(".env");
+    project.write(
+        ".env",
+        "TYPESAFE_API_KEY=typesafe-file-key\nOPENROUTER_API_KEY=openrouter-file-key\n",
+    );
+
+    let environment = sources::resolve_with_named(
+        Some("openrouter-environment-key".into()),
+        &file,
+        true,
+        crate::options::Provider::OpenRouter,
+        || panic!("environment credentials take precedence"),
+    )
+    .unwrap();
+    assert_eq!(environment.key.expose(), "openrouter-environment-key");
+    assert_eq!(
+        environment.source,
+        "OPENROUTER_API_KEY environment variable"
+    );
+
+    let file_credential = sources::resolve_with_named(
+        None,
+        &file,
+        false,
+        crate::options::Provider::OpenRouter,
+        || panic!("the selected provider's env-file key takes precedence"),
+    )
+    .unwrap();
+    assert_eq!(file_credential.key.expose(), "openrouter-file-key");
+
+    project.write(".env", "TYPESAFE_API_KEY=typesafe-only-key\n");
+    let missing = sources::resolve_with_named(
+        None,
+        &file,
+        false,
+        crate::options::Provider::OpenRouter,
+        || Ok(None),
+    )
+    .err()
+    .expect("an OpenRouter key is required")
+    .to_string();
+    assert!(missing.contains("OPENROUTER_API_KEY"));
+}
+
+#[test]
 fn invalid_or_duplicate_keys_never_fall_through_or_appear_in_errors() {
     let project = crate::tests::Project::new();
     project.write(

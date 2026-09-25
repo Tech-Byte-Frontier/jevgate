@@ -261,8 +261,11 @@ fn check(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         return Ok(0);
     }
     let store = store.unwrap();
-    let mut client =
-        transport::Client::new(&credential_path(args, context), args.env_file.is_some());
+    let mut client = transport::Client::new(
+        &credential_path(args, context),
+        args.env_file.is_some(),
+        args.provider(),
+    );
     let mut session = evaluate::Session {
         args,
         context,
