@@ -37,6 +37,7 @@ mod init;
 mod inventory;
 mod line_ranges;
 mod locations;
+mod manual;
 mod options;
 mod output;
 mod packages;
@@ -73,7 +74,7 @@ use options::{CheckArgs, Format, JevCommand};
 /// --include-tests), and the opt-in security and documentation groups.
 #[derive(Parser)]
 #[command(version, after_long_help = options::OVERVIEW)]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
     command: JevCommand,
 }
@@ -94,6 +95,11 @@ fn run(command: JevCommand) -> Result<u8> {
     if let JevCommand::Auth { command } = command {
         return auth::run(command);
     }
+    match &command {
+        JevCommand::Completions { shell } => return manual::completions(*shell).map(|()| 0),
+        JevCommand::Man { command } => return manual::man(command.as_deref()).map(|()| 0),
+        _ => {}
+    }
     if let JevCommand::Init { force } = command {
         // Before reading configuration, so an invalid file can be replaced.
         let root = config::repository_root(&std::env::current_dir()?.canonicalize()?);
@@ -113,7 +119,10 @@ fn run(command: JevCommand) -> Result<u8> {
     };
     let context = ConfigContext::discover(file.as_deref())?;
     match command {
-        JevCommand::Auth { .. } | JevCommand::Init { .. } => {
+        JevCommand::Auth { .. }
+        | JevCommand::Init { .. }
+        | JevCommand::Completions { .. }
+        | JevCommand::Man { .. } => {
             unreachable!("handled before repository configuration")
         }
         JevCommand::Check(mut args) => {
