@@ -17,6 +17,7 @@ use crate::{
     schema::Pass,
 };
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 /// Comments judged per file, at most; the rest are counted as omitted.
 pub(super) const MAX_COMMENTS: usize = 80;
@@ -38,7 +39,10 @@ pub(super) fn plan(
     let omitted = comments.len().saturating_sub(MAX_COMMENTS);
     *out.rules.entry(COMMENTS).or_default() += omitted;
     let mut seen = std::collections::BTreeMap::<String, usize>::new();
-    let mut items = Vec::new();
+    // Packed by runs of definitions, so a comment added or removed re-asks
+    // only its own run: packed in file order, it shifted every later pack
+    // of the file and none of them hit the cache.
+    let mut by_owner: Vec<(String, Vec<(usize, Entry)>)> = Vec::new();
     for comment in comments.iter().take(MAX_COMMENTS) {
         let unit = comment.unit.map(|i| &units[i]);
         let owner = unit.map_or_else(
@@ -82,41 +86,78 @@ pub(super) fn plan(
             },
             recheck,
         });
-        items.push((
-            out.units.len() - 1,
-            Entry {
-                id,
-                state,
-                code_like: comment.code_like,
-                words: comment.words,
-            },
-        ));
+        let entry = Entry {
+            id,
+            state,
+            code_like: comment.code_like,
+            words: comment.words,
+        };
+        match by_owner.iter_mut().find(|(name, _)| name == owner) {
+            Some((_, items)) => items.push((out.units.len() - 1, entry)),
+            None => by_owner.push((owner.to_string(), vec![(out.units.len() - 1, entry)])),
+        }
     }
-    for group in pack(items, PACK_ITEMS, |(_, entry)| &entry.state) {
-        let entries: Vec<Entry> = group.iter().map(|(_, e)| e.clone()).collect();
-        let (request, asked) = build(file, &entries, Pass::First);
+    for run in runs(by_owner) {
+        for group in pack(run, PACK_ITEMS, |(_, entry)| &entry.state) {
+            send(file, group, out, requests);
+        }
+    }
+}
+
+/// One in this many definitions ends a run of definitions packed together.
+const RUN_ENDS: u8 = 4;
+
+/// Runs of consecutive definitions whose comments are packed together. A
+/// run ends after a definition whose name hashes to an end, so where runs
+/// end depends on names rather than positions: a comment added or removed
+/// re-asks only its own run. Packing each definition alone kept that too,
+/// but a definition with one documentation comment was a request of its
+/// own, and requests doubled to quadrupled.
+fn runs(by_owner: Vec<(String, Vec<(usize, Entry)>)>) -> Vec<Vec<(usize, Entry)>> {
+    let mut runs = Vec::new();
+    let mut run = Vec::new();
+    for (owner, items) in by_owner {
+        run.extend(items);
+        if Sha256::digest(owner.as_bytes())[0] % RUN_ENDS == 0 {
+            runs.push(std::mem::take(&mut run));
+        }
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    runs
+}
+
+/// One request for a pack of comments; a pack that is too large is sent one
+/// comment at a time, and a comment too large alone needs context.
+fn send(
+    file: &FileContext<'_>,
+    group: Vec<(usize, Entry)>,
+    out: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let entries: Vec<Entry> = group.iter().map(|(_, e)| e.clone()).collect();
+    let (request, asked) = build(file, &entries, Pass::First);
+    if file.budget.fits(&request) {
+        requests.push(Planned {
+            owner: file.owner,
+            request,
+            asked,
+        });
+        return;
+    }
+    for (index, entry) in group {
+        let (request, asked) = build(file, &[entry], Pass::First);
         if file.budget.fits(&request) {
             requests.push(Planned {
                 owner: file.owner,
                 request,
                 asked,
             });
-            continue;
-        }
-        // A pack that is too large is sent one comment at a time.
-        for (index, entry) in group {
-            let (request, asked) = build(file, &[entry], Pass::First);
-            if file.budget.fits(&request) {
-                requests.push(Planned {
-                    owner: file.owner,
-                    request,
-                    asked,
-                });
-            } else {
-                let unit = &mut out.units[index];
-                unit.presence = Presence::NeedsContext;
-                unit.recheck = None;
-            }
+        } else {
+            let unit = &mut out.units[index];
+            unit.presence = Presence::NeedsContext;
+            unit.recheck = None;
         }
     }
 }

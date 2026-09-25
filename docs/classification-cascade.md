@@ -420,7 +420,12 @@ signatures, or one candidate pair.
    comment or the end of its block, the line it ends, or for a file's own
    documentation the signatures of its definitions; with where it sits and
    the signature of the definition it sits in. Comments are packed eight per
-   request and asked whether they only repeat that code (a Score whose
+   request within runs of definitions, a run ending after a definition
+   whose name hashes to one of four values, so a comment added or removed
+   re-asks only its run: packed in file order, one added comment re-sent
+   every later pack of the file (6 of 6 requests of `compose.rs`, against 1
+   now), and a pack per definition doubled the requests. They are asked
+   whether they only repeat that code (a Score whose
    middle level holds headings over a group of lines), whether sentences
    could go without losing anything (only comments of 20 or more words),
    whether they describe an edit instead of the code as it is, and whether

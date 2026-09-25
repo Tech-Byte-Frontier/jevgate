@@ -149,3 +149,27 @@ fn an_undecided_comment_is_rechecked_then_settled_by_its_kind() {
         finding.message
     );
 }
+
+#[test]
+fn a_comment_added_to_one_run_of_functions_leaves_the_others_alone() {
+    // `count` ends a run of definitions, so `other` starts the next one.
+    let first = COMMENTED.replace("fn total", "fn count");
+    let second = COMMENTED.replace("fn total", "fn other");
+    let requests = |source: &str| {
+        let (project, options) = rule_project(source, catalog::COMMENTS);
+        let (_, plan) = planned(&project, &options);
+        plan.requests
+            .iter()
+            .map(|p| p.request["state"].to_string())
+            .collect::<Vec<_>>()
+    };
+    let before = requests(&format!("{first}{second}"));
+    let added = first.replace(
+        "    let mut sum = 0;\n",
+        "    let mut sum = 0;\n    // Begin with nothing\n",
+    );
+    let after = requests(&format!("{added}{second}"));
+    assert_eq!((before.len(), after.len()), (2, 2), "one request per run");
+    assert_ne!(before[0], after[0]);
+    assert_eq!(before[1], after[1], "`other` is answered from the cache");
+}
