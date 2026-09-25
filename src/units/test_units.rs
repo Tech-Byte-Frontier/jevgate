@@ -149,6 +149,35 @@ fn value_recheck(
             sources.push((path.clone(), hash.clone()));
         }
     }
+    let listed = sourced_subjects(case, subjects, &mut sources);
+    let sourced = listed.iter().any(|s| s.get("source").is_some());
+    if !sourced && setup.is_empty() {
+        return None;
+    }
+    let ruby = file.path.extension().is_some_and(|e| e == "rb");
+    let state = json!({
+        "file": file.plain_state(),
+        "tests": [test_item(case, case.source(file.source), ruby)],
+        "subjects": listed,
+        "setup": setup,
+    });
+    let paths: Vec<(&Path, &str)> = sources
+        .iter()
+        .map(|(path, hash)| (path.as_path(), hash.as_str()))
+        .collect();
+    let questions = recheck_questions(id, ruby);
+    let (request, asked) = super::request(file.model, "recheck", &paths, state, questions);
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// The functions a test calls, with the route of a controller method it
+/// reaches through a request and the bodies of the first few; each body's
+/// file joins `sources`.
+fn sourced_subjects(
+    case: &TestCase,
+    subjects: &Subjects<'_>,
+    sources: &mut Vec<(PathBuf, String)>,
+) -> Vec<Value> {
     let names: Vec<&String> = case.subjects.iter().collect();
     let mut listed = subject_state(&names, subjects.signatures);
     // A controller method the test reaches through a request, not a call.
@@ -176,11 +205,12 @@ fn value_recheck(
             sources.push((found.path.clone(), hash.clone()));
         }
     }
-    let sourced = listed.iter().any(|s| s.get("source").is_some());
-    if !sourced && setup.is_empty() {
-        return None;
-    }
-    let ruby = file.path.extension().is_some_and(|e| e == "rb");
+    listed
+}
+
+/// The hollow-test questions of a recheck; a Ruby test's name the setup its
+/// groups declare for it.
+fn recheck_questions(id: &str, ruby: bool) -> Questions {
     let evidence = if ruby {
         TestEvidence::RecheckGroups
     } else {
@@ -201,18 +231,7 @@ fn value_recheck(
             Pass::Recheck,
         );
     }
-    let state = json!({
-        "file": file.plain_state(),
-        "tests": [test_item(case, case.source(file.source), ruby)],
-        "subjects": listed,
-        "setup": setup,
-    });
-    let paths: Vec<(&Path, &str)> = sources
-        .iter()
-        .map(|(path, hash)| (path.as_path(), hash.as_str()))
-        .collect();
-    let (request, asked) = super::request(file.model, "recheck", &paths, state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+    questions
 }
 
 /// A test as sent: its name and source, and for Ruby the groups it is
