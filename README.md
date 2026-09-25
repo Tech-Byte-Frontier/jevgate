@@ -170,7 +170,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     env:
-      JEVGATE_VERSION: 0.13.0
+      JEVGATE_VERSION: 0.14.0
     steps:
       - uses: actions/checkout@v7
         with:
