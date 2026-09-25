@@ -198,6 +198,7 @@ Environment:
   JEVGATE_CREDENTIAL_STORE  Where `auth login` saves: auto, keyring or file
   JEVGATE_CONFIG_DIR        Absolute directory for file-stored credentials
   CI                        When set, --report writes the dashboard without opening a browser
+  NO_COLOR, CLICOLOR_FORCE  Turn agent output color off or on where --color is auto
 
 `jevgate <command> --help` explains each command; -h prints a summary. `jevgate completions SHELL`
 and `jevgate man [COMMAND]` print shell completions and man pages.";

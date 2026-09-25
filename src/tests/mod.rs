@@ -42,6 +42,32 @@ pub(super) fn args() -> CheckArgs {
 }
 
 /// A function large enough to judge (five body lines).
+/// A shared-logic finding at `src/a,b.rs:12`, with text the output formats escape.
+pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Finding {
+    crate::schema::Finding {
+        rule: "maintainability/shared-logic".into(),
+        strength,
+        line: 12,
+        message: "Copies: 50% alike,\nsee `b`".into(),
+        action: "Share one | implementation".into(),
+        symbol: None,
+        rule_version: String::new(),
+        concern_probability: 0.9,
+        locations: vec![crate::schema::Location {
+            path: "src/a,b.rs".into(),
+            start_line: 12,
+            end_line: 20,
+            symbol: None,
+        }],
+        quote: None,
+        category: None,
+        values: Vec::new(),
+        fingerprint: String::new(),
+        rank: 1.0,
+        baselined: false,
+    }
+}
+
 pub(super) fn function(name: &str) -> String {
     format!(
         "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let doubled = total * 2;\n    doubled + 1\n}}\n"

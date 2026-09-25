@@ -48,7 +48,7 @@ pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<(
             note!("jevgate: cannot write the job summary: {error}");
         }
     }
-    output::agent(out, report, args.verbose)
+    output::agent(out, report, args.verbose, output::Style::PLAIN)
 }
 
 fn annotation(path: &Path, finding: &Finding, fails: bool) -> String {
@@ -137,32 +137,7 @@ fn cell(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::Location;
-
-    fn finding(strength: Strength) -> Finding {
-        Finding {
-            rule: "maintainability/shared-logic".into(),
-            strength,
-            line: 12,
-            message: "Copies: 50% alike,\nsee `b`".into(),
-            action: "Share one | implementation".into(),
-            symbol: None,
-            rule_version: String::new(),
-            concern_probability: 0.9,
-            locations: vec![Location {
-                path: "src/a,b.rs".into(),
-                start_line: 12,
-                end_line: 20,
-                symbol: None,
-            }],
-            quote: None,
-            category: None,
-            values: Vec::new(),
-            fingerprint: String::new(),
-            rank: 1.0,
-            baselined: false,
-        }
-    }
+    use crate::tests::finding;
 
     #[test]
     fn annotations_escape_commands_and_mark_what_fails_the_gate() {

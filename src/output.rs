@@ -1,9 +1,13 @@
 use crate::{
-    options::{CheckArgs, Format},
+    options::{CheckArgs, ColorChoice, Format},
     schema::{FileResult, Finding, Report, Status, Strength},
 };
 use anyhow::Result;
-use std::{collections::BTreeMap, io::Write, path::Path};
+use std::{
+    collections::BTreeMap,
+    io::{IsTerminal, Write},
+    path::Path,
+};
 
 /// Consider findings shown by default; `--verbose` shows all.
 const TOP_CONSIDER: usize = 10;
@@ -23,6 +27,56 @@ fn usd(model: &str, tokens: u64) -> Option<f64> {
     (model == "jev-1.13.0").then(|| tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
 }
 
+// ANSI select-graphic-rendition codes.
+const BOLD: &str = "1";
+const DIM: &str = "2";
+const RED: &str = "31";
+const CYAN: &str = "36";
+const BOLD_RED: &str = "1;31";
+const BOLD_GREEN: &str = "1;32";
+const BOLD_YELLOW: &str = "1;33";
+
+/// ANSI styles for agent output, or plain text.
+#[derive(Clone, Copy)]
+pub(crate) struct Style(bool);
+
+impl Style {
+    pub(crate) const PLAIN: Self = Self(false);
+
+    /// `--color`, then NO_COLOR (set and not empty: off) and CLICOLOR_FORCE
+    /// (set and not `0`: on), then whether stdout is a terminal that shows color.
+    fn for_stdout(choice: ColorChoice) -> Self {
+        let var = |name| std::env::var_os(name).filter(|v| !v.is_empty());
+        Self(match choice {
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+            ColorChoice::Auto if var("NO_COLOR").is_some() => false,
+            ColorChoice::Auto if var("CLICOLOR_FORCE").is_some_and(|v| v != "0") => true,
+            ColorChoice::Auto => std::io::stdout().is_terminal() && color_terminal(),
+        })
+    }
+
+    fn paint(self, code: &str, text: &str) -> String {
+        if self.0 {
+            format!("\x1b[{code}m{text}\x1b[0m")
+        } else {
+            text.to_string()
+        }
+    }
+}
+
+/// Whether the terminal shows ANSI color: not `TERM=dumb`, and on Windows
+/// only Windows Terminal or a terminal that sets TERM, as the legacy console
+/// prints the codes.
+fn color_terminal() -> bool {
+    let term = std::env::var_os("TERM");
+    if cfg!(windows) {
+        std::env::var_os("WT_SESSION").is_some() || term.is_some_and(|t| t != "dumb")
+    } else {
+        term.is_none_or(|t| t != "dumb")
+    }
+}
+
 /// Write the report to stdout. A reader that closes the pipe early (as with
 /// `| head`) ends the output without failing the run, so the exit code still
 /// reflects the gate.
@@ -35,7 +89,12 @@ pub fn emit(report: &Report, args: &CheckArgs) -> Result<()> {
         Format::Jsonl => serde_json::to_writer(&mut out, report)
             .map_err(anyhow::Error::from)
             .and_then(|()| Ok(writeln!(out)?)),
-        Format::Agent => agent(&mut out, report, args.verbose),
+        Format::Agent => agent(
+            &mut out,
+            report,
+            args.verbose,
+            Style::for_stdout(args.color),
+        ),
         Format::Github => crate::github::emit(&mut out, report, args),
     };
     match written {
@@ -63,9 +122,14 @@ pub(crate) fn label(value: &impl serde::Serialize) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-pub(super) fn agent(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
-    emit_header(out, report)?;
-    emit_findings(out, report, verbose)?;
+pub(super) fn agent(
+    out: &mut impl Write,
+    report: &Report,
+    verbose: bool,
+    style: Style,
+) -> Result<()> {
+    emit_header(out, report, style)?;
+    emit_findings(out, report, verbose, style)?;
     emit_summary(out, report)?;
     if let Some(load) = &report.context_load {
         emit_context_load(out, load)?;
@@ -109,11 +173,16 @@ pub(crate) fn headline(report: &Report) -> String {
     )
 }
 
-/// The headline, then run errors.
-fn emit_header(out: &mut impl Write, report: &Report) -> Result<()> {
-    writeln!(out, "{}", headline(report))?;
+/// The headline, green when the gate passed and red when it failed, then run errors.
+fn emit_header(out: &mut impl Write, report: &Report, style: Style) -> Result<()> {
+    let code = match &report.gate {
+        Some(gate) if gate.passed => BOLD_GREEN,
+        Some(_) => BOLD_RED,
+        None => BOLD,
+    };
+    writeln!(out, "{}", style.paint(code, &headline(report)))?;
     for error in &report.errors {
-        writeln!(out, "Error: {error}")?;
+        writeln!(out, "{} {error}", style.paint(RED, "Error:"))?;
     }
     Ok(())
 }
@@ -135,7 +204,7 @@ pub(crate) fn ranked(report: &Report) -> Vec<(&Path, &Finding)> {
 
 /// Every review, then the top-ranked considers (all with `verbose`). Notes
 /// are listed only with `verbose`; otherwise just counted.
-fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
+fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: Style) -> Result<()> {
     let findings = ranked(report);
     let of = |strength: Strength| -> Vec<(&Path, &Finding)> {
         findings
@@ -150,10 +219,8 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result
         of(Strength::Note),
     );
     if !review.is_empty() {
-        writeln!(out, "\nReview ({}):", review.len())?;
-        for (path, finding) in &review {
-            emit_finding(out, path, finding)?;
-        }
+        let heading = format!("Review ({}):", review.len());
+        emit_section(out, &heading, BOLD_RED, &review, style)?;
     }
     if !consider.is_empty() {
         let shown = if verbose {
@@ -166,10 +233,14 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result
         } else {
             String::new()
         };
-        writeln!(out, "\nConsider ({}{more}):", consider.len())?;
-        for (path, finding) in consider.iter().take(shown) {
-            emit_finding(out, path, finding)?;
-        }
+        let heading = format!("Consider ({}{more}):", consider.len());
+        emit_section(
+            out,
+            &heading,
+            BOLD_YELLOW,
+            &consider[..shown.min(consider.len())],
+            style,
+        )?;
     }
     if notes.is_empty() {
         return Ok(());
@@ -182,9 +253,21 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool) -> Result
         )?;
         return Ok(());
     }
-    writeln!(out, "\nNotes ({}, optional):", notes.len())?;
-    for (path, finding) in &notes {
-        emit_finding(out, path, finding)?;
+    let heading = format!("Notes ({}, optional):", notes.len());
+    emit_section(out, &heading, BOLD, &notes, style)
+}
+
+/// A blank line, a heading, then its findings.
+fn emit_section(
+    out: &mut impl Write,
+    heading: &str,
+    code: &str,
+    findings: &[(&Path, &Finding)],
+    style: Style,
+) -> Result<()> {
+    writeln!(out, "\n{}", style.paint(code, heading))?;
+    for (path, finding) in findings {
+        emit_finding(out, path, finding, style)?;
     }
     Ok(())
 }
@@ -263,21 +346,27 @@ fn emit_context_load(out: &mut impl Write, load: &crate::docs::load::ContextLoad
     Ok(())
 }
 
-fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding) -> Result<()> {
-    writeln!(
-        out,
-        "  {}:{} [{}]{} {}",
-        path.display(),
-        finding.line,
+/// `path:line [rule] message`, then the next step; the location is bold and
+/// the rule dim.
+fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Style) -> Result<()> {
+    let location = format!("{}:{}", path.display(), finding.line);
+    let rule = format!(
+        "[{}]{}",
         finding.rule,
         if finding.baselined {
             " (baselined)"
         } else {
             ""
-        },
+        }
+    );
+    writeln!(
+        out,
+        "  {} {} {}",
+        style.paint(BOLD, &location),
+        style.paint(DIM, &rule),
         finding.message
     )?;
-    writeln!(out, "    → {}", finding.action)?;
+    writeln!(out, "    {} {}", style.paint(CYAN, "→"), finding.action)?;
     Ok(())
 }
 
@@ -314,4 +403,44 @@ pub(super) fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::finding;
+
+    fn line(style: Style) -> String {
+        let mut out = Vec::new();
+        emit_finding(
+            &mut out,
+            Path::new("src/a.rs"),
+            &finding(Strength::Review),
+            style,
+        )
+        .unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn plain_findings_carry_no_escape_codes() {
+        assert_eq!(
+            line(Style::PLAIN),
+            "  src/a.rs:12 [maintainability/shared-logic] Copies: 50% alike,\nsee `b`\n    → Share one | implementation\n"
+        );
+        assert!(!Style::for_stdout(ColorChoice::Never).0);
+    }
+
+    #[test]
+    fn colored_findings_bold_the_location_and_dim_the_rule() {
+        assert!(Style::for_stdout(ColorChoice::Always).0);
+        let text = line(Style(true));
+        assert!(
+            text.starts_with(
+                "  \x1b[1msrc/a.rs:12\x1b[0m \x1b[2m[maintainability/shared-logic]\x1b[0m Copies"
+            ),
+            "{text:?}"
+        );
+        assert!(text.contains("\x1b[36m→\x1b[0m Share one"));
+    }
 }
