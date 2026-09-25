@@ -9,6 +9,7 @@ pub mod groups;
 pub mod imports;
 pub mod literals;
 pub mod nesting;
+pub(crate) mod php;
 pub mod ruby;
 pub mod sites;
 pub mod sql;

@@ -300,6 +300,364 @@ fn top_level_setup_is_one_unit_for_unsafe_settings() {
     assert!(finding.message.starts_with("Module setup"));
 }
 
+const PAGE: &str = "<?php\nrequire_once 'lib.php';\n\nfunction escape_html($text) {\n    return htmlspecialchars($text, ENT_QUOTES);\n}\n\nif (isset($_GET['id'])) {\n    $id = $_GET['id'];\n    $query = \"SELECT name FROM users WHERE id = '$id'\";\n    $result = mysqli_query($db, $query);\n    echo '<p>' . $_GET['name'] . '</p>';\n}\n?>\n<footer><?= date('Y') ?></footer>\n";
+
+#[test]
+fn a_php_page_script_is_one_unit_judged_by_every_security_rule() {
+    let project = Project::new();
+    project.write("page.php", PAGE);
+    let mut options = args();
+    options.rules = catalog::SECURITY.iter().map(|r| r.to_string()).collect();
+    let (_, plan) = planned(&project, &options);
+    let request = &plan.requests[0].request;
+    let functions = request["state"]["functions"].as_array().unwrap();
+    let names: Vec<&str> = functions
+        .iter()
+        .filter_map(|f| f["name"].as_str())
+        .collect();
+    assert_eq!(names, ["escape_html", "top-level code"]);
+    let script = functions[1]["source"].as_str().unwrap();
+    assert!(script.starts_with("require_once 'lib.php';\nif (isset($_GET['id']))"));
+    assert!(!script.contains("function escape_html") && !script.contains("<footer>"));
+    assert!(script.ends_with("date('Y')"), "{script}");
+    let asked: Vec<&String> = request["questions"].as_object().unwrap().keys().collect();
+    for question in ["f1_interpreted", "f1_error_details", "f1_weakened"] {
+        assert!(asked.iter().any(|q| *q == question), "{asked:?}");
+    }
+
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("interpreted", noul_at(0.95)),
+        ("sql", noul_at(0.97)),
+        ("markup", noul_at(0.9)),
+        ("origin", spread(0.0, 0.05, 0.95)),
+        ("markup_parts", choice_of("request", &MARKUP_PARTS)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let finding = report.files[0]
+        .findings
+        .iter()
+        .find(|f| f.rule == "security/injection")
+        .unwrap();
+    assert_eq!(finding.symbol.as_deref(), Some("top-level code"));
+    assert_eq!(finding.category.as_deref(), Some("CWE-89 SQL injection"));
+    assert!(
+        finding.message.starts_with(
+            "Top-level code places values from another party into a database query and markup without"
+        ),
+        "{}",
+        finding.message
+    );
+    assert_eq!(
+        (
+            finding.locations.last().unwrap().start_line,
+            finding.locations.last().unwrap().end_line
+        ),
+        (2, 15)
+    );
+}
+
+#[test]
+fn redirects_deserializers_and_uploads_are_checked_kinds_with_their_weakness() {
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    for (check, category) in [
+        ("redirect", "CWE-601 open redirect"),
+        ("deserialize", "CWE-502 deserialization of untrusted data"),
+        ("upload", "CWE-434 unrestricted file upload"),
+    ] {
+        let project = Project::new();
+        project.write(
+            "go.php",
+            "<?php\n$target = $_GET['next'];\nheader('Location: ' . $target);\n$prefs = unserialize($_COOKIE['prefs']);\nmove_uploaded_file($_FILES['f']['tmp_name'], 'up/' . $_FILES['f']['name']);\n",
+        );
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("resource", noul_at(0.95)),
+            (check, noul_at(0.95)),
+            ("origin", spread(0.0, 0.05, 0.95)),
+        ];
+        let report = run(&project, &options, &mut eval);
+        let finding = &report.files[0].findings[0];
+        assert_eq!(finding.category.as_deref(), Some(category));
+        assert_eq!(finding.strength, Strength::Review);
+    }
+}
+
+/// The questions of the trace planned for the first unit of `path`.
+fn traced_checks(path: &str, source: &str) -> serde_json::Map<String, Value> {
+    let project = Project::new();
+    project.write(path, source);
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let (_, plan) = planned(&project, &options);
+    let trace = &plan.files[&0].units[0];
+    let Detail::Security {
+        trace: Some((request, _)),
+        ..
+    } = &trace.detail
+    else {
+        panic!("no trace planned");
+    };
+    request["questions"].as_object().unwrap().clone()
+}
+
+#[test]
+fn php_checks_name_php_functions_and_its_own_kinds_only_where_the_source_names_them() {
+    let rust = traced_checks("lib.rs", QUERY);
+    for kind in ["deserialize", "upload"] {
+        assert!(!rust.contains_key(kind), "{kind} in {rust:?}");
+    }
+    assert!(!rust["sql"].to_string().contains("mysqli"));
+    let plain = traced_checks(
+        "page.php",
+        "<?php\n$id = $_GET['id'];\n$rows = mysqli_query($db, \"SELECT * FROM t WHERE id = $id\");\n",
+    );
+    assert!(
+        plain["sql"]
+            .to_string()
+            .contains("mysqli_real_escape_string")
+    );
+    assert!(plain["redirect"].to_string().contains("Location header"));
+    for kind in ["deserialize", "upload"] {
+        assert!(!plain.contains_key(kind), "{kind} is asked only when named");
+    }
+    let named = traced_checks(
+        "page.php",
+        "<?php\nheader('Location: ' . $_GET['next']);\n$p = unserialize($_COOKIE['p']);\nmove_uploaded_file($_FILES['f']['tmp_name'], 'up/x');\n",
+    );
+    for kind in ["redirect", "deserialize", "upload"] {
+        assert!(named.contains_key(kind), "{kind} in {named:?}");
+    }
+}
+
+const MARKUP_PARTS: [&str; 8] = [
+    "request",
+    "stored",
+    "parameter",
+    "escaped",
+    "internal",
+    "built",
+    "data",
+    "none",
+];
+
+const PATH_PARTS: [&str; 5] = ["fixed", "request", "stored", "parameter", "none"];
+
+/// The injection status of a PHP page whose markup check found a variable
+/// and whose settle Choices answer `markup` and `path`, with the path check
+/// at `path_check`; and the settle requests sent.
+fn php_settled(markup: &str, path_check: f64, path: &str) -> (Status, u64) {
+    let project = Project::new();
+    project.write(
+        "index.php",
+        "<?php\nrequire_once ROOT . \"parts/{$part}.php\";\n$page['body'] .= \"<div>{$html}</div>\";\necho $page['body'];\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("interpreted", noul_at(0.9)),
+        ("markup", noul_at(0.9)),
+        ("path", noul_at(path_check)),
+        ("origin", spread(0.4, 0.3, 0.3)),
+        ("markup_parts", choice_of(markup, &MARKUP_PARTS)),
+        ("path_parts", choice_of(path, &PATH_PARTS)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    (
+        report.files[0].dimensions[catalog::INJECTION]
+            .status
+            .clone(),
+        report
+            .stages
+            .get("settle")
+            .map_or(0, |stage| stage.successful_requests),
+    )
+}
+
+const SHELL_PARTS: [&str; 6] = [
+    "request",
+    "stored",
+    "parameter",
+    "checked",
+    "internal",
+    "none",
+];
+
+/// The injection status and first finding's message of a PHP page with the
+/// `nouls` of its trace, the origin at `origin` and `settles` answering its
+/// Choices; and the settle requests sent.
+fn php_page(
+    nouls: &[(&'static str, f64)],
+    origin: Value,
+    settles: Vec<(&'static str, Value)>,
+) -> (Status, Option<String>, u64) {
+    let project = Project::new();
+    project.write(
+        "ping.php",
+        "<?php\n$ip = $_POST['ip'];\n$parts = explode('.', $ip);\n$out = shell_exec('ping -c 4 ' . $ip);\ninclude PARTS . $part;\necho \"<pre>{$out}</pre>\";\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let mut eval = scripted(0);
+    eval.overrides = nouls.iter().map(|(q, p)| (*q, noul_at(*p))).collect();
+    eval.overrides.push(("origin", origin));
+    eval.overrides.extend(settles);
+    let report = run(&project, &options, &mut eval);
+    let file = &report.files[0];
+    (
+        file.dimensions[catalog::INJECTION].status.clone(),
+        file.findings.first().map(|f| f.message.clone()),
+        report
+            .stages
+            .get("settle")
+            .map_or(0, |stage| stage.successful_requests),
+    )
+}
+
+#[test]
+fn a_php_shell_check_is_settled_by_what_its_command_lines_hold() {
+    let found = [("interpreted", 0.95), ("shell", 0.9)];
+    let request = spread(0.0, 0.05, 0.95);
+    for (held, status) in [
+        ("checked", Status::Clear),
+        ("internal", Status::Clear),
+        ("request", Status::Review),
+    ] {
+        let settle = vec![("shell_parts", choice_of(held, &SHELL_PARTS))];
+        assert_eq!(
+            php_page(&found, request.clone(), settle).0,
+            status,
+            "{held}"
+        );
+    }
+}
+
+#[test]
+fn a_php_path_choice_is_asked_when_a_leaning_check_made_the_page_a_note() {
+    // The markup check leans toward a concern with parameters as the
+    // origin, a note; once its Choice clears it, the undecided path check
+    // is left, and its own Choice is asked in the same settle round.
+    let nouls = [("interpreted", 0.9), ("markup", 0.7), ("path", 0.3)];
+    let parameters = spread(0.1, 0.8, 0.1);
+    let (status, _, settles) = php_page(
+        &nouls,
+        parameters.clone(),
+        vec![
+            ("markup_parts", choice_of("built", &MARKUP_PARTS)),
+            ("path_parts", choice_of("fixed", &PATH_PARTS)),
+        ],
+    );
+    assert_eq!((status, settles), (Status::Clear, 2));
+    let (status, message, _) = php_page(
+        &nouls,
+        parameters,
+        vec![
+            ("markup_parts", choice_of("parameter", &MARKUP_PARTS)),
+            ("path_parts", choice_of("fixed", &PATH_PARTS)),
+        ],
+    );
+    assert_eq!(status, Status::Note);
+    let message = message.unwrap();
+    assert!(
+        message
+            .starts_with("Top-level code places a value whose origin it does not show into markup"),
+        "a page script has no parameters: {message}"
+    );
+}
+
+#[test]
+fn a_php_markup_check_is_settled_by_what_is_joined_even_when_it_found_a_variable() {
+    assert_eq!(php_settled("built", 0.05, "none"), (Status::Clear, 1));
+    for joined in ["escaped", "internal", "data"] {
+        assert_eq!(
+            php_settled(joined, 0.05, "none").0,
+            Status::Clear,
+            "{joined}"
+        );
+    }
+    for joined in ["request", "stored"] {
+        assert_eq!(
+            php_settled(joined, 0.05, "none").0,
+            Status::Review,
+            "{joined} names another party's value, whatever the origin question said"
+        );
+    }
+    assert_eq!(
+        php_settled("parameter", 0.05, "none").0,
+        Status::Uncertain,
+        "a parameter leaves the found variable with its undecided origin"
+    );
+    assert_eq!(
+        php_settled("built", 0.4, "fixed").0,
+        Status::Clear,
+        "an undecided include path picked from fixed names"
+    );
+    for origin in ["request", "stored", "parameter"] {
+        assert_eq!(
+            php_settled("built", 0.4, origin).0,
+            Status::Uncertain,
+            "{origin}"
+        );
+    }
+    let (project, options) = security_project(QUERY);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("interpreted", noul_at(0.9)),
+        ("markup", noul_at(0.9)),
+        ("origin", spread(0.4, 0.3, 0.3)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    assert!(
+        !report.stages.contains_key("settle"),
+        "other languages keep a found markup check"
+    );
+}
+
+#[test]
+fn laravel_and_slim_error_handlers_are_found_by_the_class_they_extend() {
+    let project = Project::new();
+    project.write(
+        "src/Handlers/HttpErrorHandler.php",
+        "<?php\nnamespace App\\Handlers;\n\nuse Slim\\Handlers\\ErrorHandler as SlimErrorHandler;\n\nclass HttpErrorHandler extends SlimErrorHandler\n{\n    protected function respond(): Response\n    {\n        $response = $this->responseFactory->createResponse(500);\n        $response->getBody()->write($this->exception->getMessage());\n        return $response;\n    }\n}\n",
+    );
+    project.write(
+        "app/Exceptions/Handler.php",
+        "<?php\nnamespace App\\Exceptions;\n\nclass Handler extends ExceptionHandler\n{\n    public function render($request, Throwable $e)\n    {\n        return response()->json(['error' => $e->getMessage()], 500);\n    }\n}\n",
+    );
+    project.write(
+        "public/index.php",
+        "<?php\nset_exception_handler(function (Throwable $e) {\n    echo $e->getMessage();\n});\nclass Page extends Base { public function render() { return view('page'); } }\n",
+    );
+    // Only PHP classes and PHP registrations are read this way.
+    project.write(
+        "src/view.ts",
+        "class Panel extends BaseErrorHandler {\n  render(error: Error) {\n    return `<p>${error.message}</p>`;\n  }\n}\nset_exception_handler((e: Error) => send(e.stack));\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::SENSITIVE_DATA.into()];
+    let (_, plan) = planned(&project, &options);
+    let mut registered: Vec<String> = plan
+        .files
+        .values()
+        .flat_map(|f| &f.units)
+        .filter_map(|u| match &u.detail {
+            Detail::Handler { registered } => Some(registered.clone()),
+            _ => None,
+        })
+        .collect();
+    registered.sort();
+    assert_eq!(
+        registered,
+        [
+            "`class Handler extends ExceptionHandler` (app/Exceptions/Handler.php:6)",
+            "`class HttpErrorHandler extends SlimErrorHandler` (src/Handlers/HttpErrorHandler.php:8)",
+            "`set_exception_handler(function (Throwable $e) {\n    echo $e->getMessage();\n})` (public/index.php:2)",
+        ]
+    );
+}
+
 #[test]
 fn an_undecided_value_is_cleared_by_its_kind_or_leans_into_a_note() {
     let (project, mut options) = hardcoded_project();

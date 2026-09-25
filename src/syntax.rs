@@ -85,6 +85,7 @@ fn grammar(path: &Path) -> Option<tree_sitter::Language> {
         "go" => tree_sitter_go::LANGUAGE,
         "cs" => tree_sitter_c_sharp::LANGUAGE,
         "rb" => tree_sitter_ruby::LANGUAGE,
+        "php" | "phtml" => tree_sitter_php::LANGUAGE_PHP,
         _ => return None,
     };
     Some(language.into())
@@ -196,6 +197,16 @@ mod tests {
         assert!(parse(Path::new("view.tsx"), jsx).unwrap().is_some());
         assert!(parse(Path::new("view.ts"), jsx).is_err());
         assert!(parse(Path::new("view.txt"), jsx).unwrap().is_none());
+        assert!(
+            parse(Path::new("page.php"), "<?php echo $x; ?>\n<p>hi</p>\n")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            parse(Path::new("page.phtml"), "<p><?= $x ?></p>\n")
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]

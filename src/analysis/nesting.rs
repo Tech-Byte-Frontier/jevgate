@@ -11,6 +11,7 @@ const CONTROL: &[&str] = &[
     "if_expression",
     "for_statement",
     "for_in_statement",
+    "foreach_statement",
     "for_expression",
     "while_statement",
     "while_expression",
@@ -80,10 +81,11 @@ pub(super) fn control(node: Node<'_>) -> (usize, usize) {
             }
             return length;
         }
-        // Python lists `elif` and `else` clauses as children of one `if_statement`.
+        // Python lists `elif` and `else` clauses as children of one
+        // `if_statement`, and PHP its `elseif` clauses.
         let clauses = node
             .named_children(&mut node.walk())
-            .filter(|c| matches!(c.kind(), "elif_clause"))
+            .filter(|c| matches!(c.kind(), "elif_clause" | "else_if_clause"))
             .count();
         if clauses > 0 {
             let otherwise = node

@@ -26,7 +26,10 @@ use std::{
 
 /// Calls that register a web framework's error handler, by the method that
 /// takes it; the handler is the function named or written in the call.
-const HANDLER_REGISTRATIONS: [&str; 2] = [".onError(", ".setErrorHandler("];
+/// PHP's `set_exception_handler` takes a closure or a function's name; it
+/// is the only registration looked for in PHP files.
+const HANDLER_REGISTRATIONS: [&str; 3] = [".onError(", ".setErrorHandler(", PHP_REGISTRATION];
+const PHP_REGISTRATION: &str = "set_exception_handler(";
 /// Express registers a function of four parameters (`err, req, res, next`)
 /// passed to `.use(…)` as its error handler.
 const MIDDLEWARE_REGISTRATION: &str = ".use(";
@@ -130,9 +133,11 @@ fn registered(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>, owner: usiz
         .ok()
         .flatten();
     let mut found = Vec::new();
+    let php = crate::analysis::php::file(&input.result.path);
     for needle in HANDLER_REGISTRATIONS
         .into_iter()
         .chain([MIDDLEWARE_REGISTRATION, EXCEPTION_HANDLER_REGISTRATION])
+        .filter(|needle| php == (*needle == PHP_REGISTRATION))
     {
         for (at, _) in source.match_indices(needle) {
             let line = crate::analysis::line_of(source, at);
@@ -170,7 +175,8 @@ fn registration(
         &source[start..open + argument.len() + 1],
         input.result.path.display()
     );
-    let named = argument
+    let quoted = argument.trim_matches(['\'', '"']);
+    let named = quoted
         .chars()
         .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
     if needle == EXCEPTION_HANDLER_REGISTRATION
@@ -179,7 +185,7 @@ fn registration(
         return None;
     }
     let (owner, name, source, lines) = if named {
-        named_handler(scope, imports, owner, argument)?
+        named_handler(scope, imports, owner, quoted)?
     } else {
         let first = crate::analysis::line_of(source, open);
         let last = crate::analysis::line_of(source, open + argument.len());
@@ -364,8 +370,10 @@ fn handler_helpers(scope: &Scope<'_>, handler: &Handler) -> Vec<String> {
 
 /// Methods and functions a web framework calls to turn any error a request
 /// handler returns into a response: axum's `into_response` on an error type,
-/// actix-web's `error_response`, Rocket's `#[catch(…)]` functions and the
-/// `catch` method of a NestJS `@Catch(…)` class.
+/// actix-web's `error_response`, Rocket's `#[catch(…)]` functions, the
+/// `catch` method of a NestJS `@Catch(…)` class, and the `respond`, `render`
+/// or `register` method of a PHP class extending an `…ErrorHandler` or
+/// `…ExceptionHandler` (Slim, Laravel).
 fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
     let input = &scope.inputs[owner];
     let source = input.source.as_deref().unwrap_or("");
@@ -390,6 +398,11 @@ fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
                 "error_response" if !unit.owner.is_empty() => implements("ResponseError")?,
                 "catch" if filters.contains(&unit.owner) => {
                     format!("@Catch(…) class {}", unit.owner)
+                }
+                "respond" | "render" | "register"
+                    if !unit.owner.is_empty() && crate::analysis::php::file(&input.result.path) =>
+                {
+                    php_error_handler(source, &unit.owner)?
                 }
                 name if csharp && !unit.owner.is_empty() => {
                     csharp_handler(source, &unit.owner, name, text)?
@@ -459,6 +472,21 @@ fn csharp_bases<'a>(source: &'a str, owner: &str) -> &'a str {
             head.find(':').map(|colon| head[colon + 1..].trim())
         })
         .unwrap_or("")
+}
+
+/// `class Owner extends Base` when `Base` is a PHP framework's error
+/// handler: Slim's `ErrorHandler` (whose `respond` writes the response) or
+/// Laravel's `ExceptionHandler` (`render`, and `register` for renderables).
+fn php_error_handler(source: &str, owner: &str) -> Option<String> {
+    let declaration = format!("class {owner} extends ");
+    let at = source.find(&declaration)? + declaration.len();
+    let base: String = source[at..]
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '\\')
+        .collect();
+    let name = base.rsplit('\\').next().unwrap_or("");
+    (name.ends_with("ErrorHandler") || name.ends_with("ExceptionHandler"))
+        .then(|| format!("{declaration}{base}"))
 }
 
 /// A type whose name marks it as an error, such as `Error`, `ApiError` or `AuthRejection`.

@@ -66,6 +66,7 @@ const LITERALS: &[&str] = &[
     "character_literal",
     "real_literal",
     "verbatim_string_literal",
+    "boolean",
 ];
 
 const STATEMENTS: &[&str] = &[
@@ -85,6 +86,7 @@ const STATEMENTS: &[&str] = &[
     "assignment",
     "operator_assignment",
     "return",
+    "echo_statement",
 ];
 
 /// Rust's standard formatting macros build text from their arguments.
@@ -171,6 +173,9 @@ pub struct Setup {
     /// The settings a settings module assigns, in order, each with its
     /// assignment as shown (secret literals redacted).
     pub assigned: Vec<(String, String)>,
+    /// A PHP page script: its statements are the program, judged by every
+    /// security rule rather than for unsafe settings only.
+    pub script: bool,
 }
 
 impl Setup {
@@ -253,6 +258,7 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>], settings: boo
         settings,
         redactions,
         assigned,
+        script: false,
     }
 }
 
@@ -271,6 +277,41 @@ fn assigns_setting(node: Node<'_>, source: &str) -> bool {
                 .any(|c| assigns_setting(c, source))
         }
         _ => false,
+    }
+}
+
+/// The top-level statements of a PHP file, which run on every request that
+/// reaches it: judged like a function by every security rule, since a page
+/// script is where PHP reads requests and writes responses.
+pub fn script(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
+    let mut nodes = Vec::new();
+    super::php::script_statements(root, &mut nodes);
+    let mut statements = Vec::new();
+    let mut best = BTreeMap::<usize, (Priority, Node<'_>)>::new();
+    let mode = Mode {
+        django: false,
+        settings: false,
+    };
+    for node in nodes {
+        let range = node.byte_range();
+        if units
+            .iter()
+            .any(|u| u.start < range.end && range.start < u.end)
+        {
+            continue;
+        }
+        statements.push((
+            range,
+            line_of(source, node.start_byte()),
+            line_of(source, node.end_byte().saturating_sub(1)),
+        ));
+        collect(node, root, source, mode, &mut best);
+    }
+    Setup {
+        statements,
+        sites: numbered(best, source, &[]),
+        script: true,
+        ..Setup::default()
     }
 }
 
@@ -405,6 +446,28 @@ fn priority(node: Node<'_>, source: &str, mode: Mode) -> Option<Priority> {
                 Priority::Setting
             })
         }
+        // PHP: `"… $id …"`, a heredoc, and a backtick command.
+        "encapsed_string" | "heredoc" if super::php::interpolates(node) => {
+            Some(Priority::BuiltText)
+        }
+        "shell_command_expression" => Some(Priority::BuiltText),
+        kind if super::php::CALLS.contains(&kind) => Some(
+            if super::php::arguments(node).is_some_and(|args| has_value(args)) {
+                Priority::CallWithValue
+            } else {
+                Priority::Call
+            },
+        ),
+        // PHP writes to the page with `echo`, `print` and `<?= … ?>`, and runs
+        // other files with `include` and `require`.
+        kind if super::php::OUTPUT.contains(&kind) => Some(if has_value(node) {
+            Priority::CallWithValue
+        } else {
+            Priority::Call
+        }),
+        "expression_statement" if super::php::short_echo(node, source) => {
+            Some(Priority::CallWithValue)
+        }
         "template_string" if has_child(node, "template_substitution") => Some(Priority::BuiltText),
         // React's raw-markup property: `dangerouslySetInnerHTML={{ __html: value }}`.
         "jsx_attribute"
@@ -446,10 +509,8 @@ fn priority(node: Node<'_>, source: &str, mode: Mode) -> Option<Priority> {
         | "new_expression"
         | "invocation_expression"
         | "object_creation_expression" => Some(
-            if node
-                .child_by_field_name("arguments")
-                .is_some_and(|args| has_value(args))
-            {
+            // PHP's `new` holds its arguments without a field name.
+            if super::php::arguments(node).is_some_and(|args| has_value(args)) {
                 Priority::CallWithValue
             } else {
                 Priority::Call
@@ -474,7 +535,8 @@ fn field_assignment(node: Node<'_>, mode: Mode) -> Option<Priority> {
             | "field_expression"
             | "subscript_expression"
             | "member_access_expression"
-            | "element_access_expression" => true,
+            | "element_access_expression"
+            | "scoped_property_access_expression" => true,
             "subscript" => mode.django,
             _ => false,
         })
@@ -514,11 +576,20 @@ fn concatenates(node: Node<'_>, source: &str) -> bool {
                 | "raw_string_literal"
                 | "verbatim_string_literal"
                 | "interpolated_string_expression"
+                | "encapsed_string"
+                | "heredoc"
         )
     };
-    matches!(operator, "+" | "%")
+    // PHP joins strings with `.`.
+    matches!(operator, "+" | "%" | ".")
         && (string(left) || string(right))
-        && !(LITERALS.contains(&left.kind()) && LITERALS.contains(&right.kind()))
+        && !(literal(left) && literal(right))
+}
+
+/// A literal value: PHP double-quoted text counts when it interpolates nothing.
+fn literal(node: Node<'_>) -> bool {
+    LITERALS.contains(&node.kind())
+        || matches!(node.kind(), "encapsed_string" | "heredoc") && !super::php::interpolates(node)
 }
 
 /// Whether an argument list holds something other than literals.
@@ -527,13 +598,15 @@ fn has_value(arguments: Node<'_>) -> bool {
     arguments.named_children(&mut cursor).any(|argument| {
         let value = match argument.kind() {
             "keyword_argument" => argument.child_by_field_name("value"),
-            // A C# argument wraps its expression, after any `name:`.
+            // A C# or PHP argument wraps its expression, after any `name:`.
             "argument" => {
                 argument.named_child(argument.named_child_count().saturating_sub(1) as u32)
             }
+            // PHP: `echo $a, $b;`
+            "sequence_expression" => return has_value(argument),
             _ => Some(argument),
         };
-        value.is_some_and(|v| !LITERALS.contains(&v.kind()) && !is_comment(v))
+        value.is_some_and(|v| !literal(v) && !is_comment(v))
     })
 }
 
@@ -733,6 +806,45 @@ mod tests {
         // The same object elsewhere is ordinary code without setup calls.
         let other = parse(Path::new("config.ts"), source).unwrap();
         assert!(other.setup.statements.is_empty());
+    }
+
+    #[test]
+    fn a_php_page_script_is_its_top_level_statements_with_their_sites() {
+        let source = "<?php\nnamespace App;\nuse App\\Db;\n\nfunction helper($x) {\n    return trim($x);\n}\n\n$id = $_GET['id'];\n$query = \"SELECT * FROM users WHERE id = '$id'\";\n$result = mysqli_query($db, $query);\n$out = `ping -c 4 $host`;\necho '<p>' . $_GET['name'] . '</p>';\ninclude $page;\nprint 'fixed';\n$this->title = $name;\n?>\n<h1><?= $title ?></h1>\n";
+        let file = parse(Path::new("page.php"), source).unwrap();
+        assert!(file.setup.script);
+        let lines: Vec<usize> = file.setup.statements.iter().map(|s| s.1).collect();
+        assert_eq!(
+            lines,
+            [9, 10, 11, 12, 13, 14, 15, 16, 18],
+            "definitions, imports and inline HTML are not script statements"
+        );
+        let found: Vec<(&str, usize)> = file
+            .setup
+            .sites
+            .iter()
+            .map(|s| (s.text.as_str(), s.line))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("$query = \"SELECT * FROM users WHERE id = '$id'\";", 10),
+                ("$result = mysqli_query($db, $query);", 11),
+                ("$out = `ping -c 4 $host`;", 12),
+                ("echo '<p>' . $_GET['name'] . '</p>';", 13),
+                ("include $page;", 14),
+                ("print 'fixed';", 15),
+                ("$this->title = $name;", 16),
+                ("$title", 18),
+            ]
+        );
+        let function = sites(
+            "page.php",
+            "<?php\nfunction show($pdo, $id) {\n    $pdo->prepare('SELECT 1')->execute([$id]);\n    echo \"<b>{$id}</b>\";\n}\n",
+        );
+        assert_eq!(function.len(), 2, "{function:?}");
+        let node = parse(Path::new("server.js"), "app.use(cors())\n").unwrap();
+        assert!(!node.setup.script);
     }
 
     #[test]

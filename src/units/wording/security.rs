@@ -70,7 +70,7 @@ pub(in crate::units) fn privilege_wording(
 }
 
 /// Injection kinds: the text a variable is placed into, its weakness and remedy.
-const INJECTIONS: [(&str, &str, &str, &str); 10] = [
+const INJECTIONS: [(&str, &str, &str, &str); 11] = [
     (
         "sql",
         "a database query",
@@ -123,7 +123,13 @@ const INJECTIONS: [(&str, &str, &str, &str); 10] = [
         "deserialize",
         "a deserializer that can build any object",
         "CWE-502 deserialization of untrusted data",
-        "Parse the data as JSON or with a safe loader such as `yaml.safe_load`",
+        "Parse the data as JSON or with a safe loader such as `yaml.safe_load`, or restrict the classes it may create",
+    ),
+    (
+        "upload",
+        "the name of a file it saves",
+        "CWE-434 unrestricted file upload",
+        "Allow only listed extensions and name saved uploads yourself",
     ),
     (
         "",
@@ -209,34 +215,69 @@ const SETTINGS: [(&str, &str, &str, &str); 12] = [
     ),
 ];
 
-/// The specific check of a rule's trace that found the concern most surely.
-fn found_check(rule: &str, answers: &Answers<'_>) -> &'static str {
+/// The specific checks of a rule's trace that found the concern, most surely
+/// first: a PHP page script often builds a query and markup from the same
+/// request, and naming only the strongest hid the other. Without one, the
+/// check a note leaned toward. A check its settle Choice cleared is not named.
+fn found_checks(rule: &str, answers: &Answers<'_>) -> Vec<&'static str> {
+    let get = |q: &str| answers.get(q).copied();
+    let mut found: Vec<(&'static str, f64)> = settled_checks(rule, &get)
+        .into_iter()
+        .filter_map(|(id, outcome)| match outcome {
+            Outcome::Review(p) => Some((id, p)),
+            _ => None,
+        })
+        .collect();
+    found.sort_by(|a, b| b.1.total_cmp(&a.1));
+    if !found.is_empty() {
+        return found.into_iter().map(|(id, _)| id).collect();
+    }
+    // A note from a leaning check names the kind it leaned toward.
     crate::units::security::checks(rule)
         .iter()
-        .filter_map(|check| match answers.get(check.id).map(|a| noul(a)) {
-            Some(Outcome::Review(p)) => Some((check.id, p)),
+        .filter_map(|check| match answers.get(check.id) {
+            Some(Answer::Noul { noul })
+                if crate::policy::probability_at_least(
+                    *noul,
+                    crate::policy::LEADING_PROBABILITY,
+                ) =>
+            {
+                Some((check.id, *noul))
+            }
             _ => None,
         })
         .max_by(|a, b| a.1.total_cmp(&b.1))
-        .or_else(|| {
-            // A note from a leaning check names the kind it leaned toward.
-            crate::units::security::checks(rule)
-                .iter()
-                .filter_map(|check| match answers.get(check.id) {
-                    Some(Answer::Noul { noul })
-                        if crate::policy::probability_at_least(
-                            *noul,
-                            crate::policy::LEADING_PROBABILITY,
-                        ) =>
-                    {
-                        Some((check.id, *noul))
-                    }
-                    _ => None,
-                })
-                .max_by(|a, b| a.1.total_cmp(&b.1))
-        })
-        .map_or("", |(id, _)| id)
+        .map(|(id, _)| id)
+        .into_iter()
+        .collect()
 }
+
+/// `a`, `a and b`, or `a, b and c`.
+fn listed(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+type KindRow = (&'static str, &'static str, &'static str, &'static str);
+
+/// The row of the strongest check found (the general row when none was),
+/// with the phrases of every found check listed.
+fn kind_rows(table: &'static [KindRow], kinds: &[&str]) -> (String, &'static KindRow) {
+    let strongest = kind_row(table, kinds.first().copied().unwrap_or(""));
+    let phrases: Vec<&str> = kinds.iter().map(|k| kind_row(table, k).1).collect();
+    let phrase = if phrases.len() > 1 {
+        listed(&phrases)
+    } else {
+        strongest.1.to_string()
+    };
+    (phrase, strongest)
+}
+
+/// How findings name a PHP file's top-level code.
+const SCRIPT_SUBJECT: &str = "Top-level code";
 
 /// A security finding's message, action and category (a CWE and its name).
 pub(in crate::units) fn security_wording(
@@ -249,16 +290,20 @@ pub(in crate::units) fn security_wording(
     let subject = match name {
         crate::units::security::MODULE_SETUP => "Module setup".to_string(),
         crate::units::security::SETTINGS_MODULE => "Settings module".to_string(),
+        crate::units::security::SCRIPT => SCRIPT_SUBJECT.to_string(),
         _ => format!("`{name}`"),
     };
-    let kind = found_check(rule, answers);
+    let kinds = found_checks(rule, answers);
     match rule {
-        catalog::INJECTION => injection_wording(&subject, kind, strength, p, answers),
+        catalog::INJECTION => injection_wording(&subject, &kinds, strength, p, answers),
         catalog::SENSITIVE_DATA => {
             let (what, category, action) = exposure_kind(answers);
             exposure_wording(&subject, (what, category, action), strength, p, answers)
         }
         _ => {
+            // The strongest weak setting names the finding; the others it
+            // found are listed after it.
+            let kind = kinds.first().copied().unwrap_or("");
             let (_, what, category, action) = kind_row(&SETTINGS, kind);
             let ((message, action), category) =
                 exposure_wording(&subject, (what, category, action), strength, p, answers);
@@ -286,10 +331,7 @@ fn also_found(kind: &str, answers: &Answers<'_>) -> String {
 
 /// The row of a kind table for the check that found the concern; the last
 /// row is the general case.
-fn kind_row(
-    table: &'static [(&'static str, &'static str, &'static str, &'static str)],
-    kind: &str,
-) -> &'static (&'static str, &'static str, &'static str, &'static str) {
+fn kind_row(table: &'static [KindRow], kind: &str) -> &'static KindRow {
     table
         .iter()
         .find(|(id, ..)| *id == kind)
@@ -298,16 +340,35 @@ fn kind_row(
 
 fn injection_wording(
     subject: &str,
-    kind: &str,
+    kinds: &[&str],
     strength: Strength,
     p: f64,
     answers: &Answers<'_>,
 ) -> (Wording, String) {
-    let (_, noun, category, action) = kind_row(&INJECTIONS, kind);
+    let (noun, (_, _, category, action)) = kind_rows(&INJECTIONS, kinds);
     let outside = matches!(
         answers.get("origin").map(|a| origin_outcome(a)),
         Some(Outcome::Review(_))
     );
+    // A page script has no parameters: what it does not show the origin of
+    // is set by the files it includes or returned by the helpers it calls.
+    if subject == SCRIPT_SUBJECT && !outside && strength != Strength::Review {
+        let message = if strength == Strength::Consider {
+            format!(
+                "{subject} places values whose origin it does not show, such as those an included file sets or a helper returns, into {noun} without binding, escaping or checking them; outside input reaching them would make it exploitable ({p:.2})."
+            )
+        } else {
+            format!(
+                "{subject} places a value whose origin it does not show into {noun}; it may already be bound or checked, or hold only the program's own values."
+            )
+        };
+        let action = if strength == Strength::Note {
+            "Optional: bind or check the value where it enters"
+        } else {
+            action
+        };
+        return ((message, action), category.to_string());
+    }
     let message = match (strength, outside) {
         (Strength::Review, _) => format!(
             "{subject} places values from another party into {noun} without binding, escaping or checking them ({p:.2})."

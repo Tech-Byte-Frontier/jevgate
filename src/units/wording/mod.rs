@@ -2,7 +2,10 @@
 //! per rule family; helpers they share are here.
 use super::{
     Block, Detail, GroupInfo,
-    outcome::{Answers, Outcome, benefit, noul, origin_outcome, section_signals, value_signals},
+    outcome::{
+        Answers, Outcome, benefit, noul, origin_outcome, section_signals, settled_checks,
+        value_signals,
+    },
 };
 use crate::catalog;
 use crate::schema::{Answer, Strength};

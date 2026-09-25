@@ -67,7 +67,8 @@ fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'
 /// uncertain, and for a consider or note resting on an undecided check,
 /// where its text goes (the finding claims it likely reaches a client) and
 /// where code that requests a URL runs, and every Choice for an injection
-/// note in Django code.
+/// note in Django code; and those asked whenever their checks are not
+/// clear, such as what a PHP page joins into HTML.
 pub fn unsettled(unit: &UnitPlan, judgments: &[Judgment]) -> BTreeSet<&'static str> {
     use crate::units::security::{SETTLES, SettleWhen};
     if unit.presence != Presence::Judged
@@ -94,10 +95,14 @@ pub fn unsettled(unit: &UnitPlan, judgments: &[Judgment]) -> BTreeSet<&'static s
             .get(q)
             .is_some_and(|a| matches!(noul(a), Outcome::Uncertain(_)))
     };
+    let not_clear = |q: &str| merged.get(q).is_some_and(|a| noul(a) != Outcome::Clear);
     SETTLES
         .iter()
         .filter(|kind| kind.rule == unit.rule && !merged.contains_key(kind.question))
-        .filter(|kind| open(kind.when) && kind.checks.iter().any(|q| undecided(q)))
+        .filter(|kind| match kind.when {
+            SettleWhen::NotClear => kind.checks.iter().any(|q| not_clear(q)),
+            when => open(when) && kind.checks.iter().any(|q| undecided(q)),
+        })
         .map(|kind| kind.question)
         .collect()
 }

@@ -23,27 +23,52 @@ pub(in crate::units) fn origin_outcome(answer: &Answer) -> Outcome {
 /// The outcomes of a rule's specific trace checks that were answered. An
 /// undecided check is clear when a settle Choice that settles it puts its
 /// probability on the options that clear it at the threshold, such as a URL
-/// whose host is among the program's own.
+/// whose host is among the program's own. A Choice asked whenever its
+/// checks are not clear clears a found concern too: what a PHP page joins
+/// into HTML may be a number, an error message or a body its included file
+/// built, which the markup check does not tell from a request value.
 pub(in crate::units) fn checks<'a>(
     rule: &str,
     get: &impl Fn(&str) -> Option<&'a Answer>,
 ) -> Vec<Outcome> {
+    settled_checks(rule, get)
+        .into_iter()
+        .map(|(_, outcome)| outcome)
+        .collect()
+}
+
+/// Each answered check's id with its outcome, after its settle Choice.
+pub(in crate::units) fn settled_checks<'a>(
+    rule: &str,
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Vec<(&'static str, Outcome)> {
     crate::units::security::checks(rule)
         .iter()
         .filter_map(|check| {
-            Some(match noul(get(check.id)?) {
-                Outcome::Uncertain(_) if settled(rule, check.id, get) => Outcome::Clear,
+            let outcome = match noul(get(check.id)?) {
+                Outcome::Uncertain(_) if settled(rule, check.id, get, false) => Outcome::Clear,
+                Outcome::Review(_) if settled(rule, check.id, get, true) => Outcome::Clear,
                 other => other,
-            })
+            };
+            Some((check.id, outcome))
         })
         .collect()
 }
 
-/// Whether a settle Choice of `rule` clears the undecided check `id`.
-fn settled<'a>(rule: &str, id: &str, get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
-    crate::units::security::SETTLES
+/// Whether a settle Choice of `rule` clears the check `id`: an undecided
+/// one, or one that `found` a concern when the Choice is asked whenever its
+/// checks are not clear.
+fn settled<'a>(
+    rule: &str,
+    id: &str,
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    found: bool,
+) -> bool {
+    use crate::units::security::{SETTLES, SettleWhen};
+    SETTLES
         .iter()
         .filter(|kind| kind.rule == rule && kind.checks.contains(&id))
+        .filter(|kind| !found || kind.when == SettleWhen::NotClear)
         .any(|kind| choice_mass(get(kind.question), kind.clears).is_some_and(at_least))
 }
 
@@ -65,7 +90,7 @@ fn choice_mass(answer: Option<&Answer>, options: &[&str]) -> Option<f64> {
 /// Whether the settle Choice sends a function's text anywhere but a remote
 /// client, at the threshold.
 fn away_from_clients<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
-    settled(catalog::SENSITIVE_DATA, "error_details", get)
+    settled(catalog::SENSITIVE_DATA, "error_details", get, false)
 }
 
 /// Kinds where a variable is a concern only when another party controls it:
@@ -99,23 +124,33 @@ pub(in crate::units) fn injection_outcome<'a>(
     if unhandled.iter().all(|o| *o == Outcome::Clear) {
         return Some(Outcome::Clear);
     }
-    Some(by_origin(
-        origin_outcome(origin),
-        &found_injections(get),
-        get,
-    ))
+    let found = found_injections(get);
+    let origin = match (origin_outcome(origin), outside_markup(&found, get)) {
+        (Outcome::Review(p), _) => Outcome::Review(p),
+        (_, Some(p)) => Outcome::Review(p),
+        (outcome, None) => outcome,
+    };
+    Some(by_origin(origin, &found, get))
+}
+
+/// When the markup check found a variable and the PHP markup Choice names
+/// what is joined as a request value or a stored record, at the threshold:
+/// that value comes from another party, whatever the origin question made
+/// of a page's other values. On DVWA an access log joining user names from
+/// the database stayed uncertain with the origin split 0.26/0.24/0.50.
+fn outside_markup<'a>(found: &[&str], get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<f64> {
+    if !found.contains(&"markup") {
+        return None;
+    }
+    choice_mass(get("markup_parts"), &questions::OUTSIDE_MARKUP).filter(|p| at_least(*p))
 }
 
 /// The injection checks that found a variable placed unhandled.
 fn found_injections<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<&'static str> {
-    crate::units::security::checks(catalog::INJECTION)
-        .iter()
-        .filter(|check| {
-            get(check.id)
-                .map(noul)
-                .is_some_and(|o| matches!(o, Outcome::Review(_)))
-        })
-        .map(|check| check.id)
+    settled_checks(catalog::INJECTION, get)
+        .into_iter()
+        .filter(|(_, o)| matches!(o, Outcome::Review(_)))
+        .map(|(id, _)| id)
         .collect()
 }
 
@@ -131,9 +166,10 @@ fn by_origin<'a>(
     match outcome {
         Outcome::Review(p) if found.is_empty() => Outcome::Note(p),
         Outcome::Consider(p) if found.is_empty() => {
-            let leaning = crate::units::security::checks(catalog::INJECTION)
-                .iter()
-                .filter_map(|check| get(check.id))
+            let leaning = settled_checks(catalog::INJECTION, get)
+                .into_iter()
+                .filter(|(_, o)| *o != Outcome::Clear)
+                .filter_map(|(id, _)| get(id))
                 .map(lean)
                 .fold(0.0, f64::max);
             if probability_at_least(leaning, LEADING_PROBABILITY) {
@@ -218,7 +254,9 @@ pub(in crate::units) fn exposure_outcome<'a>(
         .filter_map(|check| {
             let (outcome, lean) = judge(check.id, get(check.id)?);
             Some(match outcome {
-                Outcome::Uncertain(_) if settled(rule, check.id, get) => (Outcome::Clear, 0.0),
+                Outcome::Uncertain(_) if settled(rule, check.id, get, false) => {
+                    (Outcome::Clear, 0.0)
+                }
                 _ => (outcome, lean),
             })
         })
