@@ -119,6 +119,12 @@ pub fn missing(
         let Some(name) = path_like(&token, &top) else {
             continue;
         };
+        // A relative link that climbs above the repository, such as a
+        // README's `../../actions/workflows/ci.yml/badge.svg`, is a route of
+        // the site that hosts it.
+        if name.starts_with("../") && escapes(base, &name) {
+            continue;
+        }
         if found.contains(&name) || present(root, base, &name, history) {
             continue;
         }
@@ -260,6 +266,23 @@ fn present(root: &Path, base: &Path, name: &str, history: &History) -> bool {
 }
 
 /// A relative path without `.` and `..` parts.
+/// Whether `name`, relative to the document's directory `base`, climbs
+/// above the repository root.
+fn escapes(base: &Path, name: &str) -> bool {
+    let mut depth = base.components().count() as isize;
+    for part in Path::new(name).components() {
+        match part {
+            Component::ParentDir => depth -= 1,
+            Component::Normal(_) => depth += 1,
+            _ => {}
+        }
+        if depth < 0 {
+            return true;
+        }
+    }
+    false
+}
+
 fn normal(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
@@ -527,6 +550,16 @@ mod tests {
                 "Open `/login`, merge `origin/main`, fetch `https://x.io/a.ts`, match `src/*.ts`."
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn links_above_the_repository_are_routes_of_its_host() {
+        let text = "[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml) and [gone](../src/gone.ts)";
+        assert_eq!(
+            found(text),
+            [("../src/gone.ts".to_string(), Fate::Absent)],
+            "a link inside the repository is still checked"
         );
     }
 

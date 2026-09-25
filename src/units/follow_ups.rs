@@ -97,13 +97,13 @@ pub fn settles(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
 }
 
 /// One kind question per outline whose recheck stayed undecided, per large
-/// document whose split stayed undecided, and per section pair whose checks
-/// stayed undecided.
+/// document whose split stayed undecided, and per section pair or stale
+/// section whose checks stayed undecided.
 pub fn kinds(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::unkinded_units, |unit| {
         match &unit.detail {
             Detail::Outline { kind, .. } | Detail::Document { kind, .. } => kind.as_ref(),
-            Detail::DocPair { settle, .. } => settle.as_ref(),
+            Detail::DocPair { settle, .. } | Detail::Stale { settle, .. } => settle.as_ref(),
             _ => None,
         }
     })

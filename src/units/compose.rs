@@ -133,7 +133,8 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
     if let Some(pass) = beside {
         let mut merged = answers(judgments, &unit.id, Pass::First);
         merged.extend(answers(judgments, &unit.id, pass));
-        // How a pair's sections relate, asked when its checks stay undecided.
+        // How a pair's sections relate, or what a section treats its missing
+        // names as, asked when its checks stay undecided.
         merged.extend(answers(judgments, &unit.id, Pass::Settle));
         return (unit_outcome(unit, &merged), merged);
     }
@@ -238,13 +239,16 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
 /// Outlines whose recheck left the split Score undecided, or whose first
 /// answer did when the file is too long for a recheck, and large documents
 /// whose split Score stayed undecided, whose kind has not been asked yet;
-/// section pairs whose checks stayed undecided and whose relation has not
-/// been asked yet.
+/// section pairs and stale sections whose checks stayed undecided and whose
+/// settle has not been asked yet.
 pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     let pairs = plan
         .units
         .iter()
-        .filter(|u| u.rule == catalog::DOC_DUPLICATION && u.presence == Presence::Judged)
+        .filter(|u| {
+            matches!(u.detail, Detail::DocPair { .. } | Detail::Stale { .. })
+                && u.presence == Presence::Judged
+        })
         .filter(|u| {
             !answers(judgments, &u.id, Pass::Trace).is_empty()
                 && answers(judgments, &u.id, Pass::Settle).is_empty()

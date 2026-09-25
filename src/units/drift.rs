@@ -389,6 +389,16 @@ fn stale_section(
         "section": {"heading": section.heading, "text": section.text},
         "missing": listed,
     });
+    let mut role = Questions::default();
+    role.ask(
+        "role".into(),
+        super::questions::missing_role(),
+        &id,
+        DOC_STALENESS,
+        "role",
+        Pass::Settle,
+    );
+    let settle = file.request("doc-checks", state.clone(), role);
     let (request, asked) = file.request("doc-checks", state, questions);
     let fits = file.budget.fits(&request);
     UnitPlan {
@@ -411,6 +421,7 @@ fn stale_section(
         detail: Detail::Stale {
             missing: missing.iter().map(describe).collect(),
             check: fits.then_some((request, asked)),
+            settle: fits.then_some(settle),
         },
         recheck: None,
     }
