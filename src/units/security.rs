@@ -42,6 +42,9 @@ pub(super) struct Subject<'a> {
     /// defined in this or another selected file: fixed choices, not
     /// parameters, which the trace otherwise could not tell apart.
     pub enums: Vec<String>,
+    /// C# constants it names, as `Class.Field = value`: a key written in
+    /// the code or a value read from configuration.
+    pub constants: Vec<String>,
 }
 
 impl Subject<'_> {
@@ -55,17 +58,48 @@ pub(super) fn function_subject<'a>(
     unit: &'a Unit,
     callers: Vec<(String, String)>,
     enums: &BTreeMap<String, String>,
+    constants: &BTreeMap<String, Vec<String>>,
 ) -> Subject<'a> {
+    let source = unit.source(file.source).to_string();
     Subject {
         name: unit.name.clone(),
         kind: "function",
-        source: unit.source(file.source).to_string(),
+        constants: named_constants(file, &source, constants),
+        source,
         sites: &unit.sites,
         errors: &unit.errors,
         lines: (unit.line, unit.end_line),
         callers,
         enums: named_enums(&unit.sites, enums),
     }
+}
+
+/// Constant declarations shown with one subject, at most.
+const CONSTANTS: usize = 4;
+
+/// The declarations of the C# constants a C# subject names.
+fn named_constants(
+    file: &FileContext<'_>,
+    source: &str,
+    constants: &BTreeMap<String, Vec<String>>,
+) -> Vec<String> {
+    if file.language != questions::CSHARP {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for (field, declarations) in constants {
+        let named = source.match_indices(field.as_str()).any(|(at, _)| {
+            let before = source[..at].chars().next_back();
+            let after = source[at + field.len()..].chars().next();
+            let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+            !word(before) && !word(after)
+        });
+        if named {
+            found.extend(declarations.iter().cloned());
+        }
+    }
+    found.truncate(CONSTANTS);
+    found
 }
 
 /// Enum definitions shown with one subject, at most.
@@ -93,6 +127,7 @@ fn named_enums(sites: &[Site], enums: &BTreeMap<String, String>) -> Vec<String> 
 pub(super) fn setup_subject<'a>(
     file: &FileContext<'_>,
     setup: &'a crate::analysis::sites::Setup,
+    constants: &BTreeMap<String, Vec<String>>,
 ) -> Option<Subject<'a>> {
     let first = setup.statements.first()?;
     let last = setup.statements.last()?;
@@ -101,10 +136,12 @@ pub(super) fn setup_subject<'a>(
         .iter()
         .map(|(range, ..)| &file.source[range.clone()])
         .collect();
+    let source = source.join("\n");
     Some(Subject {
         name: MODULE_SETUP.into(),
         kind: "module",
-        source: source.join("\n"),
+        constants: named_constants(file, &source, constants),
+        source,
         sites: &setup.sites,
         errors: &[],
         lines: (first.1, last.2),
@@ -294,14 +331,26 @@ fn presence_body(question: &str, code: &str) -> Value {
     }
 }
 
-/// The specific checks a rule's trace asks; the one that finds a concern
-/// names the finding's kind.
-pub(super) fn checks(rule: &str) -> &'static [questions::Check] {
-    match rule {
-        INJECTION => &questions::UNHANDLED,
-        SENSITIVE_DATA => &questions::EXPOSURES,
-        _ => &questions::WEAK_SETTINGS,
-    }
+/// The specific checks a rule's trace can ask; the one that finds a concern
+/// names the finding's kind. Checks of one language are answered only in
+/// its files.
+pub(super) fn checks(rule: &str) -> Vec<&'static questions::Check> {
+    asked_checks(rule, questions::CSHARP)
+}
+
+/// The checks a rule's trace asks about a file in `language`.
+fn asked_checks(rule: &str, language: &str) -> Vec<&'static questions::Check> {
+    let (general, csharp): (&'static [questions::Check], &'static [questions::Check]) = match rule {
+        INJECTION => (&questions::UNHANDLED, &questions::CSHARP_UNHANDLED),
+        SENSITIVE_DATA => (&questions::EXPOSURES, &[]),
+        _ => (&questions::WEAK_SETTINGS, &questions::CSHARP_SETTINGS),
+    };
+    let csharp = if language == questions::CSHARP {
+        csharp
+    } else {
+        &[]
+    };
+    general.iter().chain(csharp).collect()
 }
 
 /// The trace follow-up of one unit: which site, the rule's specific checks,
@@ -344,7 +393,7 @@ fn trace(
         let ids: Vec<String> = (0..messages.len()).map(|i| format!("m{i}")).collect();
         ask("messages", questions::security_message_origin(&ids));
     }
-    for check in checks(rule) {
+    for check in asked_checks(rule, file.language) {
         ask(check.id, check.body(&code));
     }
     let mut state = json!({
@@ -358,6 +407,9 @@ fn trace(
     }
     if rule == INJECTION && !subject.enums.is_empty() {
         state["enums_named_in_sites"] = json!(subject.enums);
+    }
+    if rule == UNSAFE_SETTINGS && !subject.constants.is_empty() {
+        state["constants_named"] = json!(subject.constants);
     }
 
     file.request("trace", state, questions)
@@ -380,7 +432,7 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
         "origin",
         Pass::Recheck,
     );
-    for check in &questions::UNHANDLED {
+    for check in asked_checks(INJECTION, file.language) {
         questions.ask(
             check.id.into(),
             check.with_callers(&code),

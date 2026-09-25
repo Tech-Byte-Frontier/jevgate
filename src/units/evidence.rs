@@ -51,7 +51,7 @@ impl FileContext<'_> {
             stage,
             &[(self.path, self.source_hash)],
             state,
-            questions,
+            questions.reworded(self.language),
         )
     }
 }

@@ -696,3 +696,214 @@ fn an_injection_trace_shows_the_enums_its_sites_name() {
         traces[0]["state"]
     );
 }
+
+#[test]
+fn a_broad_weak_setting_answer_that_no_check_names_is_a_note() {
+    let (project, options) = security_project(QUERY);
+    let unnamed = run_with_nouls(&project, &options, &[("weakened", 0.95), ("debug", 0.95)]);
+    let finding = &unnamed.files[0].findings[0];
+    assert_eq!(finding.rule, "security/unsafe-settings");
+    assert_eq!(finding.strength, Strength::Note);
+    let asked = |report: &Report, question: &str| {
+        report.files[0]
+            .judgments
+            .iter()
+            .any(|j| j.question == question)
+    };
+    assert!(
+        asked(&unnamed, "tls") && !asked(&unnamed, "debug") && !asked(&unnamed, "type"),
+        "the C# checks are asked only about C# files"
+    );
+    let (project, options) = security_project(QUERY);
+    let named = run_with_nouls(&project, &options, &[("weakened", 0.95), ("cookie", 0.95)]);
+    assert_eq!(named.files[0].findings[0].strength, Strength::Review);
+
+    let project = Project::new();
+    project.write(
+        "Program.cs",
+        "var app = WebApplication.CreateBuilder(args).Build();\napp.UseDeveloperExceptionPage();\napp.MapGet(\"/\", () => \"Hello\");\napp.Run();\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
+    let named = run_with_nouls(&project, &options, &[("weakened", 0.95), ("debug", 0.95)]);
+    assert!(asked(&named, "debug") && asked(&named, "token"));
+    let finding = &named.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-489 active debug code")
+    );
+    assert!(
+        finding.message.contains("detailed error pages"),
+        "{}",
+        finding.message
+    );
+}
+
+#[test]
+fn aspnet_core_exception_handlers_are_found_where_they_are_implemented_or_registered() {
+    let project = Project::new();
+    project.write(
+        "src/Api/Program.cs",
+        "var app = WebApplication.CreateBuilder(args).Build();\napp.UseExceptionHandler(\"/Error\");\napp.UseExceptionHandler(errorApp =>\n{\n    errorApp.Run(async context =>\n    {\n        var error = context.Features.Get<IExceptionHandlerFeature>();\n        await context.Response.WriteAsync(error.Error.ToString());\n    });\n});\napp.UseMiddleware<ExceptionMiddleware>();\napp.Run();\n",
+    );
+    project.write(
+        "src/Api/ExceptionMiddleware.cs",
+        "namespace Api;\n\npublic class ExceptionMiddleware\n{\n    private readonly RequestDelegate _next;\n\n    public ExceptionMiddleware(RequestDelegate next) => _next = next;\n\n    public async Task InvokeAsync(HttpContext httpContext)\n    {\n        try\n        {\n            await _next(httpContext);\n        }\n        catch (Exception ex)\n        {\n            await Write(httpContext, ex);\n        }\n    }\n\n    private static Task Write(HttpContext context, Exception exception)\n    {\n        context.Response.StatusCode = 500;\n        return context.Response.WriteAsync(exception.Message);\n    }\n}\n",
+    );
+    project.write(
+        "src/Api/Filters.cs",
+        "namespace Api;\n\npublic class ApiExceptionFilter : IExceptionFilter\n{\n    public void OnException(ExceptionContext context)\n    {\n        context.Result = new ObjectResult(new ProblemDetails { Detail = context.Exception.StackTrace });\n        context.ExceptionHandled = true;\n    }\n}\n\npublic sealed class GlobalHandler(ILogger<GlobalHandler> logger) : IExceptionHandler\n{\n    public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken token)\n    {\n        logger.LogError(exception, \"Unhandled\");\n        await context.Response.WriteAsJsonAsync(new { title = \"Server error\" }, token);\n        return true;\n    }\n}\n\npublic class DuplicateException : Exception\n{\n    public DuplicateException(string message) : base(message) { }\n}\n\npublic class NotFoundException(string name) : Exception($\"{name} was not found\");\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::SENSITIVE_DATA.into()];
+    let (_, plan) = planned(&project, &options);
+    let mut registered: Vec<String> = plan
+        .files
+        .values()
+        .flat_map(|f| &f.units)
+        .filter_map(|u| match &u.detail {
+            Detail::Handler { registered } => Some(registered.clone()),
+            _ => None,
+        })
+        .collect();
+    registered.sort();
+    assert_eq!(
+        registered,
+        [
+            "`app.UseExceptionHandler(errorApp =>\n{\n    errorApp.Run(async context =>\n    {\n        var error = context.Features.Get<IExceptionHandlerFeature>();\n        await context.Response.WriteAsync(error.Error.ToString());\n    });\n})` (src/Api/Program.cs:3)",
+            "`class ApiExceptionFilter : IExceptionFilter` (src/Api/Filters.cs:5)",
+            "`class GlobalHandler : IExceptionHandler` (src/Api/Filters.cs:14)",
+            "`middleware class ExceptionMiddleware` (src/Api/ExceptionMiddleware.cs:9)",
+        ],
+        "a path passed to UseExceptionHandler re-executes a page and is no handler"
+    );
+    let middleware = plan
+        .requests
+        .iter()
+        .find(|p| {
+            p.request["state"]["error_handler"]["registered"]
+                .as_str()
+                .is_some_and(|r| r.contains("middleware"))
+        })
+        .unwrap();
+    let state = &middleware.request["state"];
+    assert!(
+        state["error_handler"]["helpers"][0]
+            .as_str()
+            .unwrap()
+            .contains("WriteAsync(exception.Message)")
+    );
+    let classes = state["error_classes"].as_str().unwrap();
+    assert!(
+        classes.starts_with("public class DuplicateException : Exception\n{"),
+        "{classes}"
+    );
+    assert!(
+        classes.ends_with(
+            "public class NotFoundException(string name) : Exception($\"{name} was not found\");"
+        ),
+        "{classes}"
+    );
+}
+
+/// Answers like `Scripted` and keeps every request it was sent.
+struct Recording {
+    inner: Scripted,
+    requests: Vec<Value>,
+}
+
+impl crate::transport::Evaluator for Recording {
+    fn evaluate(&mut self, request: &Value) -> anyhow::Result<Value> {
+        self.requests.push(request.clone());
+        self.inner.evaluate(request)
+    }
+}
+
+fn recording(nouls: &[(&'static str, f64)]) -> Recording {
+    let mut inner = scripted(0);
+    inner.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
+    Recording {
+        inner,
+        requests: Vec::new(),
+    }
+}
+
+#[test]
+fn a_csharp_setup_trace_shows_the_constants_it_names_and_finds_a_key_written_in_code() {
+    let project = Project::new();
+    project.write(
+        "src/Api/AuthorizationConstants.cs",
+        "namespace Api;\n\npublic class AuthorizationConstants\n{\n    public const string JWT_SECRET_KEY = \"SecretKeyOfDoomThatMustBeLong\";\n    public const int PAGE_SIZE = 50;\n}\n",
+    );
+    project.write(
+        "src/Api/Program.cs",
+        "var builder = WebApplication.CreateBuilder(args);\nvar key = Encoding.ASCII.GetBytes(AuthorizationConstants.JWT_SECRET_KEY);\nbuilder.Services.AddAuthentication().AddJwtBearer(o => o.TokenValidationParameters = new TokenValidationParameters { IssuerSigningKey = new SymmetricSecurityKey(key) });\nvar app = builder.Build();\napp.Run();\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
+    let mut eval = recording(&[("weakened", 0.95), ("key", 0.95)]);
+    let report = run(&project, &options, &mut eval);
+    let trace = eval
+        .requests
+        .iter()
+        .find(|r| r["jevgate"]["stage"] == "trace")
+        .unwrap();
+    assert_eq!(
+        trace["state"]["constants_named"],
+        json!(["AuthorizationConstants.JWT_SECRET_KEY = \"SecretKeyOfDoomThatMustBeLong\""]),
+        "only the constants the setup names"
+    );
+    assert!(trace["questions"]["key"].is_object() && trace["questions"]["debug"].is_object());
+    let program = report
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("Program.cs"))
+        .unwrap();
+    let finding = &program.findings[0];
+    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-321 hard-coded cryptographic key")
+    );
+    assert!(
+        finding.message.contains("key written in the code"),
+        "{}",
+        finding.message
+    );
+}
+
+#[test]
+fn a_csharp_type_named_by_input_is_an_injection_named_by_its_own_check() {
+    let project = Project::new();
+    project.write(
+        "Controllers/ImportsController.cs",
+        "namespace Api;\n\npublic class ImportsController : Controller\n{\n    [HttpPost]\n    public IActionResult Post(string typeName, string xml)\n    {\n        var serializer = new XmlSerializer(Type.GetType(typeName));\n        return Ok(serializer.Deserialize(new StringReader(xml)));\n    }\n}\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let mut eval = recording(&[("interpreted", 0.95), ("type", 0.95)]);
+    eval.inner
+        .overrides
+        .push(("origin", spread(0.0, 0.05, 0.95)));
+    let report = run(&project, &options, &mut eval);
+    let first = &eval.requests[0]["questions"]["f0_interpreted"];
+    assert!(
+        first["instructions"]["question"]
+            .as_str()
+            .unwrap()
+            .ends_with("or into the type of objects it creates?"),
+        "{first}"
+    );
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-502 deserialization of untrusted data")
+    );
+    assert!(
+        finding.message.contains("types of objects it creates"),
+        "{}",
+        finding.message
+    );
+}

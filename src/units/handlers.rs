@@ -29,6 +29,19 @@ const HANDLER_REGISTRATIONS: [&str; 2] = [".onError(", ".setErrorHandler("];
 /// passed to `.use(…)` as its error handler.
 const MIDDLEWARE_REGISTRATION: &str = ".use(";
 const MIDDLEWARE_PARAMETERS: usize = 4;
+/// ASP.NET Core's exception handler middleware runs the lambda it is given
+/// for every unhandled exception; given a path (`"/Error"`), it re-executes
+/// a page instead, which is judged as the page's own code.
+const EXCEPTION_HANDLER_REGISTRATION: &str = ".UseExceptionHandler(";
+/// ASP.NET Core interfaces and base classes whose method handles every
+/// exception a controller or request throws, by the method they define.
+const CSHARP_HANDLER_TYPES: [(&str, &str); 5] = [
+    ("IExceptionFilter", "OnException"),
+    ("IAsyncExceptionFilter", "OnExceptionAsync"),
+    ("ExceptionFilterAttribute", "OnException"),
+    ("ExceptionFilterAttribute", "OnExceptionAsync"),
+    ("IExceptionHandler", "TryHandleAsync"),
+];
 /// Python decorators that register the function below them as an error handler.
 const HANDLER_DECORATORS: [&str; 2] = [".exception_handler(", ".errorhandler("];
 /// Error classes shown with a handler question, whole, up to this many bytes.
@@ -103,7 +116,7 @@ fn registered(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>, owner: usiz
     let mut found = Vec::new();
     for needle in HANDLER_REGISTRATIONS
         .into_iter()
-        .chain([MIDDLEWARE_REGISTRATION])
+        .chain([MIDDLEWARE_REGISTRATION, EXCEPTION_HANDLER_REGISTRATION])
     {
         for (at, _) in source.match_indices(needle) {
             let line = crate::analysis::line_of(source, at);
@@ -144,6 +157,11 @@ fn registration(
     let named = argument
         .chars()
         .all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+    if needle == EXCEPTION_HANDLER_REGISTRATION
+        && !(named || argument.contains("=>") || argument.contains("delegate"))
+    {
+        return None;
+    }
     let (owner, name, source, lines) = if named {
         named_handler(scope, imports, owner, argument)?
     } else {
@@ -259,6 +277,7 @@ fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
     let source = input.source.as_deref().unwrap_or("");
     let lines = scope.test_lines(owner);
     let filters = exception_filters(source);
+    let csharp = input.result.path.extension().is_some_and(|e| e == "cs");
     scope.units[&owner]
         .units
         .iter()
@@ -276,6 +295,9 @@ fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
                 "error_response" if !unit.owner.is_empty() => implements("ResponseError")?,
                 "catch" if filters.contains(&unit.owner) => {
                     format!("@Catch(…) class {}", unit.owner)
+                }
+                name if csharp && !unit.owner.is_empty() => {
+                    csharp_handler(source, &unit.owner, name, text)?
                 }
                 _ => text
                     .lines()
@@ -297,6 +319,46 @@ fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
             })
         })
         .collect()
+}
+
+/// How ASP.NET Core calls a C# method for every exception a request throws:
+/// the `OnException` of an exception filter, the `TryHandleAsync` of an
+/// `IExceptionHandler`, or the `Invoke`/`InvokeAsync` of a middleware class
+/// that catches what the rest of the pipeline throws.
+fn csharp_handler(source: &str, owner: &str, method: &str, text: &str) -> Option<String> {
+    let bases = csharp_bases(source, owner);
+    let implements = |base: &str| {
+        bases
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .any(|b| b == base)
+    };
+    if let Some((base, _)) = CSHARP_HANDLER_TYPES
+        .iter()
+        .find(|(base, handles)| *handles == method && implements(base))
+    {
+        return Some(format!("class {owner} : {base}"));
+    }
+    let middleware = matches!(method, "Invoke" | "InvokeAsync")
+        && text.contains("HttpContext")
+        && text.contains("catch");
+    middleware.then(|| format!("middleware class {owner}"))
+}
+
+/// The base class and interfaces a C# class declares, as written after `:`.
+fn csharp_bases<'a>(source: &'a str, owner: &str) -> &'a str {
+    let declaration = format!("class {owner}");
+    source
+        .match_indices(&declaration)
+        .find_map(|(at, _)| {
+            let rest = &source[at + declaration.len()..];
+            if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+                return None;
+            }
+            let head = &rest[..rest.find('{').unwrap_or(rest.len())];
+            let head = head.split(" where ").next().unwrap_or(head);
+            head.find(':').map(|colon| head[colon + 1..].trim())
+        })
+        .unwrap_or("")
 }
 
 /// A type whose name marks it as an error, such as `Error`, `ApiError` or `AuthRejection`.
@@ -453,6 +515,7 @@ fn error_classes(scope: &Scope<'_>, hashes: &BTreeMap<PathBuf, String>) -> Error
 fn error_class_texts<'a>(path: &Path, source: &'a str) -> Vec<&'a str> {
     let python = path.extension().is_some_and(|e| e == "py");
     let rust = path.extension().is_some_and(|e| e == "rs");
+    let csharp = path.extension().is_some_and(|e| e == "cs");
     let mut found = Vec::new();
     let mut offset = 0;
     let mut attributes: Option<usize> = None;
@@ -468,14 +531,16 @@ fn error_class_texts<'a>(path: &Path, source: &'a str) -> Vec<&'a str> {
         } else {
             line_start
         };
-        let error = declared_class(line, rust)
+        let error = declared_class(line, rust, csharp)
             .is_some_and(|name| name.ends_with("Error") || name.ends_with("Exception"));
         if !error {
             continue;
         }
         let end = if python {
             Some(indented_end(&source[start..], line.len()))
-        } else if rust && let Some(end) = declaration_end(&source[line_start..]) {
+        } else if (rust || csharp)
+            && let Some(end) = declaration_end(&source[line_start..])
+        {
             Some(line_start - start + end)
         } else {
             braced_end(&source[start..])
@@ -487,10 +552,20 @@ fn error_class_texts<'a>(path: &Path, source: &'a str) -> Vec<&'a str> {
     found
 }
 
-/// The class a line declares: a JavaScript, TypeScript or Python class, or
-/// a Rust enum or struct.
-fn declared_class(line: &str, rust: bool) -> Option<String> {
-    let rest = if rust {
+/// The class a line declares: a JavaScript, TypeScript, Python or C# class,
+/// or a Rust enum or struct.
+fn declared_class(line: &str, rust: bool, csharp: bool) -> Option<String> {
+    let rest = if csharp {
+        let mut rest = line.trim_start();
+        while let Some(after) = CSHARP_MODIFIERS
+            .iter()
+            .find_map(|modifier| rest.strip_prefix(modifier))
+        {
+            rest = after;
+        }
+        rest.strip_prefix("class ")
+            .or_else(|| rest.strip_prefix("record "))?
+    } else if rust {
         let visible = line.trim_start().trim_start_matches("pub(crate) ");
         let visible = visible.trim_start_matches("pub ");
         visible
@@ -508,6 +583,17 @@ fn declared_class(line: &str, rust: bool) -> Option<String> {
             .collect(),
     )
 }
+
+/// Modifiers a C# class declaration can start with.
+const CSHARP_MODIFIERS: [&str; 7] = [
+    "public ",
+    "internal ",
+    "private ",
+    "protected ",
+    "sealed ",
+    "abstract ",
+    "partial ",
+];
 
 /// The end of a Python class: its first line and the indented lines after it.
 fn indented_end(text: &str, first: usize) -> usize {
@@ -535,14 +621,22 @@ fn braced_end(text: &str) -> Option<usize> {
     })
 }
 
-/// Where a Rust unit or tuple struct declaration ends: at its `;`, when that
-/// comes before any `{`.
+/// Where a Rust unit or tuple struct declaration, or a C# class with a
+/// primary constructor and no body, ends: at its `;`, when that comes before
+/// any `{` outside parentheses. A C# base call can interpolate
+/// (`: Exception($"{name} was not found");`).
 fn declaration_end(declaration: &str) -> Option<usize> {
-    let semicolon = declaration.find(';')?;
-    declaration
-        .find('{')
-        .is_none_or(|brace| semicolon < brace)
-        .then_some(semicolon + 1)
+    let mut depth = 0usize;
+    for (i, c) in declaration.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ';' if depth == 0 => return Some(i + 1),
+            '{' if depth == 0 => return None,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// A function a web framework calls for every error a request handler
@@ -603,6 +697,7 @@ fn plan_handler(
             .filter(|(path, _)| path != file.path)
             .map(|(path, hash)| (path.as_path(), hash.as_str())),
     );
+    let questions = questions.reworded(file.language);
     let (request, asked) = super::request(file.model, "security", &sources, state, questions);
     let fits = file.budget.fits(&request);
     out.units.push(UnitPlan {
