@@ -352,6 +352,30 @@ pub fn setting_assigned<'s>(statement: Node<'_>, source: &'s str) -> Option<&'s 
     (left.kind() == "identifier" && setting_name(name)).then_some(name)
 }
 
+/// Whether an expression statement changes part of a setting, such as
+/// `CACHES["default"]["OPTIONS"]["ssl_cert_reqs"] = None`.
+pub fn setting_changed(statement: Node<'_>, source: &str) -> bool {
+    let Some(assignment) = statement
+        .named_child(0)
+        .filter(|a| a.kind() == "assignment")
+    else {
+        return false;
+    };
+    let mut target = assignment.child_by_field_name("left");
+    while let Some(node) = target {
+        match node.kind() {
+            "subscript" => target = node.child_by_field_name("value"),
+            "attribute" => target = node.child_by_field_name("object"),
+            "identifier" => {
+                return node != assignment.child_by_field_name("left").unwrap()
+                    && setting_name(text(node, source));
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 /// An upper-case name such as `SESSION_COOKIE_SECURE`.
 pub fn setting_name(name: &str) -> bool {
     name.chars().any(|c| c.is_ascii_uppercase())

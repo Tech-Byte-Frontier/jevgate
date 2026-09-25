@@ -398,7 +398,7 @@ pub fn security_handler_leaks(django: bool) -> Value {
     let (question, no) = if django {
         (
             "Does the error handler in `error_handler.source` send a remote client anything besides the message and code of errors the program raises itself and of the framework's errors written for the user?",
-            "It sends only the message and code of the program's own errors and of the framework's errors written for the user, such as Django REST framework's validation, not-found and permission errors, and a fixed message for any other error or none, leaving it to the framework's generic error page; causes and stacks go to logs.",
+            "It sends only the message and code of the program's own errors and of the framework's errors written for the user, such as Django REST framework's validation, not-found and permission errors, and a fixed message for any other error or none, leaving it to the framework's generic error page; causes and stacks go to logs. Django REST framework's own exception_handler answers only its API errors and returns None for any other error.",
         )
     } else {
         (
@@ -682,8 +682,8 @@ const DEBUG: Check = Check {
 const CSRF: Check = Check {
     id: "csrf",
     question: "Does `{code}` turn off protection against cross-site request forgery for requests that change data?",
-    yes: "A view or route that changes data for a signed-in user is exempted from the CSRF check, such as with csrf_exempt, or the CSRF middleware or check is removed.",
-    no: "CSRF protection stays on; the exempted endpoint authenticates each request itself rather than with the session cookie, such as a webhook that verifies a signature or an API that reads a token from a header, or only reads data; or it sets nothing about CSRF.",
+    yes: "A view or route that changes data as the user its session cookie signs in, such as their profile, password or records, is exempted from the CSRF check, such as with csrf_exempt, or the CSRF middleware or check is removed.",
+    no: "CSRF protection stays on; the exempted endpoint authenticates each request itself rather than with the session cookie, such as a webhook that verifies a signature, an API that reads a token from a header, or a form for visitors who are not signed in that asks for a password reset email or checks a reset token it is sent; it only reads data; or it sets nothing about CSRF.",
     no_examples: &[],
 };
 
@@ -735,8 +735,8 @@ const ENVIRONMENT_TO_CLIENT: Check = Check {
 const DJANGO_REDIRECT: Check = Check {
     id: "redirect",
     question: "Does `{code}` redirect the client to a URL or path taken from a variable without checking where it leads?",
-    yes: "A URL or path that a request carries, such as a query parameter, form field, header or cookie, or a stored value users can set, is passed to redirect(), HttpResponseRedirect or a Location header without checking that it is a path on the program's own site or that its host is on an allowed list.",
-    no: "The target is fixed, is a route name or built with reverse(), is one of the program's own paths with only ids or names from variables in it, is checked such as with url_has_allowed_host_and_scheme, or comes from the program's configuration; or it does not redirect.",
+    yes: "A URL or path that a request carries, such as a query parameter, form field, header or cookie, is passed to redirect(), HttpResponseRedirect or a Location header without checking that it is a path on the program's own site or that its host is on an allowed list.",
+    no: "The target is fixed, is a route name or built with reverse(), is one of the program's own paths with only ids or names from variables in it, is checked such as with url_has_allowed_host_and_scheme, comes from the program's configuration, or is read from a stored record rather than the request; or it does not redirect.",
     no_examples: &[],
 };
 

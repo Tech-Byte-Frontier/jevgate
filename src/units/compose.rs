@@ -66,7 +66,8 @@ fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'
 /// checks stay undecided after the trace and recheck while the unit is
 /// uncertain, and for a consider or note resting on an undecided check,
 /// where its text goes (the finding claims it likely reaches a client) and
-/// where code that requests a URL runs.
+/// where code that requests a URL runs, and every Choice for an injection
+/// note in Django code.
 pub fn unsettled(unit: &UnitPlan, judgments: &[Judgment]) -> BTreeSet<&'static str> {
     use crate::units::security::{SETTLES, SettleWhen};
     if unit.presence != Presence::Judged
@@ -76,8 +77,15 @@ pub fn unsettled(unit: &UnitPlan, judgments: &[Judgment]) -> BTreeSet<&'static s
         return BTreeSet::new();
     }
     let merged = security_answers(unit, judgments);
+    // Nearly every Django view places request values somewhere, so an
+    // injection note that no check found ("values from another party …,
+    // but no check found one placed unhandled") rests on its undecided
+    // checks, such as a redirect to its own path with an id in it.
+    let django_note = unit.rule == catalog::INJECTION
+        && matches!(unit.detail, Detail::Security { django: true, .. });
     let open = |when: SettleWhen| match unit_outcome(unit, &merged) {
         Outcome::Uncertain(_) => true,
+        Outcome::Note(_) if django_note => true,
         Outcome::Consider(_) | Outcome::Note(_) => when == SettleWhen::UndecidedOrFinding,
         _ => false,
     };
