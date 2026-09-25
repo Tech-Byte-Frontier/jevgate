@@ -2,6 +2,7 @@
 //! the gate and baseline tests are in `gating`, and what a run judges
 //! (unsupported or oversized input, roles, context) in `scope`.
 use super::*;
+use crate::{config::ConfigContext, options::CheckArgs};
 use clap::Parser;
 use serde_json::{Value, json};
 use std::path::PathBuf;
