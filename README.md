@@ -207,6 +207,16 @@ The action installs a checked release binary, keeps `.jevgate/cache` in the Acti
 - **Transient failures:** rate limits, overload and server or edge errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts; a timeout or dropped connection is retried once, since the first send may have run.
 - **Report-only paths:** give tooling its own level with `[[scope]]` (below), so scripts are reported while product code gates.
 
+Before each commit, with [pre-commit](https://pre-commit.com), review what is staged:
+
+```yaml
+repos:
+  - repo: https://github.com/Tech-Byte-Frontier/jevgate
+    rev: v0.18.0
+    hooks:
+      - id: jevgate-system   # the jevgate on PATH; `jevgate` builds it with Rust instead
+```
+
 Other CI systems work the same way: install with `install.sh` or `cargo binstall`, set `TYPESAFE_API_KEY`, keep `.jevgate/cache` between runs, and read the exit code or the JSON report.
 
 ## Configuration
