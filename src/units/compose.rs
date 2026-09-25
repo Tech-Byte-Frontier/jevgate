@@ -249,22 +249,9 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
         .filter(|u| answers(judgments, &u.id, Pass::Recheck).is_empty())
         .filter(|u| {
             if security(u.rule) {
-                let merged = security_answers(u, judgments);
-                let get = |q: &str| merged.get(q).copied();
-                u.rule == catalog::INJECTION
-                    && !checks(u.rule, &get).iter().all(|o| *o == Outcome::Clear)
-                    && matches!(
-                        merged.get("origin").map(|a| origin_outcome(a)),
-                        Some(Outcome::Uncertain(_) | Outcome::Consider(_))
-                    )
+                origin_unsettled(u, judgments)
             } else if u.rule == catalog::HARDCODED_VALUES {
-                let first = answers(judgments, &u.id, Pass::First);
-                let get = |q: &str| first.get(q).copied();
-                value_signals(&get, &u.detail, false).is_some_and(|signals| {
-                    signals
-                        .iter()
-                        .any(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
-                })
+                value_undecided(u, judgments)
             } else {
                 let first = answers(judgments, &u.id, Pass::First);
                 open(u, &first, unit_outcome(u, &first))
@@ -272,6 +259,30 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
         })
         .map(|u| u.id.clone())
         .collect()
+}
+
+/// An injection unit whose checks are not all clear while its traced origin
+/// stayed unclear or was the function's parameters.
+fn origin_unsettled(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    let merged = security_answers(unit, judgments);
+    let get = |q: &str| merged.get(q).copied();
+    unit.rule == catalog::INJECTION
+        && !checks(unit.rule, &get).iter().all(|o| *o == Outcome::Clear)
+        && matches!(
+            merged.get("origin").map(|a| origin_outcome(a)),
+            Some(Outcome::Uncertain(_) | Outcome::Consider(_))
+        )
+}
+
+/// A hardcoded-value unit with a question its first pass left undecided.
+fn value_undecided(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    let first = answers(judgments, &unit.id, Pass::First);
+    let get = |q: &str| first.get(q).copied();
+    value_signals(&get, &unit.detail, false).is_some_and(|signals| {
+        signals
+            .iter()
+            .any(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
+    })
 }
 
 /// Outlines whose recheck left the split Score undecided, or whose first
