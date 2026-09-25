@@ -365,13 +365,21 @@ signatures, or one candidate pair.
    Staleness and duplication candidates come from code. Staleness candidates
    are paths and scripts a section names that the repository lacks, with what
    Git shows about each. A span written with a code role (`:attr:`,
-   `:class:`) is not a path; a path the ignore files cover, or one the
-   section writes out for a code block (its `filename=`, or the one path
-   the paragraph before it names), is the reader's own; a script where no
-   command starts, such as "make sure", is not one, and dependencies count
-   as scripts, since `pnpm tsx` runs one. A missing name whose one tracked
-   namesake sits under the document's directory, such as `.tsx` for `.ts`,
-   is named beside it.
+   `:class:`) is not a path, nor is a link that climbs above the repository
+   (a README badge's `../../actions/...`); a path the ignore files cover
+   (a bare name also as a directory, so `backend/app/frontend/` covers a
+   build output), or one the section writes out for a code block (its
+   `filename=`, or the one path the paragraph before it names), is the
+   reader's own; a script where no command starts, such as "make sure", is
+   not one, and dependencies count as scripts, since `pnpm tsx` runs one. A
+   missing name whose one tracked namesake sits under the document's
+   directory, such as `.tsx` for `.ts`, is named beside it. A check that
+   stays undecided is asked, apart, what the section treats the names as (a
+   current part of the repository, the reader's own project, an example,
+   not a file at all, or something removed); the repository at 0.20 or less
+   clears it. A protocol method (`tools/call`), skill-relative example
+   paths and a migration guide's `pnpm drizzle-kit` stayed near 0.25 to
+   0.50 on the check and were decisive as a kind.
    Duplication candidates are section pairs where 30%
    of the smaller section's three-word sequences recur in the other, at most
    three per pair of documents. Sequences come from the prose; a section

@@ -649,3 +649,35 @@ fn an_undecided_large_document_is_asked_its_kind() {
         decided.judgments
     );
 }
+
+const ROLES: [&str; 5] = ["example", "not_a_file", "reader", "removed", "repository"];
+
+/// The staleness dimension of a README naming a missing script, its check
+/// answered at `relies` and what it treats the name as with `role`.
+fn stale_answered(relies: Value, role: Value) -> crate::schema::Dimension {
+    let project = Project::new();
+    project.write("README.md", "# Setup\nRun `scripts/setup.sh` first.\n");
+    let mut options = args();
+    only(&mut options, catalog::DOC_STALENESS);
+    let mut eval = scripted(0);
+    eval.overrides = vec![("relies", relies), ("role", role)];
+    let report = run(&project, &options, &mut eval);
+    report
+        .files
+        .into_iter()
+        .find(|f| f.path == std::path::Path::new("README.md"))
+        .unwrap()
+        .dimensions[catalog::DOC_STALENESS]
+        .clone()
+}
+
+#[test]
+fn an_undecided_stale_section_settles_by_what_it_treats_the_name_as() {
+    let cleared = stale_answered(noul_at(0.5), choice_of("example", &ROLES));
+    assert_eq!(cleared.units.clear, 1, "{}", cleared.decision_basis);
+    let open = stale_answered(noul_at(0.5), choice_of("repository", &ROLES));
+    assert_eq!(open.units.uncertain, 1, "{}", open.decision_basis);
+    // A decided check is never moved.
+    let decided = stale_answered(noul_at(0.95), choice_of("example", &ROLES));
+    assert_eq!(decided.units.consider, 1, "{}", decided.decision_basis);
+}

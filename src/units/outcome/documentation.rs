@@ -18,6 +18,19 @@ fn kind_share(answer: Option<&Answer>, kind: &str) -> Option<f64> {
     (mass > 0.0).then(|| probabilities.get(kind).copied().unwrap_or(0.0) / mass)
 }
 
+/// An undecided staleness check, cleared when the section's missing names
+/// are clearly not a current part of the repository.
+pub(super) fn stale_outcome(outcome: Outcome, role: Option<&Answer>) -> Outcome {
+    match outcome {
+        Outcome::Uncertain(_)
+            if kind_share(role, "repository").is_some_and(|share| at_least(1.0 - share)) =>
+        {
+            Outcome::Clear
+        }
+        outcome => outcome,
+    }
+}
+
 /// A pair of sections repeats itself when either covers the other, unless one
 /// translates the other; a disagreement counts either way, since a
 /// translation that disagrees with its original is out of date. Each is a

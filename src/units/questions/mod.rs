@@ -668,6 +668,7 @@ mod tests {
             pair_subject(),
             pair_translation(),
             pair_relation(),
+            missing_role(),
         ];
         all.extend(checks.clone().map(|c| c.body("function.source")));
         for check in checks {

@@ -151,6 +151,9 @@ pub enum Detail {
     Stale {
         missing: Vec<String>,
         check: Option<(Value, Asked)>,
+        /// What the section treats the missing names as, asked when the
+        /// check stays undecided.
+        settle: Option<(Value, Asked)>,
     },
     /// A candidate pair of sections, the other in `other`, and the check
     /// sent unless either document is a finished plan.

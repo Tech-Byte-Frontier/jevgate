@@ -20,6 +20,7 @@ mod test_rules;
 
 use access::access_outcome;
 use documentation::doc_pair_outcome;
+use documentation::stale_outcome;
 pub(super) use documentation::{
     disagreement, document_outcome, document_split, pair_signals, repeated, section_signals,
 };
@@ -231,7 +232,7 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             } else {
                 "relies"
             };
-            get(question).map(|a| cleanup(noul(a)))
+            get(question).map(|a| stale_outcome(cleanup(noul(a)), get("role")))
         }
         catalog::DOC_DUPLICATION => doc_pair_outcome(&get),
         catalog::AGENT_CONTEXT => {
