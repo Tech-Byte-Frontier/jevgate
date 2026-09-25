@@ -26,7 +26,8 @@ pub(super) use maintainability::{
     value_signals, values_outcome,
 };
 pub(super) use security::{
-    Messages, checks, exposure_outcome, injection_outcome, messages, origin_outcome,
+    Messages, checks, django_settings_outcome, exposure_outcome, injection_outcome, messages,
+    origin_outcome,
 };
 pub(super) use test_rules::test_value_outcome;
 
@@ -195,6 +196,20 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         catalog::SENSITIVE_DATA => {
             exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
+        }
+        catalog::UNSAFE_SETTINGS if unit.name == crate::units::security::SETTINGS_MODULE => {
+            django_settings_outcome(&get).map(|outcome| {
+                if matches!(get("dev_only").map(noul), Some(Outcome::Review(_))) {
+                    lowered(outcome)
+                } else {
+                    outcome
+                }
+            })
+        }
+        catalog::UNSAFE_SETTINGS
+            if matches!(unit.detail, Detail::Security { django: true, .. }) =>
+        {
+            django_settings_outcome(&get)
         }
         catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
         catalog::ACCESS_CONTROL => access_outcome(&get, &unit.detail),

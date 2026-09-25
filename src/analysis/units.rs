@@ -88,6 +88,14 @@ pub struct FileUnits {
     pub setup: super::sites::Setup,
     /// False when no parser supports this language.
     pub parsed: bool,
+    /// Whether it is Django code: Python that imports Django or Django REST
+    /// framework, or a Django settings module.
+    pub django: bool,
+    /// In Django code, the URL routes it declares.
+    pub routes: Vec<super::django::Route>,
+    /// In Django code, its upper-case module constants with their
+    /// assignments as shown.
+    pub module_constants: Vec<(String, String)>,
 }
 
 /// Units of a supported language. Unsupported languages return an unparsed,
@@ -96,17 +104,25 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(FileUnits::default());
     };
+    let settings = super::django::settings_module(path, tree.root_node(), source);
     let mut file = FileUnits {
         parsed: true,
+        django: settings || super::django::imports_django(path, tree.root_node(), source),
         ..Default::default()
     };
     walk(tree.root_node(), source, "", &mut file);
+    if file.django {
+        file.routes = super::django::routes(tree.root_node(), source);
+        if !settings {
+            file.module_constants = super::django::module_constants(tree.root_node(), source);
+        }
+    }
     file.constants = super::literals::constants(tree.root_node(), source);
     let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
     file.setup = if framework_config(path) {
         super::sites::config_setup(tree.root_node(), source)
     } else {
-        super::sites::setup(tree.root_node(), source, &spans)
+        super::sites::setup(tree.root_node(), source, &spans, settings)
     };
     // A function passed by name, such as `map(parse)`, is used like a call.
     let names: BTreeSet<String> = file.units.iter().map(|u| u.short_name.clone()).collect();
@@ -671,7 +687,7 @@ fn push(
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
         literals: body.map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
-        sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source)),
+        sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source, file.django)),
         errors: body.map_or_else(Vec::new, |b| super::errors::created_errors(b, source)),
         calls: facts.calls,
         refs,

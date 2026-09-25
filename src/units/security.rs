@@ -45,11 +45,27 @@ pub(super) struct Subject<'a> {
     /// C# constants it names, as `Class.Field = value`: a key written in
     /// the code or a value read from configuration.
     pub constants: Vec<String>,
+    /// Framework facts shown beside the source in every request of its
+    /// units, such as the settings modules that import a settings module
+    /// and assign its settings again.
+    pub evidence: serde_json::Map<String, Value>,
+    /// Whether it is Django code, whose questions name Django's calls and
+    /// settings and ask its extra checks.
+    pub django: bool,
 }
 
 impl Subject<'_> {
     fn code(&self) -> String {
         format!("{}.source", self.kind)
+    }
+
+    /// Its name, source and framework evidence, as sent.
+    fn state(&self) -> Value {
+        let mut state = serde_json::Map::new();
+        state.insert("name".into(), json!(self.name));
+        state.insert("source".into(), json!(self.source));
+        state.extend(self.evidence.clone());
+        Value::Object(state)
     }
 }
 
@@ -71,6 +87,8 @@ pub(super) fn function_subject<'a>(
         lines: (unit.line, unit.end_line),
         callers,
         enums: named_enums(&unit.sites, enums),
+        evidence: serde_json::Map::new(),
+        django: false,
     }
 }
 
@@ -131,14 +149,19 @@ pub(super) fn setup_subject<'a>(
 ) -> Option<Subject<'a>> {
     let first = setup.statements.first()?;
     let last = setup.statements.last()?;
-    let source: Vec<&str> = setup
+    let source: Vec<String> = setup
         .statements
         .iter()
-        .map(|(range, ..)| &file.source[range.clone()])
+        .map(|(range, ..)| setup.text(file.source, range.clone()))
         .collect();
     let source = source.join("\n");
     Some(Subject {
-        name: MODULE_SETUP.into(),
+        name: if setup.settings {
+            SETTINGS_MODULE
+        } else {
+            MODULE_SETUP
+        }
+        .into(),
         kind: "module",
         constants: named_constants(file, &source, constants),
         source,
@@ -147,19 +170,26 @@ pub(super) fn setup_subject<'a>(
         lines: (first.1, last.2),
         callers: Vec::new(),
         enums: Vec::new(),
+        evidence: serde_json::Map::new(),
+        django: false,
     })
 }
 
 /// The name of the unit that holds a file's top-level setup statements.
 pub(super) const MODULE_SETUP: &str = "module setup";
+/// The name of that unit in a Django settings module, whose statements
+/// assign the deployed site's settings.
+pub(super) const SETTINGS_MODULE: &str = "settings module";
 
 /// Plan every enabled rule's units for these subjects. Functions are packed;
 /// the module setup, when present, is judged for unsafe settings only.
+/// `django` marks Django code, whose presence questions name its calls.
 pub(super) fn plan(
     file: &FileContext<'_>,
     functions: &[Subject<'_>],
     setup: Option<Subject<'_>>,
     rules: &[&'static str],
+    django: bool,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -175,21 +205,28 @@ pub(super) fn plan(
             .zip(&ids)
             .map(|(rule, ids)| push_unit(file, out, subject, rule, &ids[index]))
             .collect();
-        items.push((
-            units,
-            json!({"name": subject.name, "source": subject.source}),
-        ));
+        items.push((units, subject.state()));
     }
     for group in pack(items, PACK_ITEMS, |(_, state)| state) {
-        send(file, group, "functions", out, requests);
+        send(file, group, "functions", django, out, requests);
     }
     if let Some(setup) = setup.filter(|s| !s.sites.is_empty())
         && rules.contains(&UNSAFE_SETTINGS)
     {
         let id = format!("{}:module", prefix(UNSAFE_SETTINGS));
         let unit = push_unit(file, out, &setup, UNSAFE_SETTINGS, &id);
-        let state = json!({"source": setup.source});
-        send(file, vec![(vec![unit], state)], "module", out, requests);
+        let mut state = setup.state();
+        if let Some(object) = state.as_object_mut() {
+            object.remove("name");
+        }
+        send(
+            file,
+            vec![(vec![unit], state)],
+            "module",
+            django,
+            out,
+            requests,
+        );
     }
 }
 
@@ -234,6 +271,7 @@ fn push_unit(
             },
             trace,
             settles,
+            django: subject.django,
         },
         recheck,
     });
@@ -248,10 +286,11 @@ fn send(
     file: &FileContext<'_>,
     group: Vec<Item>,
     key: &str,
+    django: bool,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
-    let (request, asked) = presence_request(file, &group, key);
+    let (request, asked) = presence_request(file, &group, key, django);
     if file.budget.fits(&request) {
         requests.push(Planned {
             owner: file.owner,
@@ -261,7 +300,7 @@ fn send(
         return;
     }
     for item in group {
-        let (request, asked) = presence_request(file, std::slice::from_ref(&item), key);
+        let (request, asked) = presence_request(file, std::slice::from_ref(&item), key, django);
         if file.budget.fits(&request) {
             requests.push(Planned {
                 owner: file.owner,
@@ -282,7 +321,12 @@ fn send(
     }
 }
 
-fn presence_request(file: &FileContext<'_>, items: &[Item], key: &str) -> (Value, Asked) {
+fn presence_request(
+    file: &FileContext<'_>,
+    items: &[Item],
+    key: &str,
+    django: bool,
+) -> (Value, Asked) {
     let mut questions = Questions::default();
     for (index, (units, _)) in items.iter().enumerate() {
         let code = if key == "module" {
@@ -294,7 +338,7 @@ fn presence_request(file: &FileContext<'_>, items: &[Item], key: &str) -> (Value
             for question in presence_questions(rule) {
                 questions.ask(
                     format!("{}{index}_{question}", &key[..1]),
-                    presence_body(question, &code),
+                    presence_body(question, &code, django),
                     id,
                     rule,
                     question,
@@ -321,36 +365,67 @@ pub(super) fn presence_questions(rule: &str) -> &'static [&'static str] {
         .map_or(&[], |(_, questions)| questions)
 }
 
-fn presence_body(question: &str, code: &str) -> Value {
+fn presence_body(question: &str, code: &str, django: bool) -> Value {
     match question {
-        "interpreted" => questions::security_interpreted(code),
-        "resource" => questions::security_resource(code),
+        "interpreted" => questions::security_interpreted(code, django),
+        "resource" => questions::security_resource(code, django),
         "logs_secret" => questions::security_logs_secret(code),
-        "error_details" => questions::security_error_details(code),
-        _ => questions::security_weakened(code),
+        "error_details" => questions::security_error_details(code, django),
+        _ => questions::security_weakened(code, django),
     }
 }
 
 /// The specific checks a rule's trace can ask; the one that finds a concern
-/// names the finding's kind. Checks of one language are answered only in
-/// its files.
+/// names the finding's kind. Checks of one language or framework are
+/// answered only in its files.
 pub(super) fn checks(rule: &str) -> Vec<&'static questions::Check> {
-    asked_checks(rule, questions::CSHARP)
+    let mut all = asked_checks(rule, questions::CSHARP, false);
+    for check in asked_checks(rule, "", true) {
+        if !all.iter().any(|c| c.id == check.id) {
+            all.push(check);
+        }
+    }
+    all
 }
 
-/// The checks a rule's trace asks about a file in `language`.
-fn asked_checks(rule: &str, language: &str) -> Vec<&'static questions::Check> {
-    let (general, csharp): (&'static [questions::Check], &'static [questions::Check]) = match rule {
-        INJECTION => (&questions::UNHANDLED, &questions::CSHARP_UNHANDLED),
-        SENSITIVE_DATA => (&questions::EXPOSURES, &[]),
-        _ => (&questions::WEAK_SETTINGS, &questions::CSHARP_SETTINGS),
+/// The checks a rule's trace asks about a file in `language`; Django code
+/// (`django`) is asked the Django variant of a check where one exists, and
+/// the Django checks besides.
+fn asked_checks(rule: &str, language: &str, django: bool) -> Vec<&'static questions::Check> {
+    let (general, csharp, framework): (
+        &'static [questions::Check],
+        &'static [questions::Check],
+        &'static [questions::Check],
+    ) = match rule {
+        INJECTION => (
+            &questions::UNHANDLED,
+            &questions::CSHARP_UNHANDLED,
+            &questions::DJANGO_UNHANDLED,
+        ),
+        SENSITIVE_DATA => (&questions::EXPOSURES, &[], &questions::DJANGO_EXPOSURES),
+        _ => (
+            &questions::WEAK_SETTINGS,
+            &questions::CSHARP_SETTINGS,
+            &questions::DJANGO_SETTINGS,
+        ),
     };
     let csharp = if language == questions::CSHARP {
         csharp
     } else {
         &[]
     };
-    general.iter().chain(csharp).collect()
+    let framework = if django { framework } else { &[] };
+    general
+        .iter()
+        .map(|check| {
+            questions::DJANGO_VARIANTS
+                .iter()
+                .find(|variant| django && variant.id == check.id)
+                .unwrap_or(check)
+        })
+        .chain(csharp)
+        .chain(framework)
+        .collect()
 }
 
 /// The trace follow-up of one unit: which site, the rule's specific checks,
@@ -373,11 +448,23 @@ fn trace(
     let mut ask = |question: &'static str, body: Value| {
         questions.ask(question.into(), body, id, rule, question, Pass::Trace);
     };
-    ask("site", questions::security_site(what, &ids));
-    if rule == INJECTION {
-        ask("origin", questions::security_origin(&code, false));
+    // Other code keeps the key the site question has always named.
+    let listed = if subject.django {
+        code.as_str()
     } else {
-        ask("dev_only", questions::security_dev_only(&code));
+        "function.source"
+    };
+    ask("site", questions::security_site(what, &ids, listed));
+    if rule == INJECTION {
+        ask(
+            "origin",
+            questions::security_origin(&code, false, subject.django),
+        );
+    } else {
+        ask(
+            "dev_only",
+            questions::security_dev_only(&code, subject.django),
+        );
     }
     // With the errors it creates listed, each message is asked about; a
     // function that creates none is asked about its messages as a whole.
@@ -393,12 +480,12 @@ fn trace(
         let ids: Vec<String> = (0..messages.len()).map(|i| format!("m{i}")).collect();
         ask("messages", questions::security_message_origin(&ids));
     }
-    for check in asked_checks(rule, file.language) {
+    for check in asked_checks(rule, file.language, subject.django) {
         ask(check.id, check.body(&code));
     }
     let mut state = json!({
         "file": file.file_state(),
-        subject.kind: {"name": subject.name, "source": subject.source},
+        subject.kind: subject.state(),
         "sites": subject.sites.iter().map(|s| json!({"id": s.id, "source": s.text})).collect::<Vec<_>>(),
     });
 
@@ -426,13 +513,13 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
     let mut questions = Questions::default();
     questions.ask(
         "origin".into(),
-        questions::security_origin(&code, true),
+        questions::security_origin(&code, true, subject.django),
         id,
         INJECTION,
         "origin",
         Pass::Recheck,
     );
-    for check in asked_checks(INJECTION, file.language) {
+    for check in asked_checks(INJECTION, file.language, subject.django) {
         questions.ask(
             check.id.into(),
             check.with_callers(&code),
@@ -444,7 +531,7 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
     }
     let mut state = json!({
         "file": file.file_state(),
-        subject.kind: {"name": subject.name, "source": subject.source},
+        subject.kind: subject.state(),
         "callers": subject.callers.iter().map(|(name, source)| json!({"name": name, "source": source})).collect::<Vec<_>>(),
     });
     if !subject.enums.is_empty() {
@@ -583,7 +670,7 @@ fn settle(
         "url_parts" => questions::security_url_parts(&code, callers),
         "runs_in" => questions::security_runs_in(&code),
         "redirect_target" => questions::security_redirect_target(&code, callers),
-        "markup_output" => questions::security_markup_output(&code),
+        "markup_output" => questions::security_markup_output(&code, subject.django),
         "destination" => questions::security_destination(&code),
         "logged" => questions::security_logged(&code),
         _ => questions::security_cors_origins(&code),
@@ -599,7 +686,7 @@ fn settle(
     );
     let mut state = json!({
         "file": file.file_state(),
-        subject.kind: {"name": subject.name, "source": subject.source},
+        subject.kind: subject.state(),
     });
     if callers {
         state["callers"] = json!(

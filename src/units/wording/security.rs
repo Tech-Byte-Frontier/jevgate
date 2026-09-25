@@ -70,7 +70,7 @@ pub(in crate::units) fn privilege_wording(
 }
 
 /// Injection kinds: the text a variable is placed into, its weakness and remedy.
-const INJECTIONS: [(&str, &str, &str, &str); 9] = [
+const INJECTIONS: [(&str, &str, &str, &str); 10] = [
     (
         "sql",
         "a database query",
@@ -120,6 +120,12 @@ const INJECTIONS: [(&str, &str, &str, &str); 9] = [
         "Redirect only to paths on this site or to hosts on an allowed list",
     ),
     (
+        "deserialize",
+        "a deserializer that can build any object",
+        "CWE-502 deserialization of untrusted data",
+        "Parse the data as JSON or with a safe loader such as `yaml.safe_load`",
+    ),
+    (
         "",
         "text another program interprets",
         "CWE-74 injection",
@@ -128,7 +134,7 @@ const INJECTIONS: [(&str, &str, &str, &str); 9] = [
 ];
 
 /// Weak settings: what the code does, its weakness and remedy.
-const SETTINGS: [(&str, &str, &str, &str); 10] = [
+const SETTINGS: [(&str, &str, &str, &str); 12] = [
     (
         "tls",
         "turns off certificate or signature verification",
@@ -184,6 +190,18 @@ const SETTINGS: [(&str, &str, &str, &str); 10] = [
         "Read the secret from a variable without the public prefix, only in server code, and rotate it",
     ),
     (
+        "csrf",
+        "turns off cross-site request forgery protection for requests that change data",
+        "CWE-352 cross-site request forgery",
+        "Keep CSRF protection on and send the token with forms and scripts instead of exempting the view",
+    ),
+    (
+        "literal_secret",
+        "keeps a secret key, password or token as a literal in the code",
+        "CWE-798 hard-coded credentials",
+        "Read the secret from the environment or a secret store, and replace the committed value",
+    ),
+    (
         "",
         "chooses a weak security setting",
         "CWE-1188 insecure setting",
@@ -228,10 +246,10 @@ pub(in crate::units) fn security_wording(
     p: f64,
     answers: &Answers<'_>,
 ) -> (Wording, String) {
-    let subject = if name == crate::units::security::MODULE_SETUP {
-        "Module setup".to_string()
-    } else {
-        format!("`{name}`")
+    let subject = match name {
+        crate::units::security::MODULE_SETUP => "Module setup".to_string(),
+        crate::units::security::SETTINGS_MODULE => "Settings module".to_string(),
+        _ => format!("`{name}`"),
     };
     let kind = found_check(rule, answers);
     match rule {
@@ -242,8 +260,27 @@ pub(in crate::units) fn security_wording(
         }
         _ => {
             let (_, what, category, action) = kind_row(&SETTINGS, kind);
-            exposure_wording(&subject, (what, category, action), strength, p, answers)
+            let ((message, action), category) =
+                exposure_wording(&subject, (what, category, action), strength, p, answers);
+            ((message + &also_found(kind, answers), action), category)
         }
+    }
+}
+
+/// The other weak settings a check found at the threshold, such as a weak
+/// password hash beside debug mode in one settings module: the unit is one
+/// finding, so its message names them all.
+fn also_found(kind: &str, answers: &Answers<'_>) -> String {
+    let others: Vec<&str> = SETTINGS
+        .iter()
+        .filter(|(id, ..)| !id.is_empty() && *id != kind)
+        .filter(|(id, ..)| matches!(answers.get(id).map(|a| noul(a)), Some(Outcome::Review(_))))
+        .map(|(_, _, category, _)| *category)
+        .collect();
+    if others.is_empty() {
+        String::new()
+    } else {
+        format!(" Also found: {}.", others.join("; "))
     }
 }
 
@@ -307,9 +344,16 @@ fn exposure_kind(answers: &Answers<'_>) -> (&'static str, &'static str, &'static
             })
             .fold(0.0, f64::max)
     };
-    if strongest(&["logs_secret", "logs_object_secret"])
-        >= strongest(&["error_details", "exception_to_client"])
-    {
+    let logs = strongest(&["logs_secret", "logs_object_secret"]);
+    let errors = strongest(&["error_details", "exception_to_client"]);
+    let environment = strongest(&["environment_to_client"]);
+    if environment > logs && environment > errors {
+        (
+            "sends the server's environment, settings or request metadata to a remote client",
+            "CWE-497 exposure of system data",
+            "Send only the fields the client needs; keep the environment and settings on the server",
+        )
+    } else if logs >= errors {
         (
             "writes a password, token, key or personal data to a log",
             "CWE-532 sensitive data in logs",
@@ -349,7 +393,19 @@ fn exposure_wording(
             crate::units::outcome::messages(&get),
             Some(crate::units::outcome::Messages::Foreign(_))
         );
+    let decided = crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY);
     let message = match strength {
+        // A decided finding lowered because the code runs only in
+        // development or tests; its answer was not split.
+        Strength::Note if decided && development => {
+            format!("{subject} {what}, but it runs only in development or tests.")
+        }
+        // A weak setting the presence answer found but no specific check
+        // named, as in a settings module.
+        Strength::Note if decided && category == "CWE-1188 insecure setting" => format!(
+            "{subject} may {}; no specific check named the setting.",
+            base_form(what)
+        ),
         Strength::Note => format!(
             "{subject} may {}; the answer was split.{where_}",
             base_form(what)

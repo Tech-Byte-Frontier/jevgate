@@ -1,8 +1,10 @@
 //! Web framework error handlers: found where the program registers them
 //! (`.onError(…)`, `.setErrorHandler(…)`, Express error middleware, Flask and
-//! FastAPI decorators) or implements them (axum `IntoResponse` and actix-web
+//! FastAPI decorators, Django URLconf error views and Django REST framework's
+//! `EXCEPTION_HANDLER`) or implements them (axum `IntoResponse` and actix-web
 //! `ResponseError` for an error type, Rocket catchers, NestJS exception
-//! filters), and asked once each whether they send clients more than the
+//! filters, Django middleware `process_exception`), and asked once each
+//! whether they send clients more than the
 //! program's own messages and codes, with the program's error classes as
 //! evidence.
 use super::{
@@ -80,7 +82,15 @@ pub(super) fn plan(
             ),
         };
         if let Some(file) = result.files.get_mut(&handler.owner) {
-            plan_handler(&context, handler, &classes, file, &mut result.requests);
+            let django = scope.units[&handler.owner].django;
+            plan_handler(
+                &context,
+                handler,
+                &classes,
+                django,
+                file,
+                &mut result.requests,
+            );
         }
     }
 }
@@ -95,6 +105,7 @@ fn error_handlers(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>) -> Vec<
         let file = registered(scope, imports, owner)
             .into_iter()
             .chain(decorated(scope, owner))
+            .chain(django_views(scope, imports, owner))
             .chain(implemented(scope, owner));
         for handler in file {
             if !found
@@ -235,6 +246,84 @@ fn decorated(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
         .collect()
 }
 
+/// Module-level names a Django URLconf assigns its error views to.
+const DJANGO_ERROR_VIEWS: [&str; 4] = ["handler400", "handler403", "handler404", "handler500"];
+/// The Django REST framework setting that names its exception handler.
+const DRF_EXCEPTION_HANDLER: &str = "EXCEPTION_HANDLER";
+
+/// Views a Django URLconf names for errors (`handler500 = views.server_error`
+/// or a dotted path in a string), and the function Django REST framework's
+/// `EXCEPTION_HANDLER` setting names, found by their last name segment.
+fn django_views(
+    scope: &Scope<'_>,
+    imports: &BTreeMap<usize, Imports>,
+    owner: usize,
+) -> Vec<Handler> {
+    let input = &scope.inputs[owner];
+    if input.result.path.extension().is_none_or(|e| e != "py") {
+        return Vec::new();
+    }
+    let source = input.source.as_deref().unwrap_or("");
+    let tests = scope.test_lines(owner);
+    let mut offset = 0;
+    let mut found = Vec::new();
+    for line in source.split_inclusive('\n') {
+        let at = offset;
+        offset += line.len();
+        if line.trim_start().starts_with('#')
+            || tests
+                .iter()
+                .any(|l| l.contains(&crate::analysis::line_of(source, at)))
+        {
+            continue;
+        }
+        let named = DJANGO_ERROR_VIEWS
+            .iter()
+            .find_map(|view| {
+                let value = line.strip_prefix(view)?.trim_start().strip_prefix('=')?;
+                Some(value.trim())
+            })
+            .or_else(|| {
+                let key = line.find(DRF_EXCEPTION_HANDLER)?;
+                let rest = line[key + DRF_EXCEPTION_HANDLER.len()..]
+                    .trim_start_matches(['"', '\''])
+                    .trim_start();
+                Some(rest.strip_prefix(':')?.trim())
+            });
+        let Some(value) = named else {
+            continue;
+        };
+        let name = value
+            .trim_end_matches(',')
+            .trim_matches(['"', '\''])
+            .rsplit('.')
+            .next()
+            .unwrap_or_default();
+        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let Some((handler_owner, handler_name, handler_source, lines)) =
+            named_handler(scope, imports, owner, name)
+        else {
+            continue;
+        };
+        let line_number = crate::analysis::line_of(source, at);
+        found.push(Handler {
+            owner: handler_owner,
+            name: handler_name,
+            source: handler_source,
+            lines,
+            helpers: Vec::new(),
+            registered: format!(
+                "`{}` ({}:{line_number})",
+                line.trim(),
+                input.result.path.display()
+            ),
+        });
+    }
+    found
+}
+
 /// Helper functions shown with a handler: at most this many, each whole and
 /// at most `HELPER_BYTES` long.
 const HELPERS: usize = 4;
@@ -283,6 +372,7 @@ fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
     let lines = scope.test_lines(owner);
     let filters = exception_filters(source);
     let csharp = input.result.path.extension().is_some_and(|e| e == "cs");
+    let python = input.result.path.extension().is_some_and(|e| e == "py");
     scope.units[&owner]
         .units
         .iter()
@@ -303,6 +393,11 @@ fn implemented(scope: &Scope<'_>, owner: usize) -> Vec<Handler> {
                 }
                 name if csharp && !unit.owner.is_empty() => {
                     csharp_handler(source, &unit.owner, name, text)?
+                }
+                // Django calls a middleware's `process_exception` for every
+                // exception a view raises; a response it returns is sent.
+                "process_exception" if python && !unit.owner.is_empty() => {
+                    format!("Django middleware {}.process_exception", unit.owner)
                 }
                 _ => text
                     .lines()
@@ -672,6 +767,7 @@ fn plan_handler(
     file: &FileContext<'_>,
     handler: &Handler,
     classes: &ErrorClasses,
+    django: bool,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -679,7 +775,7 @@ fn plan_handler(
     let mut questions = Questions::default();
     questions.ask(
         "handler_leaks".into(),
-        questions::security_handler_leaks(),
+        questions::security_handler_leaks(django),
         &id,
         SENSITIVE_DATA,
         "handler_leaks",
