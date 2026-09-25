@@ -90,6 +90,10 @@ struct Token<'a> {
     kind: TokenKind,
     text: &'a str,
     start: usize,
+    /// A call of the function the token sits in: `bound(child, …)` inside
+    /// `bound`. Recursion names the function itself, so two walks calling
+    /// themselves differ by no renamed name.
+    own: bool,
 }
 
 /// Placeholders for renamed identifiers and literals. The control character
@@ -112,6 +116,9 @@ struct Statement {
     span: Range<usize>,
     tokens: Range<usize>,
     hash: u64,
+    /// Part of the frame of a walk rather than its work: an early exit that
+    /// does nothing else, or a recursion into the function itself.
+    frame: bool,
 }
 
 struct Block {
@@ -173,6 +180,7 @@ fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block
         };
         let mut tokens = Vec::new();
         leaves(tree.root_node(), file.source, &mut tokens);
+        mark_recursion(&mut tokens, file.units);
         let bodies: Vec<Range<usize>> = file
             .units
             .iter()
@@ -262,8 +270,17 @@ fn pair(
     let span_y = y[0].span.start..y[n - 1].span.end;
     let size =
         compact(&files[fx].source[span_x.clone()]).min(compact(&files[fy].source[span_y.clone()]));
-    // A repeated pair of statements is usually an idiom, such as a call and its check.
-    if n < MIN_CLONE_STATEMENTS || size < MIN_BYTES {
+    // A repeated pair of statements is usually an idiom, such as a call and
+    // its check. Early exits and recursion into the function itself frame
+    // any tree walk, so a copy needs as many statements beyond them: two
+    // walks that stop at a different kind and recurse into their children
+    // share only that frame.
+    let work = x
+        .iter()
+        .zip(y)
+        .filter(|(a, b)| !(a.frame && b.frame))
+        .count();
+    if n < MIN_CLONE_STATEMENTS || work < MIN_STATEMENTS || size < MIN_BYTES {
         return None;
     }
     let normalized = crate::schema::hash(
@@ -456,6 +473,10 @@ fn align(x: &[Token<'_>], y: &[Token<'_>]) -> Option<Vec<Difference>> {
         if a.normal() != b.normal() {
             return None;
         }
+        // Each side calling itself is the same step, not a rename.
+        if a.own && b.own {
+            continue;
+        }
         if a.kind == TokenKind::Identifier
             && (*forward.entry(a.text).or_insert(b.text) != b.text
                 || *backward.entry(b.text).or_insert(a.text) != a.text)
@@ -523,6 +544,7 @@ fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
             kind,
             text,
             start: node.start_byte(),
+            own: false,
         });
         return;
     }
@@ -540,24 +562,7 @@ fn collect_blocks(
     tokens: &[Token<'_>],
     blocks: &mut Vec<Block>,
 ) {
-    // Ruby holds statements in a `body_statement` or `block_body`, and in the
-    // `then`, `else` and `do` of a branch or loop; its `block` is a `{ … }`
-    // argument around a `block_body`. PHP holds them in a `compound_statement`,
-    // and a Java constructor's statements are in a `constructor_body`.
-    let ruby_block = node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call");
-    if matches!(
-        node.kind(),
-        "block"
-            | "statement_block"
-            | "statement_list"
-            | "compound_statement"
-            | "body_statement"
-            | "block_body"
-            | "then"
-            | "else"
-            | "do"
-            | "constructor_body"
-    ) && !ruby_block
+    if holds_statements(node)
         && bodies
             .iter()
             .any(|b| b.start <= node.start_byte() && node.end_byte() <= b.end)
@@ -576,6 +581,143 @@ fn collect_blocks(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_blocks(child, file, index, bodies, tokens, blocks);
+    }
+}
+
+/// A node whose named children are statements. Ruby holds statements in a
+/// `body_statement` or `block_body`, and in the `then`, `else` and `do` of a
+/// branch or loop; its `block` is a `{ … }` argument around a `block_body`.
+/// PHP holds them in a `compound_statement`, and a Java constructor's
+/// statements are in a `constructor_body`.
+fn holds_statements(node: Node<'_>) -> bool {
+    let ruby_block = node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call");
+    matches!(
+        node.kind(),
+        "block"
+            | "statement_block"
+            | "statement_list"
+            | "compound_statement"
+            | "body_statement"
+            | "block_body"
+            | "then"
+            | "else"
+            | "do"
+            | "constructor_body"
+    ) && !ruby_block
+}
+
+/// Mark each call of the function it sits in: its name followed by its
+/// arguments inside the body of the innermost callable of that name, bare or
+/// on the object itself (`self.walk(`, `this.walk(`, `Self::walk(`). A call
+/// through another path, as `native::get()` inside `get`, names a
+/// different function.
+fn mark_recursion(tokens: &mut [Token<'_>], units: &[Unit]) {
+    let callables: Vec<&Unit> = units.iter().filter(|u| u.callable()).collect();
+    let names: BTreeSet<&str> = callables.iter().map(|u| u.short_name.as_str()).collect();
+    for i in 1..tokens.len() {
+        let token = &tokens[i - 1];
+        if token.kind != TokenKind::Identifier
+            || tokens[i].text != "("
+            || !names.contains(token.text)
+        {
+            continue;
+        }
+        let qualifier = i
+            .checked_sub(2)
+            .filter(|&q| matches!(tokens[q].text, "." | "::" | "->" | "?."));
+        let on_itself = qualifier.is_none_or(|q| {
+            q.checked_sub(1).is_some_and(|o| {
+                matches!(tokens[o].text, "self" | "Self" | "this" | "cls" | "static")
+            })
+        });
+        if !on_itself {
+            continue;
+        }
+        let own = callables
+            .iter()
+            .filter(|u| u.body.as_ref().is_some_and(|b| b.contains(&token.start)))
+            .min_by_key(|u| u.span.len())
+            .is_some_and(|u| u.short_name == token.text);
+        tokens[i - 1].own = own;
+    }
+}
+
+/// The tokens of one node.
+fn tokens_of<'t, 'a>(tokens: &'t [Token<'a>], node: Node<'_>) -> &'t [Token<'a>] {
+    let start = tokens.partition_point(|t| t.start < node.start_byte());
+    let end = tokens.partition_point(|t| t.start < node.end_byte());
+    &tokens[start..end]
+}
+
+/// Statements nested at any depth inside a statement's branches and loops.
+fn nested_statements<'t>(node: Node<'t>, nested: &mut Vec<Node<'t>>) {
+    let holds = holds_statements(node);
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if holds && !is_comment(child) {
+            nested.push(child);
+        }
+        nested_statements(child, nested);
+    }
+}
+
+/// Part of a walk's frame rather than its work: an early exit that does
+/// nothing else, or a recursion whose nested statements only call the
+/// function itself or leave early, as
+/// `for child in node.named_children(&mut cursor) { bound(child, names); }`.
+fn frame(statement: Node<'_>, tokens: &[Token<'_>]) -> bool {
+    let calls_itself = |node: Node<'_>| tokens_of(tokens, node).iter().any(|t| t.own);
+    if exit_guard(statement, tokens) {
+        return true;
+    }
+    if !calls_itself(statement) {
+        return false;
+    }
+    let mut nested = Vec::new();
+    nested_statements(statement, &mut nested);
+    nested
+        .into_iter()
+        .all(|n| calls_itself(n) || exits(n, tokens) || exit_guard(n, tokens))
+}
+
+/// A branch that only leaves, as `if node.kind() == "call" { return; }`,
+/// `if (done) return;` or `return if done`.
+fn exit_guard(statement: Node<'_>, tokens: &[Token<'_>]) -> bool {
+    let words = tokens_of(tokens, statement);
+    let guard = words
+        .first()
+        .is_some_and(|t| matches!(t.text, "if" | "unless"))
+        || matches!(statement.kind(), "if_modifier" | "unless_modifier");
+    if !guard
+        || words
+            .iter()
+            .any(|t| matches!(t.text, "else" | "elif" | "elsif"))
+    {
+        return false;
+    }
+    let mut nested = Vec::new();
+    nested_statements(statement, &mut nested);
+    if nested.is_empty() {
+        // A branch without braces holds its one statement in a field.
+        nested.extend(
+            ["consequence", "body"]
+                .into_iter()
+                .filter_map(|field| statement.child_by_field_name(field)),
+        );
+    }
+    !nested.is_empty() && nested.into_iter().all(|n| exits(n, tokens))
+}
+
+/// `return`, `break`, `continue` or `next` with no value, or with nothing.
+fn exits(statement: Node<'_>, tokens: &[Token<'_>]) -> bool {
+    match tokens_of(tokens, statement) {
+        [first, rest @ ..] => {
+            matches!(first.text, "return" | "break" | "continue" | "next")
+                && rest
+                    .iter()
+                    .all(|t| matches!(t.text, ";" | "None" | "nil" | "null"))
+        }
+        [] => false,
     }
 }
 
@@ -610,6 +752,7 @@ fn block_statements(
             span: child.byte_range(),
             tokens: start..end,
             hash: fast_hash(&key),
+            frame: frame(child, tokens),
         }));
     }
     statements
@@ -833,6 +976,58 @@ mod tests {
             pairs_between(("OwnerMapper.java", &a), ("VetMapper.java", &b)),
             1
         );
+    }
+
+    /// A Ruby assignment's bound locals and a Rust `use` path's imported
+    /// names: two walks that share only the frame of skipping one kind and
+    /// recursing into their children.
+    const BOUND: &str = "fn bound(node: Node<'_>, source: &str, names: &mut Vec<String>) {\n    if node.kind() == \"identifier\" {\n        names.push(text(node, source).to_string());\n        return;\n    }\n    if node.kind() == \"call\" {\n        return;\n    }\n    let mut cursor = node.walk();\n    for child in node.named_children(&mut cursor) {\n        bound(child, source, names);\n    }\n}\n";
+    const IMPORTS: &str = "fn imports(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {\n    if node.kind() == \"identifier\" {\n        let name = text(node, source);\n        if !matches!(name, \"self\" | \"super\" | \"crate\") {\n            names.insert(name.to_string());\n        }\n        return;\n    }\n    if node.kind() == \"scoped_identifier\" {\n        if let Some(name) = node.child_by_field_name(\"name\") {\n            imports(name, source, names);\n        }\n        return;\n    }\n    if node.kind() == \"string\" {\n        return;\n    }\n    let mut cursor = node.walk();\n    for child in node.named_children(&mut cursor) {\n        imports(child, source, names);\n    }\n}\n";
+
+    #[test]
+    fn walks_sharing_only_an_early_exit_and_their_recursion_are_not_copies() {
+        assert_eq!(
+            pairs_between(("ruby.rs", BOUND), ("import_names.rs", IMPORTS)),
+            0
+        );
+        // The same frame around a different exit, with the recursion written
+        // as a method on the walker itself, is still only the frame.
+        let method = |name: &str, stop: &str| {
+            format!(
+                "impl Walker {{\n    fn {name}(&mut self, node: Node<'_>) {{\n        if node.is_missing() {{\n            return;\n        }}\n        if node.kind() == \"{stop}\" {{\n            return;\n        }}\n        let mut cursor = node.walk();\n        for child in node.named_children(&mut cursor) {{\n            if child.is_extra() {{\n                continue;\n            }}\n            self.{name}(child);\n        }}\n    }}\n}}\n"
+            )
+        };
+        let (a, b) = (method("locals", "call"), method("exports", "string"));
+        assert_eq!(pairs_between(("a.rs", &a), ("b.rs", &b)), 0);
+        // Exits without braces and `this.` recursion in JavaScript.
+        let script = |name: &str, stop: &str| {
+            format!(
+                "class Scanner {{\n  {name}(node) {{\n    if (!node) return;\n    if (node.type === '{stop}') return;\n    const children = node.namedChildren;\n    for (const child of children) {{\n      this.{name}(child);\n    }}\n  }}\n}}\n"
+            )
+        };
+        let (a, b) = (
+            script("locals", "call_expression"),
+            script("exports", "string"),
+        );
+        assert_eq!(pairs_between(("a.js", &a), ("b.js", &b)), 0);
+    }
+
+    #[test]
+    fn walks_copying_the_work_they_do_at_each_node_are_candidates() {
+        // Both walks collect the bound identifiers the same way; each calling
+        // itself is the same step, so their own names are no difference.
+        let copy = BOUND.replace("bound", "assigned");
+        let found = run(&[("ruby.rs", BOUND, true), ("python.rs", &copy, true)]);
+        assert_eq!(found.pairs.len(), 1);
+        assert_eq!(found.pairs[0].differences, []);
+        // A walk that does its work in the loop, around its recursion.
+        let visit = |name: &str| {
+            format!(
+                "fn {name}(node: Node<'_>, source: &str, names: &mut Vec<String>) {{\n    if node.kind() == \"call\" {{\n        return;\n    }}\n    let mut cursor = node.walk();\n    for child in node.named_children(&mut cursor) {{\n        if child.kind() == \"identifier\" {{\n            names.push(text(child, source).to_string());\n        }}\n        {name}(child, source, names);\n    }}\n}}\n"
+            )
+        };
+        let (a, b) = (visit("locals"), visit("parameters"));
+        assert_eq!(pairs_between(("a.rs", &a), ("b.rs", &b)), 1);
     }
 
     #[test]
