@@ -2,6 +2,7 @@
 //! project helper is here.
 mod auth;
 mod changes;
+mod manual;
 mod preview;
 mod rules;
 #[path = "../support/temp_dir.rs"]

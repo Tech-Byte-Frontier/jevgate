@@ -4,6 +4,7 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- `jevgate completions SHELL` prints a completion script for bash, zsh, fish, elvish or PowerShell, and `jevgate man [COMMAND]` a man page, both generated from the same definitions as `--help`. The Homebrew formula installs them.
 - Homebrew: `brew install tech-byte-frontier/tap/jevgate` installs the release binaries on macOS and Linux, and each release updates the formula.
 
 ## [0.17.0] - 2026-09-25

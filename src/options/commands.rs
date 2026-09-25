@@ -84,6 +84,22 @@ pub enum JevCommand {
         #[arg(long)]
         force: bool,
     },
+    /// Print a shell completion script (offline)
+    #[command(after_long_help = COMPLETIONS_EXAMPLES)]
+    Completions {
+        /// bash, zsh, fish, elvish or powershell
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+    /// Print a man page in roff (offline)
+    ///
+    /// Without a command, the page for `jevgate`; with one, the page for that
+    /// command, such as `jevgate-check`.
+    #[command(after_long_help = MAN_EXAMPLES)]
+    Man {
+        /// A command: auth, check, baseline, rules, init, serve or completions
+        command: Option<String>,
+    },
     /// Serve the latest report as read-only JSON on localhost (run alongside `check --watch`)
     ///
     /// Answers GET requests from local tools, never from a browser page:
@@ -183,7 +199,8 @@ Environment:
   JEVGATE_CONFIG_DIR        Absolute directory for file-stored credentials
   CI                        When set, --report writes the dashboard without opening a browser
 
-`jevgate <command> --help` explains each command; -h prints a summary.";
+`jevgate <command> --help` explains each command; -h prints a summary. `jevgate completions SHELL`
+and `jevgate man [COMMAND]` print shell completions and man pages.";
 
 const CHECK_EXAMPLES: &str = "\
 Examples:
@@ -209,6 +226,19 @@ Reading the JSON report (--format json or .jevgate/latest.json):
   files[].dimensions per rule: status, unit counts and the units left undecided
   files[].judgments  every raw answer, first pass and follow-ups
   api_requests, paid_input_tokens, paid_output_tokens   this run's usage";
+
+const COMPLETIONS_EXAMPLES: &str = "\
+Examples:
+  jevgate completions bash > ~/.local/share/bash-completion/completions/jevgate
+  jevgate completions zsh > \"${fpath[1]}/_jevgate\"
+  jevgate completions fish > ~/.config/fish/completions/jevgate.fish
+  jevgate completions powershell >> $PROFILE";
+
+const MAN_EXAMPLES: &str = "\
+Examples:
+  jevgate man > ~/.local/share/man/man1/jevgate.1
+  jevgate man check > ~/.local/share/man/man1/jevgate-check.1
+  jevgate man check | man -l -                  Read a page without installing it (man-db)";
 
 const AUTH_EXAMPLES: &str = "\
 Examples:

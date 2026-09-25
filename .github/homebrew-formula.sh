@@ -45,6 +45,12 @@ class Jevgate < Formula
 
   def install
     bin.install "jevgate"
+    generate_completions_from_executable(bin/"jevgate", "completions")
+    man1.mkpath
+    (man1/"jevgate.1").write Utils.safe_popen_read(bin/"jevgate", "man")
+    %w[auth check baseline rules init serve completions man].each do |command|
+      (man1/"jevgate-#{command}.1").write Utils.safe_popen_read(bin/"jevgate", "man", command)
+    end
   end
 
   test do
