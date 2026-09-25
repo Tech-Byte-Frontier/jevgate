@@ -22,6 +22,7 @@
 
 - [How it works](how-it-works.md)
 - [Limits](limits.md)
+- [Versions and stability](stability.md)
 - [Changelog](changelog.md)
 
 # Reference
