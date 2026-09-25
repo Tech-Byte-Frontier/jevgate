@@ -97,6 +97,7 @@ pub fn emit(report: &Report, args: &CheckArgs) -> Result<()> {
         ),
         Format::Github => crate::github::emit(&mut out, report, args),
         Format::Sarif => crate::sarif::emit(&mut out, report, args),
+        Format::Gitlab => crate::gitlab::emit(&mut out, report, args),
     };
     match written {
         Err(error) if broken_pipe(&error) => Ok(()),

@@ -49,4 +49,25 @@ repos:
       - id: jevgate-system   # the jevgate on PATH; `jevgate` builds it with Rust instead
 ```
 
+On GitLab, a merge request pipeline can show the findings in the merge request with a Code Quality report. Set `TYPESAFE_API_KEY` as a masked CI/CD variable:
+
+```yaml
+jevgate:
+  image: buildpack-deps:bookworm-scm   # any image with git, curl and tar
+  variables:
+    GIT_DEPTH: 0                       # --base compares with the fork point
+  cache:
+    key: jevgate-answers
+    paths: [.jevgate/cache]
+  script:
+    - curl -fsSL https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/main/install.sh | sh
+    - ~/.local/bin/jevgate check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --format gitlab > gl-code-quality-report.json
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+```
+
 Other CI systems work the same way: install with `install.sh` or `cargo binstall`, set `TYPESAFE_API_KEY`, keep `.jevgate/cache` between runs, and read the exit code or the JSON report.

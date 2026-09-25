@@ -19,6 +19,8 @@ pub enum Format {
     Github,
     /// A SARIF 2.1.0 log, for GitHub code scanning and other SARIF readers
     Sarif,
+    /// A GitLab Code Quality report, for merge request widgets
+    Gitlab,
 }
 
 /// When agent output is colored.

@@ -22,7 +22,7 @@ fn validate(args: &CheckArgs) -> Result<()> {
         !(args.watch
             && matches!(
                 args.output_format(),
-                Format::Json | Format::Github | Format::Sarif
+                Format::Json | Format::Github | Format::Sarif | Format::Gitlab
             )),
         "Use --format jsonl for watch snapshots"
     );
