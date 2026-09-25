@@ -370,11 +370,7 @@ mod tests {
     #[test]
     fn php_files_get_their_own_wording_and_other_languages_keep_theirs() {
         let general = questions::UNHANDLED[0].body("function.source");
-        let mut python = general.clone();
-        reword_php("Python", "sql", &mut python);
-        assert_eq!(python, general);
-        let mut php = general.clone();
-        reword_php(PHP, "sql", &mut php);
+        let php = questions::reworded(reword_php, PHP, "sql", &general);
         let text = php.to_string();
         assert!(text.contains("mysqli_real_escape_string"), "{text}");
         assert!(!text.contains("Drizzle"), "{text}");
@@ -471,9 +467,7 @@ mod tests {
             );
         }
         for body in bodies {
-            let text = body["instructions"]["question"].as_str().unwrap();
-            assert!(text.ends_with('?') && text.len() < 200, "{text}");
-            assert!(text.contains("`function.source`"), "{text}");
+            questions::assert_short_question(&body, "`function.source`");
         }
     }
 }

@@ -187,11 +187,10 @@ pub fn security_url_parts(code: &str, callers: bool) -> Value {
 /// The option of the runs-in Choice that rules a forged request out.
 pub const BROWSER: &str = "browser";
 
-/// Where a function runs, asked when the URL check stays undecided: a fetch
-/// helper of a client component, handed a whole URL, stayed undecided, and
-/// offered beside the URL's parts, the browser lost to "a whole URL handed
-/// to it", which is true as well. Requests from the user's browser reach
-/// only what that user can.
+/// Where a function runs, asked when the URL check stays undecided, since a
+/// request from the user's browser reaches only what that user can. Offered
+/// beside the URL's parts, the browser lost to "a whole URL handed to it"
+/// for a client component's fetch helper.
 pub fn security_runs_in(code: &str) -> Value {
     json!({
         "type": "choice",

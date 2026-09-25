@@ -274,11 +274,7 @@ mod tests {
     #[test]
     fn csharp_files_get_framework_examples_and_other_languages_keep_their_wording() {
         let general = questions::security_weakened("functions[0].source", false);
-        let mut python = general.clone();
-        reword("Python", "weakened", &mut python);
-        assert_eq!(python, general);
-        let mut csharp = general.clone();
-        reword(CSHARP, "weakened", &mut csharp);
+        let csharp = questions::reworded(reword, CSHARP, "weakened", &general);
         let base = general["criteria"]["true"]["examples"]
             .as_array()
             .unwrap()
@@ -346,9 +342,7 @@ mod tests {
             );
         }
         for body in bodies {
-            let text = body["instructions"]["question"].as_str().unwrap();
-            assert!(text.ends_with('?') && text.len() < 200, "{text}");
-            assert!(text.contains("`function.source`"), "{text}");
+            questions::assert_short_question(&body, "`function.source`");
         }
     }
 }

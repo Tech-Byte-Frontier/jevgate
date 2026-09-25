@@ -576,21 +576,42 @@ pub fn test_portion(index: usize) -> Value {
     )
 }
 
+/// Asserts that a question body asks one short question naming `path`.
+#[cfg(test)]
+fn assert_short_question(body: &Value, path: &str) {
+    let text = body["instructions"]["question"].as_str().unwrap();
+    assert!(text.ends_with('?') && text.len() < 200, "{text}");
+    assert!(text.contains(path), "names a state path: {text}");
+}
+
+/// `general` as `reword` words question `id` for a file in `language`,
+/// after checking that a Python file keeps the general wording.
+#[cfg(test)]
+fn reworded(
+    reword: fn(&str, &str, &mut Value),
+    language: &str,
+    id: &str,
+    general: &Value,
+) -> Value {
+    let mut python = general.clone();
+    reword("Python", id, &mut python);
+    assert_eq!(&python, general);
+    let mut body = general.clone();
+    reword(language, id, &mut body);
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every question, so each test below checks them all.
     fn all() -> Vec<Value> {
-        let checks = UNHANDLED
-            .iter()
-            .chain(&WEAK_SETTINGS)
-            .chain(&EXPOSURES)
-            .chain(&DJANGO_VARIANTS)
-            .chain(&DJANGO_UNHANDLED)
-            .chain(&DJANGO_SETTINGS)
-            .chain(&DJANGO_EXPOSURES)
-            .chain(&PHP_UNHANDLED);
-        let mut all = vec![
+        [maintainability(), test_rules(), security(), documentation()].concat()
+    }
+
+    fn maintainability() -> Vec<Value> {
+        vec![
             function_split("functions[0].source", false),
             function_split("functions[0].source", true),
             function_flatten("functions[0].source"),
@@ -613,6 +634,11 @@ mod tests {
             duplicate_same(true),
             duplicate_only_differences(),
             duplicate_required(),
+        ]
+    }
+
+    fn test_rules() -> Vec<Value> {
+        vec![
             test_internal("tests[0].source"),
             test_own_logic("tests[0].source", TestEvidence::First),
             test_own_logic("tests[0].source", TestEvidence::Recheck),
@@ -630,6 +656,22 @@ mod tests {
             test_pair_same_outcome(),
             file_purpose(),
             test_portion(0),
+        ]
+    }
+
+    /// The security questions, each check in the general and the PHP
+    /// wording, and the questions Django code is asked in its own words.
+    fn security() -> Vec<Value> {
+        let checks = UNHANDLED
+            .iter()
+            .chain(&WEAK_SETTINGS)
+            .chain(&EXPOSURES)
+            .chain(&DJANGO_VARIANTS)
+            .chain(&DJANGO_UNHANDLED)
+            .chain(&DJANGO_SETTINGS)
+            .chain(&DJANGO_EXPOSURES)
+            .chain(&PHP_UNHANDLED);
+        let mut all = vec![
             security_logs_secret("function.source"),
             security_url_parts("function.source", false),
             security_url_parts("function.source", true),
@@ -651,26 +693,6 @@ mod tests {
                 &["S1".into(), "S2".into()],
                 "function.source",
             ),
-            instructions_inferable("sections[0]"),
-            instructions_describes("sections[0]"),
-            instructions_commands("sections[0]"),
-            instructions_generic("sections[0]"),
-            instructions_history("sections[0]"),
-            instructions_enforced("sections[0]"),
-            instructions_kind("sections[0]"),
-            instructions_scope("sections[0]", &["src/".into(), "web/".into()]),
-            document_split(),
-            document_history(),
-            document_part(&["P1".into(), "P2".into()]),
-            document_kind(),
-            document_plan(),
-            section_relies(),
-            pair_covers("section_a", "section_b"),
-            pair_conflict(),
-            pair_subject(),
-            pair_translation(),
-            pair_relation(),
-            missing_role(),
         ];
         all.extend(checks.clone().map(|c| c.body("function.source")));
         for check in checks {
@@ -706,12 +728,35 @@ mod tests {
         all
     }
 
+    fn documentation() -> Vec<Value> {
+        vec![
+            instructions_inferable("sections[0]"),
+            instructions_describes("sections[0]"),
+            instructions_commands("sections[0]"),
+            instructions_generic("sections[0]"),
+            instructions_history("sections[0]"),
+            instructions_enforced("sections[0]"),
+            instructions_kind("sections[0]"),
+            instructions_scope("sections[0]", &["src/".into(), "web/".into()]),
+            document_split(),
+            document_history(),
+            document_part(&["P1".into(), "P2".into()]),
+            document_kind(),
+            document_plan(),
+            section_relies(),
+            pair_covers("section_a", "section_b"),
+            pair_conflict(),
+            pair_subject(),
+            pair_translation(),
+            pair_relation(),
+            missing_role(),
+        ]
+    }
+
     #[test]
     fn questions_are_short_and_name_a_state_path() {
         for question in all() {
-            let text = question["instructions"]["question"].as_str().unwrap();
-            assert!(text.ends_with('?') && text.len() < 200, "{text}");
-            assert!(text.contains('`'), "names a state path: {text}");
+            assert_short_question(&question, "`");
         }
     }
 
