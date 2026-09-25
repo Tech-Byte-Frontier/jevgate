@@ -498,7 +498,9 @@ fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
         }
         let kind = if literal {
             TokenKind::Literal
-        } else if kind.ends_with("identifier") || kind == "identifier" {
+        } else if kind.ends_with("identifier")
+            || matches!(kind, "identifier" | "constant" | "instance_variable")
+        {
             TokenKind::Identifier
         } else {
             TokenKind::Other
@@ -524,7 +526,21 @@ fn collect_blocks(
     tokens: &[Token<'_>],
     blocks: &mut Vec<Block>,
 ) {
-    if matches!(node.kind(), "block" | "statement_block" | "statement_list")
+    // Ruby holds statements in a `body_statement` or `block_body`, and in the
+    // `then`, `else` and `do` of a branch or loop; its `block` is a `{ … }`
+    // argument around a `block_body`.
+    let ruby_block = node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call");
+    if matches!(
+        node.kind(),
+        "block"
+            | "statement_block"
+            | "statement_list"
+            | "body_statement"
+            | "block_body"
+            | "then"
+            | "else"
+            | "do"
+    ) && !ruby_block
         && bodies
             .iter()
             .any(|b| b.start <= node.start_byte() && node.end_byte() <= b.end)

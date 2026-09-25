@@ -1,8 +1,10 @@
 //! Test cases, the non-test functions they call, and candidate redundant pairs.
 //! Rust `#[test]`-family functions, JavaScript and TypeScript `it`/`test`
-//! (including `.each`), Python `test_*` functions, Go `Test…` functions and
-//! C# methods marked `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]`.
-use super::{callee_name, fast_hash, is_comment, line_of, macro_calls, text};
+//! (including `.each`), Python `test_*` functions, Go `Test…` functions, C#
+//! methods marked `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]`, and Ruby
+//! RSpec examples (`it`, `specify`), Rails `test "…" do` blocks and Minitest
+//! `test_*` methods.
+use super::{call_name, callee_name, fast_hash, is_comment, line_of, macro_calls, ruby, text};
 use anyhow::Result;
 use std::{collections::BTreeSet, ops::Range, path::Path};
 use tree_sitter::Node;
@@ -23,6 +25,14 @@ pub struct TestCase {
     /// Titles of the enclosing `describe` blocks, test classes or modules,
     /// outermost first.
     pub suite: Vec<String>,
+    /// Setup its enclosing groups declare for it, in source order: RSpec
+    /// `before` and `around`, the `let` and `subject` it reads, and Minitest
+    /// `setup`. Only Ruby cases have these; other languages' setup is found in
+    /// the file's text.
+    pub hooks: Vec<Range<usize>>,
+    /// Names its hooks call, for the test helpers they use. Only Ruby cases
+    /// have these.
+    pub hook_calls: BTreeSet<String>,
     shingles: BTreeSet<u64>,
 }
 
@@ -56,7 +66,56 @@ pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
             .map(|(_, title)| title.clone())
             .collect();
     }
+    qualify_repeated_names(&mut found);
     Ok(found)
+}
+
+/// Cases titled alike in different suites, as RSpec examples often are
+/// (`it "can be invoked with a string"` under two contexts), are named with
+/// as many of their innermost suite titles as tell them apart:
+/// `when trait is a symbol > can be invoked with a string`.
+fn qualify_repeated_names(cases: &mut [TestCase]) {
+    let names: Vec<String> = cases.iter().map(|c| c.name.clone()).collect();
+    for name in names.iter().collect::<BTreeSet<_>>() {
+        let alike: Vec<usize> = (0..cases.len()).filter(|&i| &names[i] == name).collect();
+        if alike.len() < 2 {
+            continue;
+        }
+        let deepest = alike
+            .iter()
+            .map(|&i| cases[i].suite.len())
+            .max()
+            .unwrap_or(0);
+        let qualified = |depth: usize| -> Vec<String> {
+            alike
+                .iter()
+                .map(|&i| {
+                    let suite = &cases[i].suite;
+                    let groups = &suite[suite.len().saturating_sub(depth)..];
+                    groups
+                        .iter()
+                        .chain(std::iter::once(name))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" > ")
+                })
+                .collect()
+        };
+        // The shallowest qualification that tells the most of them apart;
+        // cases alike within one suite keep their shared name.
+        let distinct = |named: &Vec<String>| named.iter().collect::<BTreeSet<_>>().len();
+        let Some(chosen) = (1..=deepest)
+            .map(qualified)
+            .rev()
+            .max_by_key(distinct)
+            .filter(|named| distinct(named) > 1)
+        else {
+            continue;
+        };
+        for (&i, named) in alike.iter().zip(chosen) {
+            cases[i].name = named;
+        }
+    }
 }
 
 /// Blocks that group test cases, with their titles, in source order: a
@@ -65,7 +124,15 @@ pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
 fn collect_suites(node: Node<'_>, source: &str, suites: &mut Vec<(Range<usize>, String)>) {
     let title = match node.kind() {
         "call_expression" => suite_call(node, source),
-        "class_definition" | "mod_item" => Some(name(node, source)).filter(|name| !name.is_empty()),
+        "call" if crate::test_locations::ruby_test_call(node, source) => {
+            Some(ruby::method(node, source))
+                .filter(|method| ruby::GROUPS.contains(method))
+                .and_then(|_| ruby::first_argument(node))
+                .map(|title| ruby::title(title, source))
+        }
+        "class_definition" | "mod_item" | "class" | "module" => {
+            Some(name(node, source)).filter(|name| !name.is_empty())
+        }
         // A C# test class; TypeScript classes (`class_body`) do not group tests.
         "class_declaration"
             if node
@@ -160,6 +227,36 @@ fn visit(
             }
             return;
         }
+        // Ruby: `class OrderTest < Minitest::Test` holds `test_*` methods.
+        "class" if crate::test_locations::ruby_test_class(node, source) => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                visit(child, source, pytest, true, found);
+            }
+            return;
+        }
+        "method" => {
+            let name = name(node, source);
+            if in_test_class && name.starts_with("test_") {
+                push(node, node.start_byte(), name, source, found);
+                ruby_context(node, source, found);
+            }
+            return;
+        }
+        "call"
+            if crate::test_locations::ruby_test_call(node, source)
+                && ruby::CASES.contains(&ruby::method(node, source)) =>
+        {
+            push(
+                node,
+                node.start_byte(),
+                ruby_case_name(node, source),
+                source,
+                found,
+            );
+            ruby_context(node, source, found);
+            return;
+        }
         "call_expression" => {
             if let Some(case) = javascript_case(node, source) {
                 push(
@@ -177,6 +274,140 @@ fn visit(
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         visit(child, source, pytest, in_test_class, found);
+    }
+}
+
+/// A Ruby example's title: its string, `its(:name)`, or the first line of a
+/// one-line example such as `it { is_expected.to be_valid }`.
+fn ruby_case_name(node: Node<'_>, source: &str) -> String {
+    let method = ruby::method(node, source);
+    match ruby::first_argument(node) {
+        Some(title) if title.kind() == "string" => ruby::title(title, source),
+        Some(title) => format!("{method} {}", text(title, source)),
+        None => {
+            let body = ruby::block_body(node).map_or("", |b| text(b, source));
+            let line = body.lines().next().unwrap_or("").trim();
+            if line.is_empty() {
+                method.to_string()
+            } else {
+                format!("{method} {{ {} }}", clip_name(line))
+            }
+        }
+    }
+}
+
+fn clip_name(line: &str) -> String {
+    const NAME_CHARS: usize = 80;
+    if line.chars().count() <= NAME_CHARS {
+        return line.to_string();
+    }
+    format!("{}…", line.chars().take(NAME_CHARS).collect::<String>())
+}
+
+/// The setup and calls of the last case, a Ruby example or test method.
+/// Its enclosing groups' `before` and `around` blocks, `let!`, and a
+/// Minitest `setup` run before it and are its hooks; a `let` or `subject` is
+/// lazy, so it is a hook only when the case or another hook reads it. Ruby
+/// calls a method without parentheses or arguments as a bare name (`total`),
+/// so the case calls each bare name that is not a local it binds or a `let`
+/// of its groups, and the calls of each `let` and `subject` it reads.
+fn ruby_context(node: Node<'_>, source: &str, found: &mut [TestCase]) {
+    let Some(case) = found.last_mut() else {
+        return;
+    };
+    let mut bound = Vec::new();
+    ruby::locals(node, source, &mut bound);
+    let mut eager = Vec::new();
+    // Innermost first, so an inner `let` hides an outer one of the same name.
+    let mut lazy: Vec<(String, Node<'_>)> = Vec::new();
+    let mut ancestor = node.parent();
+    while let Some(scope) = ancestor {
+        if matches!(scope.kind(), "body_statement" | "block_body" | "program") {
+            let mut cursor = scope.walk();
+            for sibling in scope.named_children(&mut cursor) {
+                let method = ruby::method(sibling, source);
+                let with_block = sibling.child_by_field_name("block").is_some();
+                if matches!(method, "let" | "let!" | "subject" | "subject!") && with_block {
+                    let name = ruby::first_argument(sibling)
+                        .filter(|n| n.kind() == "simple_symbol")
+                        .map(|n| text(n, source).trim_start_matches(':').to_string())
+                        .or_else(|| method.starts_with("subject").then(|| "subject".into()));
+                    if let Some(name) = name {
+                        if method.ends_with('!') {
+                            eager.push(sibling);
+                        }
+                        if !lazy.iter().any(|(known, _)| *known == name) {
+                            lazy.push((name, sibling));
+                        }
+                    }
+                    continue;
+                }
+                let setup_method = sibling.kind() == "method"
+                    && sibling
+                        .child_by_field_name("name")
+                        .is_some_and(|n| text(n, source) == "setup");
+                if setup_method || matches!(method, "before" | "around" | "setup") && with_block {
+                    eager.push(sibling);
+                }
+            }
+        }
+        ancestor = scope.parent();
+    }
+    bound.extend(lazy.iter().map(|(name, _)| name.clone()));
+    let mut read = Vec::new();
+    identifiers(node, source, &mut read);
+    case.calls
+        .extend(read.iter().filter(|name| !bound.contains(name)).cloned());
+    for hook in &eager {
+        identifiers(*hook, source, &mut read);
+    }
+    // The `let` and `subject` definitions read, directly or through another.
+    let mut used: Vec<Node<'_>> = Vec::new();
+    let mut next = 0;
+    while next < read.len() {
+        let name = read[next].clone();
+        next += 1;
+        if let Some((_, definition)) = lazy.iter().find(|(known, _)| *known == name)
+            && !used.contains(definition)
+        {
+            used.push(*definition);
+            identifiers(*definition, source, &mut read);
+            let mut calls = BTreeSet::new();
+            walk(*definition, source, &mut calls, &mut Vec::new());
+            case.calls.extend(calls);
+            let mut names = Vec::new();
+            identifiers(*definition, source, &mut names);
+            case.calls
+                .extend(names.into_iter().filter(|name| !bound.contains(name)));
+        }
+    }
+    let mut hooks: Vec<Node<'_>> = eager;
+    hooks.extend(
+        used.iter()
+            .filter(|u| !hooks.contains(u))
+            .copied()
+            .collect::<Vec<_>>(),
+    );
+    hooks.sort_by_key(|hook| hook.start_byte());
+    hooks.dedup();
+    for hook in &hooks {
+        walk(*hook, source, &mut case.hook_calls, &mut Vec::new());
+        let mut names = Vec::new();
+        identifiers(*hook, source, &mut names);
+        case.hook_calls
+            .extend(names.into_iter().filter(|name| !bound.contains(name)));
+    }
+    case.hooks = hooks.iter().map(|hook| hook.byte_range()).collect();
+}
+
+fn identifiers(node: Node<'_>, source: &str, names: &mut Vec<String>) {
+    if node.kind() == "identifier" {
+        names.push(text(node, source).to_string());
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        identifiers(child, source, names);
     }
 }
 
@@ -241,6 +472,8 @@ fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Ve
         calls,
         subjects: Vec::new(),
         suite: Vec::new(),
+        hooks: Vec::new(),
+        hook_calls: BTreeSet::new(),
         shingles,
     });
 }
@@ -256,10 +489,7 @@ fn walk<'a>(
     }
     match node.kind() {
         "call_expression" | "call" | "invocation_expression" => {
-            if let Some(name) = node
-                .child_by_field_name("function")
-                .and_then(|f| callee_name(f, source))
-            {
+            if let Some(name) = call_name(node, source) {
                 calls.insert(name);
             }
         }
@@ -408,6 +638,88 @@ mod tests {
             .map(|r| (r.start_line, r.end_line))
             .collect();
         assert_eq!(lines, [(5, 21), (23, 31)], "whole test classes");
+    }
+
+    const RSPEC: &str = "require 'spec_helper'\n\nRSpec.describe Invoice do\n  let(:rows) { [Row.new(2)] }\n  let(:unused) { expensive_fixture }\n  subject { Invoice.new(rows) }\n\n  before do\n    Currency.reset\n  end\n\n  it \"totals its rows\" do\n    expect(subject.total).to eq 2\n  end\n\n  context \"when empty\" do\n    let(:rows) { [] }\n\n    it { is_expected.to be_empty }\n    its(:total) { is_expected.to eq 0 }\n\n    it \"totals its rows\" do\n      expect(subject.total).to eq 0\n    end\n  end\n\n  describe \"#currency\" do\n    it \"is euro\" do\n      expect(currency_of(subject)).to eq \"EUR\"\n    end\n  end\nend\n";
+
+    #[test]
+    fn rspec_examples_get_their_groups_hooks_and_the_calls_of_what_they_read() {
+        let found = cases(Path::new("spec/invoice_spec.rb"), RSPEC).unwrap();
+        let named: Vec<(&str, Vec<&str>)> = found
+            .iter()
+            .map(|c| {
+                (
+                    c.name.as_str(),
+                    c.suite.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("Invoice > totals its rows", vec!["Invoice"]),
+                (
+                    "it { is_expected.to be_empty }",
+                    vec!["Invoice", "when empty"]
+                ),
+                ("its :total", vec!["Invoice", "when empty"]),
+                (
+                    "when empty > totals its rows",
+                    vec!["Invoice", "when empty"]
+                ),
+                ("is euro", vec!["Invoice", "#currency"]),
+            ],
+            "examples titled alike are told apart by their innermost groups"
+        );
+        let first = &found[0];
+        let hooks: Vec<&str> = first.hooks.iter().map(|h| &RSPEC[h.clone()]).collect();
+        assert_eq!(
+            hooks,
+            [
+                "let(:rows) { [Row.new(2)] }",
+                "subject { Invoice.new(rows) }",
+                "before do\n    Currency.reset\n  end"
+            ],
+            "a `let` the example never reads is not its setup"
+        );
+        assert!(first.calls.contains("Invoice") && first.calls.contains("Row"));
+        assert!(first.calls.contains("total") && !first.calls.contains("rows"));
+        assert!(first.hook_calls.contains("reset"));
+        let empty = &found[3];
+        assert_eq!(
+            &RSPEC[empty.hooks[0].clone()],
+            "subject { Invoice.new(rows) }"
+        );
+        assert_eq!(&RSPEC[empty.hooks[2].clone()], "let(:rows) { [] }");
+        assert!(found[4].calls.contains("currency_of"), "a bare call");
+        let located =
+            crate::test_locations::locate_tests(Path::new("spec/invoice_spec.rb"), RSPEC).unwrap();
+        assert_eq!(
+            located.ranges.len(),
+            1,
+            "the outer group holds every example"
+        );
+    }
+
+    #[test]
+    fn minitest_methods_and_rails_test_blocks_are_cases_and_rake_tasks_are_not() {
+        let minitest = "require_relative 'test_helper'\n\nclass InvoiceTest < Minitest::Test\n  def setup\n    @invoice = Invoice.new\n  end\n\n  def test_total\n    assert_equal 0, @invoice.total\n  end\n\n  def build_row\n    Row.new\n  end\nend\n\nclass Helper\n  def test_like\n  end\nend\n";
+        let found = cases(Path::new("test/invoice_test.rb"), minitest).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (found[0].name.as_str(), found[0].suite.clone()),
+            ("test_total", vec!["InvoiceTest".to_string()])
+        );
+        assert_eq!(
+            &minitest[found[0].hooks[0].clone()],
+            "def setup\n    @invoice = Invoice.new\n  end"
+        );
+        let rails = "class InvoiceTest < ActiveSupport::TestCase\n  test \"totals rows\" do\n    assert_equal 2, Invoice.new([2]).total\n  end\nend\n";
+        assert_eq!(names("test/models/invoice_test.rb", rails), ["totals rows"]);
+        let rakefile = "task :default => :test\n\ntest(:unit) do |t|\n  t.pattern = 'test/**/*_test.rb'\nend\n";
+        assert!(names("tasks.rb", rakefile).is_empty());
+        let located = crate::test_locations::locate_tests(Path::new("tasks.rb"), rakefile).unwrap();
+        assert!(located.ranges.is_empty());
     }
 
     #[test]

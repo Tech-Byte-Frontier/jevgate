@@ -16,8 +16,8 @@ pub const MAX_ERRORS: usize = 12;
 /// Errors a body creates, in source order: JavaScript and TypeScript
 /// `new …Error(…)` or `new …Exception(…)` and any call or `new` a `throw`
 /// statement makes, the call a Python `raise` makes, Go's `errors.New`
-/// and `fmt.Errorf`, and C# `new …Exception(…)` or any object a `throw`
-/// creates. The message is the
+/// and `fmt.Errorf`, C# `new …Exception(…)` or any object a `throw`
+/// creates, and a Ruby `raise`. The message is the
 /// first argument, or a Python `detail`, `message` or `msg` keyword. They
 /// are evidence of what the messages say; Jev judges where their text comes from.
 pub fn created_errors(body: Node<'_>, source: &str) -> Vec<CreatedError> {
@@ -57,6 +57,17 @@ fn errors_in(node: Node<'_>, source: &str, found: &mut Vec<CreatedError>) {
         "call_expression" => node
             .child_by_field_name("function")
             .filter(|f| matches!(text(*f, source), "errors.New" | "fmt.Errorf")),
+        // Ruby: `raise NotFound, "…"`, `raise NotFound.new("…")` or `raise "…"`.
+        "call"
+            if matches!(super::ruby::method(node, source), "raise" | "fail")
+                && node.child_by_field_name("receiver").is_none() =>
+        {
+            found.extend(
+                node.child_by_field_name("arguments")
+                    .and_then(|arguments| ruby_raise(arguments, source)),
+            );
+            None
+        }
         _ => None,
     };
     if let Some(callee) = created {
@@ -73,6 +84,38 @@ fn errors_in(node: Node<'_>, source: &str, found: &mut Vec<CreatedError>) {
     for child in node.named_children(&mut cursor) {
         errors_in(child, source, found);
     }
+}
+
+/// A Ruby `raise`: the error class and message it passes, or the message
+/// alone for `raise "…"` (a `RuntimeError`).
+fn ruby_raise(arguments: Node<'_>, source: &str) -> Option<CreatedError> {
+    let mut cursor = arguments.walk();
+    let all: Vec<Node<'_>> = arguments
+        .named_children(&mut cursor)
+        .filter(|a| !is_comment(*a))
+        .collect();
+    let (error, rest) = all.split_first()?;
+    if rest.is_empty() && error.kind() == "string" {
+        return Some(CreatedError {
+            error: "RuntimeError".into(),
+            message: clip(text(*error, source)),
+        });
+    }
+    let built = (error.kind() == "call" && super::ruby::method(*error, source) == "new")
+        .then(|| error.child_by_field_name("receiver"))
+        .flatten();
+    let message = match (built, rest.first()) {
+        (_, Some(message)) => clip(text(*message, source)),
+        (Some(_), None) => error
+            .child_by_field_name("arguments")
+            .and_then(|a| message_argument(a, source))
+            .unwrap_or_default(),
+        (None, None) => String::new(),
+    };
+    Some(CreatedError {
+        error: clip(text(built.unwrap_or(*error), source)),
+        message,
+    })
 }
 
 /// The first argument, or a `detail`, `message` or `msg` keyword argument.

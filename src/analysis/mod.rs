@@ -9,6 +9,7 @@ pub mod groups;
 pub mod imports;
 pub mod literals;
 pub mod nesting;
+pub mod ruby;
 pub mod sites;
 pub mod sql;
 mod summary;
@@ -40,6 +41,7 @@ pub(crate) fn callee_name(node: Node<'_>, source: &str) -> Option<String> {
             "field_expression" => node.child_by_field_name("field")?,
             "member_expression" => node.child_by_field_name("property")?,
             "selector_expression" => node.child_by_field_name("field")?,
+            "scope_resolution" => node.child_by_field_name("name")?,
             "attribute" => node.child_by_field_name("attribute")?,
             // C#: `_repository.ListAsync`, `Get<T>`, `System.IO.File` and `order?.Total()`.
             "member_access_expression" | "member_binding_expression" | "qualified_name" => {
@@ -51,12 +53,32 @@ pub(crate) fn callee_name(node: Node<'_>, source: &str) -> Option<String> {
                 node.named_children(&mut cursor)
                     .find(|c| c.kind() == "member_binding_expression")?
             }
-            "identifier" | "field_identifier" | "property_identifier" | "type_identifier" => {
+            "identifier"
+            | "field_identifier"
+            | "property_identifier"
+            | "type_identifier"
+            | "constant" => {
                 return Some(text(node, source).to_string());
             }
             _ => return None,
         };
     }
+}
+
+/// The name a call is recorded under: the last segment of its `function`, or
+/// the `method` a Ruby call names. Ruby's `Billing::Invoice.new(…)` builds an
+/// `Invoice`, like JavaScript's `new Invoice(…)`, rather than calling some `new`.
+pub(crate) fn call_name(call: Node<'_>, source: &str) -> Option<String> {
+    if let Some(class) = call
+        .child_by_field_name("receiver")
+        .filter(|r| matches!(r.kind(), "constant" | "scope_resolution"))
+        .filter(|_| ruby::method(call, source) == "new")
+    {
+        return callee_name(class, source);
+    }
+    call.child_by_field_name("function")
+        .or_else(|| call.child_by_field_name("method"))
+        .and_then(|callee| callee_name(callee, source))
 }
 
 /// Names called inside a Rust macro's token tree, such as `total` in

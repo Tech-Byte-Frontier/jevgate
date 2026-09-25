@@ -22,6 +22,8 @@ fn visit(node: Node<'_>, source: &str, locations: &mut Vec<(String, usize)>) {
             | "method_declaration"
             | "constructor_declaration"
             | "local_function_statement"
+            | "method"
+            | "singleton_method"
     ) {
         locations.push((function_name(node, source), node.start_position().row + 1));
     }

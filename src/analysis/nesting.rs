@@ -30,6 +30,22 @@ const CONTROL: &[&str] = &[
     "with_statement",
     "conditional_expression",
     "ternary_expression",
+    // Ruby: conditions, loops, `begin … rescue`, modifier forms such as
+    // `return if done`, and `do … end` blocks (`items.each do |item|`).
+    "if",
+    "unless",
+    "case",
+    "case_match",
+    "while",
+    "until",
+    "for",
+    "begin",
+    "conditional",
+    "if_modifier",
+    "unless_modifier",
+    "while_modifier",
+    "until_modifier",
+    "do_block",
 ];
 
 /// Maximum control-flow depth and longest branch chain under `node`. An `if`
@@ -45,13 +61,25 @@ pub(super) fn control(node: Node<'_>) -> (usize, usize) {
                     || (p.kind() == "if_expression"
                         && p.child_by_field_name("alternative") == Some(node))
             }),
-            "conditional_expression" | "ternary_expression" => parent.is_some_and(|p| {
-                p.kind() == node.kind() && p.child_by_field_name("alternative") == Some(node)
-            }),
+            "conditional_expression" | "ternary_expression" | "conditional" => {
+                parent.is_some_and(|p| {
+                    p.kind() == node.kind() && p.child_by_field_name("alternative") == Some(node)
+                })
+            }
             _ => false,
         }
     }
     fn chain(node: Node<'_>) -> usize {
+        // Ruby links each `elsif` and the `else` through `alternative`.
+        if matches!(node.kind(), "if" | "unless") {
+            let mut length = 1;
+            let mut alternative = node.child_by_field_name("alternative");
+            while let Some(clause) = alternative {
+                length += 1;
+                alternative = clause.child_by_field_name("alternative");
+            }
+            return length;
+        }
         // Python lists `elif` and `else` clauses as children of one `if_statement`.
         let clauses = node
             .named_children(&mut node.walk())
@@ -84,11 +112,20 @@ pub(super) fn control(node: Node<'_>) -> (usize, usize) {
         }
     }
     fn walk(node: Node<'_>, depth: usize, result: &mut (usize, usize)) {
-        let control = CONTROL.contains(&node.kind());
+        // A Ruby `{ … }` block passed to a call nests like `do … end`; other
+        // languages' `block` is a body.
+        let control = CONTROL.contains(&node.kind())
+            || node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call");
         let depth = if control && !chained(node) {
             if matches!(
                 node.kind(),
-                "if_statement" | "if_expression" | "conditional_expression" | "ternary_expression"
+                "if_statement"
+                    | "if_expression"
+                    | "conditional_expression"
+                    | "ternary_expression"
+                    | "if"
+                    | "unless"
+                    | "conditional"
             ) {
                 result.1 = result.1.max(chain(node));
             }

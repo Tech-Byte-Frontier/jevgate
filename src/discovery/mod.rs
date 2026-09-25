@@ -53,6 +53,7 @@ impl Classifier {
             || under(&["test", "tests", "__tests__"])
             || (name.ends_with(".cs") && components.iter().any(|c| dotnet_test_project(c)))
             || test_name(&name)
+            || name.ends_with(".rb") && under(&["spec", "step_definitions"])
         {
             "test"
         } else {
@@ -92,7 +93,9 @@ fn dotnet_test_project(directory: &str) -> bool {
 
 /// Test file naming conventions across the supported languages. Cargo and
 /// Go decide which files are tests, so a `test_*.rs` or `test_*.go` file is
-/// ordinary code, such as a module that locates tests.
+/// ordinary code, such as a module that locates tests. RSpec runs
+/// `*_spec.rb`, and a Ruby project keeps them and their support under
+/// `spec/` (Cucumber steps under `step_definitions/`).
 fn test_name(name: &str) -> bool {
     (name.starts_with("test_") && !name.ends_with(".rs") && !name.ends_with(".go"))
         || name.contains(".test.")
@@ -100,6 +103,7 @@ fn test_name(name: &str) -> bool {
         || name.contains("_test.")
         || name.ends_with("_tests.rs")
         || name == "tests.rs"
+        || name.ends_with("_spec.rb")
 }
 
 fn file_extension(path: &Path) -> String {
@@ -144,6 +148,17 @@ mod tests {
         assert_eq!(classifier.role(Path::new("pkg/test_helpers.go")), "source");
         assert_eq!(classifier.role(Path::new("src/orders.test.ts")), "test");
         assert_eq!(classifier.role(Path::new("pkg/orders_test.go")), "test");
+        assert_eq!(classifier.role(Path::new("lib/orders_spec.rb")), "test");
+        assert_eq!(classifier.role(Path::new("spec/support/models.rb")), "test");
+        assert_eq!(
+            classifier.role(Path::new("features/step_definitions/steps.rb")),
+            "test"
+        );
+        assert_eq!(
+            classifier.role(Path::new("spec/fixtures/app.rb")),
+            "fixture"
+        );
+        assert_eq!(classifier.role(Path::new("lib/spec/openapi.ts")), "source");
     }
 
     #[test]

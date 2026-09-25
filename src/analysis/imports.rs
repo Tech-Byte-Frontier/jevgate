@@ -30,6 +30,9 @@ impl Imports {
                 .any(|prefix| line.starts_with(prefix))
                     || line.contains("require(")
                     || line.contains("import(")
+                    || ["require ", "require_relative ", "load ", "autoload "]
+                        .iter()
+                        .any(|prefix| line.starts_with(prefix))
             })
             .map(str::to_string)
             .collect();
@@ -85,6 +88,7 @@ fn family(path: &Path) -> &'static str {
         "py" => "python",
         "go" => "go",
         "cs" => "csharp",
+        "rb" => "ruby",
         "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte"
         | "astro" => "javascript",
         _ => "",

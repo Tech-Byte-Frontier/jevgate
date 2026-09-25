@@ -10,7 +10,13 @@ pub const MAX_BLOCKS: usize = 12;
 /// short setup above it.
 const LONG_STATEMENT_LINES: usize = 3;
 
-const BODY_KINDS: [&str; 3] = ["block", "statement_block", "compound_statement"];
+const BODY_KINDS: [&str; 5] = [
+    "block",
+    "statement_block",
+    "compound_statement",
+    "body_statement",
+    "block_body",
+];
 
 /// Byte ranges of the body's blocks, in order, with leading comments attached.
 /// A statement that wraps most of the body (a `with`, loop or `try` around the
@@ -72,6 +78,8 @@ fn inner_body(statement: Node<'_>) -> Option<Node<'_>> {
     } else {
         statement
     };
+    // A Ruby call wraps its work in a block: `File.open(path) do |file| … end`.
+    let node = node.child_by_field_name("block").unwrap_or(node);
     node.child_by_field_name("body")
         .filter(|body| BODY_KINDS.contains(&body.kind()))
 }
