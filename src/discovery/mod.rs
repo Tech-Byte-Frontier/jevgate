@@ -51,6 +51,7 @@ impl Classifier {
             "migration"
         } else if self.tests.is_match(path)
             || under(&["test", "tests", "__tests__"])
+            || (name.ends_with(".cs") && components.iter().any(|c| dotnet_test_project(c)))
             || test_name(&name)
         {
             "test"
@@ -60,12 +61,33 @@ impl Classifier {
     }
 }
 
-/// File names generators use, such as `api.generated.ts` or `bundle.min.js`.
+/// File names generators use, such as `api.generated.ts` or `bundle.min.js`,
+/// and the C# files that designers and source generators write
+/// (`Form1.Designer.cs`, `App.g.cs`).
 fn generated_name(name: &str) -> bool {
     name.contains(".generated.")
         || name.contains(".gen.")
         || name.ends_with(".min.js")
         || name == "database.types.ts"
+        || name.ends_with(".designer.cs")
+        || name.ends_with(".g.cs")
+        || name.ends_with(".g.i.cs")
+}
+
+/// A .NET test project directory, named by convention after the project it
+/// tests: `Shop.Tests`, `Shop.UnitTests`, `Shop.IntegrationTests`. Only its
+/// C# files are tests by this name.
+fn dotnet_test_project(directory: &str) -> bool {
+    [
+        ".tests",
+        ".test",
+        ".unittests",
+        ".integrationtests",
+        ".functionaltests",
+        ".specs",
+    ]
+    .iter()
+    .any(|suffix| directory.len() > suffix.len() && directory.ends_with(suffix))
 }
 
 /// Test file naming conventions across the supported languages. Cargo and
@@ -122,6 +144,31 @@ mod tests {
         assert_eq!(classifier.role(Path::new("pkg/test_helpers.go")), "source");
         assert_eq!(classifier.role(Path::new("src/orders.test.ts")), "test");
         assert_eq!(classifier.role(Path::new("pkg/orders_test.go")), "test");
+    }
+
+    #[test]
+    fn dotnet_test_projects_are_tests_and_designer_files_generated() {
+        let classifier = super::Classifier::new(&Default::default()).unwrap();
+        for path in [
+            "src/Shop.Tests/BasketTests.cs",
+            "Shop.UnitTests/Services/Orders.cs",
+            "src/Shop.IntegrationTests/Fixture.cs",
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), "test", "{path}");
+        }
+        assert_eq!(classifier.role(Path::new("src/Tests/Api.cs")), "test");
+        assert_eq!(classifier.role(Path::new("src/Shop/Tests.cs")), "source");
+        assert_eq!(
+            classifier.role(Path::new("src/Shop.Web/Orders.cs")),
+            "source"
+        );
+        for path in [
+            "Forms/Main.Designer.cs",
+            "obj/App.g.cs",
+            "Views/Page.g.i.cs",
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), "generated", "{path}");
+        }
     }
 
     #[test]

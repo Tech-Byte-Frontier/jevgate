@@ -40,6 +40,16 @@ pub(crate) fn callee_name(node: Node<'_>, source: &str) -> Option<String> {
             "member_expression" => node.child_by_field_name("property")?,
             "selector_expression" => node.child_by_field_name("field")?,
             "attribute" => node.child_by_field_name("attribute")?,
+            // C#: `_repository.ListAsync`, `Get<T>`, `System.IO.File` and `order?.Total()`.
+            "member_access_expression" | "member_binding_expression" | "qualified_name" => {
+                node.child_by_field_name("name")?
+            }
+            "generic_name" => node.named_child(0)?,
+            "conditional_access_expression" => {
+                let mut cursor = node.walk();
+                node.named_children(&mut cursor)
+                    .find(|c| c.kind() == "member_binding_expression")?
+            }
             "identifier" | "field_identifier" | "property_identifier" | "type_identifier" => {
                 return Some(text(node, source).to_string());
             }

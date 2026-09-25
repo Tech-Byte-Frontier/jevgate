@@ -538,14 +538,21 @@ fn has_implementation(path: &Path, source: &str) -> bool {
     if !crate::context_units::review_targets(path, source).is_empty() {
         return true;
     }
-    source.lines().any(code_line)
+    let csharp = path.extension().is_some_and(|e| e == "cs");
+    source.lines().any(|line| code_line(line, csharp))
 }
 
-/// A line that is neither blank, a comment nor an import.
-fn code_line(line: &str) -> bool {
+/// A line that is neither blank, a comment nor an import; in C#, nor a
+/// namespace declaration or only the braces around one.
+fn code_line(line: &str, csharp: bool) -> bool {
     const NOT_CODE: &[&str] = &["//", "#", "/*", "*", "use ", "pub use ", "import ", "from "];
+    const NOT_CSHARP_CODE: &[&str] = &["using ", "namespace "];
     let line = line.trim();
-    !line.is_empty() && !NOT_CODE.iter().any(|start| line.starts_with(start))
+    !line.is_empty()
+        && !NOT_CODE.iter().any(|start| line.starts_with(start))
+        && !(csharp
+            && (NOT_CSHARP_CODE.iter().any(|start| line.starts_with(start))
+                || line.chars().all(|c| matches!(c, '{' | '}'))))
 }
 
 fn separated_reason(ranges: &[SourceRange]) -> String {
@@ -728,6 +735,27 @@ mod tests {
         let mut included = args();
         included.include_tests = true;
         assert_eq!(view_of(&project, &included).classification.kind, "tests");
+    }
+
+    #[test]
+    fn csharp_test_classes_are_structural_tests_in_any_directory() {
+        let project = Project::new();
+        let tests = "using Xunit;\n\nnamespace Shop.Tests\n{\n    public class BasketTotal\n    {\n        private readonly Basket _basket = new Basket();\n\n        [Fact]\n        public void IsZeroWhenEmpty()\n        {\n            Assert.Equal(0, _basket.Total());\n        }\n    }\n}\n";
+        project.write("src/Shop/BasketTotal.cs", tests);
+        let mut included = args();
+        included.include_tests = true;
+        let view = view_of(&project, &included);
+        assert_eq!(view.classification.kind, "tests");
+        assert_eq!(view.classification.language, "C#");
+        std::fs::remove_file(project.0.join("src/Shop/BasketTotal.cs")).unwrap();
+        // A class of NUnit tests beside application code is separated whole.
+        project.write(
+            "src/Shop/Basket.cs",
+            "namespace Shop;\n\npublic class Basket\n{\n    public int Total() => 0;\n}\n\n[TestFixture]\npublic class BasketChecks\n{\n    [Test]\n    public void IsZero() => Assert.That(new Basket().Total(), Is.EqualTo(0));\n}\n",
+        );
+        let view = view_of(&project, &args());
+        assert_eq!(view.classification.kind, "mixed");
+        assert_eq!(test_line_ranges(&view), [(8, 13)]);
     }
 
     #[test]

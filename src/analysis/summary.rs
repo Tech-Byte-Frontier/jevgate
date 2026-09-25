@@ -7,11 +7,19 @@ const SIGNATURE_CHARS: usize = 240;
 const DOC_CHARS: usize = 160;
 
 /// The definition's header on one line, without attributes, decorators or
-/// the opening of its body.
+/// the opening of its body. C# attribute lists are children of the
+/// declaration, so the header starts after them.
 pub(super) fn signature(outer: Node<'_>, body: Option<Node<'_>>, source: &str) -> String {
     let end = body.map_or(outer.end_byte(), |b| b.start_byte());
+    let mut cursor = outer.walk();
+    let start = outer
+        .named_children(&mut cursor)
+        .take_while(|c| c.kind() == "attribute_list" || c.kind().contains("comment"))
+        .last()
+        .map_or(outer.start_byte(), |c| c.end_byte())
+        .min(end);
     clip(
-        source[outer.start_byte()..end]
+        source[start..end]
             .lines()
             .map(str::trim)
             .filter(|line| !line.starts_with("#[") && !line.starts_with('@'))
@@ -52,11 +60,27 @@ fn clean_comment(line: &str) -> String {
     if line.starts_with("#[") {
         return String::new();
     }
-    line.trim_start_matches(['/', '*', '!', '#'])
+    let mut line = line
+        .trim_start_matches(['/', '*', '!', '#'])
         .trim_end_matches("*/")
-        .trim()
-        .to_string()
+        .to_string();
+    for tag in DOC_TAGS {
+        line = line.replace(tag, "");
+    }
+    line.trim().to_string()
 }
+
+/// C# XML documentation tags that wrap the text of a comment.
+const DOC_TAGS: [&str; 8] = [
+    "<summary>",
+    "</summary>",
+    "<remarks>",
+    "</remarks>",
+    "<returns>",
+    "</returns>",
+    "<para>",
+    "</para>",
+];
 
 fn clip(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {

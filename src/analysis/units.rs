@@ -125,15 +125,74 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
             imports(node, source, &mut file.imports);
         }
         "import_declaration" => go_imports(node, source, &mut file.imports),
-        // Go: `func (s *Store) Find(…)` is a method of `Store`.
+        "using_directive" => csharp_import(node, source, &mut file.imports),
+        // Go: `func (s *Store) Find(…)` is a method of `Store`; a C# method
+        // belongs to the class, struct or record around it.
         "method_declaration" => {
             let receiver = node
                 .child_by_field_name("receiver")
                 .and_then(|r| r.named_child(0))
                 .and_then(|p| p.child_by_field_name("type"))
-                .map(|t| base_type(text(t, source).trim_start_matches('*')))
-                .unwrap_or_default();
-            function(node, node, source, &receiver, file);
+                .map(|t| base_type(text(t, source).trim_start_matches('*')));
+            function(
+                node,
+                node,
+                source,
+                receiver.as_deref().unwrap_or(owner),
+                file,
+            );
+        }
+        "constructor_declaration" | "destructor_declaration" => {
+            function(node, node, source, owner, file);
+        }
+        // A C# property or indexer whose accessors have statement bodies.
+        "property_declaration" | "indexer_declaration" => {
+            let accessors = node.child_by_field_name("accessors").filter(|list| {
+                let mut cursor = list.walk();
+                list.named_children(&mut cursor).any(|accessor| {
+                    accessor
+                        .child_by_field_name("body")
+                        .is_some_and(|b| b.kind() == "block")
+                })
+            });
+            if let Some(accessors) = accessors {
+                let name = match node.kind() {
+                    "indexer_declaration" => "this".to_string(),
+                    _ => name_of(node, source),
+                };
+                let definition = Definition {
+                    outer: node,
+                    node,
+                    body: Some(accessors),
+                };
+                push(definition, &name, owner, Kind::Method, source, file);
+            }
+        }
+        "namespace_declaration" => {
+            if let Some(body) = node.child_by_field_name("body") {
+                children(body, source, owner, file);
+            }
+        }
+        // C# top-level statements: minimal API route handlers and middleware
+        // written inline, and local functions.
+        "global_statement" => {
+            let Some(statement) = node.named_child(0) else {
+                return;
+            };
+            if statement.kind() == "local_function_statement" {
+                function(node, statement, source, owner, file);
+                return;
+            }
+            let callbacks = csharp_callbacks(statement, source);
+            let single = callbacks.len() == 1;
+            for (name, lambda) in callbacks {
+                let definition = Definition {
+                    outer: if single { node } else { lambda },
+                    node: lambda,
+                    body: lambda.child_by_field_name("body"),
+                };
+                push(definition, &name, owner, Kind::Function, source, file);
+            }
         }
         "type_declaration" => {
             let mut cursor = node.walk();
@@ -159,7 +218,9 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
             }
         }
         "source_file" | "program" | "module" | "declaration_list" | "class_body"
-        | "export_statement" | "statement_block" => children(node, source, owner, file),
+        | "export_statement" | "statement_block" | "compilation_unit" => {
+            children(node, source, owner, file)
+        }
         // `export default { async fetch(request, env) { … } }`, as Cloudflare Workers write it.
         "object"
             if node
@@ -201,7 +262,12 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                 children(body, source, owner, file);
             }
         }
-        "class_declaration" | "class_definition" | "class" | "abstract_class_declaration" => {
+        "class_declaration"
+        | "class_definition"
+        | "class"
+        | "abstract_class_declaration"
+        | "struct_declaration"
+        | "record_declaration" => {
             let name = name_of(node, source);
             let before = file.units.len();
             if let Some(body) = node.child_by_field_name("body") {
@@ -260,7 +326,8 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         | "union_item"
         | "interface_declaration"
         | "type_alias_declaration"
-        | "enum_declaration" => {
+        | "enum_declaration"
+        | "delegate_declaration" => {
             let name = name_of(node, source);
             if !name.is_empty() {
                 push(Definition::whole(node), &name, "", Kind::Type, source, file);
@@ -340,6 +407,94 @@ fn registered_callbacks<'t>(statement: Node<'t>, source: &str) -> Vec<(String, N
     }
     found.reverse();
     found
+}
+
+/// Methods that register an ASP.NET Core request handler or middleware
+/// written inline: minimal API routes (`app.MapGet("/orders", …)`) and
+/// `app.Use(…)` or `app.Run(…)`. Other top-level calls that take a lambda,
+/// such as `builder.Services.AddCors(o => …)`, configure the program and
+/// stay in its setup.
+fn csharp_registration(method: &str) -> bool {
+    matches!(method, "Use" | "Run")
+        || method
+            .strip_prefix("Map")
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_uppercase))
+}
+
+/// Lambdas a C# top-level statement registers as request handlers, named by
+/// their registration: `app.MapPost("/orders")`. Each call of a chain
+/// (`app.MapGet(…).RequireAuthorization()`) is read.
+fn csharp_callbacks<'t>(statement: Node<'t>, source: &str) -> Vec<(String, Node<'t>)> {
+    let mut found = Vec::new();
+    let mut call = statement
+        .named_child(0)
+        .map(|e| {
+            if e.kind() == "await_expression" {
+                e.named_child(0).unwrap_or(e)
+            } else {
+                e
+            }
+        })
+        .filter(|e| e.kind() == "invocation_expression");
+    while let Some(current) = call {
+        let function = current
+            .child_by_field_name("function")
+            .filter(|f| f.kind() == "member_access_expression");
+        let method = function
+            .and_then(|f| f.child_by_field_name("name"))
+            .and_then(|n| callee_name(n, source))
+            .unwrap_or_default();
+        let arguments: Vec<Node<'t>> = current
+            .child_by_field_name("arguments")
+            .map(|a| {
+                a.named_children(&mut a.walk())
+                    .filter_map(|argument| {
+                        argument.named_child(argument.named_child_count().saturating_sub(1) as u32)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let handler = arguments.iter().rev().find(|n| {
+            matches!(
+                n.kind(),
+                "lambda_expression" | "anonymous_method_expression"
+            )
+        });
+        if let Some(handler) = handler
+            && csharp_registration(&method)
+        {
+            let root = function
+                .map(|f| csharp_chain_root(f, source))
+                .unwrap_or_default();
+            let path = arguments
+                .first()
+                .filter(|a| a.kind().contains("string"))
+                .map(|a| text(*a, source))
+                .unwrap_or("…");
+            found.push((format!("{root}.{method}({path})"), *handler));
+        }
+        call = function
+            .and_then(|f| f.child_by_field_name("expression"))
+            .filter(|o| o.kind() == "invocation_expression");
+    }
+    found.reverse();
+    found
+}
+
+/// The leftmost name of a C# callee such as `app.MapGet` or `app.MapGroup("/x").MapGet`.
+fn csharp_chain_root(callee: Node<'_>, source: &str) -> String {
+    let mut node = callee;
+    loop {
+        let next = match node.kind() {
+            "member_access_expression" => node.child_by_field_name("expression"),
+            "invocation_expression" => node.child_by_field_name("function"),
+            _ => None,
+        };
+        match next {
+            Some(inner) => node = inner,
+            None => return text(node, source).to_string(),
+        }
+    }
 }
 
 /// The leftmost name of a callee such as `app.get` or `router.route('/x').get`.
@@ -555,7 +710,7 @@ impl Facts {
             return;
         }
         match node.kind() {
-            "call_expression" | "call" => {
+            "call_expression" | "call" | "invocation_expression" => {
                 if let Some(name) = node
                     .child_by_field_name("function")
                     .and_then(|f| callee_name(f, source))
@@ -563,14 +718,21 @@ impl Facts {
                     self.calls.insert(name);
                 }
             }
-            "new_expression" => {
+            "new_expression" | "object_creation_expression" => {
                 if let Some(name) = node
                     .child_by_field_name("constructor")
+                    .or_else(|| node.child_by_field_name("type"))
                     .and_then(|c| callee_name(c, source))
                 {
                     self.refs.insert(name.clone());
                     self.calls.insert(name);
                 }
+            }
+            // C# names types and members with plain identifiers.
+            "identifier" if csharp_reference(node) => {
+                let name = text(node, source).to_string();
+                self.refs.insert(name.clone());
+                self.idents.insert(name);
             }
             "jsx_opening_element" | "jsx_self_closing_element" => {
                 if let Some(name) = node.child_by_field_name("name") {
@@ -599,6 +761,40 @@ impl Facts {
     }
 }
 
+/// A C# identifier that names a type or a member rather than a local: a
+/// member access (`_repository.ListAsync`), a type argument, base type,
+/// declared type or pattern type.
+fn csharp_reference(node: Node<'_>) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    match parent.kind() {
+        "member_access_expression" | "member_binding_expression" => {
+            parent.child_by_field_name("name") == Some(node)
+        }
+        "generic_name"
+        | "type_argument_list"
+        | "base_list"
+        | "nullable_type"
+        | "typeof_expression"
+        | "declaration_pattern"
+        | "catch_declaration"
+        | "qualified_name" => true,
+        // Rust, Go and TypeScript array types name their element `element`
+        // or nothing; a length there is a value, not a type.
+        "array_type"
+        | "variable_declaration"
+        | "parameter"
+        | "property_declaration"
+        | "cast_expression" => parent.child_by_field_name("type") == Some(node),
+        "method_declaration" | "local_function_statement" => {
+            parent.child_by_field_name("returns") == Some(node)
+                || parent.child_by_field_name("type") == Some(node)
+        }
+        _ => false,
+    }
+}
+
 /// Go imports: each package's name, its alias or the last path segment.
 fn go_imports(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
     if node.kind() == "import_spec" {
@@ -621,6 +817,27 @@ fn go_imports(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
     for child in node.named_children(&mut cursor) {
         go_imports(child, source, names);
     }
+}
+
+/// A C# `using` directive: the alias it declares, or the last segment of
+/// the namespace or type it imports.
+fn csharp_import(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
+    let name = node
+        .child_by_field_name("name")
+        .or_else(|| {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .find(|c| matches!(c.kind(), "qualified_name" | "identifier"))
+        })
+        .map(|n| {
+            if n.kind() == "qualified_name" {
+                n.child_by_field_name("name").unwrap_or(n)
+            } else {
+                n
+            }
+        })
+        .map(|n| text(n, source).to_string());
+    names.extend(name.filter(|n| !n.is_empty()));
 }
 
 fn imports(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
@@ -835,6 +1052,84 @@ mod tests {
     fn jsx_components_count_as_calls() {
         let render = parse(Path::new("view.tsx"), VIEW).unwrap().units.remove(2);
         assert!(render.calls.contains("Cell") && render.calls.contains("label"));
+    }
+
+    #[test]
+    fn csharp_classes_records_and_their_members_are_units_with_facts() {
+        let source = "using System.Data.SqlClient;\nusing Db = Microsoft.EntityFrameworkCore;\n\nnamespace Shop.Orders;\n\n/// <summary>Stores orders.</summary>\n[Route(\"api/[controller]\")]\npublic class OrderStore : Controller\n{\n    private const int MaxRows = 500;\n    private static readonly string Host = \"https://api.example.com\";\n    private readonly IOrderRepository _repository;\n\n    public OrderStore(IOrderRepository repository)\n    {\n        _repository = repository;\n    }\n\n    public int Count { get { return _repository.Count(); } }\n    public string Name { get; set; }\n\n    [HttpGet(\"search\")]\n    public async Task<IActionResult> Search(string keyword)\n    {\n        var query = $\"SELECT * FROM Products WHERE name LIKE '%{keyword}%'\";\n        using var command = new SqlCommand(query, _connection);\n        if (keyword == null)\n        {\n            throw new ArgumentException(\"empty keyword\");\n        }\n        else if (keyword == \"root\")\n        {\n            return BadRequest();\n        }\n        foreach (var item in await _repository.ListAsync<Order>())\n        {\n            switch (item.Kind) { case 3: break; }\n        }\n        return Ok(string.Format(\"{0} rows\", MaxRows));\n    }\n}\n\npublic record Person(string First, string Last);\n\npublic interface IOrderRepository { int Count(); }\n";
+        let file = parse(Path::new("OrderStore.cs"), source).unwrap();
+        let named: Vec<(&str, Kind, usize)> = file
+            .units
+            .iter()
+            .map(|u| (u.name.as_str(), u.kind, u.line))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("OrderStore::OrderStore", Kind::Method, 14),
+                ("OrderStore::Count", Kind::Method, 19),
+                ("OrderStore::Search", Kind::Method, 22),
+                ("Person", Kind::Type, 43),
+                ("IOrderRepository", Kind::Type, 45),
+            ]
+        );
+        assert!(file.imports.contains("SqlClient") && file.imports.contains("Db"));
+        let search = &file.units[2];
+        assert_eq!(
+            search.signature,
+            "public async Task<IActionResult> Search(string keyword)"
+        );
+        assert!(search.calls.contains("ListAsync") && search.calls.contains("SqlCommand"));
+        assert!(search.refs.contains("IActionResult") && search.refs.contains("Order"));
+        assert_eq!((search.nesting, search.branch_chain), (2, 2));
+        assert!(
+            search.sites[0].text.starts_with("var query = $\"SELECT"),
+            "{:?}",
+            search.sites
+        );
+        let errors: Vec<(&str, &str)> = search
+            .errors
+            .iter()
+            .map(|e| (e.error.as_str(), e.message.as_str()))
+            .collect();
+        assert_eq!(errors, [("ArgumentException", "\"empty keyword\"")]);
+        assert!(search.literals.iter().any(|l| l.text == "\"root\""));
+        assert!(!search.literals.iter().any(|l| l.text.contains("search")));
+        let constants: Vec<&str> = file.constants.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(constants, ["OrderStore.MaxRows", "OrderStore.Host"]);
+        let constructor = &file.units[0];
+        assert!(constructor.too_small());
+        assert_eq!(constructor.doc, "");
+        let documented = parse(Path::new("A.cs"), "public class A\n{\n    /// <summary>\n    /// Loads orders.\n    /// </summary>\n    void Run() { }\n}\n").unwrap();
+        assert_eq!(documented.units[0].doc, "Loads orders.");
+        assert!(crate::syntax::supported(Path::new("OrderStore.cs")));
+    }
+
+    #[test]
+    fn csharp_top_level_statements_register_route_handlers_and_keep_setup() {
+        let source = "var builder = WebApplication.CreateBuilder(args);\nbuilder.Services.AddCors(o => o.AddPolicy(\"all\", p => p.AllowAnyOrigin()));\nvar app = builder.Build();\napp.MapGet(\"/orders/{id}\", async (int id, OrderDb db) =>\n{\n    var order = await db.Orders.FindAsync(id);\n    return order is null ? Results.NotFound() : Results.Ok(order);\n}).RequireAuthorization();\napp.Use(async (context, next) => { await next(context); });\nstatic string Greet(string name)\n{\n    return $\"Hello {name}\";\n}\napp.Run();\n";
+        let file = parse(Path::new("Program.cs"), source).unwrap();
+        let named: Vec<(&str, usize)> = file
+            .units
+            .iter()
+            .map(|u| (u.name.as_str(), u.line))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("app.MapGet(\"/orders/{id}\")", 4),
+                ("app.Use(…)", 9),
+                ("Greet", 10)
+            ]
+        );
+        assert!(file.units[0].calls.contains("FindAsync"));
+        let setup: Vec<usize> = file.setup.statements.iter().map(|s| s.1).collect();
+        assert_eq!(setup, [1, 2, 3, 14]);
+        assert!(
+            file.setup.sites[1]
+                .text
+                .starts_with("builder.Services.AddCors(")
+        );
     }
 
     #[test]
