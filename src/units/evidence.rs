@@ -39,6 +39,14 @@ impl FileContext<'_> {
         }
     }
 
+    /// The file's path and language, for questions about how code reads:
+    /// a framework role sent there moved split answers without informing them.
+    pub(super) fn plain_state(&self) -> Value {
+        json!({"path": self.path, "language": self.language})
+    }
+
+    /// The file's path, language and framework role, for questions about
+    /// where values come from and go, and which values a reader must guess.
     pub(super) fn file_state(&self) -> Value {
         match &self.framework {
             Some(framework) => {

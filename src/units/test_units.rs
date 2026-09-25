@@ -160,7 +160,7 @@ fn value_recheck(
         );
     }
     let state = json!({
-        "file": file.file_state(),
+        "file": file.plain_state(),
         "tests": [{"name": case.name, "source": case.source(file.source)}],
         "subjects": listed,
         "setup": setup,
@@ -311,7 +311,7 @@ fn value_request(
         .flat_map(|(_, _, case, _)| case.subjects.iter())
         .collect();
     let state = json!({
-        "file": file.file_state(),
+        "file": file.plain_state(),
         "tests": group.iter().map(|(_, _, _, item)| item.clone()).collect::<Vec<_>>(),
         "subjects": subject_state(&names, subjects),
     });

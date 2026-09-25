@@ -260,7 +260,7 @@ impl Outline {
             }
         }
         let mut state = json!({
-            "file": file.file_state(),
+            "file": file.plain_state(),
             "members": self.members,
             "groups": self.groups,
         });

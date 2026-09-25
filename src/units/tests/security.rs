@@ -157,6 +157,8 @@ const FETCH_QUOTE: &str = "fn quote(client: &Client, base: &Url, symbol: &str) -
 
 const URL_PARTS: [&str; 5] = ["own", "forwards", "given", "outside", "none"];
 
+const RUNS_IN: [&str; 3] = ["browser", "server", "either"];
+
 /// Injection status and settle requests with the URL (or path) check at
 /// `check` undecided and the settle Choice answering `parts`.
 fn settled_injection(
@@ -171,6 +173,7 @@ fn settled_injection(
         (check, noul_at(0.4)),
         ("origin", spread(0.0, 0.9, 0.1)),
         ("url_parts", choice_of(parts, &URL_PARTS)),
+        ("runs_in", choice_of("server", &RUNS_IN)),
     ];
     let report = run(project, options, &mut eval);
     (
@@ -189,7 +192,8 @@ fn an_undecided_url_is_settled_only_by_a_host_of_the_programs_own() {
     let (project, mut options) = security_project(FETCH_QUOTE);
     assert_eq!(
         settled_injection(&project, &options, "url", "own"),
-        (Status::Clear, 1)
+        (Status::Clear, 2),
+        "where its URLs come from and where it runs"
     );
     for parts in ["forwards", "given", "outside"] {
         options.refresh = true;
@@ -431,23 +435,6 @@ fn an_undecided_caller_recheck_replaces_an_undecided_traced_lean() {
 }
 
 const ROUTE: &str = "export async function loadThing(c: Context) {\n  const { data, error } = await db.from('things').select('*').eq('id', c.req.param('id'))\n  if (error) throw new InternalError(`Query failed: ${error.message}`, error)\n  if (!data) throw new NotFoundError('Thing not found')\n  return c.json(data)\n}\n";
-
-fn choice_of(chosen: &str, options: &[&str]) -> Value {
-    let probabilities: serde_json::Map<String, Value> = options
-        .iter()
-        .map(|o| {
-            (
-                o.to_string(),
-                json!(if *o == chosen {
-                    0.9
-                } else {
-                    0.1 / (options.len() - 1) as f64
-                }),
-            )
-        })
-        .collect();
-    json!({"type":"choice","choice":chosen,"confidence":0.9,"probabilities":probabilities})
-}
 
 #[test]
 fn each_created_error_message_is_asked_about_and_names_the_foreign_one() {
@@ -906,4 +893,100 @@ fn a_csharp_type_named_by_input_is_an_injection_named_by_its_own_check() {
         "{}",
         finding.message
     );
+}
+
+/// The status of `rule` and the number of settle requests, with `nouls`
+/// leaving one check undecided and `settle` answering its Choice.
+fn settled_status(
+    project: &Project,
+    options: &CheckArgs,
+    rule: &str,
+    nouls: &[(&'static str, f64)],
+    settle: (&'static str, Value),
+) -> (Status, u64) {
+    let mut eval = scripted(0);
+    eval.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
+    eval.overrides.push(("origin", spread(0.0, 0.9, 0.1)));
+    eval.overrides.push(settle);
+    let report = run(project, options, &mut eval);
+    (
+        report.files[0].dimensions[rule].status.clone(),
+        report
+            .stages
+            .get("settle")
+            .map_or(0, |stage| stage.successful_requests),
+    )
+}
+
+#[test]
+fn undecided_markup_cors_and_logged_objects_are_settled_by_their_choices() {
+    let (project, mut options) = security_project(QUERY);
+    let markup = ["escaped", "text", "raw", "none"];
+    let undecided_markup = [("interpreted", 0.95), ("markup", 0.4)];
+    for (chosen, status) in [("escaped", Status::Clear), ("raw", Status::Uncertain)] {
+        options.refresh = true;
+        let settle = ("markup_output", choice_of(chosen, &markup));
+        assert_eq!(
+            settled_status(
+                &project,
+                &options,
+                catalog::INJECTION,
+                &undecided_markup,
+                settle
+            ),
+            (status, 1),
+            "{chosen}"
+        );
+    }
+    let origins = ["unset", "listed", "public", "any"];
+    let undecided_cors = [("weakened", 0.4), ("cors", 0.3)];
+    for (chosen, status) in [("public", Status::Clear), ("any", Status::Uncertain)] {
+        options.refresh = true;
+        let settle = ("cors_origins", choice_of(chosen, &origins));
+        assert_eq!(
+            settled_status(
+                &project,
+                &options,
+                catalog::UNSAFE_SETTINGS,
+                &undecided_cors,
+                settle
+            )
+            .0,
+            status,
+            "{chosen}"
+        );
+    }
+    let logs = ["plain", "secret", "personal", "none"];
+    let undecided_logs = [("logs_secret", 0.4), ("logs_object_secret", 0.4)];
+    for (chosen, status) in [("plain", Status::Clear), ("secret", Status::Uncertain)] {
+        options.refresh = true;
+        let settle = ("logged", choice_of(chosen, &logs));
+        assert_eq!(
+            settled_status(
+                &project,
+                &options,
+                catalog::SENSITIVE_DATA,
+                &undecided_logs,
+                settle
+            )
+            .0,
+            status,
+            "{chosen}"
+        );
+    }
+}
+
+#[test]
+fn a_decided_check_asks_no_settle_choice() {
+    let (project, options) = security_project(QUERY);
+    let settle = ("markup_output", choice_of("escaped", &["escaped", "raw"]));
+    let (status, settles) = settled_status(
+        &project,
+        &options,
+        catalog::INJECTION,
+        &[("interpreted", 0.95), ("markup", 0.95)],
+        settle,
+    );
+    assert_eq!(settles, 0, "a markup check at review is not second-guessed");
+    assert_eq!(status, Status::Consider);
 }

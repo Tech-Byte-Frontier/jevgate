@@ -123,29 +123,49 @@ signatures, or one candidate pair.
    `app/**/error.tsx`, pages and layouts, `next.config.*`), and in any
    package a leading `'use server'` or `'use client'` directive, or a
    function body that starts with `'use server'`, marks Server Actions or a
-   client component. The role goes into the file state as `framework`, and
-   every question's note points to it: stated only in the state, a
-   client component's role did not clear its browser requests. With it, a
+   client component. The role goes into the file state of security and
+   hardcoded-value questions as `framework`, and every such question's note
+   points to it: stated only in the state, a client component's role did not
+   clear its browser requests. Questions about how code reads (splits,
+   outlines, tests) get no role: there it moved split answers without
+   informing them. With it, a
    Server Action's parameters read as client input (an injection that was a
    consider on its parameters became a review) and an error boundary as the
    browser's own page. The injection trace asks one more literal check,
    whether a redirect target from a variable is checked (CWE-601): without
    it, `redirect(next)` and `NextResponse.redirect(returnTo)` were notes about
-   URLs "it requests". The SQL check names tagged templates that bind (`sql`,
-   `$queryRaw`) as handled and `$queryRawUnsafe` and `sql.raw` as not, the
+   URLs "it requests". Only targets a request carries count: a link
+   shortener's redirect to the destination its owner saved was a review.
+   The SQL check names tagged templates that bind (`sql`, `$queryRaw`) as
+   handled and `$queryRawUnsafe` and `sql.raw` as not, the
    markup check names `dangerouslySetInnerHTML` (also a site), and the unsafe
    settings ask whether a secret comes from a variable the build puts into
    browser code (`NEXT_PUBLIC_`). A `next.config` file's setup is every
    top-level statement that holds an object, with its innermost objects as
    sites, since `headers()` settings call nothing.
-   A security unit still uncertain after its trace and recheck is asked, in a
-   request of its own, one literal Choice that can only clear: where its URLs
-   come from (a host of the program's own at 0.80 clears an undecided URL
-   check; a configured host sent another URL to fetch does not), or where its
-   text goes (anywhere but a remote client at 0.80 clears undecided error
-   details). A sensitive-data consider or note that rests on an undecided
-   error-detail check gets the same question, since it claims the text
-   likely reaches a client. The same question about paths cleared real
+   A security unit still uncertain after its trace and recheck is asked, per
+   undecided check and in a request of its own, one literal Choice that can
+   only clear that check: where its URLs come from (a host of the program's
+   own at 0.80 clears an undecided URL check; a configured host sent another
+   URL to fetch does not) and where the code runs (only in the user's
+   browser clears it); where its redirect targets come from (written in the
+   code, returned by its own server or what callers pass, checked, or no
+   redirect); how its markup is rendered (escaped by JSX or a template, or
+   shown as text); which sites may send credentialed requests (none, listed
+   origins, or any origin without credentials); what its logs write (only
+   messages, ids and caught errors); or where its text goes (anywhere but a
+   remote client at 0.80 clears undecided error details). Offered beside
+   "a whole URL handed to it", the browser lost for a client component's
+   fetch helper, which is why where code runs is its own Choice. A consider
+   or note that rests on an undecided error-detail or URL check gets the
+   destination or runs-in question, since it claims the text likely reaches
+   a client or the request leaves a server. On three Next.js apps these
+   Choices took the uncertain files from 56 to 34, most of them client
+   components that navigate to fixed paths or render values as attributes.
+   A Choice about what a query builder joins into SQL (its own clauses,
+   numbers, or values handed to it) was tried for considers on parameters
+   and dropped: it cleared a sort column taken from the request as readily
+   as clauses with placeholders. The same question about paths cleared real
    traversals, reading names stored in an index as the program's own, so path
    checks stay undecided until callers show more. The SQL check counts
    identifiers quoted by doubling embedded quotes as handled (identifiers

@@ -5,7 +5,7 @@
 //! origin stays unclear. A file's top-level setup statements are one more
 //! unit for unsafe settings.
 use super::{
-    Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions,
+    Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, Settle,
     UnitPlan, compact, identity, pack, questions, unique_ids,
 };
 use crate::{
@@ -215,7 +215,7 @@ fn push_unit(
     let recheck = (rule == INJECTION)
         .then(|| recheck(file, subject, id))
         .flatten();
-    let settle = settle(file, subject, rule, id).filter(|(request, _)| file.budget.fits(request));
+    let settles = settles(file, subject, rule, id);
     out.units.push(UnitPlan {
         rule,
         id: id.to_string(),
@@ -233,7 +233,7 @@ fn push_unit(
                 Vec::new()
             },
             trace,
-            settle,
+            settles,
         },
         recheck,
     });
@@ -273,9 +273,9 @@ fn send(
                 let unit = &mut out.units[*index];
                 unit.presence = Presence::NeedsContext;
                 unit.recheck = None;
-                if let Detail::Security { trace, settle, .. } = &mut unit.detail {
+                if let Detail::Security { trace, settles, .. } = &mut unit.detail {
                     *trace = None;
-                    *settle = None;
+                    settles.clear();
                 }
             }
         }
@@ -454,32 +454,154 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
     file.budget.fits(&request).then_some((request, asked))
 }
 
-/// The follow-up asked when a check stays undecided after the trace and
-/// recheck: where an injection's URLs come from, with its callers when
-/// known, or where a function's text goes for error details. It can only
-/// clear the checks it settles, so it is asked apart from them.
-fn settle(
+/// A Choice asked when one of a rule's checks stays undecided after the
+/// trace and recheck; it can only clear the checks it settles, so it is
+/// asked apart from them.
+pub(in crate::units) struct SettleKind {
+    pub rule: &'static str,
+    /// The question id of the Choice.
+    pub question: &'static str,
+    /// The checks that call for it while undecided, and that it settles.
+    pub checks: &'static [&'static str],
+    /// The options whose combined probability at the threshold clears them.
+    pub clears: &'static [&'static str],
+    /// Whether the functions that call the subject are sent with it.
+    callers: bool,
+    pub when: SettleWhen,
+}
+
+/// Which units a settle Choice is asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::units) enum SettleWhen {
+    /// An uncertain unit whose checks stay undecided.
+    Undecided,
+    /// Also a consider or note that rests on its undecided checks: a note
+    /// that a client component's fetch "places a parameter into a URL it
+    /// requests" only puzzled readers.
+    UndecidedOrFinding,
+}
+
+/// Every settle Choice. Where a URL comes from settles the URL check: on
+/// clients of a fixed or configured service it split on a variable path or
+/// query; so does code that runs only in the user's browser. Where a redirect leads, how markup is rendered and which origins
+/// may send credentials settle theirs, which split on client components that
+/// navigate to fixed paths or render values as attributes, and on route
+/// handlers that answer preflights for any origin without credentials. What
+/// its logs write settles a logged object, which split on errors caught from
+/// a payment or database call. Where a function's text goes settles error
+/// details (see `exposure_signal`), also under a finding that claims the text
+/// likely reaches a client.
+pub(in crate::units) const SETTLES: [SettleKind; 7] = [
+    SettleKind {
+        rule: INJECTION,
+        question: "url_parts",
+        checks: &["url"],
+        clears: &questions::OWN_PARTS,
+        callers: true,
+        when: SettleWhen::Undecided,
+    },
+    SettleKind {
+        rule: INJECTION,
+        question: "runs_in",
+        checks: &["url"],
+        clears: &[questions::BROWSER],
+        callers: false,
+        when: SettleWhen::UndecidedOrFinding,
+    },
+    SettleKind {
+        rule: INJECTION,
+        question: "redirect_target",
+        checks: &["redirect"],
+        clears: &questions::OWN_TARGETS,
+        callers: true,
+        when: SettleWhen::Undecided,
+    },
+    SettleKind {
+        rule: INJECTION,
+        question: "markup_output",
+        checks: &["markup"],
+        clears: &questions::INERT_MARKUP,
+        callers: false,
+        when: SettleWhen::Undecided,
+    },
+    SettleKind {
+        rule: SENSITIVE_DATA,
+        question: "destination",
+        checks: &["error_details", "exception_to_client"],
+        clears: &questions::AWAY_FROM_CLIENTS,
+        callers: false,
+        when: SettleWhen::UndecidedOrFinding,
+    },
+    SettleKind {
+        rule: SENSITIVE_DATA,
+        question: "logged",
+        checks: &["logs_object_secret"],
+        clears: &questions::PLAIN_LOGS,
+        callers: false,
+        when: SettleWhen::Undecided,
+    },
+    SettleKind {
+        rule: UNSAFE_SETTINGS,
+        question: "cors_origins",
+        checks: &["cors"],
+        clears: &questions::SAFE_ORIGINS,
+        callers: false,
+        when: SettleWhen::Undecided,
+    },
+];
+
+/// The settle follow-ups of one unit, one per Choice of its rule, each sent
+/// only when its checks stay undecided.
+fn settles(
     file: &FileContext<'_>,
     subject: &Subject<'_>,
     rule: &'static str,
     id: &str,
-) -> Option<(Value, Asked)> {
+) -> Vec<Settle> {
+    SETTLES
+        .iter()
+        .filter(|kind| kind.rule == rule)
+        .filter_map(|kind| {
+            let request = settle(file, subject, kind, id);
+            file.budget.fits(&request.0).then_some(Settle {
+                question: kind.question,
+                request,
+            })
+        })
+        .collect()
+}
+
+fn settle(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    kind: &SettleKind,
+    id: &str,
+) -> (Value, Asked) {
     let code = subject.code();
-    let callers = !subject.callers.is_empty();
-    let mut questions = Questions::default();
-    let mut ask = |question: &'static str, body: Value| {
-        questions.ask(question.into(), body, id, rule, question, Pass::Settle);
+    let callers = kind.callers && !subject.callers.is_empty();
+    let body = match kind.question {
+        "url_parts" => questions::security_url_parts(&code, callers),
+        "runs_in" => questions::security_runs_in(&code),
+        "redirect_target" => questions::security_redirect_target(&code, callers),
+        "markup_output" => questions::security_markup_output(&code),
+        "destination" => questions::security_destination(&code),
+        "logged" => questions::security_logged(&code),
+        _ => questions::security_cors_origins(&code),
     };
-    match rule {
-        INJECTION => ask("url_parts", questions::security_url_parts(&code, callers)),
-        SENSITIVE_DATA => ask("destination", questions::security_destination(&code)),
-        _ => return None,
-    }
+    let mut questions = Questions::default();
+    questions.ask(
+        kind.question.into(),
+        body,
+        id,
+        kind.rule,
+        kind.question,
+        Pass::Settle,
+    );
     let mut state = json!({
         "file": file.file_state(),
         subject.kind: {"name": subject.name, "source": subject.source},
     });
-    if rule == INJECTION && callers {
+    if callers {
         state["callers"] = json!(
             subject
                 .callers
@@ -488,7 +610,7 @@ fn settle(
                 .collect::<Vec<_>>()
         );
     }
-    Some(file.request("settle", state, questions))
+    file.request("settle", state, questions)
 }
 
 fn sites(file: &FileContext<'_>, subject: &Subject<'_>) -> Vec<Block> {
