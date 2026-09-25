@@ -24,10 +24,13 @@ const CONTROL: &[&str] = &[
     "type_switch_statement",
     "select_statement",
     "foreach_statement",
+    "enhanced_for_statement",
     "switch_expression",
     "using_statement",
     "lock_statement",
     "try_statement",
+    "try_with_resources_statement",
+    "synchronized_statement",
     "with_statement",
     "conditional_expression",
     "ternary_expression",
@@ -115,9 +118,15 @@ pub(super) fn control(node: Node<'_>) -> (usize, usize) {
     }
     fn walk(node: Node<'_>, depth: usize, result: &mut (usize, usize)) {
         // A Ruby `{ … }` block passed to a call nests like `do … end`; other
-        // languages' `block` is a body.
+        // languages' `block` is a body. A Java lambda with a block body, as
+        // in `items.forEach(i -> { … })`, nests its statements; an
+        // expression lambda does not.
         let control = CONTROL.contains(&node.kind())
-            || node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call");
+            || node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call")
+            || node.kind() == "lambda_expression"
+                && node
+                    .child_by_field_name("body")
+                    .is_some_and(|b| b.kind() == "block");
         let depth = if control && !chained(node) {
             if matches!(
                 node.kind(),

@@ -298,3 +298,12 @@ fn overlapping_tests_are_grouped_only_when_their_pairs_connect_them() {
         "{chained:?}"
     );
 }
+
+#[test]
+fn a_java_test_classs_setup_holds_its_mocks_and_setup_method() {
+    let java = "package app;\n\nimport org.junit.jupiter.api.BeforeEach;\n\n@ExtendWith(MockitoExtension.class)\nclass FormatterTests {\n\n\t@Mock\n\tprivate TypeRepository types;\n\n\t@BeforeEach\n\tvoid setup() {\n\t\tthis.formatter = new Formatter(types);\n\t}\n\n\t@Test\n\tvoid parses() {\n\t\tassertThat(formatter.parse(\"Bird\")).isNotNull();\n\t}\n}\n";
+    assert_eq!(
+        test_units::file_setup(java, 1, 16),
+        "package app;\n\nimport org.junit.jupiter.api.BeforeEach;\n\n@ExtendWith(MockitoExtension.class)\nclass FormatterTests {\n\n\t@Mock\n\tprivate TypeRepository types;\n\n@BeforeEach\n\tvoid setup() {\n\t\tthis.formatter = new Formatter(types);\n\t}"
+    );
+}

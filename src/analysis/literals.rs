@@ -19,6 +19,12 @@ const LITERAL_KINDS: &[&str] = &[
     "raw_string_literal",
     "integer_literal",
     "float_literal",
+    "decimal_integer_literal",
+    "hex_integer_literal",
+    "octal_integer_literal",
+    "binary_integer_literal",
+    "decimal_floating_point_literal",
+    "hex_floating_point_literal",
     "string",
     "encapsed_string",
     "template_string",
@@ -44,6 +50,8 @@ const SKIPPED_KINDS: &[&str] = &[
     "attribute_list",
     "using_directive",
     "namespace_use_declaration",
+    "package_declaration",
+    "annotation",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -119,6 +127,12 @@ fn eligible(kind: &str, value: &str) -> bool {
             | "float"
             | "number"
             | "real_literal"
+            | "decimal_integer_literal"
+            | "hex_integer_literal"
+            | "octal_integer_literal"
+            | "binary_integer_literal"
+            | "decimal_floating_point_literal"
+            | "hex_floating_point_literal"
     ) {
         let digits = value.trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '_');
         return !matches!(digits, "0" | "1" | "2" | "0.0" | "1.0" | "2.0");
@@ -177,9 +191,11 @@ fn clip(value: &str) -> String {
 
 /// Top-level constants and bindings whose value holds an eligible literal:
 /// Rust `const`/`static`, JavaScript and TypeScript `const`/`let`/`var`
-/// (exported or not), Python module assignments, Go `const`/`var`, and Ruby
+/// (exported or not), Python module assignments, Go `const`/`var`, Ruby
 /// assignments at the top level or in the body of a module or class, where
-/// Ruby constants live. Functions and classes bound to a name are not values.
+/// Ruby constants live, and the static fields of Java classes, interfaces,
+/// enums and records, nested ones included. Functions and classes bound to a
+/// name are not values.
 pub fn constants(root: Node<'_>, source: &str) -> Vec<Constant> {
     let mut found = Vec::new();
     if root.kind() == "compilation_unit" {
@@ -191,16 +207,9 @@ pub fn constants(root: Node<'_>, source: &str) -> Vec<Constant> {
 }
 
 fn constants_in(root: Node<'_>, source: &str, found: &mut Vec<Constant>) {
-    let mut cursor = root.walk();
-    for node in root.named_children(&mut cursor) {
-        let node = if node.kind() == "export_statement" {
-            match node.child_by_field_name("declaration") {
-                Some(declaration) => declaration,
-                None => continue,
-            }
-        } else {
-            node
-        };
+    let mut declarations = Vec::new();
+    module_declarations(root, &mut declarations);
+    for node in declarations {
         if matches!(node.kind(), "module" | "class")
             && let Some(body) = node
                 .child_by_field_name("body")
@@ -313,6 +322,55 @@ fn csharp_constants(node: Node<'_>, source: &str, owner: &str, found: &mut Vec<C
     }
 }
 
+/// The statements of a module that can bind constants, with export wrappers
+/// opened and Java types read for their static fields.
+fn module_declarations<'t>(root: Node<'t>, found: &mut Vec<Node<'t>>) {
+    let mut cursor = root.walk();
+    for node in root.named_children(&mut cursor) {
+        match node.kind() {
+            "export_statement" => found.extend(node.child_by_field_name("declaration")),
+            _ if java_type(node) => java_static_fields(node, found),
+            _ => found.push(node),
+        }
+    }
+}
+
+/// A Java class, interface, enum or record, read for its static fields.
+/// JavaScript and TypeScript classes share the name but hold no
+/// `field_declaration`, so reading them finds nothing.
+fn java_type(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
+    )
+}
+
+/// `static` fields and interface constants of a Java type and the types it nests.
+fn java_static_fields<'t>(node: Node<'t>, found: &mut Vec<Node<'t>>) {
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+    let mut cursor = body.walk();
+    for member in body.named_children(&mut cursor) {
+        match member.kind() {
+            "constant_declaration" => found.push(member),
+            "field_declaration" if is_static(member) => found.push(member),
+            "enum_body_declarations" => {
+                let mut inner = member.walk();
+                for nested in member.named_children(&mut inner) {
+                    if nested.kind() == "field_declaration" && is_static(nested) {
+                        found.push(nested);
+                    } else if java_type(nested) {
+                        java_static_fields(nested, found);
+                    }
+                }
+            }
+            _ if java_type(member) => java_static_fields(member, found),
+            _ => {}
+        }
+    }
+}
+
 /// Whether a C# expression calls a method.
 fn calls(node: Node<'_>) -> bool {
     node.kind() == "invocation_expression" || {
@@ -334,6 +392,18 @@ fn fixed_field(field: Node<'_>, source: &str) -> bool {
         || (modifiers.contains(&"static") && modifiers.contains(&"readonly"))
 }
 
+/// A Java field declared `static`.
+fn is_static(field: Node<'_>) -> bool {
+    let mut cursor = field.walk();
+    field
+        .named_children(&mut cursor)
+        .filter(|c| c.kind() == "modifiers")
+        .any(|modifiers| {
+            let mut inner = modifiers.walk();
+            modifiers.children(&mut inner).any(|m| m.kind() == "static")
+        })
+}
+
 /// Name and value nodes a top-level statement binds.
 fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
     match node.kind() {
@@ -342,7 +412,10 @@ fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
             .zip(node.child_by_field_name("value"))
             .into_iter()
             .collect(),
-        "lexical_declaration" | "variable_declaration" => {
+        "lexical_declaration"
+        | "variable_declaration"
+        | "field_declaration"
+        | "constant_declaration" => {
             let mut cursor = node.walk();
             node.named_children(&mut cursor)
                 .filter(|d| d.kind() == "variable_declarator")
@@ -398,7 +471,12 @@ fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
 fn is_value(node: Node<'_>) -> bool {
     !matches!(
         node.kind(),
-        "arrow_function" | "function_expression" | "function" | "class" | "lambda"
+        "arrow_function"
+            | "function_expression"
+            | "function"
+            | "class"
+            | "lambda"
+            | "lambda_expression"
     )
 }
 

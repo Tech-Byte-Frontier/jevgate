@@ -32,7 +32,13 @@ signatures, or one candidate pair.
    `*_spec.rb` files and Ruby files under `spec/` are test files.
    PHP tests are the `test…`, `@test` or `#[Test]` methods of a class
    extending a `…TestCase`, and Pest `test(…)`/`it(…)` calls; `…Test.php`
-   files are test paths. Astro, Vue and
+   files are test paths.
+   A Java class is a test class, whole, when it holds a method annotated
+   `@Test`, `@ParameterizedTest` or another test annotation (a composed one
+   whose name ends in `Test` included), a JUnit lifecycle method such as
+   `@BeforeEach`, a nested test class, or extends JUnit 3's `TestCase`;
+   `…Test`, `…Tests`, `…TestCase` and `…IT` files are test paths.
+   Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
    contents, with every other byte a space, so lines stay the file's.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
@@ -43,7 +49,10 @@ signatures, or one candidate pair.
    make it a dependency); for file organization, each member's line count and
    the file's, and for a test file, its cases with their enclosing
    `describe`, class or module and the functions under test they call, grouped
-   by shared suite, subject or helper. Test files get this outline without
+   by shared suite, subject or helper. A subject that one type in scope owns
+   is named with it (`StringUtil::isBlank`); a Java test file's top-level
+   class is not a suite, since every case would share it, while `@Nested`
+   classes are. Test files get this outline without
    `--include-tests`; their finding is at most a consider. Who calls a group is
    evidence only: gating a split on callers of its own hid large files whose
    single caller is the rest of the program; Type-2 clone candidates grouped by overlapping copies, only

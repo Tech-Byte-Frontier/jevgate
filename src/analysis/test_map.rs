@@ -1,9 +1,10 @@
 //! Test cases, the non-test functions they call, and candidate redundant pairs.
 //! Rust `#[test]`-family functions, JavaScript and TypeScript `it`/`test`
 //! (including `.each`), Python `test_*` functions, Go `Test…` functions, C#
-//! methods marked `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]`, and Ruby
+//! methods marked `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]`, Ruby
 //! RSpec examples (`it`, `specify`), Rails `test "…" do` blocks and Minitest
-//! `test_*` methods.
+//! `test_*` methods, and Java `@Test`-family methods (or JUnit 3 `test…`
+//! methods of a `TestCase`).
 use super::{call_name, callee_name, fast_hash, is_comment, line_of, macro_calls, ruby, text};
 use anyhow::Result;
 use std::{collections::BTreeSet, ops::Range, path::Path};
@@ -119,8 +120,8 @@ fn qualify_repeated_names(cases: &mut [TestCase]) {
 }
 
 /// Blocks that group test cases, with their titles, in source order: a
-/// `describe`/`context`/`suite` call with a literal title, a Python class,
-/// or a Rust module.
+/// `describe`/`context`/`suite` call with a literal title, a Python or Java
+/// class, or a Rust module.
 fn collect_suites(node: Node<'_>, source: &str, suites: &mut Vec<(Range<usize>, String)>) {
     let title = match node.kind() {
         "call_expression" => suite_call(node, source),
@@ -139,11 +140,14 @@ fn collect_suites(node: Node<'_>, source: &str, suites: &mut Vec<(Range<usize>, 
         "expression_statement" => crate::analysis::php::pest_statement(node, source)
             .filter(|pest| pest.suite)
             .map(|pest| pest.title),
-        // A C# test class; TypeScript classes (`class_body`) do not group tests.
+        // A C# test class, or a nested Java class (JUnit 5 `@Nested`): the
+        // top-level Java class is the file itself, which every case would
+        // share. TypeScript classes (`class_body`) do not group tests.
         "class_declaration"
             if node
                 .child_by_field_name("body")
-                .is_some_and(|b| b.kind() == "declaration_list") =>
+                .is_some_and(|b| b.kind() == "declaration_list")
+                || node.parent().is_some_and(|p| p.kind() == "class_body") =>
         {
             Some(name(node, source)).filter(|name| !name.is_empty())
         }
@@ -209,8 +213,28 @@ fn visit(
             push(node, node.start_byte(), name(node, source), source, found);
             return;
         }
-        "method_declaration" if crate::test_locations::csharp_test_method(node, source) => {
+        // PHP: a test method of a PHPUnit test class.
+        "method_declaration"
+            if in_test_class && crate::analysis::php::test_method(node, source) =>
+        {
             push(node, node.start_byte(), name(node, source), source, found);
+            return;
+        }
+        "method_declaration" => {
+            if crate::test_locations::csharp_test_method(node, source)
+                || crate::test_locations::java_test_method(node, source)
+                || in_test_class && name(node, source).starts_with("test")
+            {
+                push(node, node.start_byte(), name(node, source), source, found);
+            }
+            return;
+        }
+        // A JUnit 3 `TestCase` subclass: its `test…` methods are tests.
+        "class_declaration" if crate::test_locations::junit3_class(node, source) => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                visit(child, source, pytest, true, found);
+            }
             return;
         }
         "function_definition" => {
@@ -268,12 +292,6 @@ fn visit(
             for child in node.named_children(&mut cursor) {
                 visit(child, source, pytest, true, found);
             }
-            return;
-        }
-        "method_declaration"
-            if in_test_class && crate::analysis::php::test_method(node, source) =>
-        {
-            push(node, node.start_byte(), name(node, source), source, found);
             return;
         }
         "expression_statement" => {
@@ -520,18 +538,23 @@ fn walk<'a>(
                 calls.insert(name);
             }
         }
-        "jsx_opening_element" | "jsx_self_closing_element" => {
+        "method_invocation" => {
             if let Some(name) = node.child_by_field_name("name") {
                 calls.insert(text(name, source).to_string());
             }
         }
-        // C# and PHP: constructing the class under test calls its constructor.
+        // C#, PHP and Java: constructing the class under test calls its constructor.
         "object_creation_expression" => {
             if let Some(name) = match node.child_by_field_name("type") {
                 Some(t) => callee_name(t, source),
                 None => crate::analysis::php::callee_name(node, source),
             } {
                 calls.insert(name);
+            }
+        }
+        "jsx_opening_element" | "jsx_self_closing_element" => {
+            if let Some(name) = node.child_by_field_name("name") {
+                calls.insert(text(name, source).to_string());
             }
         }
         "token_tree"
@@ -799,5 +822,52 @@ mod tests {
         assert_eq!(pairs.len(), 1);
         assert_eq!((pairs[0].a, pairs[0].b), (0, 1));
         assert_eq!(pairs[0].subject, "total");
+    }
+
+    const JUNIT: &str = "package app;\n\nimport org.junit.jupiter.api.Test;\n\nclass TotalTests {\n\n\tprivate final Totals totals = new Totals();\n\n\t@Test\n\tvoid adds() {\n\t\tassertEquals(3, totals.sum(1, 2));\n\t}\n\n\t@ParameterizedTest\n\t@ValueSource(ints = {1, 2})\n\tvoid keeps(int value) {\n\t\tassertEquals(value, totals.sum(value));\n\t}\n\n\t@MultiLocaleTest\n\tvoid formats(Locale locale) {\n\t\tassertEquals(\"1\", totals.format(1, locale));\n\t}\n\n\tprivate int helper() {\n\t\treturn totals.sum();\n\t}\n\n\t@Nested\n\tclass Empty {\n\t\t@org.junit.jupiter.api.Test\n\t\tvoid isZero() {\n\t\t\tassertEquals(0, new Totals().sum());\n\t\t}\n\t}\n}\n";
+
+    #[test]
+    fn junit_methods_are_cases_and_nested_classes_are_their_suites() {
+        let found = cases(Path::new("src/test/java/app/TotalTests.java"), JUNIT).unwrap();
+        let named: Vec<(&str, Vec<&str>)> = found
+            .iter()
+            .map(|c| {
+                (
+                    c.name.as_str(),
+                    c.suite.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("adds", vec![]),
+                ("keeps", vec![]),
+                ("formats", vec![]),
+                ("isZero", vec!["Empty"])
+            ]
+        );
+        assert!(found[0].calls.contains("sum") && found[3].calls.contains("Totals"));
+        // The whole test class is test code, its fields and helpers included.
+        let located =
+            crate::test_locations::locate_tests(Path::new("TotalTests.java"), JUNIT).unwrap();
+        let ranges: Vec<(usize, usize)> = located
+            .ranges
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect();
+        assert_eq!(ranges, [(5, 36)]);
+        let junit3 = "public class TotalTest extends junit.framework.TestCase {\n\tpublic void testAdds() {\n\t\tassertEquals(3, Totals.sum(1, 2));\n\t}\n\n\tprivate void check() {}\n}\n";
+        assert_eq!(names("TotalTest.java", junit3), ["testAdds"]);
+        let subclass = "class HttpSessionTest extends SessionTest {\n\t@BeforeAll\n\tstatic void useHttp() {\n\t\tenableHttp();\n\t}\n}\n";
+        let located =
+            crate::test_locations::locate_tests(Path::new("HttpSessionTest.java"), subclass)
+                .unwrap();
+        assert_eq!(located.ranges.len(), 1);
+        let application = "class Totals {\n\tint sum(int... values) {\n\t\treturn 0;\n\t}\n\n\tvoid testConnection() {}\n}\n";
+        assert!(names("Totals.java", application).is_empty());
+        let located =
+            crate::test_locations::locate_tests(Path::new("Totals.java"), application).unwrap();
+        assert!(located.ranges.is_empty());
     }
 }

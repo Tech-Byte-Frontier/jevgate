@@ -342,10 +342,11 @@ pub(super) fn file_setup(source: &str, region_start: usize, first_case: usize) -
     }
 }
 
-/// The lines from `start` up to the first suite, test or test module, when
-/// they are short enough to send.
+/// The lines from `start` up to the first suite, test, test module or Java
+/// setup method, when they are short enough to send. A Java test class's
+/// fields, such as its mocks, are part of the head.
 fn setup_head(lines: &[&str], start: usize, first_case: usize) -> Option<String> {
-    const OPENERS: [&str; 18] = [
+    const OPENERS: &[&str] = &[
         "describe(",
         "describe.",
         "suite(",
@@ -365,12 +366,18 @@ fn setup_head(lines: &[&str], start: usize, first_case: usize) -> Option<String>
         "it ",
         "test ",
         "module ",
+        // Java: setup methods and `@Nested` test classes.
+        "@Before",
+        "@Nested",
     ];
     let last = first_case.saturating_sub(1).min(lines.len());
     let end = (start..last)
         .find(|&i| {
             let line = lines[i].trim_start();
+            // A Python class opens a suite; a braced class holds the fields
+            // the tests share.
             OPENERS.iter().any(|opener| line.starts_with(opener))
+                && !(line.starts_with("class ") && line.trim_end().ends_with('{'))
         })
         .unwrap_or(last);
     let head = lines[start..end].join("\n");
@@ -378,9 +385,25 @@ fn setup_head(lines: &[&str], start: usize, first_case: usize) -> Option<String>
 }
 
 /// Every setup hook in `region` short enough to send: `beforeEach`/`beforeAll`
-/// calls and Python `setUp`/`setup_method` methods.
+/// calls, Python `setUp`/`setup_method` methods and Java methods annotated
+/// `@BeforeEach`, `@BeforeAll`, `@Before` or `@BeforeClass`.
 fn setup_hooks(region: &str) -> Vec<String> {
     let mut hooks = Vec::new();
+    for (at, _) in region.match_indices("@Before") {
+        let name_end = at
+            + region[at + 1..]
+                .find(|c: char| !c.is_alphanumeric())
+                .map_or(region.len() - at, |i| i + 1);
+        if matches!(
+            &region[at..name_end],
+            "@BeforeEach" | "@BeforeAll" | "@Before" | "@BeforeClass"
+        ) {
+            let text = braced_method(&region[at..]);
+            if text.len() <= HOOK_BYTES {
+                hooks.push(text.to_string());
+            }
+        }
+    }
     for hook in [
         "beforeEach(",
         "beforeAll(",
@@ -403,6 +426,27 @@ fn setup_hooks(region: &str) -> Vec<String> {
         }
     }
     hooks
+}
+
+/// A Java method from its annotation through the brace that closes its body.
+fn braced_method(text: &str) -> &str {
+    let Some(open) = text.find('{') else {
+        return text;
+    };
+    let mut depth = 0usize;
+    for (i, c) in text[open..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &text[..open + i + 1];
+                }
+            }
+            _ => {}
+        }
+    }
+    text
 }
 
 /// A call from its name through the parenthesis that closes it.

@@ -173,7 +173,12 @@ fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block
         };
         let mut tokens = Vec::new();
         leaves(tree.root_node(), file.source, &mut tokens);
-        let bodies: Vec<Range<usize>> = file.units.iter().filter_map(|u| u.body.clone()).collect();
+        let bodies: Vec<Range<usize>> = file
+            .units
+            .iter()
+            .filter(|u| !u.equality)
+            .filter_map(|u| u.body.clone())
+            .collect();
         collect_blocks(tree.root_node(), file, index, &bodies, &tokens, &mut blocks);
         parsed.push(Parsed { tokens });
     }
@@ -482,6 +487,13 @@ fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
             | "integer_literal"
             | "float_literal"
             | "char_literal"
+            | "decimal_integer_literal"
+            | "hex_integer_literal"
+            | "octal_integer_literal"
+            | "binary_integer_literal"
+            | "decimal_floating_point_literal"
+            | "hex_floating_point_literal"
+            | "character_literal"
             | "number"
             | "integer"
             | "float"
@@ -489,7 +501,6 @@ fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
             | "raw_string_content"
             | "verbatim_string_literal"
             | "real_literal"
-            | "character_literal"
     );
     if node.child_count() == 0 || literal {
         let text = text(node, source);
@@ -531,7 +542,8 @@ fn collect_blocks(
 ) {
     // Ruby holds statements in a `body_statement` or `block_body`, and in the
     // `then`, `else` and `do` of a branch or loop; its `block` is a `{ … }`
-    // argument around a `block_body`. PHP holds them in a `compound_statement`.
+    // argument around a `block_body`. PHP holds them in a `compound_statement`,
+    // and a Java constructor's statements are in a `constructor_body`.
     let ruby_block = node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call");
     if matches!(
         node.kind(),
@@ -544,6 +556,7 @@ fn collect_blocks(
             | "then"
             | "else"
             | "do"
+            | "constructor_body"
     ) && !ruby_block
         && bodies
             .iter()
@@ -691,6 +704,28 @@ mod tests {
             b: "title".into()
         }));
         assert_eq!(pair.occurrences, 2);
+    }
+
+    #[test]
+    fn java_copies_are_candidates_but_equality_boilerplate_is_not() {
+        let position = "class Position {\n\tprivate final int line;\n\tprivate final int column;\n\n\t@Override\n\tpublic boolean equals(Object other) {\n\t\tif (this == other) return true;\n\t\tif (other == null || getClass() != other.getClass()) return false;\n\t\tPosition that = (Position) other;\n\t\tif (line != that.line) return false;\n\t\treturn column == that.column;\n\t}\n\n\tString describe(Map<String, String> fields) {\n\t\tString text = fields.get(\"text\");\n\t\tString trimmed = text.trim();\n\t\tString lower = trimmed.toLowerCase();\n\t\tfields.put(\"text\", lower);\n\t\treturn lower + line;\n\t}\n}\n";
+        let range = position
+            .replace("Position", "Range")
+            .replace("line", "start")
+            .replace("column", "end");
+        let found = run(&[
+            ("Position.java", position, true),
+            ("Range.java", &range, true),
+        ]);
+        let functions: Vec<_> = found
+            .pairs
+            .iter()
+            .map(|p| (p.a.function.as_deref(), p.b.function.as_deref()))
+            .collect();
+        assert_eq!(
+            functions,
+            [(Some("Position::describe"), Some("Range::describe"))]
+        );
     }
 
     #[test]
