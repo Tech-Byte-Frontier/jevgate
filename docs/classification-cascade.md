@@ -75,7 +75,10 @@ signatures, or one candidate pair.
    A Java constructor's statements that store
    a parameter, another object's field or a literal in a field break a copy:
    two constructors filling different fields matched as copies and stayed
-   undecided. Java `equals` and `hashCode` overrides offer no copies or
+   undecided. So does a Java setter given one literal
+   (`owner.setCity("Madison")`): a fixture built in a helper and an owner
+   built inside a test matched as copies whose only differences were the
+   values. Java `equals` and `hashCode` overrides offer no copies or
    values, and neither does an initial capacity (`new ArrayList<>(4)`) or the
    number a method returns whole (`int cost() { return 7; }`), which the
    method's name already names.

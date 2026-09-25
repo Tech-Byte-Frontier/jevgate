@@ -594,6 +594,7 @@ fn block_statements(
         let line = line_of(file.source, child.start_byte());
         if file.excluded.iter().any(|r| r.contains(&line))
             || node.kind() == "constructor_body" && field_initializer(child)
+            || literal_setter(child, file.source)
         {
             statements.push(None);
             continue;
@@ -638,6 +639,37 @@ fn field_initializer(statement: Node<'_>) -> bool {
         .is_some_and(|o| o.kind() == "=")
         && simple(assignment.child_by_field_name("left"), false)
         && simple(assignment.child_by_field_name("right"), true)
+}
+
+/// A Java setter given one literal, as in `owner.setCity("Madison");`. A run
+/// of them fills an object with data: a test fixture built in one test and a
+/// helper building another owner matched as copies whose only differences
+/// were the values.
+fn literal_setter(statement: Node<'_>, source: &str) -> bool {
+    let Some(call) = statement
+        .named_child(0)
+        .filter(|c| statement.kind() == "expression_statement" && c.kind() == "method_invocation")
+    else {
+        return false;
+    };
+    let setter = call.child_by_field_name("name").is_some_and(|name| {
+        text(name, source)
+            .strip_prefix("set")
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_uppercase()))
+    });
+    let on_object = call
+        .child_by_field_name("object")
+        .is_some_and(|o| matches!(o.kind(), "identifier" | "this" | "field_access"));
+    let literal = call
+        .child_by_field_name("arguments")
+        .is_some_and(|arguments| {
+            arguments.named_child_count() == 1
+                && arguments.named_child(0).is_some_and(|argument| {
+                    argument.kind().ends_with("_literal")
+                        || matches!(argument.kind(), "true" | "false")
+                })
+        });
+    setter && on_object && literal
 }
 
 #[cfg(test)]
@@ -776,6 +808,26 @@ mod tests {
         };
         let (a, b) = (worker("Position"), worker("Range"));
         let found = run(&[("Position.java", &a, true), ("Range.java", &b, true)]);
+        assert_eq!(found.pairs.len(), 1);
+    }
+
+    #[test]
+    fn java_setters_given_literals_are_data_not_copies() {
+        let fixture = "class OwnerTests {\n\tprivate Owner george() {\n\t\tOwner george = new Owner();\n\t\tgeorge.setFirstName(\"George\");\n\t\tgeorge.setLastName(\"Franklin\");\n\t\tgeorge.setAddress(\"110 W. Liberty St.\");\n\t\tgeorge.setCity(\"Madison\");\n\t\tgeorge.setTelephone(\"6085551023\");\n\t\treturn george;\n\t}\n}\n";
+        let inline = "class ServiceTests {\n\tvoid insertsOwner() {\n\t\tOwner owner = new Owner();\n\t\towner.setFirstName(\"Sam\");\n\t\towner.setLastName(\"Schultz\");\n\t\towner.setAddress(\"4, Evans Street\");\n\t\towner.setCity(\"Wollongong\");\n\t\towner.setTelephone(\"4444444444\");\n\t\towners.save(owner);\n\t}\n}\n";
+        let found = run(&[
+            ("OwnerTests.java", fixture, true),
+            ("ServiceTests.java", inline, true),
+        ]);
+        assert!(found.pairs.is_empty());
+        // Setters given computed values copy logic and are still compared.
+        let mapping = |name: &str| {
+            format!(
+                "class {name} {{\n\tOwnerDto map(Owner owner) {{\n\t\tOwnerDto dto = new OwnerDto();\n\t\tdto.setFirstName(owner.getFirstName().trim());\n\t\tdto.setLastName(owner.getLastName().trim());\n\t\tdto.setAddress(owner.getAddress().trim());\n\t\tdto.setCity(owner.getCity().toUpperCase());\n\t\tdto.setTelephone(owner.getTelephone().replace(\" \", \"\"));\n\t\treturn dto;\n\t}}\n}}\n"
+            )
+        };
+        let (a, b) = (mapping("OwnerMapper"), mapping("VetMapper"));
+        let found = run(&[("OwnerMapper.java", &a, true), ("VetMapper.java", &b, true)]);
         assert_eq!(found.pairs.len(), 1);
     }
 
