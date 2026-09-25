@@ -1004,7 +1004,7 @@ fn settled_status(
 }
 
 #[test]
-fn undecided_markup_cors_and_logged_objects_are_settled_by_their_choices() {
+fn undecided_markup_cors_cookies_and_logged_objects_are_settled_by_their_choices() {
     let (project, mut options) = security_project(QUERY);
     let markup = ["escaped", "text", "raw", "none"];
     let undecided_markup = [("interpreted", 0.95), ("markup", 0.4)];
@@ -1034,6 +1034,24 @@ fn undecided_markup_cors_and_logged_objects_are_settled_by_their_choices() {
                 &options,
                 catalog::UNSAFE_SETTINGS,
                 &undecided_cors,
+                settle
+            )
+            .0,
+            status,
+            "{chosen}"
+        );
+    }
+    let cookies = ["unset", "flagged", "missing"];
+    let undecided_cookie = [("weakened", 0.4), ("cookie", 0.3)];
+    for (chosen, status) in [("flagged", Status::Clear), ("missing", Status::Uncertain)] {
+        options.refresh = true;
+        let settle = ("cookie_flags", choice_of(chosen, &cookies));
+        assert_eq!(
+            settled_status(
+                &project,
+                &options,
+                catalog::UNSAFE_SETTINGS,
+                &undecided_cookie,
                 settle
             )
             .0,

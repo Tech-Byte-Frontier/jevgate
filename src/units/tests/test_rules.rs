@@ -32,6 +32,17 @@ fn test_rules_need_include_tests_and_summarize_over_tested_subjects() {
         .unwrap();
     assert_eq!(over.strength, Strength::Consider);
     assert_eq!(over.locations.len(), 3);
+    let redundancy: Vec<&str> = file
+        .findings
+        .iter()
+        .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
+        .map(|f| f.message.as_str())
+        .collect();
+    assert_eq!(
+        redundancy.len(),
+        1,
+        "the group reports its pairs: {redundancy:?}"
+    );
 }
 
 #[test]
@@ -335,4 +346,44 @@ fn a_mockmvc_test_is_rechecked_with_the_controller_method_its_request_reaches() 
             .unwrap()
             .contains("return \"owners/details\"")
     );
+}
+
+#[test]
+fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
+    let (project, mut options) = tests_project(&[("lib.rs", TESTS)], catalog::TEST_REDUNDANCY);
+    let strengths = |options: &CheckArgs, same_input: f64, same_outcome: f64| {
+        let mut eval = scripted(2);
+        eval.overrides = vec![
+            ("overlap", spread(0.0, 0.05, 0.95)),
+            ("same_input", noul_at(same_input)),
+            ("same_outcome", noul_at(same_outcome)),
+        ];
+        let report = run(&project, options, &mut eval);
+        report.files[0]
+            .findings
+            .iter()
+            .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
+            .map(|f| f.strength)
+            .max()
+    };
+    assert_eq!(strengths(&options, 0.95, 0.95), Some(Strength::Review));
+    options.refresh = true;
+    assert_eq!(strengths(&options, 0.69, 0.95), Some(Strength::Consider));
+    assert_eq!(strengths(&options, 0.95, 0.05), Some(Strength::Consider));
+    // Tests that read the same apart from their names stay a review.
+    let twins = "fn total(values: &[i32]) -> i32 {\n    values.iter().sum()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn when_empty() {\n        let values = vec![1, 2];\n        assert_eq!(total(&values), 3);\n    }\n\n    #[test]\n    fn when_full() {\n        let values = vec![1, 2];\n        assert_eq!(total(&values), 3);\n    }\n}\n";
+    let (project, options) = tests_project(&[("lib.rs", twins)], catalog::TEST_REDUNDANCY);
+    let mut eval = scripted(2);
+    eval.overrides = vec![
+        ("overlap", spread(0.0, 0.05, 0.95)),
+        ("same_input", noul_at(0.3)),
+        ("same_outcome", noul_at(0.95)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(report.files[0].findings[0].strength, Strength::Review);
+    // A space inside a string can be what the tests differ in.
+    let spaced = twins.replacen("vec![1, 2]", "vec![1,2]", 1);
+    let (project, options) = tests_project(&[("lib.rs", &spaced)], catalog::TEST_REDUNDANCY);
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(report.files[0].findings[0].strength, Strength::Consider);
 }

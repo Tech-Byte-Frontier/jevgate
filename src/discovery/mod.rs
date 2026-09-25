@@ -47,7 +47,7 @@ impl Classifier {
             "declarations"
         } else if under(&["fixtures", "__fixtures__", "__snapshots__", "testdata"]) {
             "fixture"
-        } else if under(&["migrations"]) {
+        } else if under(&["migrations"]) || schema_change(&components, &name) {
             "migration"
         } else if self.tests.is_match(path)
             || under(&["test", "tests", "__tests__"])
@@ -62,6 +62,24 @@ impl Classifier {
             "source"
         }
     }
+}
+
+/// A schema or data migration outside a `migrations` directory: Rails'
+/// `db/migrate` (and timestamped scripts anywhere under `db/`, such as
+/// lobsters' `db/old_migrations`) and Alembic's `alembic/versions`.
+fn schema_change(components: &[String], name: &str) -> bool {
+    let follows = |parent: &str, child: &str| {
+        components
+            .windows(2)
+            .any(|pair| pair[0] == parent && pair[1] == child)
+    };
+    let timestamped = name.len() > 18
+        && name.ends_with(".rb")
+        && name.as_bytes()[..14].iter().all(u8::is_ascii_digit)
+        && name.as_bytes()[14] == b'_';
+    follows("db", "migrate")
+        || follows("alembic", "versions")
+        || timestamped && components.iter().any(|c| c == "db")
 }
 
 /// File names generators use, such as `api.generated.ts` or `bundle.min.js`,
@@ -198,6 +216,27 @@ mod tests {
             classifier.role(Path::new("src/test/java/app/Fixtures.java")),
             "test"
         );
+    }
+
+    #[test]
+    fn rails_and_alembic_migrations_are_migrations() {
+        let classifier = super::Classifier::new(&Default::default()).unwrap();
+        for path in [
+            "db/migrate/20240926150737_add_origin.rb",
+            "db/old_migrations/20251013204007_create_usernames.rb",
+            "backend/app/alembic/versions/9c0a54914c78_add_max_length.py",
+            "app/migrations/0001_initial.py",
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), "migration", "{path}");
+        }
+        for path in [
+            "internal/migrate/runner.go",
+            "lib/versions/list.rb",
+            "db/seeds.rb",
+            "app/20240926150737_note.rb",
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), "source", "{path}");
+        }
     }
 
     #[test]

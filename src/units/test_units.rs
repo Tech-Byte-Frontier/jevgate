@@ -559,6 +559,12 @@ fn value_request(
     file.request("tests", state, questions)
 }
 
+/// A test's source as its words: a space inside a string, such as
+/// `x:=` against `x := `, can be what two tests differ in.
+fn words(source: &str) -> Vec<&str> {
+    source.split_whitespace().collect()
+}
+
 pub(super) fn plan_pairs(
     file: &FileContext<'_>,
     cases: &[TestCase],
@@ -637,6 +643,9 @@ pub(super) fn plan_pairs(
             detail: Detail::TestPair {
                 names: [a.name.clone(), b.name.clone()],
                 subject: pair.subject.clone(),
+                identical: a.suite == b.suite
+                    && words(&a.source(file.source).replace(a.name.as_str(), ""))
+                        == words(&b.source(file.source).replace(b.name.as_str(), "")),
             },
             recheck: recheck.filter(|_| fits),
         });

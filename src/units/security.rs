@@ -662,7 +662,7 @@ pub(in crate::units) enum SettleWhen {
 /// cleared the markup it was left uncertain. What their command lines hold
 /// settles the shell check the same way: a page that checks each octet of
 /// an address with is_numeric was a command injection at 0.88.
-pub(in crate::units) const SETTLES: [SettleKind; 10] = [
+pub(in crate::units) const SETTLES: [SettleKind; 11] = [
     SettleKind {
         rule: INJECTION,
         question: "url_parts",
@@ -753,6 +753,15 @@ pub(in crate::units) const SETTLES: [SettleKind; 10] = [
         when: SettleWhen::Undecided,
         files: SettleFiles::All,
     },
+    SettleKind {
+        rule: UNSAFE_SETTINGS,
+        question: "cookie_flags",
+        checks: &["cookie"],
+        clears: &questions::FLAGGED_COOKIES,
+        callers: false,
+        when: SettleWhen::Undecided,
+        files: SettleFiles::All,
+    },
 ];
 
 /// The settle follow-ups of one unit, one per Choice of its rule, each sent
@@ -794,6 +803,7 @@ fn settle(
         "shell_parts" => questions::security_shell_parts(&code),
         "destination" => questions::security_destination(&code),
         "logged" => questions::security_logged(&code),
+        "cookie_flags" => questions::security_cookie_flags(&code),
         _ => questions::security_cors_origins(&code),
     };
     let mut questions = Questions::default();

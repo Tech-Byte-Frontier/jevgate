@@ -3,10 +3,11 @@ use super::*;
 
 /// Each first-pass question of a comment with its outcome: the Scores read
 /// as benefits (the middle level says the comment is fine as it is), the
-/// Nouls as checks. Documentation that only repeats its declaration is at
-/// most a note: a documentation tool or linter may expect a summary line
-/// even when it says what the name says, as in the Sphinx docstrings of
-/// psf/requests. Wordiness is asked only of long comments and code turned
+/// Nouls as checks. Documentation that only repeats its declaration, or says
+/// it at length, is at most a note: a documentation tool or linter may expect
+/// a summary line even when it says what the name says, as in the Sphinx
+/// docstrings of psf/requests, and framework skeletons ship docblocks that
+/// explain what any code of their kind does, as Laravel's do. Wordiness is asked only of long comments and code turned
 /// off only of comments that read like code, so either may be missing.
 pub(in crate::units) fn comment_signals<'a>(
     get: &impl Fn(&str) -> Option<&'a Answer>,
@@ -21,7 +22,7 @@ pub(in crate::units) fn comment_signals<'a>(
             return None;
         };
         let outcome = match question {
-            "restates" if documentation => at_most_note(benefit(answer)),
+            "restates" | "verbose" if documentation => at_most_note(benefit(answer)),
             "restates" | "verbose" => benefit(answer),
             _ => noul(answer),
         };

@@ -13,6 +13,7 @@ mod documentation;
 mod maintainability;
 mod php;
 mod privilege;
+mod rust;
 mod security;
 mod spacetimedb;
 mod test_rules;
@@ -22,16 +23,18 @@ pub use documentation::*;
 pub use maintainability::*;
 pub use php::*;
 pub use privilege::*;
+pub use rust::*;
 pub use security::*;
 pub use spacetimedb::*;
 pub use test_rules::*;
 
 /// Reword the body of question `id` for a file in `language`: C# adds its
-/// framework's names and examples, PHP reads its own wording; every other
-/// language keeps the general one.
+/// framework's names and examples, PHP reads its own wording, Rust names the
+/// `rand` crate's secure generators; every other language keeps the general one.
 pub fn reword(language: &str, id: &str, body: &mut Value) {
     csharp::reword(language, id, body);
     reword_php(language, id, body);
+    reword_rust(language, id, body);
 }
 
 fn noul(question: String, yes: &str, no: &str) -> Value {
@@ -172,6 +175,7 @@ mod tests {
             security_path_parts("function.source"),
             security_shell_parts("function.source"),
             security_cors_origins("function.source"),
+            security_cookie_flags("function.source"),
             security_runs_in("function.source"),
             security_logged("function.source"),
             security_destination("function.source"),

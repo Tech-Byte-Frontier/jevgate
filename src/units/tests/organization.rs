@@ -165,6 +165,7 @@ fn test_files_are_outlined_by_suite_without_include_tests() {
     let mut options = args();
     only(&mut options, catalog::FILE_ORGANIZATION);
     let mut eval = scripted(2);
+    eval.overrides = vec![("module", choice_of("G1", &["G1", "G2", "none"]))];
     let report = run(&project, &options, &mut eval);
     let file = &report.files[0];
     assert_eq!(file.classification.as_ref().unwrap().kind, "tests");
@@ -175,10 +176,15 @@ fn test_files_are_outlined_by_suite_without_include_tests() {
     );
     let finding = &file.findings[0];
     assert!(
-        finding.message.contains("separate test file"),
+        finding.message.contains("separate test file") && finding.message.contains("G1"),
         "{}",
         finding.message
     );
+    // Without a group to name, the finding is a note.
+    options.refresh = true;
+    let report = run(&project, &options, &mut scripted(2));
+    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    options.refresh = false;
     let (_, plan) = planned(&project, &options);
     let (request, _) = plan.files.values().next().unwrap().units[0]
         .recheck

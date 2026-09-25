@@ -425,13 +425,18 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                 };
                 // `const f = () => …`, or a callback registered through a call such as
                 // `const view = database.view(options, (ctx) => …)` or `memo(forwardRef(…))`.
-                let Some(function) = callback(value, 2) else {
-                    continue;
-                };
                 let name = declarator
                     .child_by_field_name("name")
                     .map(|n| text(n, source).to_string())
                     .unwrap_or_default();
+                let Some(function) = callback(value, 2) else {
+                    // `export const actions = { default: async (event) => … }`, as
+                    // SvelteKit form actions and handler maps write it.
+                    if let Some(object) = object_literal(value) {
+                        object_functions(object, source, &name, file);
+                    }
+                    continue;
+                };
                 let definition = Definition {
                     outer: node,
                     node: value,
@@ -454,6 +459,51 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
             }
         }
         _ => {}
+    }
+}
+
+/// The object literal a declaration's value is, through TypeScript's
+/// `satisfies` and `as` and parentheses.
+fn object_literal(value: Node<'_>) -> Option<Node<'_>> {
+    match value.kind() {
+        "object" => Some(value),
+        "satisfies_expression" | "as_expression" | "parenthesized_expression" => {
+            object_literal(value.named_child(0)?)
+        }
+        _ => None,
+    }
+}
+
+/// The functions an object literal named `owner` holds as properties or
+/// methods, each a method of `owner`.
+fn object_functions(object: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let mut cursor = object.walk();
+    for property in object.named_children(&mut cursor) {
+        match property.kind() {
+            "method_definition" => function(property, property, source, owner, file),
+            "pair" => {
+                let (Some(key), Some(value)) = (
+                    property.child_by_field_name("key"),
+                    property.child_by_field_name("value"),
+                ) else {
+                    continue;
+                };
+                if !matches!(
+                    value.kind(),
+                    "arrow_function" | "function_expression" | "function"
+                ) {
+                    continue;
+                }
+                let definition = Definition {
+                    outer: property,
+                    node: value,
+                    body: value.child_by_field_name("body"),
+                };
+                let key = text(key, source).trim_matches(['"', '\'', '`']);
+                push(definition, key, owner, Kind::Method, source, file);
+            }
+            _ => {}
+        }
     }
 }
 

@@ -196,7 +196,14 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), unit),
         catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => {
-            get("overlap").map(|overlap| redundancy_outcome(overlap, get("distinct")))
+            let identical = matches!(
+                unit.detail,
+                Detail::TestPair {
+                    identical: true,
+                    ..
+                }
+            );
+            get("overlap").map(|overlap| redundancy_outcome(overlap, &get, identical))
         }
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         catalog::COMMENTS => comment_outcome(

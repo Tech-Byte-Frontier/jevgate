@@ -55,3 +55,19 @@ fn jsx_components_count_as_calls() {
     let render = parse(Path::new("view.tsx"), VIEW).unwrap().units.remove(2);
     assert!(render.calls.contains("Cell") && render.calls.contains("label"));
 }
+
+#[test]
+fn functions_an_object_literal_holds_are_methods_of_its_binding() {
+    let source = "export const actions = {\n  default: async ({ cookies, request }) => {\n    const data = await request.formData()\n    cookies.set('jwt', data.get('token'), { path: '/' })\n  },\n  'sign-out': function () {\n    return clear()\n  },\n  async remove(event) {\n    await drop(event)\n  },\n  label: 'x',\n} satisfies Actions\nconst options = { retries: 3 }\n";
+    let units = parse(Path::new("+page.server.ts"), source).unwrap().units;
+    let named: Vec<(&str, usize)> = units.iter().map(|u| (u.name.as_str(), u.line)).collect();
+    assert_eq!(
+        named,
+        [
+            ("actions::default", 2),
+            ("actions::sign-out", 6),
+            ("actions::remove", 9)
+        ]
+    );
+    assert!(units[0].calls.contains("formData"));
+}

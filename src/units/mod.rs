@@ -22,6 +22,7 @@ mod plan;
 pub mod questions;
 mod security;
 mod spacetimedb;
+mod sveltekit;
 mod test_units;
 mod wording;
 mod workflows;
@@ -196,6 +197,9 @@ pub enum Detail {
     TestPair {
         names: [String; 2],
         subject: String,
+        /// Whether the two tests read the same apart from their names, in
+        /// the same group.
+        identical: bool,
     },
 }
 

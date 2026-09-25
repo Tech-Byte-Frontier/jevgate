@@ -241,11 +241,19 @@ pub fn reword(language: &str, id: &str, body: &mut Value) {
         body["instructions"]["question"] = json!(question.replace("{code}", code));
     }
     if body["type"] == "score" {
-        if let Some(top) = body["criteria"].as_array_mut().and_then(|l| l.last_mut())
-            && !wording.yes.is_empty()
-        {
-            let text = top.as_str().unwrap_or("");
-            *top = json!(format!("{text} {}", wording.yes.join(" ")));
+        // "Yes" examples extend the top level and "no" examples the lowest.
+        if let Some(levels) = body["criteria"].as_array_mut() {
+            for (level, examples) in [
+                (levels.len().saturating_sub(1), wording.yes),
+                (0, wording.no),
+            ] {
+                if let Some(criterion) = levels.get_mut(level)
+                    && !examples.is_empty()
+                {
+                    let text = criterion.as_str().unwrap_or("");
+                    *criterion = json!(format!("{text} {}", examples.join(" ")));
+                }
+            }
         }
         return;
     }
@@ -254,7 +262,7 @@ pub fn reword(language: &str, id: &str, body: &mut Value) {
 }
 
 /// Extend an answer's examples, turning a plain criterion into one with examples.
-fn add_examples(criterion: &mut Value, examples: &[&str]) {
+pub(super) fn add_examples(criterion: &mut Value, examples: &[&str]) {
     if examples.is_empty() {
         return;
     }

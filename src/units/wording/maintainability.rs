@@ -69,10 +69,11 @@ pub(in crate::units) fn function_wording(
 }
 
 /// The file-wide concern, naming the group chosen as the module (or, for a
-/// test file, as its own test file) when there is one, and the kind of file
+/// test file, as its own test file) when there is one, or the two groups
+/// the choice leans toward, and the kind of file
 /// when the kind decided it. A test file's finding is at most a consider.
 pub(in crate::units) fn outline_wording(
-    chosen: Option<&GroupInfo>,
+    chosen: &[&GroupInfo],
     tests: bool,
     several: Option<&str>,
     strength: Strength,
@@ -83,25 +84,32 @@ pub(in crate::units) fn outline_wording(
     } else {
         ("module", "members")
     };
-    let detail = chosen.map_or(String::new(), |group| {
-        let shown: Vec<_> = group
-            .names
-            .iter()
-            .take(6)
-            .map(|n| format!("`{n}`"))
-            .collect();
-        let more = group.names.len().saturating_sub(shown.len());
-        let more = if more > 0 {
-            format!(" and {more} more")
-        } else {
-            String::new()
-        };
+    let shown: Vec<String> = chosen
+        .iter()
+        .map(|group| {
+            let names: Vec<_> = group
+                .names
+                .iter()
+                .take(6)
+                .map(|n| format!("`{n}`"))
+                .collect();
+            let more = group.names.len().saturating_sub(names.len());
+            let more = if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            };
+            format!("{} ({}{more})", group.id, names.join(", "))
+        })
+        .collect();
+    let detail = if shown.is_empty() {
+        String::new()
+    } else {
         format!(
-            " {} ({}{more}) would be most useful as its own {kind}.",
-            group.id,
-            shown.join(", ")
+            " {} would be most useful as its own {kind}.",
+            shown.join(" or ")
         )
-    });
+    };
     match strength {
         // A test file's note may be a lowered consider, so it does not say the file reads well.
         Strength::Note if tests => (
@@ -134,7 +142,7 @@ pub(in crate::units) fn outline_wording(
             format!(
                 "This file holds several features that would be easier to find apart ({p:.2}).{detail}"
             ),
-            if chosen.is_some() {
+            if !chosen.is_empty() {
                 "Move that group into its own module"
             } else {
                 "Split the file into one module per feature"

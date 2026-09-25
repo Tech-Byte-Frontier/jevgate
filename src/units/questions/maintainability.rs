@@ -194,7 +194,7 @@ pub fn hardcoded_environment(values: &str, code: &str) -> Value {
         ),
         "",
         [
-            "No. Every value stays the same in every environment: the program's own routes and file names, paths relative to the project, public addresses such as documentation links, messages and formats.",
+            "No. Every value stays the same in every environment: the program's own routes and file names, paths relative to the project, public addresses such as documentation links, messages and formats, the names of environment variables, modules and packages, and addresses whose host comes from configuration or data joined with a fixed path.",
             "Slightly. A value is a default for local development, such as localhost, that configuration already overrides.",
             "Yes. A value names something outside the program that differs between environments, such as a specific server address, database, account, or an absolute path on one machine, fixed in the code or used as its default.",
         ],
@@ -208,7 +208,7 @@ pub fn hardcoded_magic(values: &str, code: &str) -> Value {
         ),
         "",
         [
-            "No. Each value explains itself where it is used, such as a message, format, key, or a count its context makes clear.",
+            "No. Each value explains itself where it is used, such as a message, format, key, a count its context makes clear, or a code a protocol defines, such as an HTTP status or a Unix file mode.",
             "Slightly. One value could be named, but its meaning is clear from the code around it.",
             "Yes. A reader must guess what a number or string means or why it has that value, or the same value repeats.",
         ],
@@ -221,7 +221,7 @@ pub fn hardcoded_special(code: &str) -> Value {
             "Does `{code}` treat one specific user, account, tenant, record or name differently from the rest?"
         ),
         "It checks for, or holds a table of, particular users, accounts, tenants, records or items by their literal identifiers, instead of reading them from data or configuration.",
-        "It treats every identity alike, or compares against values that are part of the program's own rules, such as states, roles or commands.",
+        "It treats every identity alike, or compares against values that are part of the program's own rules, such as states, roles or commands, or an account, queue or record the program itself creates and finds by a fixed name, such as a system or deleted-user account.",
     )
 }
 

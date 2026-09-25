@@ -396,7 +396,14 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         commented,
         mut undecided,
     } = tally;
-    findings.extend(over_tested(plan, &redundant));
+    // A pair of tests in a group of three or more is reported by the group.
+    let (groups, grouped) = over_tested(plan, &redundant);
+    let mut index = 0;
+    findings.retain(|_| {
+        index += 1;
+        !grouped.contains(&(index - 1))
+    });
+    findings.extend(groups);
     findings.extend(comment_findings(plan, &commented));
     let dimensions = plan
         .rules
@@ -425,9 +432,19 @@ struct Tally<'p> {
     counts: BTreeMap<&'p str, UnitCounts>,
     concern: BTreeMap<&'p str, f64>,
     findings: Vec<Finding>,
-    redundant: Vec<(&'p UnitPlan, &'p [String; 2], &'p String, f64)>,
+    redundant: Vec<Redundant<'p>>,
     commented: Vec<(&'p UnitPlan, Strength, f64, &'static str)>,
     undecided: BTreeMap<&'p str, Vec<Undecided>>,
+}
+
+/// A redundant test pair, with the index of its finding when it is a
+/// consider, which a group of three or more tests reports instead.
+struct Redundant<'p> {
+    unit: &'p UnitPlan,
+    names: &'p [String; 2],
+    subject: &'p String,
+    p: f64,
+    finding: Option<usize>,
 }
 
 impl<'p> Tally<'p> {
@@ -445,7 +462,10 @@ impl<'p> Tally<'p> {
             return;
         }
         let (outcome, answers) = resolved(unit, judgments);
-        let outcome = if unnamed_value(unit, judgments) || few.contains(unit.id.as_str()) {
+        let outcome = if unnamed_value(unit, judgments)
+            || unnamed_outline(unit, judgments)
+            || few.contains(unit.id.as_str())
+        {
             lowered(outcome)
         } else {
             outcome
@@ -480,10 +500,20 @@ impl<'p> Tally<'p> {
                     .push(undecided_unit(unit, &answers));
             }
         }
-        if let (Detail::TestPair { names, subject }, Outcome::Review(p) | Outcome::Consider(p)) =
-            (&unit.detail, outcome)
+        if let (
+            Detail::TestPair { names, subject, .. },
+            Outcome::Review(p) | Outcome::Consider(p),
+        ) = (&unit.detail, outcome)
         {
-            self.redundant.push((unit, names, subject, p));
+            // A review pair stays its own finding: it says a test adds nothing.
+            let finding = matches!(outcome, Outcome::Consider(_)).then(|| self.findings.len() - 1);
+            self.redundant.push(Redundant {
+                unit,
+                names,
+                subject,
+                p,
+                finding,
+            });
         }
     }
 }
@@ -635,8 +665,10 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
         _ => Vec::new(),
     };
     Undecided {
-        unit: match unit.detail {
+        unit: match &unit.detail {
             Detail::Outline { .. } => "file outline".into(),
+            // Policies are often named by what they allow, the same on each table.
+            Detail::Access(Access::Policy { table }) => format!("{} on {table}", unit.name),
             _ => unit.name.clone(),
         },
         values,
@@ -831,14 +863,13 @@ fn finding(
             function_wording(name, strength, p, answers, block)
         }
         Detail::Outline { tests, groups, .. } => {
-            let module = answers.get("module").copied();
-            let chosen = choice(module).and_then(|(id, _)| groups.iter().find(|g| g.id == id));
-            symbol = chosen.map(|group| group.id.clone());
-            if let Some(group) = chosen {
-                locations = group.locations.clone();
+            let chosen = outline_groups(answers.get("module").copied(), groups);
+            symbol = chosen.first().map(|group| group.id.clone());
+            if !chosen.is_empty() {
+                locations = chosen.iter().flat_map(|g| g.locations.clone()).collect();
             }
             let several = several_kind(answers.get("split").copied(), answers.get("kind").copied());
-            outline_wording(chosen, *tests, several, strength, p)
+            outline_wording(&chosen, *tests, several, strength, p)
         }
         Detail::Pair {
             differences,
@@ -1000,6 +1031,56 @@ fn unnamed_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         )
 }
 
+/// A file-organization consider that says only that some members could
+/// move, naming no group: the module Choice was not asked (one group or
+/// none) or spread wider than two groups, and no kind of file decided it.
+/// Its finding is a note, since a reader cannot tell which members to move.
+/// A review, or a consider the kind decided, says to split the whole file.
+fn unnamed_outline(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    let Detail::Outline { groups, .. } = &unit.detail else {
+        return false;
+    };
+    let (outcome, answers) = resolved(unit, judgments);
+    let get = |q: &str| answers.get(q).copied();
+    matches!(outcome, Outcome::Consider(_))
+        && several_kind(get("split"), get("kind")).is_none()
+        && outline_groups(get("module"), groups).is_empty()
+}
+
+/// The group a module Choice picks clearly, or else the two it leans toward
+/// when together they reach the location probability: flask's `cli.py`
+/// split 0.45 and 0.23 over two of six groups. None when it spreads wider.
+fn outline_groups<'g>(
+    module: Option<&Answer>,
+    groups: &'g [super::GroupInfo],
+) -> Vec<&'g super::GroupInfo> {
+    let find = |id: &str| groups.iter().find(|g| g.id == id);
+    if let Some((id, _)) = choice(module) {
+        return find(id).into_iter().collect();
+    }
+    let Some(Answer::Choice { probabilities, .. }) = module else {
+        return Vec::new();
+    };
+    let mass: f64 = probabilities.values().sum::<f64>().max(f64::MIN_POSITIVE);
+    let mut ranked: Vec<(&str, f64)> = probabilities
+        .iter()
+        .filter(|(id, _)| id.as_str() != "none")
+        .map(|(id, p)| (id.as_str(), p / mass))
+        .collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+    match ranked.as_slice() {
+        [first, second, ..]
+            if crate::policy::probability_at_least(
+                first.1 + second.1,
+                crate::policy::LOCATION_PROBABILITY,
+            ) =>
+        {
+            [first.0, second.0].into_iter().filter_map(find).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// The value a hardcoded-value finding is about, when the locate choice is clear.
 fn located_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<String> {
     let Detail::Values { choices, .. } = &unit.detail else {
@@ -1027,27 +1108,34 @@ fn located_block<'a>(
 /// a chain of such pairs connects. Two pairs of one subject that share no
 /// test stay two pairs; grouped by subject alone, sinatra's pair of redirect
 /// tests and pair of deny tests of `get` read as four overlapping tests.
-fn over_tested(
-    plan: &FilePlan,
-    redundant: &[(&UnitPlan, &[String; 2], &String, f64)],
-) -> Vec<Finding> {
+/// Also returns the indices of the consider pair findings each group reports.
+fn over_tested(plan: &FilePlan, redundant: &[Redundant<'_>]) -> (Vec<Finding>, BTreeSet<usize>) {
     type Cluster<'a> = (
         &'a String,
         BTreeSet<&'a String>,
         Vec<crate::schema::Location>,
         f64,
+        Vec<Option<usize>>,
     );
     let mut clusters: Vec<Cluster<'_>> = Vec::new();
-    for (unit, names, subject, p) in redundant {
-        let mut joined: Cluster<'_> = (*subject, BTreeSet::new(), Vec::new(), *p);
+    for Redundant {
+        unit,
+        names,
+        subject,
+        p,
+        finding,
+    } in redundant
+    {
+        let mut joined: Cluster<'_> = (subject, BTreeSet::new(), Vec::new(), *p, vec![*finding]);
         let mut index = 0;
         while index < clusters.len() {
             let (other, tests, ..) = &clusters[index];
             if *other == *subject && names.iter().any(|name| tests.contains(name)) {
-                let (_, tests, locations, q) = clusters.remove(index);
+                let (_, tests, locations, q, findings) = clusters.remove(index);
                 joined.1.extend(tests);
                 joined.2.extend(locations);
                 joined.3 = joined.3.min(q);
+                joined.4.extend(findings);
             } else {
                 index += 1;
             }
@@ -1060,10 +1148,14 @@ fn over_tested(
         clusters.push(joined);
     }
     clusters.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-    clusters
+    clusters.retain(|(_, tests, ..)| tests.len() >= 3);
+    let grouped = clusters
+        .iter()
+        .flat_map(|(.., findings)| findings.iter().flatten().copied())
+        .collect();
+    let groups = clusters
         .into_iter()
-        .filter(|(_, tests, ..)| tests.len() >= 3)
-        .map(|(subject, tests, mut locations, p)| {
+        .map(|(subject, tests, mut locations, p, _)| {
             locations.sort();
             let names: Vec<String> = tests.iter().map(|t| format!("`{t}`")).collect();
             let lines = locations
@@ -1099,7 +1191,8 @@ fn over_tested(
                 baselined: false,
             }
         })
-        .collect()
+        .collect();
+    (groups, grouped)
 }
 
 fn documented(unit: &UnitPlan) -> bool {

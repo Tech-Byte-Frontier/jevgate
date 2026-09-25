@@ -34,16 +34,31 @@ pub(in crate::units) fn test_value_outcome<'a>(
 }
 
 /// Two tests that check the same behavior with equivalent inputs make a
-/// review: one of them adds nothing. When asked (for Ruby) whether each
-/// checks something the other does not, a review also needs that ruled out at
-/// the shared threshold, since it says a test can be deleted; otherwise the
-/// pair is at most a consider.
-pub(in crate::units) fn redundancy_outcome(overlap: &Answer, distinct: Option<&Answer>) -> Outcome {
+/// review: one of them adds nothing. A review also needs both tests to
+/// exercise the same input case and expect the same outcome, each at the
+/// shared threshold; otherwise the pair is at most a consider. On just, a
+/// test formatting `x:=` from stdin read as redundant with one checking
+/// already-formatted input (same input 0.69), and on zero2prod a valid
+/// 256-grapheme name with a rejected 257-grapheme one (same outcome 0.05).
+/// Tests `identical` apart from their names need neither: their names can
+/// say different cases, as lobsters' "when story is deleted" and "when story
+/// is available" did, which deleted nothing. When asked (for Ruby) whether
+/// each checks something the other does not, a review also needs that ruled
+/// out.
+pub(in crate::units) fn redundancy_outcome<'a>(
+    overlap: &Answer,
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    identical: bool,
+) -> Outcome {
     let outcome = score(overlap);
-    let separable = distinct
+    let separable = get("distinct")
         .is_some_and(|answer| matches!(answer, Answer::Noul { noul } if !at_least(1.0 - noul)));
+    let differs = !identical
+        && ["same_input", "same_outcome"]
+            .iter()
+            .any(|q| matches!(get(q), Some(Answer::Noul { noul }) if !at_least(*noul)));
     match (outcome, levels(overlap)) {
-        (Outcome::Review(_), Some([_, middle, top])) if separable => {
+        (Outcome::Review(_), Some([_, middle, top])) if separable || differs => {
             Outcome::Consider(middle + top)
         }
         _ => outcome,

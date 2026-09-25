@@ -332,6 +332,27 @@ pub fn security_cors_origins(code: &str) -> Value {
     })
 }
 
+/// The options of the cookie Choice that clear the cookie check.
+pub const FLAGGED_COOKIES: [&str; 2] = ["unset", "flagged"];
+
+/// What a function leaves a session cookie's flags as, asked when the cookie
+/// check stays undecided: a SvelteKit form action's `cookies.set` without
+/// options, whose defaults set both flags, stayed at 0.21.
+pub fn security_cookie_flags(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("How are the Secure and HttpOnly flags set on the cookies `{code}` sets?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "unset": "It sets no cookie, or only cookies that hold no session, token or sign-in state, such as a theme or language preference.",
+            "flagged": "Session or token cookies get both flags: in the options it passes, or from a framework whose defaults set them, such as SvelteKit's `cookies.set`.",
+            "missing": "A session or token cookie is set with Secure or HttpOnly turned off, or through an API whose defaults leave them off, such as Express `res.cookie`, `document.cookie` or PHP `setcookie` without them.",
+        },
+    })
+}
+
 /// The options of the destination Choice that rule error details out: every
 /// place but a remote client.
 pub const AWAY_FROM_CLIENTS: [&str; 4] = ["local", "logs", "caller", "stored"];

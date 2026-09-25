@@ -86,6 +86,9 @@ pub fn excluded_reason(role: &str) -> &'static str {
         "declarations" => "Type declarations have no implementation for these gates.",
         "vendored" => "Third-party library copied into the repository. Review it upstream.",
         "generated" => "Generated code. Review its generator or source definitions instead.",
+        "migration" => {
+            "Migration: a one-off change to the schema or stored data, not code maintained as it is."
+        }
         _ => "Outside source/test semantic scope",
     }
 }

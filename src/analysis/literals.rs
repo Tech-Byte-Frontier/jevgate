@@ -268,7 +268,7 @@ fn constants_in(root: Node<'_>, source: &str, found: &mut Vec<Constant>) {
                 return;
             }
             let values = in_node(value, source);
-            if values.is_empty() || !is_value(value) {
+            if values.is_empty() || !is_value(value) || reads(value, source) {
                 continue;
             }
             let whole = text(value, source);
@@ -520,6 +520,52 @@ fn spec_bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
         .collect()
 }
 
+/// Whether a binding's value is read from elsewhere, so its literals are
+/// keys or defaults rather than the value: a module (`require('fs')`), the
+/// environment (`process.env['API_URL']`, `os.getenv("PORT", "8000")`,
+/// `ENV.fetch("HOST")`) or the page (`document.getElementById('root')`).
+/// Object and array literals are values themselves: a configuration object
+/// is judged even when one of its fields reads the environment.
+fn reads(node: Node<'_>, source: &str) -> bool {
+    const ENVIRONMENT: [&str; 8] = [
+        "process.env",
+        "import.meta.env",
+        "Deno.env",
+        "os.environ",
+        "env[",
+        "env.",
+        "ENV[",
+        "ENV.",
+    ];
+    let read = match node.kind() {
+        "call_expression" | "call" => {
+            let callee = node
+                .child_by_field_name("function")
+                .or_else(|| node.child_by_field_name("receiver"))
+                .map_or("", |f| text(f, source));
+            matches!(
+                callee,
+                "require" | "import" | "os.getenv" | "os.environ.get" | "ENV"
+            ) || callee.starts_with("document.")
+        }
+        "member_expression"
+        | "subscript_expression"
+        | "subscript"
+        | "attribute"
+        | "element_reference" => {
+            let accessed = text(node, source);
+            ENVIRONMENT.iter().any(|env| accessed.starts_with(env))
+        }
+        "object" | "array" | "dictionary" | "list" | "hash" => return false,
+        _ => false,
+    };
+    read || {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor)
+            .any(|child| reads(child, source))
+    }
+}
+
 fn is_value(node: Node<'_>) -> bool {
     !matches!(
         node.kind(),
@@ -588,7 +634,29 @@ mod tests {
             .map(|c| c.name)
             .collect();
         assert_eq!(names, ["API", "retries"]);
-        let python = "TIMEOUT = 30\nname = 'service'\ndef f():\n    pass\n";
+        let js = "const fs = require('fs');\nconst spawn = require('child_process').spawn;\nconst target = process.env['services__webapi__https__0'] || 'http://localhost:5000';\nconst other = env['services__webapi__http__0'];\nconst base = import.meta.env.VITE_BASE ?? '/';\nconst root = document.getElementById('root');\nconst client = createClient('https://xyz.supabase.co');\nconst config = [{ context: ['/api'], secure: env['NODE_ENV'] !== 'development' }];\n";
+        let tree = crate::syntax::parse(Path::new("a.js"), js)
+            .unwrap()
+            .unwrap();
+        let names: Vec<_> = constants(tree.root_node(), js)
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["client", "config"],
+            "read values have keys, not values"
+        );
+        let ruby = "HOST = ENV.fetch('HOST', 'localhost')\nPORT = ENV['PORT']\nLIMIT = 25\n";
+        let tree = crate::syntax::parse(Path::new("a.rb"), ruby)
+            .unwrap()
+            .unwrap();
+        let names: Vec<_> = constants(tree.root_node(), ruby)
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names, ["LIMIT"]);
+        let python = "TIMEOUT = 30\nname = 'service'\nPORT = os.getenv('PORT', '8000')\nHOME = os.environ['HOME']\ndef f():\n    pass\n";
         let tree = crate::syntax::parse(Path::new("a.py"), python)
             .unwrap()
             .unwrap();
