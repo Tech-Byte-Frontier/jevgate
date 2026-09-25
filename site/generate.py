@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-COMMANDS = ["auth", "check", "baseline", "rules", "init", "completions", "man", "serve"]
+COMMANDS = ["auth", "check", "baseline", "rules", "init", "completions", "man", "serve", "mcp"]
 GROUPS = {
     "maintainability": "On by default.",
     "tests": "On by default; judged with `--include-tests` or `include_tests = true`.",
