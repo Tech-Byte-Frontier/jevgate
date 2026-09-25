@@ -13,26 +13,28 @@ use crate::{
 use std::collections::BTreeMap;
 
 mod access;
+mod comments;
 mod documentation;
+mod exposure;
+mod injection;
 mod maintainability;
+mod pairs;
 mod security;
 mod test_rules;
 
 use access::access_outcome;
-use documentation::doc_pair_outcome;
+pub(super) use comments::{comment_concern_kind, comment_outcome, comment_signals};
 use documentation::stale_outcome;
-pub(super) use documentation::{
-    comment_concern_kind, comment_outcome, comment_signals, disagreement, document_outcome,
-    document_split, pair_signals, repeated, section_signals,
-};
+pub(super) use documentation::{document_outcome, document_split, section_signals};
+pub(super) use exposure::{Messages, django_settings_outcome, exposure_outcome, messages};
+pub(super) use injection::{injection_outcome, origin_outcome};
 pub(super) use maintainability::{
     benign_key, function_outcome, organization_outcome, several_kind, shared_outcome,
     value_signals, values_outcome,
 };
-pub(super) use security::{
-    Messages, checks, django_settings_outcome, exposure_outcome, injection_outcome, messages,
-    origin_outcome, settled_checks,
-};
+use pairs::doc_pair_outcome;
+pub(super) use pairs::{disagreement, pair_signals, repeated};
+pub(super) use security::{checks, settled_checks};
 pub(super) use test_rules::{redundancy_outcome, test_value_outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq)]

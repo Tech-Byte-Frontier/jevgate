@@ -1,4 +1,5 @@
-//! Outcomes of the documentation rules: sections, documents, section pairs and code comments.
+//! Outcomes of the documentation rules about instruction sections, large
+//! documents and stale sections.
 use super::*;
 
 /// The kind of instruction section each signal names.
@@ -10,7 +11,7 @@ const SECTION_KINDS: [(&str, &str); 4] = [
 ];
 
 /// The share of a kind Choice's probability on one kind.
-fn kind_share(answer: Option<&Answer>, kind: &str) -> Option<f64> {
+pub(super) fn kind_share(answer: Option<&Answer>, kind: &str) -> Option<f64> {
     let Some(Answer::Choice { probabilities, .. }) = answer else {
         return None;
     };
@@ -31,82 +32,6 @@ pub(super) fn stale_outcome(outcome: Outcome, role: Option<&Answer>) -> Outcome 
     }
 }
 
-/// A pair of sections repeats itself when either covers the other, unless one
-/// translates the other; a disagreement counts either way, since a
-/// translation that disagrees with its original is out of date. Each is a
-/// Score whose middle level is acceptable: covering most of the other, or
-/// differing only in detail or examples, raises nothing; repeating at least
-/// most of the other without all of it, or leaning toward a contradiction,
-/// is a note. Sections about different subjects settle what stays
-/// undecided, and so does the pair's relation, asked apart: a repetition
-/// or a contradiction it rules out clears that check.
-pub(super) fn doc_pair_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
-    let signals: Vec<Outcome> = pair_signals(get)?.into_iter().map(|(_, o)| o).collect();
-    Some(strongest(&signals))
-}
-
-/// Each check of a section pair with its settled outcome.
-pub(in crate::units) fn pair_signals<'a>(
-    get: &impl Fn(&str) -> Option<&'a Answer>,
-) -> Option<Vec<(&'static str, Outcome)>> {
-    let translated = get("translation").is_some_and(|a| matches!(noul(a), Outcome::Review(_)));
-    let covers = if translated {
-        &[][..]
-    } else {
-        &["a_covers", "b_covers"][..]
-    };
-    // Different subjects settle an undecided answer, never a decided one.
-    let different = get("subject").is_some_and(|a| noul(a) == Outcome::Clear);
-    let ruled_out = |relation: &str| {
-        kind_share(get("relation"), relation).is_some_and(|share| at_least(1.0 - share))
-    };
-    let settle = |outcome: Outcome, relation: &str| match outcome {
-        Outcome::Uncertain(_) if different || ruled_out(relation) => Outcome::Clear,
-        outcome => outcome,
-    };
-    let mut signals = covers
-        .iter()
-        .map(|q| get(q).map(|a| (*q, settle(cleanup(repeated(a)), "repeats"))))
-        .collect::<Option<Vec<_>>>()?;
-    signals.push((
-        "conflict",
-        settle(cleanup(disagreement(get("conflict")?)), "contradict"),
-    ));
-    Some(signals)
-}
-
-/// A conflict Score: its top level raises a finding, its two lower levels
-/// clear, and an undecided answer that leans toward a contradiction is a
-/// note. On vercel/ai most pairs leaning past 0.50 did disagree, such as a
-/// README passing `messages` where the reference passes `uiMessages`.
-pub(in crate::units) fn disagreement(answer: &Answer) -> Outcome {
-    match acceptable_levels(answer) {
-        Outcome::Uncertain(top) if probability_at_least(top, LEADING_PROBABILITY) => {
-            Outcome::Note(top)
-        }
-        outcome => outcome,
-    }
-}
-
-/// A repetition Score: its top level, everything, raises a finding; its two
-/// lower levels clear. When the answer rules out "states things the other
-/// does not" but not "most", the section repeats at least most of the other:
-/// a note, which never claims all of it.
-pub(in crate::units) fn repeated(answer: &Answer) -> Outcome {
-    let Some([bottom, middle, top]) = levels(answer) else {
-        return Outcome::Missing;
-    };
-    if at_least(top) {
-        Outcome::Review(top)
-    } else if at_least(bottom + middle) {
-        Outcome::Clear
-    } else if at_least(middle + top) {
-        Outcome::Note(middle + top)
-    } else {
-        Outcome::Uncertain(top)
-    }
-}
-
 /// A large document: a split Score where the middle level says it is fine
 /// as it is, and a Noul on whether it mainly records past work. Both are at
 /// most a consider; an undecided history answer that leans toward past work
@@ -114,13 +39,9 @@ pub(in crate::units) fn repeated(answer: &Answer) -> Outcome {
 pub(in crate::units) fn document_outcome<'a>(
     get: &impl Fn(&str) -> Option<&'a Answer>,
 ) -> Option<Outcome> {
-    let capped = |outcome: Outcome| match outcome {
-        Outcome::Review(p) => Outcome::Consider(p),
-        other => other,
-    };
-    let split = capped(document_split(get("split")?, get("kind")));
+    let split = cleanup(document_split(get("split")?, get("kind")));
     let history = get("history")?;
-    let past = match capped(noul(history)) {
+    let past = match cleanup(noul(history)) {
         Outcome::Uncertain(p) if probability_at_least(p, LEADING_PROBABILITY) => Outcome::Note(p),
         other => other,
     };
@@ -169,12 +90,8 @@ pub(in crate::units) fn document_split(split: &Answer, kind: Option<&Answer>) ->
 pub(in crate::units) fn section_signals<'a>(
     get: &impl Fn(&str) -> Option<&'a Answer>,
 ) -> Option<Vec<(&'static str, Outcome)>> {
-    let capped = |outcome: Outcome| match outcome {
-        Outcome::Review(p) => Outcome::Consider(p),
-        other => other,
-    };
     let kind = |name: &str| kind_share(get("kind"), name);
-    let inferable = match capped(benefit(get("inferable")?)) {
+    let inferable = match cleanup(benefit(get("inferable")?)) {
         Outcome::Uncertain(_) if kind("instructions").is_some_and(at_least) => Outcome::Clear,
         outcome => outcome,
     };
@@ -185,23 +102,7 @@ pub(in crate::units) fn section_signals<'a>(
                 .iter()
                 .find(|(q, _)| *q == question)
                 .and_then(|(_, k)| kind(k));
-            let outcome = match capped(noul(answer)) {
-                // A description or command list the files show is what
-                // "inferable" asks; when it clearly is not, these settle.
-                Outcome::Uncertain(_)
-                    if inferable == Outcome::Clear
-                        && matches!(question, "describes" | "commands") =>
-                {
-                    Outcome::Clear
-                }
-                Outcome::Uncertain(p) => match own {
-                    Some(share) if at_least(share) => Outcome::Consider(share),
-                    Some(share) if at_least(1.0 - share) => Outcome::Clear,
-                    _ => Outcome::Uncertain(p),
-                },
-                outcome => outcome,
-            };
-            signals.push((question, outcome));
+            signals.push((question, section_signal(question, answer, inferable, own)));
         }
     }
     if let Some(answer) = get("scope") {
@@ -214,80 +115,27 @@ pub(in crate::units) fn section_signals<'a>(
     Some(signals)
 }
 
-/// Each first-pass question of a comment with its outcome: the Scores read
-/// as benefits (the middle level says the comment is fine as it is), the
-/// Nouls as checks. Documentation that only repeats its declaration is at
-/// most a note: a documentation tool or linter may expect a summary line
-/// even when it says what the name says, as in the Sphinx docstrings of
-/// psf/requests. Wordiness is asked only of long comments and code turned
-/// off only of comments that read like code, so either may be missing.
-pub(in crate::units) fn comment_signals<'a>(
-    get: &impl Fn(&str) -> Option<&'a Answer>,
-    documentation: bool,
-) -> Option<Vec<(&'static str, Outcome)>> {
-    let mut signals = Vec::new();
-    for question in crate::units::comments::QUESTIONS {
-        let Some(answer) = get(question) else {
-            if question == "disabled" || question == "verbose" {
-                continue;
-            }
-            return None;
-        };
-        let outcome = match question {
-            "restates" if documentation => at_most_note(benefit(answer)),
-            "restates" | "verbose" => benefit(answer),
-            _ => noul(answer),
-        };
-        signals.push((question, outcome));
-    }
-    Some(signals)
-}
-
-fn at_most_note(outcome: Outcome) -> Outcome {
-    match outcome {
-        Outcome::Review(p) | Outcome::Consider(p) => Outcome::Note(p),
-        other => other,
-    }
-}
-
-/// The strongest of a comment's signals, or when they stay undecided, the
-/// kind of comment: the kinds a reader could do without reaching the
-/// threshold raise a consider (a note for documentation that repeats its
-/// declaration), the others reaching it clear it. Comments are cleanups,
-/// never defects: at most a consider.
-pub(in crate::units) fn comment_outcome<'a>(
-    get: &impl Fn(&str) -> Option<&'a Answer>,
-    documentation: bool,
-) -> Option<Outcome> {
-    let signals = comment_signals(get, documentation)?;
-    let outcome = strongest(&signals.iter().map(|(_, o)| *o).collect::<Vec<_>>());
-    let concern = comment_concern_kind(get("kind"));
-    Some(cleanup(match (outcome, concern) {
-        (Outcome::Uncertain(_), Some(("restates", p))) if documentation && at_least(p) => {
-            Outcome::Note(p)
+/// One section Noul, settled: a description or command list the files show
+/// is what "inferable" asks, so when that clearly is not, these settle; any
+/// other that stays undecided settles by `own`, the share of the section's
+/// kind that the signal names.
+fn section_signal(
+    question: &str,
+    answer: &Answer,
+    inferable: Outcome,
+    own: Option<f64>,
+) -> Outcome {
+    match cleanup(noul(answer)) {
+        Outcome::Uncertain(_)
+            if inferable == Outcome::Clear && matches!(question, "describes" | "commands") =>
+        {
+            Outcome::Clear
         }
-        (Outcome::Uncertain(_), Some((_, p))) if at_least(p) => Outcome::Consider(p),
-        (Outcome::Uncertain(_), Some((_, p))) if at_least(1.0 - p) => Outcome::Clear,
-        _ => outcome,
-    }))
-}
-
-/// The likelier kind of comment a reader could do without, and the mass of
-/// all such kinds.
-pub(in crate::units) fn comment_concern_kind(kind: Option<&Answer>) -> Option<(&str, f64)> {
-    let Some(Answer::Choice { probabilities, .. }) = kind else {
-        return None;
-    };
-    let mass: f64 = probabilities.values().sum();
-    if mass <= 0.0 {
-        return None;
+        Outcome::Uncertain(p) => match own {
+            Some(share) if at_least(share) => Outcome::Consider(share),
+            Some(share) if at_least(1.0 - share) => Outcome::Clear,
+            _ => Outcome::Uncertain(p),
+        },
+        outcome => outcome,
     }
-    let concern = probabilities
-        .iter()
-        .filter(|(kind, _)| questions::CONCERN_KINDS.contains(&kind.as_str()));
-    let likeliest = concern
-        .clone()
-        .max_by(|a, b| a.1.total_cmp(b.1))
-        .map_or("restates", |(kind, _)| kind.as_str());
-    Some((likeliest, concern.map(|(_, p)| p / mass).sum()))
 }
