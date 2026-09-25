@@ -20,7 +20,9 @@ mod test_rules;
 
 use access::access_outcome;
 use documentation::doc_pair_outcome;
-pub(super) use documentation::{document_outcome, section_signals};
+pub(super) use documentation::{
+    disagreement, document_outcome, document_split, pair_signals, repeated, section_signals,
+};
 pub(super) use maintainability::{
     benign_key, function_outcome, organization_outcome, several_kind, shared_outcome,
     value_signals, values_outcome,
@@ -242,7 +244,7 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
 
 /// A Score whose two lower levels are acceptable: review at its top level,
 /// clear when the two lower levels reach the threshold, otherwise uncertain.
-pub(super) fn acceptable_levels(answer: &Answer) -> Outcome {
+pub(in crate::units) fn acceptable_levels(answer: &Answer) -> Outcome {
     let Some([bottom, middle, top]) = levels(answer) else {
         return Outcome::Missing;
     };

@@ -138,6 +138,8 @@ pub enum Detail {
     Document {
         parts: Vec<Block>,
         locate: Option<(Value, Asked)>,
+        /// What kind of document it is, asked when the split stays undecided.
+        kind: Option<(Value, Asked)>,
     },
     /// A document whose release is tagged or whose named paths were deleted:
     /// the facts a finished plan finding cites.
@@ -155,6 +157,8 @@ pub enum Detail {
     DocPair {
         other: Location,
         check: Option<(Value, Asked)>,
+        /// How the two sections relate, asked when the check stays undecided.
+        settle: Option<(Value, Asked)>,
     },
     /// A heading section of an agent instruction file.
     Section {

@@ -115,10 +115,17 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
         return (unit_outcome(unit, &merged), merged);
     }
     // Follow-ups whose questions sit beside the first answers under their own
-    // ids: document section and pair checks, and benign-kind value checks.
-    let beside = if [catalog::DOC_STALENESS, catalog::DOC_DUPLICATION].contains(&unit.rule) {
+    // ids: document section and pair checks, the kind of a large document,
+    // and benign-kind value checks.
+    let beside = if [
+        catalog::DOC_STALENESS,
+        catalog::DOC_DUPLICATION,
+        catalog::LARGE_DOCS,
+    ]
+    .contains(&unit.rule)
+    {
         Some(Pass::Trace)
-    } else if unit.rule == catalog::HARDCODED_VALUES {
+    } else if [catalog::HARDCODED_VALUES, catalog::AGENT_CONTEXT].contains(&unit.rule) {
         Some(Pass::Recheck)
     } else {
         None
@@ -126,6 +133,8 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
     if let Some(pass) = beside {
         let mut merged = answers(judgments, &unit.id, Pass::First);
         merged.extend(answers(judgments, &unit.id, pass));
+        // How a pair's sections relate, asked when its checks stay undecided.
+        merged.extend(answers(judgments, &unit.id, Pass::Settle));
         return (unit_outcome(unit, &merged), merged);
     }
     // A test recheck asks the hollow-test questions again with the code under
@@ -227,15 +236,30 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
 }
 
 /// Outlines whose recheck left the split Score undecided, or whose first
-/// answer did when the file is too long for a recheck, and whose kind has not
+/// answer did when the file is too long for a recheck, and large documents
+/// whose split Score stayed undecided, whose kind has not been asked yet;
+/// section pairs whose checks stayed undecided and whose relation has not
 /// been asked yet.
 pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    let pairs = plan
+        .units
+        .iter()
+        .filter(|u| u.rule == catalog::DOC_DUPLICATION && u.presence == Presence::Judged)
+        .filter(|u| {
+            !answers(judgments, &u.id, Pass::Trace).is_empty()
+                && answers(judgments, &u.id, Pass::Settle).is_empty()
+        })
+        .filter(|u| matches!(resolved(u, judgments).0, Outcome::Uncertain(_)))
+        .map(|u| u.id.clone());
     plan.units
         .iter()
-        .filter(|u| u.rule == catalog::FILE_ORGANIZATION && u.presence == Presence::Judged)
+        .filter(|u| {
+            [catalog::FILE_ORGANIZATION, catalog::LARGE_DOCS].contains(&u.rule)
+                && u.presence == Presence::Judged
+        })
         .filter(|u| answers(judgments, &u.id, Pass::Trace).is_empty())
         .filter(|u| {
-            let pass = if u.recheck.is_some() {
+            let pass = if u.recheck.is_some() && u.rule != catalog::LARGE_DOCS {
                 Pass::Recheck
             } else {
                 Pass::First
@@ -245,6 +269,7 @@ pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Strin
                 .is_some_and(|a| matches!(benefit(a), Outcome::Uncertain(_)))
         })
         .map(|u| u.id.clone())
+        .chain(pairs)
         .collect()
 }
 
@@ -471,13 +496,24 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
     let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
         .then(|| value_signals(&get, &unit.detail, true))
         .flatten();
-    let mut questions: Vec<String> = match settled_values {
-        Some(signals) => signals
+    // Instruction sections and section pairs settle some signals by others.
+    let settled_sections = match unit.rule {
+        catalog::AGENT_CONTEXT => super::outcome::section_signals(&get),
+        catalog::DOC_DUPLICATION => super::outcome::pair_signals(&get),
+        _ => None,
+    };
+    let mut questions: Vec<String> = match (settled_values, settled_sections) {
+        (Some(signals), _) => signals
             .iter()
             .filter(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
             .map(|(q, ..)| question_label(q).to_string())
             .collect(),
-        None => undecided_questions(unit.rule, answers),
+        (None, Some(signals)) => signals
+            .iter()
+            .filter(|(_, o)| matches!(o, Outcome::Uncertain(_)))
+            .map(|(q, _)| question_label(q).to_string())
+            .collect(),
+        (None, None) => undecided_questions(unit.rule, answers),
     };
     if answers.is_empty() {
         questions.push("no answer".into());

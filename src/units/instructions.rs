@@ -2,7 +2,8 @@
 //! beside what the repository's own files show. Per section, a Score on
 //! whether an agent could learn it from those files and Nouls on generic
 //! advice, past work and rules linters check; for text loaded in every
-//! session, a Choice on whether it applies to one directory only.
+//! session, a Choice on whether it applies to one directory only. A section
+//! whose signals stay undecided is asked, alone, what kind of section it is.
 use super::{
     Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, UnitPlan, compact,
     identity, pack, questions, unique_ids,
@@ -69,9 +70,40 @@ pub(super) fn plan(
             &[]
         },
     };
+    for (index, id, state) in &items {
+        let item = (*index, id.clone(), state.clone());
+        let (request, asked) = kind_request(file, &evidence, &item);
+        if file.budget.fits(&request) {
+            out.units[*index].recheck = Some((request, asked));
+        }
+    }
     for group in pack(items, PACK_ITEMS, |(_, _, state)| state) {
         send_or_split(file, &evidence, group, out, requests);
     }
+}
+
+/// The kind of one section, asked apart from its first request so it never
+/// moves the first answers.
+fn kind_request(
+    file: &FileContext<'_>,
+    evidence: &Evidence<'_>,
+    item: &(usize, String, Value),
+) -> (Value, super::Asked) {
+    let mut questions = Questions::default();
+    questions.ask(
+        "kind".into(),
+        questions::instructions_kind("sections[0]"),
+        &item.1,
+        AGENT_CONTEXT,
+        "kind",
+        Pass::Recheck,
+    );
+    let state = json!({
+        "file": {"path": file.path},
+        "project": evidence.project,
+        "sections": [item.2],
+    });
+    file.request("recheck", state, questions)
 }
 
 /// Sections longer than this many bytes (about 400 tokens) are judged by

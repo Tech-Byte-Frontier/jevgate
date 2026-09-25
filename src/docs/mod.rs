@@ -2,6 +2,7 @@
 //! each one loads them, and what the repository's own files already show.
 //! Parsers find and scope these files; Jev judges their sections.
 pub mod discover;
+pub mod format;
 pub mod history;
 pub mod load;
 pub mod markdown;

@@ -158,16 +158,19 @@ pub fn language(path: &Path) -> &'static str {
 }
 
 pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: &TokenBudget) -> Result<Plan> {
+    let format = crate::docs::format::Format::of(&input.result.path).language();
     if input.result.role == crate::inventory::INSTRUCTIONS {
         return Ok(Plan::Ready(document(
             INSTRUCTIONS,
             "Agent instruction file. Documentation rules judge its sections.",
+            format,
         )));
     }
     if input.result.role == crate::inventory::DOCS {
         return Ok(Plan::Ready(document(
             DOCS,
             "Project documentation. Documentation rules judge its sections.",
+            format,
         )));
     }
     let configuration = match input.result.role.as_str() {
@@ -219,9 +222,9 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: &TokenBudget) -> Res
 }
 
 /// A documentation file: only the documentation rules judge it.
-fn document(kind: &str, reason: &str) -> View {
+fn document(kind: &str, reason: &str, language: &str) -> View {
     View {
-        classification: classification(kind, "deterministic", "documentation", reason, "Markdown"),
+        classification: classification(kind, "deterministic", "documentation", reason, language),
         application: false,
         tests: false,
         test_lines: Vec::new(),

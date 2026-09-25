@@ -160,11 +160,14 @@ fn plan_document(
         path: input.result.path.clone(),
         ..Default::default()
     };
+    // Other formats are read as Markdown with the file's own lines.
+    let source =
+        crate::docs::format::view(&input.result.path, input.source.as_deref().unwrap_or(""));
     let context = FileContext {
         owner,
         path: &input.result.path,
-        language: "Markdown",
-        source: input.source.as_deref().unwrap_or(""),
+        language: crate::docs::format::Format::of(&input.result.path).language(),
+        source: &source,
         source_hash: &input.result.source_hash,
         model: args.model(),
         budget,

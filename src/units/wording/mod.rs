@@ -3,8 +3,8 @@
 use super::{
     Block, Detail, GroupInfo,
     outcome::{
-        Answers, Outcome, benefit, noul, origin_outcome, section_signals, settled_checks,
-        value_signals,
+        Answers, Outcome, benefit, disagreement, document_split, noul, origin_outcome, repeated,
+        section_signals, settled_checks, value_signals,
     },
 };
 use crate::catalog;

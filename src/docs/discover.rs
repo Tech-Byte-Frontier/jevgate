@@ -18,6 +18,7 @@ pub const AGENT_NAMES: &[&str] = &[
     ".cursorrules",
     ".windsurfrules",
     ".clinerules",
+    ".roorules",
 ];
 
 /// Hidden directories that hold instruction files.
@@ -28,6 +29,9 @@ const AGENT_DIRS: &[&str] = &[
     ".windsurf",
     ".devin",
     ".clinerules",
+    ".kiro",
+    ".junie",
+    ".roo",
 ];
 
 /// Markdown that records history or legal terms rather than usage.
@@ -75,11 +79,22 @@ pub fn agent_file(path: &Path) -> bool {
         || (under(".github", "instructions") && name.ends_with(".instructions.md"))
         || ((under(".windsurf", "rules") || under(".devin", "rules")) && extension == "md")
         || (parts.contains(&".clinerules") && matches!(extension, "md" | "txt"))
+        || (under(".kiro", "steering") && extension == "md")
+        || (parts.first() == Some(&".junie")
+            && (matches!(name, "AGENTS.md" | "guidelines.md" | "playbook.md")
+                || ((parts.get(1) == Some(&"rules") || parts.get(1) == Some(&"guidelines"))
+                    && extension == "md")))
+        || (parts.first() == Some(&".roo")
+            && parts
+                .get(1)
+                .is_some_and(|f| *f == "rules" || f.starts_with("rules-"))
+            && matches!(extension, "md" | "txt"))
+        || (parts.len() == 1 && name.starts_with(".roorules-"))
 }
 
-/// Project documentation: Markdown at the root, README and CONTRIBUTING
-/// files anywhere, and Markdown under `docs/` or `doc/`, outside records
-/// such as changelogs.
+/// Project documentation: Markdown, MDX, reStructuredText or AsciiDoc at
+/// the root, README and CONTRIBUTING files anywhere, and those formats under
+/// `docs/` or `doc/`, outside records such as changelogs and Sphinx output.
 fn project_doc(path: &Path) -> bool {
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let lower = |p: &std::ffi::OsStr| p.to_string_lossy().to_ascii_lowercase();
@@ -95,14 +110,14 @@ fn project_doc(path: &Path) -> bool {
         RECORD_STEMS.contains(&d.as_str())
             || matches!(
                 d.as_str(),
-                "fixtures" | "__fixtures__" | "testdata" | "__snapshots__" | "archive"
+                "fixtures" | "__fixtures__" | "testdata" | "__snapshots__" | "archive" | "_build"
             )
     });
     let documentation = dirs.is_empty()
         || stem.starts_with("readme")
         || stem.starts_with("contributing")
         || dirs.iter().any(|d| DOC_DIRS.contains(&d.as_str()));
-    matches!(extension.to_ascii_lowercase().as_str(), "md" | "mdx")
+    super::format::EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
         && documentation
         && !agent_file(path)
         && !hidden
@@ -250,10 +265,19 @@ mod tests {
             ".windsurf/rules/a.md",
             ".clinerules/b.md",
             ".cursorrules",
+            ".kiro/steering/tech.md",
+            ".junie/guidelines.md",
+            ".junie/rules/style.md",
+            ".roo/rules/01-general.md",
+            ".roo/rules-code/testing.txt",
+            ".roorules",
+            ".roorules-architect",
         ] {
             assert!(agent_file(Path::new(path)), "{path}");
         }
         assert!(!agent_file(Path::new(".github/workflows/ci.md")));
+        assert!(!agent_file(Path::new(".kiro/specs/login/design.md")));
+        assert!(!agent_file(Path::new(".roo/mcp.json")));
     }
 
     #[test]
