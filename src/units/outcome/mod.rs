@@ -27,7 +27,7 @@ pub(super) use maintainability::{
 };
 pub(super) use security::{
     Messages, checks, django_settings_outcome, exposure_outcome, injection_outcome, messages,
-    origin_outcome,
+    origin_outcome, settled_checks,
 };
 pub(super) use test_rules::{redundancy_outcome, test_value_outcome};
 

@@ -30,7 +30,9 @@ signatures, or one candidate pair.
    superclass ends in `Test`, `TestCase` or `Spec` (`Minitest::Test`,
    `ActiveSupport::TestCase`) with `test_*` methods or `test "…" do` blocks;
    `*_spec.rb` files and Ruby files under `spec/` are test files.
-   Astro, Vue and
+   PHP tests are the `test…`, `@test` or `#[Test]` methods of a class
+   extending a `…TestCase`, and Pest `test(…)`/`it(…)` calls; `…Test.php`
+   files are test paths. Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
    contents, with every other byte a space, so lines stay the file's.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
@@ -47,7 +49,14 @@ signatures, or one candidate pair.
    single caller is the rest of the program; Type-2 clone candidates grouped by overlapping copies, only
    within one package or packages linked by a local dependency (copies in side
    by side templates or example apps are separate projects); test cases with
-   their subjects and similar pairs.
+   their subjects and similar pairs. A PHP file's top-level statements
+   outside functions and classes (and its `<?= … ?>` echoes) are one more
+   unit, `top-level code`: a page script reads the request and writes the
+   response there, so every security rule judges it like a function, while
+   other languages' top-level statements are judged for unsafe settings
+   only. Closures registered through calls (`$app->get('/users', …)`,
+   `Route::post(…)`) or returned by a configuration file
+   (`return function (App $app) {…}`) are functions of their own.
 3. **First pass** (`src/units/`). One dispatch of every unit request. Functions
    are packed eight per request; tests are sent one per request, because unrelated
    tests in the same state left more answers undecided. State uses literal paths
@@ -216,7 +225,7 @@ signatures, or one candidate pair.
    browser clears it); where its redirect targets come from (written in the
    code, returned by its own server or what callers pass, checked, or no
    redirect); how its markup is rendered (escaped by JSX or a template, or
-   shown as text); which sites may send credentialed requests (none, listed
+   shown as text; PHP units are asked what they join instead, see below); which sites may send credentialed requests (none, listed
    origins, or any origin without credentials); what its logs write (only
    messages, ids and caught errors); or where its text goes (anywhere but a
    remote client at 0.80 clears undecided error details). Offered beside
@@ -237,6 +246,42 @@ signatures, or one candidate pair.
    cannot be bound), and the URL check excludes requests a web page sends from
    the user's browser; on fresh repositories both had flagged such code, while
    the SQL and SSRF advisory functions kept their answers.
+   PHP units read the presence questions and checks in PHP's own terms
+   (`src/units/questions/php.rs`), naming its functions (`echo`,
+   `shell_exec` and backticks, `mysqli_real_escape_string`, `password_hash`,
+   `CURLOPT_SSL_VERIFYPEER`); every other language keeps the general wording,
+   so its requests and cached answers are unchanged. The PHP SQL check counts
+   driver escaping inside quotes and numbers as handled: asked only about
+   binding, DVWA's escaped and quoted guestbook inserts were reviews. Text a
+   page writes with `echo` is its response, not a log; a page that only calls
+   `generateSessionToken()` or a session helper is not judged for what that
+   helper does; the message of an exception class the program defines,
+   caught by name, is its own text (four BookStack upload controllers
+   returning `FileUploadException` messages were error-detail reviews); and
+   only variables placed into a query or path count for the origin, not an
+   uploaded file's contents. `unserialize` and uploaded file names are PHP
+   checks, asked only of source that names `unserialize` or an upload; a page
+   that only showed an upload form stayed near 0.4 on whether it saves
+   uploads.
+   PHP units have three settle Choices of their own, asked whenever their
+   check is not clear, even when it found a concern, since each can clear
+   it: what the unit joins into HTML unescaped (request values, stored
+   records and parameters holding text keep the check; escaped values and
+   numbers, text the program produces such as errors and command output,
+   HTML other code builds such as a page body an included file sets, and
+   element data clear it), what its command lines hold (values each checked
+   against a strict format, such as octets that pass `is_numeric`, clear it;
+   values with some characters stripped do not), and where its paths come
+   from (constants and a file name a `switch` picks clear it; names stored
+   in a database or file are their own option). A page that reads a request
+   also joins ids converted with `intval` and database errors, and the
+   markup check found those at 0.9 while the origin question answered for
+   the request. A markup check that found a variable which the Choice names
+   as a request value or stored record is a review whatever the origin
+   question said: an access log joining user names from the database stayed
+   uncertain with the origin split. A page script's consider or note names
+   values whose origin it does not show, not parameters. On DVWA the PHP
+   Choices left 13 of 329 injection units undecided, from 46.
    Agent instruction files (`src/docs/`) are found by name even when hidden
    or ignored. Each file's heading sections, or the top-level blocks of a long
    section, are sent packed beside the nearest manifests, the configured

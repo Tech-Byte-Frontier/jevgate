@@ -55,8 +55,8 @@ Consider (2):
 
 | Rule | Covers |
 |---|---|
-| Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths, outbound URLs or redirect targets without binding, escaping or checks; in C#, types named by input or chosen by the data being deserialized; in Django code, request data given to `pickle` or `yaml.load` |
-| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per error handler (`app.onError`, `setErrorHandler`, Express error middleware, Flask and FastAPI handlers, Django error views and `process_exception` middleware, Django REST framework's `EXCEPTION_HANDLER`, NestJS filters, axum `IntoResponse` and actix-web `ResponseError` for error types, ASP.NET Core exception handlers); in Django code, also the server's environment or settings sent to clients (`request.META`) |
+| Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths, outbound URLs or redirect targets without binding, escaping or checks; in C#, types named by input or chosen by the data being deserialized; in Django code, request data given to `pickle` or `yaml.load`; in PHP, `unserialize` and uploaded file names |
+| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per error handler (`app.onError`, `setErrorHandler`, Express error middleware, Flask and FastAPI handlers, Django error views and `process_exception` middleware, Django REST framework's `EXCEPTION_HANDLER`, NestJS filters, axum `IntoResponse` and actix-web `ResponseError` for error types, ASP.NET Core exception handlers, PHP `set_exception_handler`, Slim and Laravel handler classes); in Django code, also the server's environment or settings sent to clients (`request.META`) |
 | Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly`, secrets in environment variables the build puts into browser code (`NEXT_PUBLIC_`, `VITE_`); in C#, also developer exception pages outside development, token signature or lifetime checks turned off, signing keys written in the code, and secrets derived from data others know; in Django code, also debug mode for the deployed site, `csrf_exempt` views and secret keys written in settings |
 | Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user. SpacetimeDB modules (TypeScript and Rust, any kind of application): public tables of users' private data, views that return other users' rows, reducers that change rows their arguments choose or admin-only settings without checking the caller, and scheduled reducers clients can call in 1.x |
 | Workflows | GitHub Actions `run` scripts that execute text outside people write (`${{ github.event.pull_request.title }}`); `pull_request_target` or `workflow_run` jobs that run pull request code with secrets |
@@ -87,6 +87,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | Go | `.go` | ✅ | ✅ `Test…(t *testing.T)` | ✅ | ➖ |
 | C# | `.cs` | ✅ | ✅ xUnit, NUnit, MSTest | ✅ | ➖ |
 | Ruby | `.rb` | ✅ | ✅ RSpec, Minitest, Rails `test "…" do` | ✅ no Ruby framework handlers yet | ➖ |
+| PHP | `.php` `.phtml` | ✅ | ✅ PHPUnit `…TestCase` classes, Pest `test`/`it` | ✅ | ➖ |
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ➖ |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
 | GitHub Actions | `.github/workflows/*.yml` | ➖ | ➖ | ✅ workflows | ➖ |
@@ -99,6 +100,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | Next.js (App Router and Pages Router) | Route handlers (`app/**/route.ts`), Server Actions (`'use server'` files and functions), `pages/api` routes, middleware, client components, error boundaries and pages are named to Jev with who calls them and where they run, so a Server Action's arguments read as client input and a client component's requests as the user's own; `dangerouslySetInnerHTML`, redirects to client-chosen URLs, raw Prisma and Drizzle queries (`$queryRawUnsafe`, `sql.raw`) as opposed to their binding tagged templates, `NEXT_PUBLIC_` secrets, and `next.config` headers |
 | Flask, FastAPI | Error handlers (`@app.errorhandler`, `@app.exception_handler`) |
 | Django, Django REST framework | Views and viewsets with the URL routes that reach them, the templates they render with `\|safe` or autoescaping off, and the module constants they use; settings modules, with secret literals redacted, the settings modules that import and override them, and the files that select them (`DJANGO_SETTINGS_MODULE`); management commands as run by hand; `handler500`-style error views, middleware `process_exception` and `EXCEPTION_HANDLER` as error handlers |
+| PHP pages, Slim, Laravel | A file's top-level code is judged like a function, since a page script reads the request and writes the response; route closures (`$app->get('/users', function …)`, `Route::post(…)`) and configuration closures (`return function (App $app) {…}`); error handlers (`set_exception_handler`, subclasses of Slim's `ErrorHandler` and Laravel's `ExceptionHandler`) |
 | axum, actix-web, Rocket | Error responses (`IntoResponse` or `ResponseError` for an error type, `#[catch]`) |
 | ASP.NET Core | Controller actions, minimal API route handlers (`app.MapGet("/orders", …)`) and inline middleware; exception handlers (`UseExceptionHandler` with a handler, `IExceptionFilter`, `IExceptionHandler`, middleware classes that catch what the pipeline throws); Entity Framework Core raw and interpolated SQL, CORS and cookie options, `UseDeveloperExceptionPage`, JWT validation options and the constants a setup names |
 | .NET projects | Test projects named like `Shop.Tests` or `Shop.UnitTests`, and classes of `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]` methods anywhere; designer and source-generated files (`.Designer.cs`, `.g.cs`) are skipped as generated |
@@ -111,7 +113,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
 | Copied libraries | A library copied into the repository (a versioned file name such as `jquery-3.6.0.js`, the readable build beside a `.min.js`, or a license banner naming a version) is skipped as vendored, whatever its size |
 
-Other files, such as Java, PHP or Ruby, are listed as skipped with the reason and never fail the gate.
+Other files, such as Java, are listed as skipped with the reason and never fail the gate.
 
 ## Install
 
@@ -281,7 +283,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 ## Limits
 
-- **Languages and frameworks:** see [the support table](#supported-languages-and-frameworks). Astro, Vue and Svelte markup is not read, only their scripts.
+- **Languages and frameworks:** see [the support table](#supported-languages-and-frameworks). Astro, Vue and Svelte markup is not read, only their scripts. PHP's inline HTML is read only for its `<?= … ?>` echoes, and variables a page gets from the files it includes are not followed there: they are judged where those files set them.
 - **Security scope:** one function plus at most one hop of callers. This is not whole-program data-flow analysis. Access control reads the final state of policies, SECURITY DEFINER functions and grants across a project's SQL files in path order; with `--base`, unchanged migrations are read for that state but not judged. It does not judge application-level authorization or dynamic SQL inside database functions.
 - **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates; a translation is not a duplicate. Code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.

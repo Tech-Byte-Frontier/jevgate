@@ -121,6 +121,8 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
     file.setup = if framework_config(path) {
         super::sites::config_setup(tree.root_node(), source)
+    } else if super::php::file(path) {
+        super::sites::script(tree.root_node(), source, &spans)
     } else {
         super::sites::setup(tree.root_node(), source, &spans, settings)
     };
@@ -154,6 +156,25 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         }
         "import_declaration" => go_imports(node, source, &mut file.imports),
         "using_directive" => csharp_import(node, source, &mut file.imports),
+        "namespace_use_declaration" => super::php::imports(node, source, &mut file.imports),
+        // PHP: `namespace App { … }` holds its declarations in a block.
+        "namespace_definition" => {
+            if let Some(body) = node.child_by_field_name("body") {
+                children(body, source, owner, file);
+            }
+        }
+        // PHP: `return function (App $app) { … };` configures its includer.
+        "return_statement" if super::php::returned_closure(node).is_some() => {
+            if let Some(closure) = super::php::returned_closure(node) {
+                let definition = Definition {
+                    outer: node,
+                    node: closure,
+                    body: closure.child_by_field_name("body"),
+                };
+                let name = super::php::RETURNED_CLOSURE;
+                push(definition, name, owner, Kind::Function, source, file);
+            }
+        }
         // Go: `func (s *Store) Find(…)` is a method of `Store`; a C# method
         // belongs to the class, struct or record around it.
         "method_declaration" => {
@@ -284,7 +305,11 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
             children(node, source, owner, file)
         }
         "expression_statement" => {
-            let callbacks = registered_callbacks(node, source);
+            let callbacks = if node.named_child(0).is_some_and(super::php::registers) {
+                super::php::registered_callbacks(node, source)
+            } else {
+                registered_callbacks(node, source)
+            };
             let single = callbacks.len() == 1;
             for (name, function) in callbacks {
                 let definition = Definition {
@@ -321,7 +346,8 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         | "class"
         | "abstract_class_declaration"
         | "struct_declaration"
-        | "record_declaration" => {
+        | "record_declaration"
+        | "trait_declaration" => {
             let name = name_of(node, source);
             let before = file.units.len();
             if let Some(body) = node.child_by_field_name("body") {
@@ -900,10 +926,12 @@ impl Facts {
                 }
             }
             "new_expression" | "object_creation_expression" => {
+                // PHP names the class without a field: `new \App\Cursor($db)`.
                 if let Some(name) = node
                     .child_by_field_name("constructor")
                     .or_else(|| node.child_by_field_name("type"))
                     .and_then(|c| callee_name(c, source))
+                    .or_else(|| super::php::callee_name(node, source))
                 {
                     self.refs.insert(name.clone());
                     self.calls.insert(name);
@@ -914,6 +942,14 @@ impl Facts {
                 let name = text(node, source).to_string();
                 self.refs.insert(name.clone());
                 self.idents.insert(name);
+            }
+            kind if super::php::CALLS.contains(&kind) => {
+                self.calls.extend(super::php::callee_name(node, source));
+            }
+            // PHP: a declared type such as `Request $request` or `: ?User`.
+            "named_type" => {
+                let name = text(node, source).rsplit('\\').next().unwrap_or("");
+                self.refs.insert(name.trim_start_matches('?').to_string());
             }
             "jsx_opening_element" | "jsx_self_closing_element" => {
                 if let Some(name) = node.child_by_field_name("name") {
@@ -1192,6 +1228,53 @@ mod tests {
             .map(|u| u.name)
             .collect();
         assert_eq!(names, ["build_rows"]);
+    }
+
+    #[test]
+    fn php_functions_methods_closures_and_their_facts_are_units() {
+        let source = "<?php\nnamespace App\\Store;\n\nuse App\\Domain\\User\\UserRepository;\nuse Psr\\Log\\{LoggerInterface, NullLogger as Quiet};\n\nconst MAX_ROWS = 500;\n\n/** Finds a user. */\nfunction find_user($db, $name) {\n    $sql = \"SELECT * FROM users WHERE name = '$name'\";\n    if ($name === '') {\n        throw new InvalidArgumentException('empty name');\n    } elseif ($name === 'root') {\n        return null;\n    } elseif ($name === 'admin') {\n        return null;\n    }\n    foreach ([1, 2] as $i) {\n        $db->query($sql);\n    }\n    return Row::from(new Cursor($db));\n}\n\nabstract class Store extends Base {\n    public function __construct(private PDO $pdo) {}\n    public function load(int $id): ?User { return $this->pdo->prepare('x')->execute([$id]); }\n}\ntrait Cached { public function flush() { cache_clear(); } }\ninterface Finder { public function find(int $id): ?array; }\nenum Suit: string { case Hearts = 'H'; }\n$app->get('/users/{id}', function (Request $request, Response $response) {\n    return $response;\n});\nRoute::post('/pages', fn () => save());\n$handler = function ($e) { report($e); };\n";
+        let file = parse(Path::new("store.php"), source).unwrap();
+        let named: Vec<(&str, Kind, usize)> = file
+            .units
+            .iter()
+            .map(|u| (u.name.as_str(), u.kind, u.line))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("find_user", Kind::Function, 10),
+                ("Store::__construct", Kind::Method, 26),
+                ("Store::load", Kind::Method, 27),
+                ("Cached::flush", Kind::Method, 29),
+                ("Finder", Kind::Type, 30),
+                ("Suit", Kind::Type, 31),
+                ("$app->get('/users/{id}')", Kind::Function, 32),
+                ("Route::post('/pages')", Kind::Function, 35),
+                ("$handler", Kind::Function, 36),
+            ]
+        );
+        let find = &file.units[0];
+        assert_eq!(find.doc, "Finds a user.");
+        for callee in ["query", "from", "Cursor", "InvalidArgumentException"] {
+            assert!(find.calls.contains(callee), "{callee}");
+        }
+        assert_eq!((find.nesting, find.branch_chain), (1, 3));
+        assert_eq!(find.errors[0].error, "InvalidArgumentException");
+        assert_eq!(find.errors[0].message, "'empty name'");
+        assert!(find.literals.iter().any(|l| l.text == "'root'"));
+        assert!(file.units[2].refs.contains("User"));
+        for name in ["UserRepository", "LoggerInterface", "Quiet"] {
+            assert!(file.imports.contains(name), "{name}");
+        }
+        assert_eq!(file.constants[0].name, "MAX_ROWS");
+        assert!(crate::syntax::supported(Path::new("store.php")));
+        let config = parse(
+            Path::new("app/routes.php"),
+            "<?php\nreturn function (App $app) {\n    $app->get('/', fn () => home());\n};\n",
+        )
+        .unwrap();
+        assert_eq!(config.units[0].name, "returned closure");
+        assert!(config.units[0].calls.contains("get"));
     }
 
     #[test]

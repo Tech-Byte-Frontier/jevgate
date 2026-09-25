@@ -54,6 +54,7 @@ impl Classifier {
             || (name.ends_with(".cs") && components.iter().any(|c| dotnet_test_project(c)))
             || test_name(&name)
             || name.ends_with(".rb") && under(&["spec", "step_definitions"])
+            || phpunit_name(path)
         {
             "test"
         } else {
@@ -106,6 +107,14 @@ fn test_name(name: &str) -> bool {
         || name.ends_with("_spec.rb")
 }
 
+/// PHPUnit's convention, `UserTest.php`; the case keeps `latest.php` apart.
+fn phpunit_name(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_suffix("Test.php"))
+        .is_some_and(|stem| !stem.is_empty())
+}
+
 fn file_extension(path: &Path) -> String {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -124,8 +133,8 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
     let extension = file_extension(path);
     [
         "rs", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "kt",
-        "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "swift", "dart",
-        "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "astro", "sql",
+        "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "phtml", "swift",
+        "dart", "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "astro", "sql",
     ]
     .contains(&extension.as_str())
         || extra.contains(&extension)
@@ -141,6 +150,9 @@ mod tests {
         let classifier = super::Classifier::new(&Default::default()).unwrap();
         assert_eq!(classifier.role(Path::new("app/test_orders.py")), "test");
         assert_eq!(classifier.role(Path::new("src/test_orders.js")), "test");
+        assert_eq!(classifier.role(Path::new("src/OrderTest.php")), "test");
+        assert_eq!(classifier.role(Path::new("src/latest.php")), "source");
+        assert_eq!(classifier.role(Path::new("src/Test.php")), "source");
         assert_eq!(
             classifier.role(Path::new("src/test_locations.rs")),
             "source"

@@ -1,9 +1,9 @@
 //! Structural tests a parser can locate: Rust test attributes and `cfg(test)`
 //! modules, JavaScript and TypeScript `describe`/`it`/`test` calls, Python
 //! test classes and pytest functions, Go `Test…(t *testing.T)` functions, C#
-//! classes of xUnit, NUnit or MSTest tests, and Ruby RSpec groups and examples
-//! and Minitest or Rails test classes. Syntax locates tests; it never judges
-//! them.
+//! classes of xUnit, NUnit or MSTest tests, Ruby RSpec groups and examples
+//! and Minitest or Rails test classes, and PHPUnit `TestCase` classes and
+//! Pest `test`/`it` calls. Syntax locates tests; it never judges them.
 use crate::{analysis::ruby, schema::SourceRange};
 use anyhow::Result;
 use std::path::Path;
@@ -62,6 +62,7 @@ fn walk(node: Node<'_>, source: &str, pytest: bool, spans: &mut Vec<(usize, usiz
             (ruby_test_call(node, source) || ruby_test_class(node, source))
                 .then(|| (node.start_byte(), node.end_byte()))
         })
+        .or_else(|| php_test_span(node, source))
     {
         spans.push(span);
         return;
@@ -70,6 +71,21 @@ fn walk(node: Node<'_>, source: &str, pytest: bool, spans: &mut Vec<(usize, usiz
     for child in node.named_children(&mut cursor) {
         walk(child, source, pytest, spans);
     }
+}
+
+/// A PHPUnit test class with the comments above it, or a Pest statement.
+fn php_test_span(node: Node<'_>, source: &str) -> Option<(usize, usize)> {
+    use crate::analysis::php;
+    let test = php::test_class(node, source) || php::pest_statement(node, source).is_some();
+    test.then(|| {
+        let mut start = node.start_byte();
+        let mut previous = node.prev_named_sibling();
+        while let Some(comment) = previous.filter(|p| p.kind() == "comment") {
+            start = comment.start_byte();
+            previous = comment.prev_named_sibling();
+        }
+        (start, node.end_byte())
+    })
 }
 
 /// A Go test, benchmark or fuzz function: `func TestX(t *testing.T)`.

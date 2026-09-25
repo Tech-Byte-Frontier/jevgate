@@ -3,7 +3,8 @@
 //! statement, what kind, where its values come from, whether they are
 //! handled), and for injection a recheck with up to three callers when the
 //! origin stays unclear. A file's top-level setup statements are one more
-//! unit for unsafe settings.
+//! unit for unsafe settings; a PHP file's top-level statements are a page
+//! script, judged like a function by every rule.
 use super::{
     Asked, Block, Detail, FileContext, FilePlan, PACK_ITEMS, Planned, Presence, Questions, Settle,
     UnitPlan, compact, identity, pack, questions, unique_ids,
@@ -155,14 +156,16 @@ pub(super) fn setup_subject<'a>(
         .map(|(range, ..)| setup.text(file.source, range.clone()))
         .collect();
     let source = source.join("\n");
+    let (name, kind) = if setup.script {
+        (SCRIPT, "function")
+    } else if setup.settings {
+        (SETTINGS_MODULE, "module")
+    } else {
+        (MODULE_SETUP, "module")
+    };
     Some(Subject {
-        name: if setup.settings {
-            SETTINGS_MODULE
-        } else {
-            MODULE_SETUP
-        }
-        .into(),
-        kind: "module",
+        name: name.into(),
+        kind,
         constants: named_constants(file, &source, constants),
         source,
         sites: &setup.sites,
@@ -180,10 +183,13 @@ pub(super) const MODULE_SETUP: &str = "module setup";
 /// The name of that unit in a Django settings module, whose statements
 /// assign the deployed site's settings.
 pub(super) const SETTINGS_MODULE: &str = "settings module";
+/// The name of the unit that holds a PHP file's top-level statements.
+pub(super) const SCRIPT: &str = "top-level code";
 
-/// Plan every enabled rule's units for these subjects. Functions are packed;
-/// the module setup, when present, is judged for unsafe settings only.
-/// `django` marks Django code, whose presence questions name its calls.
+/// Plan every enabled rule's units for these subjects. Functions and a PHP
+/// page script are packed; the module setup, when present, is judged for
+/// unsafe settings only. `django` marks Django code, whose presence
+/// questions name its calls.
 pub(super) fn plan(
     file: &FileContext<'_>,
     functions: &[Subject<'_>],
@@ -193,7 +199,15 @@ pub(super) fn plan(
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
-    let judged: Vec<&Subject<'_>> = functions.iter().filter(|s| !s.sites.is_empty()).collect();
+    let (script, setup) = match setup {
+        Some(subject) if subject.name == SCRIPT => (Some(subject), None),
+        other => (None, other),
+    };
+    let judged: Vec<&Subject<'_>> = functions
+        .iter()
+        .chain(&script)
+        .filter(|s| !s.sites.is_empty())
+        .collect();
     let ids: Vec<Vec<String>> = rules
         .iter()
         .map(|rule| unique_ids(prefix(rule), judged.iter().map(|s| s.name.as_str())))
@@ -379,8 +393,10 @@ fn presence_body(question: &str, code: &str, django: bool) -> Value {
 /// names the finding's kind. Checks of one language or framework are
 /// answered only in its files.
 pub(super) fn checks(rule: &str) -> Vec<&'static questions::Check> {
-    let mut all = asked_checks(rule, questions::CSHARP, false);
-    for check in asked_checks(rule, "", true) {
+    let (.., php) = rule_checks(rule);
+    let mut all = asked_checks(rule, questions::CSHARP, false, "");
+    // Django and PHP each ask a `deserialize` check of their own: one kind.
+    for check in asked_checks(rule, "", true, "").into_iter().chain(php) {
         if !all.iter().any(|c| c.id == check.id) {
             all.push(check);
         }
@@ -388,33 +404,57 @@ pub(super) fn checks(rule: &str) -> Vec<&'static questions::Check> {
     all
 }
 
-/// The checks a rule's trace asks about a file in `language`; Django code
-/// (`django`) is asked the Django variant of a check where one exists, and
-/// the Django checks besides.
-fn asked_checks(rule: &str, language: &str, django: bool) -> Vec<&'static questions::Check> {
-    let (general, csharp, framework): (
-        &'static [questions::Check],
-        &'static [questions::Check],
-        &'static [questions::Check],
-    ) = match rule {
+/// A rule's general checks, and those of C# files, Django code and PHP files.
+fn rule_checks(
+    rule: &str,
+) -> (
+    &'static [questions::Check],
+    &'static [questions::Check],
+    &'static [questions::Check],
+    &'static [questions::Check],
+) {
+    match rule {
         INJECTION => (
             &questions::UNHANDLED,
             &questions::CSHARP_UNHANDLED,
             &questions::DJANGO_UNHANDLED,
+            &questions::PHP_UNHANDLED,
         ),
-        SENSITIVE_DATA => (&questions::EXPOSURES, &[], &questions::DJANGO_EXPOSURES),
+        SENSITIVE_DATA => (
+            &questions::EXPOSURES,
+            &[],
+            &questions::DJANGO_EXPOSURES,
+            &[],
+        ),
         _ => (
             &questions::WEAK_SETTINGS,
             &questions::CSHARP_SETTINGS,
             &questions::DJANGO_SETTINGS,
+            &[],
         ),
-    };
+    }
+}
+
+/// The checks a rule's trace asks about `source` in a file in `language`;
+/// Django code (`django`) is asked the Django variant of a check where one
+/// exists, and the Django checks besides; PHP files are asked PHP's own
+/// checks only of source that names what they ask about.
+fn asked_checks(
+    rule: &str,
+    language: &str,
+    django: bool,
+    source: &str,
+) -> Vec<&'static questions::Check> {
+    let (general, csharp, framework, php) = rule_checks(rule);
     let csharp = if language == questions::CSHARP {
         csharp
     } else {
         &[]
     };
     let framework = if django { framework } else { &[] };
+    let php = php
+        .iter()
+        .filter(|check| language == questions::PHP && questions::php_mentions(check.id, source));
     general
         .iter()
         .map(|check| {
@@ -425,6 +465,7 @@ fn asked_checks(rule: &str, language: &str, django: bool) -> Vec<&'static questi
         })
         .chain(csharp)
         .chain(framework)
+        .chain(php)
         .collect()
 }
 
@@ -480,7 +521,7 @@ fn trace(
         let ids: Vec<String> = (0..messages.len()).map(|i| format!("m{i}")).collect();
         ask("messages", questions::security_message_origin(&ids));
     }
-    for check in asked_checks(rule, file.language, subject.django) {
+    for check in asked_checks(rule, file.language, subject.django, &subject.source) {
         ask(check.id, check.body(&code));
     }
     let mut state = json!({
@@ -519,7 +560,7 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
         "origin",
         Pass::Recheck,
     );
-    for check in asked_checks(INJECTION, file.language, subject.django) {
+    for check in asked_checks(INJECTION, file.language, subject.django, &subject.source) {
         questions.ask(
             check.id.into(),
             check.with_callers(&code),
@@ -555,6 +596,26 @@ pub(in crate::units) struct SettleKind {
     /// Whether the functions that call the subject are sent with it.
     callers: bool,
     pub when: SettleWhen,
+    /// The files whose units it is planned for.
+    files: SettleFiles,
+}
+
+/// The files, by language, whose units a settle Choice is planned for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SettleFiles {
+    All,
+    Only(&'static str),
+    Except(&'static str),
+}
+
+impl SettleFiles {
+    fn include(self, language: &str) -> bool {
+        match self {
+            SettleFiles::All => true,
+            SettleFiles::Only(only) => language == only,
+            SettleFiles::Except(except) => language != except,
+        }
+    }
 }
 
 /// Which units a settle Choice is asked for.
@@ -566,6 +627,12 @@ pub(in crate::units) enum SettleWhen {
     /// that a client component's fetch "places a parameter into a URL it
     /// requests" only puzzled readers.
     UndecidedOrFinding,
+    /// Any unit whose checks are not clear, and it clears a check that found
+    /// a concern too: a PHP page joins into HTML the body its included file
+    /// built, ids converted to numbers and database errors, and the markup
+    /// check found those at 0.9 while the origin question answered for the
+    /// request the page also reads.
+    NotClear,
 }
 
 /// Every settle Choice. Where a URL comes from settles the URL check: on
@@ -578,7 +645,18 @@ pub(in crate::units) enum SettleWhen {
 /// a payment or database call. Where a function's text goes settles error
 /// details (see `exposure_signal`), also under a finding that claims the text
 /// likely reaches a client.
-pub(in crate::units) const SETTLES: [SettleKind; 7] = [
+///
+/// PHP pages ask what they join into HTML in place of how markup is
+/// rendered, which names JSX and client components, and where the paths
+/// they open or include come from: pages include their parts through a
+/// directory constant and a file name a switch picks, and the path check
+/// stayed near 0.25 on them. Both are asked whenever their check is not
+/// clear: a page whose markup check leaned toward a concern was a note, so
+/// its undecided path Choice was never asked, and once the markup Choice
+/// cleared the markup it was left uncertain. What their command lines hold
+/// settles the shell check the same way: a page that checks each octet of
+/// an address with is_numeric was a command injection at 0.88.
+pub(in crate::units) const SETTLES: [SettleKind; 10] = [
     SettleKind {
         rule: INJECTION,
         question: "url_parts",
@@ -586,6 +664,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 7] = [
         clears: &questions::OWN_PARTS,
         callers: true,
         when: SettleWhen::Undecided,
+        files: SettleFiles::All,
     },
     SettleKind {
         rule: INJECTION,
@@ -594,6 +673,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 7] = [
         clears: &[questions::BROWSER],
         callers: false,
         when: SettleWhen::UndecidedOrFinding,
+        files: SettleFiles::All,
     },
     SettleKind {
         rule: INJECTION,
@@ -602,6 +682,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 7] = [
         clears: &questions::OWN_TARGETS,
         callers: true,
         when: SettleWhen::Undecided,
+        files: SettleFiles::All,
     },
     SettleKind {
         rule: INJECTION,
@@ -610,6 +691,34 @@ pub(in crate::units) const SETTLES: [SettleKind; 7] = [
         clears: &questions::INERT_MARKUP,
         callers: false,
         when: SettleWhen::Undecided,
+        files: SettleFiles::Except(questions::PHP),
+    },
+    SettleKind {
+        rule: INJECTION,
+        question: "markup_parts",
+        checks: &["markup"],
+        clears: &questions::HANDLED_MARKUP,
+        callers: true,
+        when: SettleWhen::NotClear,
+        files: SettleFiles::Only(questions::PHP),
+    },
+    SettleKind {
+        rule: INJECTION,
+        question: "shell_parts",
+        checks: &["shell"],
+        clears: &questions::CHECKED_COMMANDS,
+        callers: false,
+        when: SettleWhen::NotClear,
+        files: SettleFiles::Only(questions::PHP),
+    },
+    SettleKind {
+        rule: INJECTION,
+        question: "path_parts",
+        checks: &["path"],
+        clears: &questions::FIXED_PATHS,
+        callers: false,
+        when: SettleWhen::NotClear,
+        files: SettleFiles::Only(questions::PHP),
     },
     SettleKind {
         rule: SENSITIVE_DATA,
@@ -618,6 +727,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 7] = [
         clears: &questions::AWAY_FROM_CLIENTS,
         callers: false,
         when: SettleWhen::UndecidedOrFinding,
+        files: SettleFiles::All,
     },
     SettleKind {
         rule: SENSITIVE_DATA,
@@ -626,6 +736,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 7] = [
         clears: &questions::PLAIN_LOGS,
         callers: false,
         when: SettleWhen::Undecided,
+        files: SettleFiles::All,
     },
     SettleKind {
         rule: UNSAFE_SETTINGS,
@@ -634,6 +745,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 7] = [
         clears: &questions::SAFE_ORIGINS,
         callers: false,
         when: SettleWhen::Undecided,
+        files: SettleFiles::All,
     },
 ];
 
@@ -647,7 +759,7 @@ fn settles(
 ) -> Vec<Settle> {
     SETTLES
         .iter()
-        .filter(|kind| kind.rule == rule)
+        .filter(|kind| kind.rule == rule && kind.files.include(file.language))
         .filter_map(|kind| {
             let request = settle(file, subject, kind, id);
             file.budget.fits(&request.0).then_some(Settle {
@@ -671,6 +783,9 @@ fn settle(
         "runs_in" => questions::security_runs_in(&code),
         "redirect_target" => questions::security_redirect_target(&code, callers),
         "markup_output" => questions::security_markup_output(&code, subject.django),
+        "markup_parts" => questions::security_markup_parts(&code, callers),
+        "path_parts" => questions::security_path_parts(&code),
+        "shell_parts" => questions::security_shell_parts(&code),
         "destination" => questions::security_destination(&code),
         "logged" => questions::security_logged(&code),
         _ => questions::security_cors_origins(&code),

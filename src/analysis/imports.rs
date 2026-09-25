@@ -33,6 +33,9 @@ impl Imports {
                     || ["require ", "require_relative ", "load ", "autoload "]
                         .iter()
                         .any(|prefix| line.starts_with(prefix))
+                    // PHP runs other files with `require_once __DIR__ . '/x.php';`.
+                    || family == "php"
+                        && ["require", "include"].iter().any(|p| line.starts_with(p))
             })
             .map(str::to_string)
             .collect();
@@ -89,6 +92,7 @@ fn family(path: &Path) -> &'static str {
         "go" => "go",
         "cs" => "csharp",
         "rb" => "ruby",
+        "php" | "phtml" => "php",
         "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte"
         | "astro" => "javascript",
         _ => "",
@@ -126,7 +130,19 @@ mod tests {
 
     #[test]
     fn callers_need_an_import_of_the_module_in_the_same_language() {
-        let cases: [(&str, &str, &[&str], &[&str]); 4] = [
+        let cases: [(&str, &str, &[&str], &[&str]); 5] = [
+            (
+                "app/routes.php",
+                "<?php\nuse App\\Application\\Actions\\User\\ListUsersAction;\nrequire_once __DIR__ . '/helpers.php';\n",
+                &[
+                    "src/Application/Actions/User/ListUsersAction.php",
+                    "app/helpers.php",
+                ],
+                &[
+                    "src/Application/Actions/User/ViewUserAction.php",
+                    "app/ListUsersAction.py",
+                ],
+            ),
             (
                 "src/game/view.ts",
                 "import { durationLabel } from './travel-presentation'\nconst x = update()\n",
@@ -141,9 +157,9 @@ mod tests {
             ),
             (
                 "src/main.rs",
-                "use crate::units::{self, compose};\nmod gate;\n",
+                "use crate::units::{self, compose};\nmod gate;\ninclude!(\"report.rs\");\n",
                 &["src/units/mod.rs", "src/gate.rs"],
-                &["src/units/questions.rs"],
+                &["src/units/questions.rs", "src/report.rs"],
             ),
             (
                 "src/Web/Controllers/BasketController.cs",

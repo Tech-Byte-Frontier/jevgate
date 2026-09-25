@@ -133,6 +133,12 @@ fn collect_suites(node: Node<'_>, source: &str, suites: &mut Vec<(Range<usize>, 
         "class_definition" | "mod_item" | "class" | "module" => {
             Some(name(node, source)).filter(|name| !name.is_empty())
         }
+        "class_declaration" if crate::analysis::php::test_class(node, source) => {
+            Some(name(node, source))
+        }
+        "expression_statement" => crate::analysis::php::pest_statement(node, source)
+            .filter(|pest| pest.suite)
+            .map(|pest| pest.title),
         // A C# test class; TypeScript classes (`class_body`) do not group tests.
         "class_declaration"
             if node
@@ -256,6 +262,27 @@ fn visit(
             );
             ruby_context(node, source, found);
             return;
+        }
+        "class_declaration" if crate::analysis::php::test_class(node, source) => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                visit(child, source, pytest, true, found);
+            }
+            return;
+        }
+        "method_declaration"
+            if in_test_class && crate::analysis::php::test_method(node, source) =>
+        {
+            push(node, node.start_byte(), name(node, source), source, found);
+            return;
+        }
+        "expression_statement" => {
+            if let Some(case) = crate::analysis::php::pest_statement(node, source)
+                && !case.suite
+            {
+                push(node, node.start_byte(), case.title, source, found);
+                return;
+            }
         }
         "call_expression" => {
             if let Some(case) = javascript_case(node, source) {
@@ -498,12 +525,12 @@ fn walk<'a>(
                 calls.insert(text(name, source).to_string());
             }
         }
-        // C#: constructing the class under test calls its constructor.
+        // C# and PHP: constructing the class under test calls its constructor.
         "object_creation_expression" => {
-            if let Some(name) = node
-                .child_by_field_name("type")
-                .and_then(|t| callee_name(t, source))
-            {
+            if let Some(name) = match node.child_by_field_name("type") {
+                Some(t) => callee_name(t, source),
+                None => crate::analysis::php::callee_name(node, source),
+            } {
                 calls.insert(name);
             }
         }
@@ -514,15 +541,21 @@ fn walk<'a>(
         {
             macro_calls(node, source, calls);
         }
+        kind if crate::analysis::php::CALLS.contains(&kind) => {
+            calls.extend(crate::analysis::php::callee_name(node, source));
+        }
         _ => {}
     }
     if node.child_count() == 0 {
-        // Identifiers are normalized so renamed locals still compare as similar.
-        tokens.push(if node.kind().ends_with("identifier") {
-            "\u{1}id"
-        } else {
-            text(node, source)
-        });
+        // Identifiers are normalized so renamed locals still compare as
+        // similar; PHP names them `name`.
+        tokens.push(
+            if node.kind().ends_with("identifier") || node.kind() == "name" {
+                "\u{1}id"
+            } else {
+                text(node, source)
+            },
+        );
         return;
     }
     let mut cursor = node.walk();
@@ -591,6 +624,35 @@ mod tests {
             .into_iter()
             .map(|c| c.name)
             .collect()
+    }
+
+    #[test]
+    fn phpunit_methods_and_pest_calls_are_test_cases() {
+        let phpunit = "<?php\nnamespace Tests;\n\nuse PHPUnit\\Framework\\TestCase;\n\nfinal class TotalTest extends TestCase\n{\n    private function rows(): array { return [1]; }\n\n    public function testAdds(): void\n    {\n        $this->assertSame(3, total([1, 2]));\n    }\n\n    /** @test */\n    public function it_is_empty(): void\n    {\n        $this->assertSame(0, (new Summer())->total([]));\n    }\n\n    #[Test]\n    public function keeps_order(): void {}\n}\n\nclass Helper { public function testLike() {} }\n";
+        assert_eq!(
+            names("tests/TotalTest.php", phpunit),
+            ["testAdds", "it_is_empty", "keeps_order"]
+        );
+        let found = cases(Path::new("tests/TotalTest.php"), phpunit).unwrap();
+        assert!(found[0].calls.contains("total"));
+        assert!(found[1].calls.contains("Summer"));
+        assert_eq!(found[0].suite, ["TotalTest"]);
+        let located =
+            crate::test_locations::locate_tests(Path::new("tests/TotalTest.php"), phpunit).unwrap();
+        assert_eq!(
+            located.ranges.len(),
+            1,
+            "the TestCase class, not the helper"
+        );
+        assert_eq!(located.ranges[0].start_line, 6);
+        let pest = "<?php\n\ndescribe('total', function () {\n    it('adds', function () {\n        expect(total([1, 2]))->toBe(3);\n    });\n});\n\ntest('empty', fn () => expect(total([]))->toBe(0))->skip();\n\nfunction helper() { return 1; }\n";
+        assert_eq!(names("tests/Unit/TotalTest.php", pest), ["adds", "empty"]);
+        let found = cases(Path::new("tests/Unit/TotalTest.php"), pest).unwrap();
+        assert_eq!(found[0].suite, ["total"]);
+        let located =
+            crate::test_locations::locate_tests(Path::new("tests/Unit/TotalTest.php"), pest)
+                .unwrap();
+        assert_eq!(located.ranges.len(), 2, "{:?}", located.ranges);
     }
 
     #[test]

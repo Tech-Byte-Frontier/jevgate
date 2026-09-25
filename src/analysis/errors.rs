@@ -16,7 +16,7 @@ pub const MAX_ERRORS: usize = 12;
 /// Errors a body creates, in source order: JavaScript and TypeScript
 /// `new …Error(…)` or `new …Exception(…)` and any call or `new` a `throw`
 /// statement makes, the call a Python `raise` makes, Go's `errors.New`
-/// and `fmt.Errorf`, C# `new …Exception(…)` or any object a `throw`
+/// and `fmt.Errorf`, C# and PHP `new …Exception(…)` or any object a `throw`
 /// creates, and a Ruby `raise`. The message is the
 /// first argument, or a Python `detail`, `message` or `msg` keyword. They
 /// are evidence of what the messages say; Jev judges where their text comes from.
@@ -44,15 +44,25 @@ fn errors_in(node: Node<'_>, source: &str, found: &mut Vec<CreatedError>) {
         "call" if node.parent().is_some_and(|p| p.kind() == "raise_statement") => {
             node.child_by_field_name("function")
         }
-        // C#: `new OrderNotFoundException(…)`, or any object a `throw` creates.
-        "object_creation_expression" => node.child_by_field_name("type").filter(|t| {
-            let name = super::callee_name(*t, source).unwrap_or_default();
-            name.ends_with("Exception")
-                || name.ends_with("Error")
-                || node
-                    .parent()
-                    .is_some_and(|p| matches!(p.kind(), "throw_statement" | "throw_expression"))
-        }),
+        // C#: `new OrderNotFoundException(…)`; PHP: `new \App\NotFound(…)`;
+        // or any object a `throw` creates.
+        "object_creation_expression" => node
+            .child_by_field_name("type")
+            .or_else(|| super::php::callee(node))
+            .filter(|t| {
+                let name = super::callee_name(*t, source).unwrap_or_else(|| {
+                    text(*t, source)
+                        .rsplit('\\')
+                        .next()
+                        .unwrap_or("")
+                        .to_string()
+                });
+                name.ends_with("Exception")
+                    || name.ends_with("Error")
+                    || node
+                        .parent()
+                        .is_some_and(|p| matches!(p.kind(), "throw_statement" | "throw_expression"))
+            }),
         // Go: `errors.New("…")` and `fmt.Errorf("…", err)`.
         "call_expression" => node
             .child_by_field_name("function")
@@ -71,8 +81,7 @@ fn errors_in(node: Node<'_>, source: &str, found: &mut Vec<CreatedError>) {
         _ => None,
     };
     if let Some(callee) = created {
-        let message = node
-            .child_by_field_name("arguments")
+        let message = super::php::arguments(node)
             .and_then(|arguments| message_argument(arguments, source))
             .unwrap_or_default();
         found.push(CreatedError {

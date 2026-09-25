@@ -20,6 +20,7 @@ const LITERAL_KINDS: &[&str] = &[
     "integer_literal",
     "float_literal",
     "string",
+    "encapsed_string",
     "template_string",
     "integer",
     "float",
@@ -42,6 +43,7 @@ const SKIPPED_KINDS: &[&str] = &[
     "package_clause",
     "attribute_list",
     "using_directive",
+    "namespace_use_declaration",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -362,10 +364,13 @@ fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
             }
             specs
                 .into_iter()
-                .filter(|s| matches!(s.kind(), "const_spec" | "var_spec"))
-                .filter_map(|s| {
-                    s.child_by_field_name("name")
-                        .zip(s.child_by_field_name("value"))
+                .filter_map(|s| match s.kind() {
+                    "const_spec" | "var_spec" => s
+                        .child_by_field_name("name")
+                        .zip(s.child_by_field_name("value")),
+                    // PHP: `const LIMIT = 10;`
+                    "const_element" => s.named_child(0).zip(s.named_child(1)),
+                    _ => None,
                 })
                 .collect()
         }

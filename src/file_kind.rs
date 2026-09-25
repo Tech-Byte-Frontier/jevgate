@@ -142,7 +142,7 @@ pub fn language(path: &Path) -> &'static str {
         "cpp" | "cc" | "cxx" | "hpp" => "C++",
         "cs" => "C#",
         "rb" => "Ruby",
-        "php" => "PHP",
+        "php" | "phtml" => "PHP",
         "swift" => "Swift",
         "dart" => "Dart",
         "lua" => "Lua",

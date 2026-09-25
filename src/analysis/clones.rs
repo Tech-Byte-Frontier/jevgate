@@ -499,7 +499,10 @@ fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
         let kind = if literal {
             TokenKind::Literal
         } else if kind.ends_with("identifier")
-            || matches!(kind, "identifier" | "constant" | "instance_variable")
+            || matches!(
+                kind,
+                "identifier" | "constant" | "instance_variable" | "name"
+            )
         {
             TokenKind::Identifier
         } else {
@@ -528,13 +531,14 @@ fn collect_blocks(
 ) {
     // Ruby holds statements in a `body_statement` or `block_body`, and in the
     // `then`, `else` and `do` of a branch or loop; its `block` is a `{ … }`
-    // argument around a `block_body`.
+    // argument around a `block_body`. PHP holds them in a `compound_statement`.
     let ruby_block = node.kind() == "block" && node.parent().is_some_and(|p| p.kind() == "call");
     if matches!(
         node.kind(),
         "block"
             | "statement_block"
             | "statement_list"
+            | "compound_statement"
             | "body_statement"
             | "block_body"
             | "then"
