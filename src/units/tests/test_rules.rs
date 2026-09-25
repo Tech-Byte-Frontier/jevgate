@@ -264,3 +264,37 @@ fn ruby_pairs_are_a_review_only_when_neither_test_checks_something_the_other_doe
     assert_eq!(strength(0.05, false), Strength::Review);
     assert_eq!(strength(0.3, true), Strength::Consider);
 }
+
+/// Two pairs of tests of `total`, each alike within and unlike the other.
+const TWO_PAIRS: &str = "fn total(values: &[i32]) -> i32 {\n    values.iter().sum()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn adds_two() {\n        let values = vec![1, 2];\n        assert_eq!(total(&values), 3);\n    }\n\n    #[test]\n    fn adds_three() {\n        let values = vec![1, 2, 3];\n        assert_eq!(total(&values), 6);\n    }\n\n    #[test]\n    fn empty_is_zero() {\n        let empty: Vec<i32> = Vec::new();\n        let sum = total(&empty);\n        assert!(sum == 0, \"an empty list sums to zero\");\n    }\n\n    #[test]\n    fn empty_slice_is_zero() {\n        let empty: Vec<i32> = Vec::with_capacity(8);\n        let sum = total(&empty);\n        assert!(sum == 0, \"an empty slice sums to zero\");\n    }\n}\n";
+
+#[test]
+fn overlapping_tests_are_grouped_only_when_their_pairs_connect_them() {
+    let redundancy = |source: &str| {
+        let project = Project::new();
+        project.write("lib.rs", source);
+        let mut options = args();
+        options.include_tests = true;
+        only(&mut options, catalog::TEST_REDUNDANCY);
+        let report = run(&project, &options, &mut scripted(1));
+        report.files[0]
+            .findings
+            .iter()
+            .map(|f| f.message.clone())
+            .collect::<Vec<_>>()
+    };
+    let disjoint = redundancy(TWO_PAIRS);
+    assert_eq!(disjoint.len(), 2, "two pairs and no group: {disjoint:?}");
+    assert!(
+        disjoint
+            .iter()
+            .all(|m| !m.contains("tests of `total` overlap"))
+    );
+    let chained = redundancy(TESTS);
+    assert!(
+        chained
+            .iter()
+            .any(|m| m.contains("3 tests of `total` overlap")),
+        "{chained:?}"
+    );
+}

@@ -323,7 +323,11 @@ signatures, or one candidate pair.
    Jev does not count reliably and reads "tasks" literally. Copies inside test
    cases are one level lower. A test that checks several unrelated behaviors is at
    most a note: on labeled tests, tables of inputs and browser journeys rated
-   as high as tests that really mix behaviors. A review always carries a finding.
+   as high as tests that really mix behaviors. Overlapping test pairs of one
+   subject become one consider for three or more tests only when the pairs
+   connect them: two pairs that share no test stay two pairs (a pair of
+   redirect tests and a pair of deny tests of `get` are not four overlapping
+   tests). A review always carries a finding.
 6. **Gate.** `--fail-on`, `[[scope]]` levels per path and the baseline act on
    composed findings only. Baseline entries can carry a reason (`intended`,
    `later`, `wrong`) that survives rewrites; `baseline stats` counts them.

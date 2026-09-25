@@ -859,28 +859,47 @@ fn located_block<'a>(
     blocks.iter().find(|b| b.id == id)
 }
 
-/// Three or more tests linked by overlapping pairs on one subject.
+/// Three or more tests linked by overlapping pairs on one subject: the tests
+/// a chain of such pairs connects. Two pairs of one subject that share no
+/// test stay two pairs; grouped by subject alone, sinatra's pair of redirect
+/// tests and pair of deny tests of `get` read as four overlapping tests.
 fn over_tested(
     plan: &FilePlan,
     redundant: &[(&UnitPlan, &[String; 2], &String, f64)],
 ) -> Vec<Finding> {
-    let mut clusters =
-        BTreeMap::<&String, (BTreeSet<&String>, Vec<crate::schema::Location>, f64)>::new();
+    type Cluster<'a> = (
+        &'a String,
+        BTreeSet<&'a String>,
+        Vec<crate::schema::Location>,
+        f64,
+    );
+    let mut clusters: Vec<Cluster<'_>> = Vec::new();
     for (unit, names, subject, p) in redundant {
-        let cluster = clusters
-            .entry(subject)
-            .or_insert_with(|| (BTreeSet::new(), Vec::new(), 1.0));
-        for (name, location) in names.iter().zip(&unit.locations) {
-            if cluster.0.insert(name) {
-                cluster.1.push(location.clone());
+        let mut joined: Cluster<'_> = (*subject, BTreeSet::new(), Vec::new(), *p);
+        let mut index = 0;
+        while index < clusters.len() {
+            let (other, tests, ..) = &clusters[index];
+            if *other == *subject && names.iter().any(|name| tests.contains(name)) {
+                let (_, tests, locations, q) = clusters.remove(index);
+                joined.1.extend(tests);
+                joined.2.extend(locations);
+                joined.3 = joined.3.min(q);
+            } else {
+                index += 1;
             }
         }
-        cluster.2 = cluster.2.min(*p);
+        for (name, location) in names.iter().zip(&unit.locations) {
+            if joined.1.insert(name) {
+                joined.2.push(location.clone());
+            }
+        }
+        clusters.push(joined);
     }
+    clusters.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
     clusters
         .into_iter()
-        .filter(|(_, (tests, ..))| tests.len() >= 3)
-        .map(|(subject, (tests, mut locations, p))| {
+        .filter(|(_, tests, ..)| tests.len() >= 3)
+        .map(|(subject, tests, mut locations, p)| {
             locations.sort();
             let names: Vec<String> = tests.iter().map(|t| format!("`{t}`")).collect();
             let lines = locations
