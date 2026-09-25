@@ -676,6 +676,11 @@ fn literal_setter(statement: Node<'_>, source: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Candidate pairs between two selected files, each a (path, source).
+    fn pairs_between(a: (&str, &str), b: (&str, &str)) -> usize {
+        run(&[(a.0, a.1, true), (b.0, b.1, true)]).pairs.len()
+    }
+
     fn run(files: &[(&str, &str, bool)]) -> Candidates {
         let units: Vec<_> = files
             .iter()
@@ -795,11 +800,10 @@ mod tests {
             .replace("Position", "Range")
             .replace("line", "start")
             .replace("column", "end");
-        let found = run(&[
-            ("Position.java", position, true),
-            ("Range.java", &range, true),
-        ]);
-        assert!(found.pairs.is_empty());
+        assert_eq!(
+            pairs_between(("Position.java", position), ("Range.java", &range)),
+            0
+        );
         // Work beyond storing fields is still compared.
         let worker = |name: &str| {
             format!(
@@ -807,19 +811,17 @@ mod tests {
             )
         };
         let (a, b) = (worker("Position"), worker("Range"));
-        let found = run(&[("Position.java", &a, true), ("Range.java", &b, true)]);
-        assert_eq!(found.pairs.len(), 1);
+        assert_eq!(pairs_between(("Position.java", &a), ("Range.java", &b)), 1);
     }
 
     #[test]
     fn java_setters_given_literals_are_data_not_copies() {
         let fixture = "class OwnerTests {\n\tprivate Owner george() {\n\t\tOwner george = new Owner();\n\t\tgeorge.setFirstName(\"George\");\n\t\tgeorge.setLastName(\"Franklin\");\n\t\tgeorge.setAddress(\"110 W. Liberty St.\");\n\t\tgeorge.setCity(\"Madison\");\n\t\tgeorge.setTelephone(\"6085551023\");\n\t\treturn george;\n\t}\n}\n";
         let inline = "class ServiceTests {\n\tvoid insertsOwner() {\n\t\tOwner owner = new Owner();\n\t\towner.setFirstName(\"Sam\");\n\t\towner.setLastName(\"Schultz\");\n\t\towner.setAddress(\"4, Evans Street\");\n\t\towner.setCity(\"Wollongong\");\n\t\towner.setTelephone(\"4444444444\");\n\t\towners.save(owner);\n\t}\n}\n";
-        let found = run(&[
-            ("OwnerTests.java", fixture, true),
-            ("ServiceTests.java", inline, true),
-        ]);
-        assert!(found.pairs.is_empty());
+        assert_eq!(
+            pairs_between(("OwnerTests.java", fixture), ("ServiceTests.java", inline)),
+            0
+        );
         // Setters given computed values copy logic and are still compared.
         let mapping = |name: &str| {
             format!(
@@ -827,8 +829,10 @@ mod tests {
             )
         };
         let (a, b) = (mapping("OwnerMapper"), mapping("VetMapper"));
-        let found = run(&[("OwnerMapper.java", &a, true), ("VetMapper.java", &b, true)]);
-        assert_eq!(found.pairs.len(), 1);
+        assert_eq!(
+            pairs_between(("OwnerMapper.java", &a), ("VetMapper.java", &b)),
+            1
+        );
     }
 
     #[test]

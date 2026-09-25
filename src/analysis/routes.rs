@@ -73,57 +73,62 @@ fn mappings(declaration: Node<'_>, source: &str) -> Vec<(String, Vec<String>)> {
         .filter(|c| c.kind() == "modifiers")
     {
         let mut inner = modifiers.walk();
-        for annotation in modifiers.named_children(&mut inner) {
-            let Some(name) = annotation
-                .child_by_field_name("name")
-                .map(|n| text(n, source).rsplit('.').next().unwrap_or(""))
-            else {
-                continue;
-            };
-            let Some(&(_, verb)) = MAPPINGS.iter().find(|(mapping, _)| *mapping == name) else {
-                continue;
-            };
-            let mut verb = verb.to_string();
-            let mut paths = Vec::new();
-            if let Some(arguments) = annotation.child_by_field_name("arguments") {
-                let mut args = arguments.walk();
-                for argument in arguments.named_children(&mut args) {
-                    if argument.kind() != "element_value_pair" {
-                        strings(argument, source, &mut paths);
-                        continue;
-                    }
-                    let key = argument
-                        .child_by_field_name("key")
-                        .map_or("", |k| text(k, source));
-                    let Some(value) = argument.child_by_field_name("value") else {
-                        continue;
-                    };
-                    match key {
-                        "value" | "path" => strings(value, source, &mut paths),
-                        "method" => {
-                            let named = text(value, source);
-                            verb = named
-                                .rsplit('.')
-                                .next()
-                                .unwrap_or("")
-                                .trim_end_matches('}')
-                                .trim()
-                                .to_lowercase();
-                            if named.contains(',') {
-                                verb.clear();
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            if paths.is_empty() {
-                paths.push(String::new());
-            }
-            found.push((verb, paths));
-        }
+        found.extend(
+            modifiers
+                .named_children(&mut inner)
+                .filter_map(|annotation| mapping(annotation, source)),
+        );
     }
     found
+}
+
+/// One mapping annotation's method and paths; `None` for other annotations.
+fn mapping(annotation: Node<'_>, source: &str) -> Option<(String, Vec<String>)> {
+    let name = annotation
+        .child_by_field_name("name")
+        .map(|n| text(n, source).rsplit('.').next().unwrap_or(""))?;
+    let &(_, verb) = MAPPINGS.iter().find(|(mapping, _)| *mapping == name)?;
+    let mut verb = verb.to_string();
+    let mut paths = Vec::new();
+    if let Some(arguments) = annotation.child_by_field_name("arguments") {
+        let mut args = arguments.walk();
+        for argument in arguments.named_children(&mut args) {
+            if argument.kind() != "element_value_pair" {
+                strings(argument, source, &mut paths);
+                continue;
+            }
+            let key = argument
+                .child_by_field_name("key")
+                .map_or("", |k| text(k, source));
+            let Some(value) = argument.child_by_field_name("value") else {
+                continue;
+            };
+            match key {
+                "value" | "path" => strings(value, source, &mut paths),
+                "method" => verb = request_method(text(value, source)),
+                _ => {}
+            }
+        }
+    }
+    if paths.is_empty() {
+        paths.push(String::new());
+    }
+    Some((verb, paths))
+}
+
+/// The lowercase method a `method` attribute names, such as `delete` for
+/// `RequestMethod.DELETE`; empty (any method) when it lists several.
+fn request_method(named: &str) -> String {
+    if named.contains(',') {
+        return String::new();
+    }
+    named
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('}')
+        .trim()
+        .to_lowercase()
 }
 
 /// String literals in an annotation value: one path or an array of them.
@@ -189,22 +194,33 @@ mod tests {
 
     const CONTROLLER: &str = "@Controller\n@RequestMapping(\"/owners/{ownerId}\")\nclass PetController {\n\t@GetMapping(\"/pets/new\")\n\tpublic String initCreationForm() {\n\t\treturn VIEW;\n\t}\n\n\t@PostMapping({\"/pets/new\", \"/pets/add\"})\n\tpublic String processCreationForm(Pet pet) {\n\t\treturn \"redirect:/owners/{ownerId}\";\n\t}\n\n\t@RequestMapping(path = \"/pets/{petId}\", method = RequestMethod.DELETE)\n\tpublic String remove() {\n\t\treturn VIEW;\n\t}\n\n\tvoid helper() {}\n}\n";
 
-    fn routes_of(source: &str) -> Vec<(String, Vec<Route>)> {
-        let tree = crate::syntax::parse(Path::new("PetController.java"), source)
+    /// What `pick` finds in every node of a Java file, sorted.
+    fn found_in<T: Ord>(
+        file: &str,
+        source: &str,
+        mut pick: impl FnMut(Node<'_>) -> Option<T>,
+    ) -> Vec<T> {
+        let tree = crate::syntax::parse(Path::new(file), source)
             .unwrap()
             .unwrap();
         let mut found = Vec::new();
         let mut stack = vec![tree.root_node()];
         while let Some(node) = stack.pop() {
-            if node.kind() == "method_declaration" {
-                let name = text(node.child_by_field_name("name").unwrap(), source);
-                found.push((name.to_string(), spring(node, source)));
-            }
+            found.extend(pick(node));
             let mut cursor = node.walk();
             stack.extend(node.named_children(&mut cursor));
         }
         found.sort();
         found
+    }
+
+    fn routes_of(source: &str) -> Vec<(String, Vec<Route>)> {
+        found_in("PetController.java", source, |node| {
+            (node.kind() == "method_declaration").then(|| {
+                let name = text(node.child_by_field_name("name").unwrap(), source);
+                (name.to_string(), spring(node, source))
+            })
+        })
     }
 
     fn route(method: &str, path: &str) -> Route {
@@ -269,19 +285,8 @@ mod tests {
             Some(2)
         );
         let test = "class T {\n\tvoid t() throws Exception {\n\t\tmockMvc.perform(post(\"/owners/{ownerId}/pets/new\", 1).param(\"name\", \"Betty\"));\n\t\ttemplate.exchange(RequestEntity.get(\"/owners/1\").build(), String.class);\n\t\tlog.get(\"key\");\n\t}\n}\n";
-        let tree = crate::syntax::parse(Path::new("T.java"), test)
-            .unwrap()
-            .unwrap();
-        let mut sent = Vec::new();
-        let mut stack = vec![tree.root_node()];
-        while let Some(node) = stack.pop() {
-            sent.extend(request(node, test));
-            let mut cursor = node.walk();
-            stack.extend(node.named_children(&mut cursor));
-        }
-        sent.sort();
         assert_eq!(
-            sent,
+            found_in("T.java", test, |node| request(node, test)),
             [
                 route("get", "/owners/1"),
                 route("post", "/owners/{ownerId}/pets/new")
