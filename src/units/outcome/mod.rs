@@ -29,7 +29,7 @@ pub(super) use security::{
     Messages, checks, django_settings_outcome, exposure_outcome, injection_outcome, messages,
     origin_outcome,
 };
-pub(super) use test_rules::test_value_outcome;
+pub(super) use test_rules::{redundancy_outcome, test_value_outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Outcome {
@@ -188,7 +188,9 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), &unit.detail),
         catalog::TEST_VALUE => test_value_outcome(&get),
-        catalog::TEST_REDUNDANCY => get("overlap").map(score),
+        catalog::TEST_REDUNDANCY => {
+            get("overlap").map(|overlap| redundancy_outcome(overlap, get("distinct")))
+        }
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         catalog::INJECTION => injection_outcome(&get),
         catalog::SENSITIVE_DATA if matches!(unit.detail, Detail::Handler { .. }) => {

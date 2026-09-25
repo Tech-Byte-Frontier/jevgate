@@ -24,6 +24,12 @@ signatures, or one candidate pair.
    `[TestCaseSource]`, `[TestMethod]` or `[DataTestMethod]`, and every C# file
    of a test project directory named like `Shop.Tests`; `.Designer.cs`,
    `.g.cs` and `.g.i.cs` files are generated.
+   Ruby tests are RSpec groups and examples written as statements
+   (`describe`, `context`, `it`, `specify`, `its`, titled by a string or not
+   at all, so a Rakefile's `test(:unit) do` is not one) and classes whose
+   superclass ends in `Test`, `TestCase` or `Spec` (`Minitest::Test`,
+   `ActiveSupport::TestCase`) with `test_*` methods or `test "…" do` blocks;
+   `*_spec.rb` files and Ruby files under `spec/` are test files.
    Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
    contents, with every other byte a space, so lines stay the file's.
@@ -68,6 +74,23 @@ signatures, or one candidate pair.
    its mocks is asked again with the bodies of the functions it calls and its
    file's imports, mocks and setup hooks (a part too long is left out, never
    cut); each answer replaces the first unless only the first is decisive.
+   A Ruby test is sent with the groups it is declared in, since an RSpec
+   example reads as a sentence continuing them and the outer group often names
+   the class under test. Its recheck shows, instead of every hook of the
+   file, what runs for it: its groups' `before`, `around` and `setup` hooks,
+   `let!`, and the `let` and `subject` definitions it reads (directly or
+   through another), then the test helpers it and those hooks call, from its
+   own file or the nearest support file (one without test cases sharing a
+   directory with it; an RSpec group's methods stay in its file). The note
+   says a value built there is input to the code under test unless a mock
+   returns it: with the file's setup described as mocks, factory definitions
+   and `mock_app` routes read as mocks, and a third of such tests stayed
+   undecided. Ruby test pairs carry their groups and hooks when these differ,
+   and are also asked whether each test checks something the other does not
+   (another method, matcher, attribute, option or code path); "one adds
+   nothing" is a review only when that is ruled out at 0.80. Copied RSpec
+   examples for an alias and its original (`each` and `each_pair`) or for two
+   predicates of one record were otherwise reviews.
    The first pass names a literal worked out by hand, even with the
    arithmetic in a comment, as not re-implementing the code.
    Then one locate Choice per split finding picks the body block to extract,

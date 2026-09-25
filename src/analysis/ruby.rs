@@ -187,3 +187,28 @@ fn bound(node: Node<'_>, source: &str, names: &mut Vec<String>) {
         bound(child, source, names);
     }
 }
+
+/// Names a Ruby body calls: each call's method and each bare name that is
+/// not a local it binds, since Ruby calls a method without arguments by name.
+pub(crate) fn called_names(node: Node<'_>, source: &str, names: &mut Vec<String>) {
+    let mut locals_bound = Vec::new();
+    locals(node, source, &mut locals_bound);
+    fn visit(node: Node<'_>, source: &str, bound: &[String], names: &mut Vec<String>) {
+        match node.kind() {
+            "call" => names.extend(super::call_name(node, source)),
+            "identifier" => {
+                let name = text(node, source);
+                if !bound.iter().any(|b| b == name) {
+                    names.push(name.to_string());
+                }
+                return;
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            visit(child, source, bound, names);
+        }
+    }
+    visit(node, source, &locals_bound, names);
+}

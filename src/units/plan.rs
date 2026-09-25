@@ -248,6 +248,9 @@ struct Shared<'a> {
     subjects: BTreeMap<String, String>,
     /// Callable short names to their file and source, for the test recheck.
     subject_sources: BTreeMap<String, test_units::SubjectSource>,
+    /// Ruby methods defined among tests (in a test class, an example group
+    /// or a support file) by short name, as the helpers a test calls.
+    helpers: BTreeMap<String, Vec<test_units::SubjectSource>>,
     /// With access control, every callable by short name, for SpacetimeDB helpers.
     module_helpers: BTreeMap<String, Vec<spacetimedb::Helper>>,
     /// Test cases of each selected file with a test view, inside its test lines.
@@ -261,14 +264,16 @@ struct Shared<'a> {
 
 impl<'a> Shared<'a> {
     fn new(scope: &Scope<'_>, args: &'a CheckArgs) -> Self {
+        let cases = test_cases(scope);
         let mut shared = Self {
             rules: &args.rules,
             pairs: clones::Candidates::default(),
             imports: imports(scope),
             subjects: BTreeMap::new(),
             subject_sources: BTreeMap::new(),
+            helpers: test_helpers(scope, &cases),
             module_helpers: BTreeMap::new(),
-            cases: test_cases(scope),
+            cases,
             enums: BTreeMap::new(),
             constants: BTreeMap::new(),
             hashes: BTreeMap::new(),
@@ -287,6 +292,7 @@ impl<'a> Shared<'a> {
                 .or_insert_with(|| test_units::SubjectSource {
                     path: path.to_path_buf(),
                     source: unit.source(source).to_string(),
+                    shared: true,
                 });
         }
         for &owner in &scope.owners {
@@ -317,6 +323,39 @@ impl<'a> Shared<'a> {
     fn enabled(&self, key: &str) -> bool {
         self.rules.iter().any(|r| r == key || r == catalog::id(key))
     }
+}
+
+/// Ruby methods inside the test lines of selected files, by short name: the
+/// helpers tests call, such as `mock_app` in a support file or a `def` in an
+/// example group. A file with test cases keeps its helpers to itself, as an
+/// RSpec group scopes its methods; a support file, with none, shares them.
+/// Other languages' tests show their helpers in the file.
+fn test_helpers(
+    scope: &Scope<'_>,
+    cases: &BTreeMap<PathBuf, Vec<TestCase>>,
+) -> BTreeMap<String, Vec<test_units::SubjectSource>> {
+    let mut helpers = BTreeMap::<String, Vec<test_units::SubjectSource>>::new();
+    for &owner in &scope.owners {
+        let input = &scope.inputs[owner];
+        if input.result.path.extension().is_none_or(|e| e != "rb") {
+            continue;
+        }
+        let shared = cases.get(&input.result.path).is_none_or(Vec::is_empty);
+        let lines = scope.test_lines(owner);
+        let source = input.source.as_deref().unwrap_or("");
+        for unit in scope.units[&owner].units.iter().filter(|u| u.callable()) {
+            if lines.iter().any(|l| unit.overlaps(l)) {
+                helpers.entry(unit.short_name.clone()).or_default().push(
+                    test_units::SubjectSource {
+                        path: input.result.path.clone(),
+                        source: unit.source(source).to_string(),
+                        shared,
+                    },
+                );
+            }
+        }
+    }
+    helpers
 }
 
 /// Every callable of the scope by short name, with its file's hash, as the
@@ -810,6 +849,7 @@ fn plan_tests(
         let subjects = test_units::Subjects {
             signatures: &shared.subjects,
             sources: &shared.subject_sources,
+            helpers: &shared.helpers,
             hashes: &shared.hashes,
         };
         test_units::plan_values(context, &cases, &subjects, test_lines, file, requests);
