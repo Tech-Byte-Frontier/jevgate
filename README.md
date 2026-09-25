@@ -221,7 +221,7 @@ Other CI systems work the same way: install with `install.sh` or `cargo binstall
 
 ## Configuration
 
-`jevgate init` writes a commented `jevgate.toml` at the repository root. The command line wins over the file, except that upload patterns and budgets in the file are ceilings that flags can only narrow. Unknown keys are errors.
+`jevgate init` writes a commented `jevgate.toml` at the repository root. The command line wins over the file, except that upload patterns and budgets in the file are ceilings that flags can only narrow. Unknown keys are errors. Its first line points editors with TOML schema support (Even Better TOML, Taplo) to [`jevgate.schema.json`](jevgate.schema.json), which completes keys, rule names and levels and flags mistakes as you type.
 
 ```toml
 upload_allow = ["src/**", "tests/**"]   # only these paths may be uploaded

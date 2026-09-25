@@ -108,7 +108,8 @@ fn render(allow: &[String]) -> String {
         }
     }
     format!(
-        r#"# JevGate configuration, written by `jevgate init`. Unknown keys are errors.
+        r#"#:schema https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/v{version}/jevgate.schema.json
+# JevGate configuration, written by `jevgate init`. Unknown keys are errors.
 # `jevgate rules` lists every rule; `jevgate check --dry-run --show-requests`
 # shows what would be uploaded without sending anything.
 
@@ -140,7 +141,8 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # paths = ["scripts/**", "tools/**"]
 # fail_on = ["report"]
 "#,
-        model = crate::options::DEFAULT_MODEL
+        model = crate::options::DEFAULT_MODEL,
+        version = env!("CARGO_PKG_VERSION"),
     )
 }
 

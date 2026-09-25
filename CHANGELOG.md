@@ -4,6 +4,7 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- `jevgate.schema.json` is a JSON Schema of `jevgate.toml`, generated from the configuration types with every rule name and level, and `jevgate init` writes a `#:schema` line so editors with TOML schema support complete and check the file.
 - pre-commit hooks: `jevgate-system` runs the installed `jevgate` on the staged changes, and `jevgate` builds it from source with Rust first.
 - `--format sarif` writes a SARIF 2.1.0 log for GitHub code scanning, GitLab and editors: the findings `--format github` annotates, as `error` when they fail the gate and `warning` otherwise, with every rule's question, related locations, the finding's fingerprint and probability. Run errors and files that could not be judged are tool notifications.
 - Agent output is colored on a terminal: the headline by the gate's outcome, review and consider headings, and each finding's location. `--color auto|always|never` chooses, and `NO_COLOR` and `CLICOLOR_FORCE` are honored; JSON and GitHub annotations are never colored.

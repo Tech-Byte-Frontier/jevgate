@@ -26,6 +26,8 @@ mod check;
 mod command;
 mod components;
 mod config;
+#[cfg(test)]
+mod config_schema;
 mod context;
 mod context_units;
 mod discovery;
