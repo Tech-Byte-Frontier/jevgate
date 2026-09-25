@@ -145,7 +145,11 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
     let outcome = unit_outcome(unit, &first);
     let mut recheck = answers(judgments, &unit.id, Pass::Recheck);
     if unit.rule == catalog::FILE_ORGANIZATION {
-        // The kind is asked apart from the recheck and read beside its split.
+        // The kind is asked apart from the recheck and read beside its split,
+        // or beside the first split of a file too long for a recheck.
+        if unit.recheck.is_none() {
+            recheck.extend(first.iter().map(|(q, a)| (*q, *a)));
+        }
         recheck.extend(answers(judgments, &unit.id, Pass::Trace));
     }
     if open(unit, &first, outcome) && !recheck.is_empty() {
@@ -222,15 +226,21 @@ pub fn uncertain_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
         .collect()
 }
 
-/// Outlines whose recheck left the split Score undecided and whose kind has
-/// not been asked yet.
+/// Outlines whose recheck left the split Score undecided, or whose first
+/// answer did when the file is too long for a recheck, and whose kind has not
+/// been asked yet.
 pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
         .iter()
         .filter(|u| u.rule == catalog::FILE_ORGANIZATION && u.presence == Presence::Judged)
         .filter(|u| answers(judgments, &u.id, Pass::Trace).is_empty())
         .filter(|u| {
-            answers(judgments, &u.id, Pass::Recheck)
+            let pass = if u.recheck.is_some() {
+                Pass::Recheck
+            } else {
+                Pass::First
+            };
+            answers(judgments, &u.id, pass)
                 .get("split")
                 .is_some_and(|a| matches!(benefit(a), Outcome::Uncertain(_)))
         })

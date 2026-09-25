@@ -167,9 +167,13 @@ fn plan_outline(
         identity: identity(&names),
         detail: Detail::Outline {
             tests,
-            kind: judged
-                .then(|| outline.request(file, Ask::Kind(source.clone())))
-                .filter(|(request, _)| file.budget.fits(request)),
+            // A file too long to send whole is asked its kind from the
+            // outline alone, so its undecided split is not left open.
+            kind: [Some(source.clone()), None]
+                .into_iter()
+                .filter(|_| judged)
+                .map(|source| outline.request(file, Ask::Kind(source)))
+                .find(|(request, _)| file.budget.fits(request)),
             groups: ids
                 .into_iter()
                 .zip(&sets)
@@ -216,8 +220,10 @@ enum Ask {
     First,
     /// The split again with the file's application source.
     Recheck(String),
-    /// What kind of file it is, asked only when the recheck stays undecided.
-    Kind(String),
+    /// What kind of file it is, asked only when the recheck stays undecided,
+    /// or the first answer when the file is too long for a recheck; with the
+    /// file's source when it fits.
+    Kind(Option<String>),
 }
 
 impl Outline {
@@ -226,7 +232,7 @@ impl Outline {
         let (pass, stage, source) = match ask {
             Ask::First => (Pass::First, "outline", None),
             Ask::Recheck(source) => (Pass::Recheck, "recheck", Some(source)),
-            Ask::Kind(source) => (Pass::Trace, "trace", Some(source)),
+            Ask::Kind(source) => (Pass::Trace, "trace", source),
         };
         if pass == Pass::Trace {
             // A separate request, so the kind never moves the split answers.

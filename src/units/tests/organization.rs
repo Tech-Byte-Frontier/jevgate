@@ -101,6 +101,38 @@ fn an_undecided_recheck_is_decided_by_the_kind_of_file() {
 }
 
 #[test]
+fn an_outline_too_long_for_a_recheck_is_decided_by_its_kind_alone() {
+    let project = Project::new();
+    // The comment makes the source too long to send whole; the outline is not.
+    let padding = format!("// {}\n", "x".repeat(100)).repeat(1200);
+    project.write("lib.rs", &format!("{}{padding}", two_concerns()));
+    let (options, report) = run_rechecked(&project, catalog::FILE_ORGANIZATION, 3);
+    assert_eq!(
+        report.files[0].dimensions["file_organization"].status,
+        Status::Clear,
+        "one algorithm rules a split out"
+    );
+    let asked = |stage: &str| {
+        report
+            .stages
+            .get(stage)
+            .map_or(0, |s| s.successful_requests)
+    };
+    assert_eq!((asked("recheck"), asked("trace")), (0, 1));
+    let (_, plan) = planned(&project, &options);
+    let unit = &plan.files.values().next().unwrap().units[0];
+    assert!(unit.recheck.is_none());
+    let Detail::Outline {
+        kind: Some((kind, _)),
+        ..
+    } = &unit.detail
+    else {
+        panic!("the kind is asked from the outline");
+    };
+    assert!(kind["state"]["file"]["source"].is_null());
+}
+
+#[test]
 fn outlines_carry_member_and_file_sizes() {
     let (project, options) = rule_project(&two_concerns(), catalog::FILE_ORGANIZATION);
     let mut mock = Mock::default();
