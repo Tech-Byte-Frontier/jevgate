@@ -1,10 +1,12 @@
 name: Docs
 # Builds the documentation site (site/build.sh) and publishes it to GitHub
-# Pages from main. Pull requests that touch what the site is made from only
-# build it, so a broken page or include fails before it merges.
+# Pages when a release tag is pushed, so the site describes the released
+# binary. Pull requests that touch what the site is made from only build it,
+# so a broken page or include fails before it merges; a manual run publishes
+# the ref it runs on.
 on:
   push:
-    branches: [main]
+    tags: ["v*"]
   pull_request:
     paths: ["site/**", "README.md", "CHANGELOG.md", "docs/classification-cascade.md", "jevgate.schema.json", ".github/workflows/docs.yml"]
   workflow_dispatch:
