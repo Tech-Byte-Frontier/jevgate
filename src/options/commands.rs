@@ -97,9 +97,17 @@ pub enum JevCommand {
     /// command, such as `jevgate-check`.
     #[command(after_long_help = MAN_EXAMPLES)]
     Man {
-        /// A command: auth, check, baseline, rules, init, serve or completions
+        /// A command: auth, check, baseline, rules, init, serve, mcp or completions
         command: Option<String>,
     },
+    /// Run a Model Context Protocol server on stdin and stdout, for coding agents
+    ///
+    /// Offers three tools: `jevgate_check` runs a check in the repository and
+    /// returns its findings, `jevgate_findings` reads the last report, and
+    /// `jevgate_rules` lists the rules. Register it with an agent as the
+    /// command `jevgate mcp`, started in the repository.
+    #[command(after_long_help = MCP_EXAMPLES)]
+    Mcp,
     /// Serve the latest report as read-only JSON on localhost (run alongside `check --watch`)
     ///
     /// Answers GET requests from local tools, never from a browser page:
@@ -234,6 +242,12 @@ Examples:
   jevgate completions zsh > \"${fpath[1]}/_jevgate\"
   jevgate completions fish > ~/.config/fish/completions/jevgate.fish
   jevgate completions powershell >> $PROFILE";
+
+const MCP_EXAMPLES: &str = "\
+Examples:
+  claude mcp add jevgate -- jevgate mcp       Claude Code, in the repository
+  {\"mcpServers\": {\"jevgate\": {\"command\": \"jevgate\", \"args\": [\"mcp\"]}}}
+                                              Clients configured with JSON, such as Cursor";
 
 const MAN_EXAMPLES: &str = "\
 Examples:

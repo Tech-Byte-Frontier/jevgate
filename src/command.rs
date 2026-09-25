@@ -3,7 +3,7 @@
 use crate::{
     auth, baseline, cancellation, catalog, config,
     config::ConfigContext,
-    init, manual,
+    init, manual, mcp,
     options::{self, JevCommand},
     output, revision, server,
 };
@@ -15,6 +15,7 @@ pub fn run(command: JevCommand) -> Result<u8> {
         JevCommand::Completions { shell } => manual::completions(shell).map(|()| 0),
         JevCommand::Man { command } => manual::man(command.as_deref()).map(|()| 0),
         JevCommand::Init { force } => init(force),
+        JevCommand::Mcp => mcp::run().map(|()| 0),
         command => configured(command),
     }
 }
@@ -44,7 +45,8 @@ fn configured(command: JevCommand) -> Result<u8> {
         JevCommand::Auth { .. }
         | JevCommand::Init { .. }
         | JevCommand::Completions { .. }
-        | JevCommand::Man { .. } => {
+        | JevCommand::Man { .. }
+        | JevCommand::Mcp => {
             unreachable!("handled before repository configuration")
         }
         JevCommand::Check(mut args) => {

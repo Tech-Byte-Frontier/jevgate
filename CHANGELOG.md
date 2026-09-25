@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- `jevgate mcp` runs a Model Context Protocol server on stdin and stdout, so coding agents can call JevGate as a tool: `jevgate_check` runs a check and returns its findings (an incomplete run is a tool error), `jevgate_findings` reads the last report, and `jevgate_rules` lists the rules.
+
 ## [0.18.0] - 2026-09-25
 
 - Documentation site: https://tech-byte-frontier.github.io/jevgate/, with guides, troubleshooting, a page on coding agents, and rules, configuration and command-line references generated from the binary. It is published with each release.

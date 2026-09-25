@@ -19,6 +19,28 @@ for a `consider`, fix it or say why the code should stay as it is.
 | 1 | The gate failed: act on the findings listed |
 | 2 | The run could not finish (no key, provider rejection, request budget); report it, don't treat it as a pass |
 
+## As an MCP server
+
+`jevgate mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdin and stdout, so an agent can call JevGate as a tool instead of running a shell command. Register it, started in the repository:
+
+```sh
+claude mcp add jevgate -- jevgate mcp          # Claude Code
+```
+
+```json
+{"mcpServers": {"jevgate": {"command": "jevgate", "args": ["mcp"]}}}
+```
+
+The second form is for clients configured with JSON, such as Cursor. The server offers three tools:
+
+| Tool | What it does |
+|---|---|
+| `jevgate_check` | Runs `jevgate check` in the repository with `base`, `paths`, `rules`, `include_tests`, `dry_run` or `verbose`, and returns the ranked findings. An incomplete run (exit 2) is a tool error, never a pass |
+| `jevgate_findings` | Reads the last report's findings, optionally under one path, without running anything |
+| `jevgate_rules` | Lists every rule with the question it asks |
+
+A check runs as a child process with the repository's `jevgate.toml` and key, so the tool reviews exactly what the command line would.
+
 ## Structured output
 
 `--format json` prints the full report: every file, finding, raw answer and probability, and the gate. The same report is always written to `.jevgate/latest.json`, whatever the output format, so an agent can run the check once and read the details after. `jevgate check --help` explains its fields.

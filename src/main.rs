@@ -43,6 +43,7 @@ mod inventory;
 mod line_ranges;
 mod locations;
 mod manual;
+mod mcp;
 mod options;
 mod output;
 mod packages;

@@ -3,6 +3,7 @@
 mod auth;
 mod changes;
 mod manual;
+mod mcp;
 mod preview;
 mod rules;
 #[path = "../support/temp_dir.rs"]
