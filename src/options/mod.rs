@@ -19,6 +19,15 @@ pub enum Format {
     Github,
 }
 
+/// When agent output is colored.
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum ColorChoice {
+    /// On a terminal, unless NO_COLOR is set; CLICOLOR_FORCE turns it on elsewhere
+    Auto,
+    Always,
+    Never,
+}
+
 /// Results that fail the check. Consider also fails on review findings.
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 pub enum FailOn {
@@ -154,6 +163,13 @@ pub struct CheckArgs {
     /// Output format [default: agent; jsonl with --watch; json with --show-requests]
     #[arg(long, value_enum, help_heading = OUTPUT)]
     pub format: Option<Format>,
+    /// Color agent output: auto, always or never
+    ///
+    /// `auto` colors a terminal unless NO_COLOR is set, and any output when
+    /// CLICOLOR_FORCE is set; on Windows, only Windows Terminal and terminals
+    /// that set TERM count. Other formats are never colored.
+    #[arg(long, value_enum, value_name = "WHEN", default_value_t = ColorChoice::Auto, help_heading = OUTPUT)]
+    pub color: ColorChoice,
     /// Show optional notes, every consider finding and per-file detail in agent output
     #[arg(long, help_heading = OUTPUT)]
     pub verbose: bool,
