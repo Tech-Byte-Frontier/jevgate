@@ -37,6 +37,7 @@ mod file;
 mod security_units;
 mod settings_modules;
 mod shared;
+mod trace_evidence;
 
 use file::{java, plan_file};
 use security_units::plan_security;

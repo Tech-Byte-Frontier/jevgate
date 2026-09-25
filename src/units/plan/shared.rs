@@ -2,7 +2,7 @@
 //! subjects and their sources, routes, helpers, enums, constants and hashes.
 use super::{
     Scope, java,
-    security_units::{csharp_constants, enums},
+    trace_evidence::{csharp_constants, enums},
 };
 use crate::{
     analysis::{
