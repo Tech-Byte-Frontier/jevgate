@@ -174,6 +174,9 @@ pub(crate) fn locals(node: Node<'_>, source: &str, names: &mut Vec<String>) {
     }
 }
 
+/// The local names an assignment target or a parameter list binds. A call
+/// in the target (`self.total = …`) binds no local, so the names inside it
+/// are left out.
 fn bound(node: Node<'_>, source: &str, names: &mut Vec<String>) {
     if node.kind() == "identifier" {
         names.push(text(node, source).to_string());
