@@ -435,8 +435,8 @@ signatures, or one candidate pair.
    with parameter entries named by whether the signature writes their
    types, the Sphinx `:param` entries of untyped functions stopped reading
    as filler while `numerator: The numerator value.` still does. A flag's
-   meaning (`"-x",  # Extract audio`), a unit (`// 14px` beside
-   `0.875rem`) and a category heading (`// Fixed` above fixed costs) are
+   meaning (`"-x",  # Extract audio`), a unit (`// 16px` beside
+   `1rem`) and a category heading (`// Fixed` above fixed costs) are
    named as acceptable. A comment left undecided is asked again with the
    whole definition it sits in, then, alone, what kind of comment it is (a
    reason, caveat, reference, usage, summary or heading, against repeating

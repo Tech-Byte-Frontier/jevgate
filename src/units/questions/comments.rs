@@ -28,7 +28,7 @@ pub fn comment_restates(path: &str, source: bool) -> Value {
         format!("Does the comment in `{path}.text` only repeat what `{path}.code` already says?"),
         &note(path, source),
         [
-            "No. It tells a reader something the code does not say: why the code is written this way; a constraint, caveat, unit or requirement; what a flag, option, pattern, number or term means or stands for, or a value in another unit, such as `14px` beside `0.875rem`; what a step achieves when the code does not make it obvious; or how to use a definition beyond its name and signature.",
+            "No. It tells a reader something the code does not say: why the code is written this way; a constraint, caveat, unit or requirement; what a flag, option, pattern, number or term means or stands for, or a value in another unit, such as `16px` beside `1rem`; what a step achieves when the code does not make it obvious; or how to use a definition beyond its name and signature.",
             "Partly. It repeats the code but adds a detail a reader could use, or it is a heading that names the group of lines or definitions below it.",
             "Yes. A reader learns nothing from it that the names, calls and values in the code do not already say, such as `increment the counter` above `count += 1`, `Parse the file` above `parse_file(path)` or `Returns the user` above `get_user()`.",
         ],
@@ -65,7 +65,7 @@ pub fn comment_history(path: &str) -> Value {
                 "Does the comment in `{path}.text` describe an edit made to the code, such as what was added, changed, fixed, moved or removed, instead of the code as it is?"
             ),
             "It says what the code was before or that it was changed: added, replaced, fixed, moved or updated, such as `now uses the cache instead of the database`, `changed to async`, `added validation` or `as requested in review`.",
-            "It describes the code as it is now, including headings and category names, such as `Fixed` above a list of fixed costs. A reason that names a past bug, incident or version, such as why a check exists, still describes the code.",
+            "It describes the code as it is now, including headings and category names, such as `Fixed` above a list of fixed costs. A reason that names a past bug, incident or release, such as why a check exists, still describes the code.",
         ),
     )
 }

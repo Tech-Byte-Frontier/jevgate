@@ -730,6 +730,14 @@ mod tests {
 
     fn documentation() -> Vec<Value> {
         vec![
+            comment_restates("comments[0]", false),
+            comment_restates("comments[0]", true),
+            comment_verbose("comments[0]", false),
+            comment_verbose("comments[0]", true),
+            comment_history("comments[0]"),
+            comment_disabled("comments[0]"),
+            comment_kind(false),
+            comment_kind(true),
             instructions_inferable("sections[0]"),
             instructions_describes("sections[0]"),
             instructions_commands("sections[0]"),
