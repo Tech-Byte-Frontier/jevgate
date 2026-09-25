@@ -712,10 +712,21 @@ fn settings_extended_by(scope: &Scope<'_>, owner: usize) -> Vec<serde_json::Valu
 }
 
 /// Lines that select a settings module to run with, as `path:line: text`.
+/// A `setdefault` in `manage.py` or `wsgi.py` names only the module used
+/// when the environment names none, which deployments set: shown bare, it
+/// read as the deployed choice, and CORS settings that a production module
+/// sets again were a review.
 fn selections(selected: &[crate::analysis::django::Selection]) -> Vec<String> {
     selected
         .iter()
-        .map(|s| format!("{}:{}: {}", s.file.display(), s.line, s.text))
+        .map(|s| {
+            let default = if s.text.contains("setdefault(") {
+                " (only a default: a DJANGO_SETTINGS_MODULE set in the environment replaces it)"
+            } else {
+                ""
+            };
+            format!("{}:{}: {}{default}", s.file.display(), s.line, s.text)
+        })
         .collect()
 }
 

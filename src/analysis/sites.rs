@@ -26,6 +26,11 @@ pub struct Site {
 enum Priority {
     /// A Django setting that decides security, such as `DEBUG = True`.
     SecuritySetting,
+    /// In a Django settings module, an assignment to a subscript or field,
+    /// such as `options["ssl_cert_reqs"] = None`: a setting passed on to a
+    /// library, which built text and calls there, such as a URL joined
+    /// with a path, crowded out.
+    SettingsField,
     /// Text built from values: a template, f-string, concatenation or
     /// formatting macro.
     BuiltText,
@@ -243,10 +248,14 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>], settings: boo
     }
 }
 
-/// Whether a statement assigns a setting, directly or inside its blocks.
+/// Whether a statement assigns a setting or changes part of one, directly
+/// or inside its blocks.
 fn assigns_setting(node: Node<'_>, source: &str) -> bool {
     match node.kind() {
-        "expression_statement" => django::setting_assigned(node, source).is_some(),
+        "expression_statement" => {
+            django::setting_assigned(node, source).is_some()
+                || django::setting_changed(node, source)
+        }
         "if_statement" | "try_statement" | "with_statement" | "block" | "else_clause"
         | "elif_clause" | "except_clause" | "finally_clause" => {
             let mut cursor = node.walk();
@@ -464,7 +473,11 @@ fn field_assignment(node: Node<'_>, mode: Mode) -> Option<Priority> {
         || node
             .parent()
             .is_some_and(|p| p.kind() == "initializer_expression");
-    field.then_some(Priority::FieldAssignment)
+    field.then_some(if mode.settings {
+        Priority::SettingsField
+    } else {
+        Priority::FieldAssignment
+    })
 }
 
 fn has_child(node: Node<'_>, kind: &str) -> bool {
@@ -641,6 +654,19 @@ mod tests {
                 .map(|(n, _)| n.as_str())
                 .collect::<Vec<_>>(),
             ["LANGUAGE_CODE", "SECRET_KEY", "DEBUG", "INSTALLED_APPS"]
+        );
+        // A setting passed on to a library outranks built text and calls.
+        let crowded: String = (0..super::MAX_SITES)
+            .map(|i| format!("URL_{i} = os.environ.get('URL') + '/{i}'\n"))
+            .chain(["DEBUG = False\nOPTIONS['ssl_cert_reqs'] = None\n".to_string()])
+            .collect();
+        let crowded = parse(Path::new("shop/settings.py"), &crowded).unwrap();
+        assert!(
+            crowded
+                .setup
+                .sites
+                .iter()
+                .any(|s| s.text == "OPTIONS['ssl_cert_reqs'] = None")
         );
         let plain = parse(Path::new("shop/constants.py"), "DEBUG = True\nLIMIT = 3\n").unwrap();
         assert!(!plain.setup.settings && plain.setup.statements.is_empty());

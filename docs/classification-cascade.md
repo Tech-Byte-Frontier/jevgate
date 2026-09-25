@@ -161,7 +161,12 @@ signatures, or one candidate pair.
    sent with the lines that select it (`DJANGO_SETTINGS_MODULE` in a
    Dockerfile, CI or `manage.py`) and with the settings modules that import
    it, directly or through others, each with its own selections and its
-   assignments of the settings it sets again. Presence alone found a
+   assignments of the settings it sets again; a `setdefault` in
+   `manage.py` or `wsgi.py` is marked as only a default, since shown bare it
+   read as the deployed choice and made shared CORS settings that production
+   sets again a review. Its sites put security settings first, then
+   assignments into a setting (`OPTIONS["ssl_cert_reqs"] = None`), which
+   URLs joined with paths had crowded out. Presence alone found a
    development `DEBUG = True` or a signed webhook's `csrf_exempt` weak as
    surely as a deployed one, so a Django weak setting must be named by a
    specific check at the review threshold to be a consider or review;
@@ -170,7 +175,13 @@ signatures, or one candidate pair.
    deployed site, since asked about the module alone they flagged base
    settings that production sets again. The markup Choice asks a Django view
    what it sends back, since views that only redirect or render an escaping
-   template split on the markup check. Django error views
+   template split on the markup check. Since nearly every Django view places
+   request values somewhere, an injection note that no check found (values
+   from another party, every check undecided or clear) gets the settle
+   Choices too: on django.nV, redirects to the view's own paths with ids in
+   them left seven such notes, which the redirect-target Choice cleared. The
+   CSRF check names forms for visitors who are not signed in, such as a
+   password reset request, as not acting for a user. Django error views
    (`handler500 = …`), middleware `process_exception` and Django REST
    framework's `EXCEPTION_HANDLER` are error handlers, asked with the
    framework's errors written for the user named as acceptable.

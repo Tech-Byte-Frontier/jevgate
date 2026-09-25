@@ -208,7 +208,7 @@ fn a_settings_module_is_sent_redacted_with_the_modules_that_import_it_and_what_s
             {
                 "module": "site/settings/dev.py",
                 "selected_as_the_settings_to_run_with_by": [
-                    "manage.py:3: os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site.settings.dev')"
+                    "manage.py:3: os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site.settings.dev') (only a default: a DJANGO_SETTINGS_MODULE set in the environment replaces it)"
                 ],
                 "sets_these_settings_again": ["DEBUG = True"],
             },
@@ -396,5 +396,41 @@ fn django_error_views_middleware_and_the_rest_framework_handler_are_error_handle
             .as_str()
             .unwrap()
             .contains("framework's errors written for the user")
+    );
+}
+
+#[test]
+fn a_django_injection_note_that_no_check_found_is_settled_like_an_undecided_unit() {
+    let project = Project::new();
+    project.write(
+        "shop/views.py",
+        "from django.shortcuts import redirect\n\n\ndef task_edit(request, project_id, task_id):\n    task = Task.objects.get(pk=task_id)\n    task.title = request.POST.get('title')\n    task.save()\n    return redirect('/shop/' + project_id + '/' + task_id)\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let outcome = |target: &str, options: &CheckArgs| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("resource", noul_at(0.9)),
+            ("redirect", noul_at(0.3)),
+            ("origin", spread(0.0, 0.05, 0.95)),
+            (
+                "redirect_target",
+                choice_of(target, &["own", "checked", "given", "outside", "none"]),
+            ),
+        ];
+        let report = run(&project, options, &mut eval);
+        let file = &report.files[0];
+        (
+            file.dimensions[catalog::INJECTION].status.clone(),
+            file.findings.iter().map(|f| f.strength).collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(outcome("own", &options), (Status::Clear, Vec::new()));
+    options.refresh = true;
+    assert_eq!(
+        outcome("outside", &options).1,
+        [Strength::Note],
+        "a target the Choice does not clear keeps the note"
     );
 }
