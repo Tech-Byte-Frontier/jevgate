@@ -47,7 +47,12 @@ pub(super) fn plan_file(
     if shared.enabled(catalog::FILE_ORGANIZATION) {
         plan_outline(scope, shared, &context, view, &lines, &mut file, requests);
     }
-    if shared.enabled(catalog::HARDCODED_VALUES) && view.application {
+    // Example code spells its values out for the reader: sqlmodel's
+    // `docs_src` tutorials each open a `database.db` with sample heroes.
+    if shared.enabled(catalog::HARDCODED_VALUES)
+        && view.application
+        && !crate::analysis::clones::example_code(context.path)
+    {
         plan_values(&scope.units[&owner], &context, &lines, &mut file, requests);
     }
     if shared.enabled(catalog::COMMENTS) && view.application {

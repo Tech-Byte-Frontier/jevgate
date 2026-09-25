@@ -112,6 +112,8 @@ pub fn test_mock_only(path: &str, evidence: TestEvidence) -> Value {
             "The error the code raises or the status it returns when a stub returns nothing, such as a not-found error for a missing record",
             "A field the code adds to or derives from stubbed data, such as a count or a flag it computes",
             "That the code made the calls a mock expects, such as a mock server's expectation of one request",
+            "What a client returned, parsed or passed on from a local server the test starts: that server is a real peer, not a stub",
+            "Whether the code called a hook or callback the test passes in as an option: the option is input, not a mock",
         ]);
     }
     json!({

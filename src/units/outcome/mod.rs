@@ -268,7 +268,21 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         _ => None,
     };
-    result.unwrap_or(Outcome::Missing)
+    let outcome = result.unwrap_or(Outcome::Missing);
+    // Example code is written to be read in one piece, and its settings to be
+    // copied and changed: debug-toolbar's example project keeps a literal
+    // SECRET_KEY, and sqlmodel's tutorials run each step in one function.
+    let example = matches!(
+        unit.rule,
+        catalog::FUNCTION_SIMPLIFICATION | catalog::UNSAFE_SETTINGS
+    ) && unit
+        .locations
+        .iter()
+        .all(|l| crate::analysis::clones::example_code(&l.path));
+    match outcome {
+        Outcome::Review(p) | Outcome::Consider(p) if example => Outcome::Note(p),
+        outcome => outcome,
+    }
 }
 
 /// A Score whose two lower levels are acceptable: review at its top level,

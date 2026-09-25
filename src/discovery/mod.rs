@@ -50,7 +50,8 @@ impl Classifier {
         } else if under(&["migrations"]) || schema_change(&components, &name) {
             "migration"
         } else if self.tests.is_match(path)
-            || under(&["test", "tests", "__tests__"])
+            // Browser test suites keep their specs and support files apart.
+            || under(&["test", "tests", "__tests__", "cypress", "e2e", "playwright"])
             || (name.ends_with(".cs") && components.iter().any(|c| dotnet_test_project(c)))
             || test_name(&name)
             || name.ends_with(".rb") && under(&["spec", "step_definitions"])
@@ -204,6 +205,10 @@ mod tests {
             "fixture"
         );
         assert_eq!(classifier.role(Path::new("lib/spec/openapi.ts")), "source");
+        assert_eq!(
+            classifier.role(Path::new("cypress/support/commands.ts")),
+            "test"
+        );
         for java in ["OrdersTest.java", "OrdersTests.java", "OrdersIT.java"] {
             let path = std::path::PathBuf::from("module/src/integration/java").join(java);
             assert_eq!(classifier.role(&path), "test", "{java}");

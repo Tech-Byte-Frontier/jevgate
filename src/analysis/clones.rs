@@ -182,6 +182,7 @@ fn example_directory(part: &str) -> bool {
         "demos",
         "tutorial",
         "tutorials",
+        "docs_src",
     ]
     .contains(&part.as_str())
         || part.ends_with("_examples")
@@ -1532,6 +1533,14 @@ mod tests {
             Path::new("src/billing/raw/apis.py"),
             Path::new("src/billing/sdk/apis.py")
         ));
+        for path in [
+            "docs_src/tutorial/one/tutorial001.py",
+            "example/settings.py",
+            "examples/hello_world.rs",
+        ] {
+            assert!(super::example_code(Path::new(path)), "{path}");
+        }
+        assert!(!super::example_code(Path::new("src/examples.rs")));
     }
 
     #[test]
