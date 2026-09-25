@@ -8,7 +8,10 @@ use super::{
     settings_modules::{selections, settings_extended_by},
 };
 use crate::{
-    analysis::{imports::Imports, units::Unit},
+    analysis::{
+        imports::Imports,
+        units::{FileUnits, Unit},
+    },
     catalog,
     units::{FileContext, FilePlan, Planned, security},
 };
@@ -48,49 +51,8 @@ pub(super) fn plan_security(
                 &shared.constants,
             );
             subject.django = parsed.django;
-            if !parsed.django {
-                return subject;
-            }
-            if let Some(command) = crate::analysis::django::management_command(context.path) {
-                subject.evidence.insert(
-                    "django_management_command".into(),
-                    serde_json::json!(format!(
-                        "A person runs it by hand with `manage.py {command}`; its options come from that person's command line."
-                    )),
-                );
-            }
-            let constants = constants_used(&parsed.module_constants, &subject.source);
-            if !constants.is_empty() {
-                subject.evidence.insert(
-                    "module_constants_it_uses".into(),
-                    serde_json::json!(constants),
-                );
-            }
-            let routes = routes_to(scope, context, unit);
-            if !routes.is_empty() {
-                subject.evidence.insert(
-                    "url_routes_that_send_requests_to_it".into(),
-                    serde_json::json!(routes),
-                );
-            }
-            let templates: Vec<serde_json::Value> = crate::analysis::django::rendered(
-                subject.source.as_str(),
-                &scope.inputs[context.owner].templates,
-            )
-            .into_iter()
-            .take(crate::analysis::django::TEMPLATES)
-            .map(|t| {
-                serde_json::json!({
-                    "template": t.path.display().to_string(),
-                    "unescaped_output": t.unescaped,
-                })
-            })
-            .collect();
-            if rules.contains(&catalog::INJECTION) && !templates.is_empty() {
-                subject.evidence.insert(
-                    "templates_it_renders_that_write_values_without_escaping".into(),
-                    serde_json::json!(templates),
-                );
+            if parsed.django {
+                django_evidence(scope, context, parsed, unit, rules, &mut subject);
             }
             subject
         })
@@ -135,6 +97,60 @@ const CONSTANTS: usize = 4;
 
 /// The assignments of the module constants a function's source names as a
 /// whole word, such as the base directory it joins file names to.
+/// What a Django function's checks need beyond its code: how a management
+/// command is run, the module constants it reads, the routes that reach it
+/// and, for injection, the templates it renders without escaping.
+fn django_evidence(
+    scope: &Scope<'_>,
+    context: &FileContext<'_>,
+    parsed: &FileUnits,
+    unit: &Unit,
+    rules: &[&'static str],
+    subject: &mut security::Subject<'_>,
+) {
+    if let Some(command) = crate::analysis::django::management_command(context.path) {
+        subject.evidence.insert(
+            "django_management_command".into(),
+            serde_json::json!(format!(
+                "A person runs it by hand with `manage.py {command}`; its options come from that person's command line."
+            )),
+        );
+    }
+    let constants = constants_used(&parsed.module_constants, &subject.source);
+    if !constants.is_empty() {
+        subject.evidence.insert(
+            "module_constants_it_uses".into(),
+            serde_json::json!(constants),
+        );
+    }
+    let routes = routes_to(scope, context, unit);
+    if !routes.is_empty() {
+        subject.evidence.insert(
+            "url_routes_that_send_requests_to_it".into(),
+            serde_json::json!(routes),
+        );
+    }
+    let templates: Vec<serde_json::Value> = crate::analysis::django::rendered(
+        subject.source.as_str(),
+        &scope.inputs[context.owner].templates,
+    )
+    .into_iter()
+    .take(crate::analysis::django::TEMPLATES)
+    .map(|t| {
+        serde_json::json!({
+            "template": t.path.display().to_string(),
+            "unescaped_output": t.unescaped,
+        })
+    })
+    .collect();
+    if rules.contains(&catalog::INJECTION) && !templates.is_empty() {
+        subject.evidence.insert(
+            "templates_it_renders_that_write_values_without_escaping".into(),
+            serde_json::json!(templates),
+        );
+    }
+}
+
 fn constants_used(constants: &[(String, String)], source: &str) -> Vec<String> {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     constants

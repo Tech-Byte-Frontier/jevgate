@@ -214,6 +214,9 @@ const JITTER_RETRY_STEP: u64 = 101;
 const JITTER_RANGE: u64 = 250;
 const PER_MILLE: u32 = 1000;
 
+/// The first pause after a rate-limit or overload response; later ones grow from it.
+const FIRST_BACKOFF: Duration = Duration::from_millis(500);
+
 /// Reject further uploads in this review only after a typed account/access failure.
 /// Completed and in-flight requests keep their individual results; caches bypass this gate.
 /// Rate-limit and overload responses pause every worker through one shared cooldown.
@@ -235,7 +238,7 @@ impl Default for ProviderAccess {
             edge: std::sync::atomic::AtomicBool::new(false),
             edge_blocks: AtomicU16::new(0),
             cooldown: Mutex::new(None),
-            backoff: Duration::from_millis(500),
+            backoff: FIRST_BACKOFF,
         }
     }
 }

@@ -380,62 +380,22 @@ pub fn untraced_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Strin
 }
 
 pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
-    let mut counts = BTreeMap::<&str, UnitCounts>::new();
-    let mut concern = BTreeMap::<&str, f64>::new();
-    let mut findings = Vec::new();
-    let mut redundant = Vec::new();
-    let mut commented = Vec::new();
-    let mut undecided = BTreeMap::<&str, Vec<Undecided>>::new();
     let few = few_comment_lines(plan, judgments);
+    let mut tally = Tally::default();
     for (rule, omitted) in &plan.rules {
-        counts.entry(rule).or_default().omitted = *omitted;
+        tally.counts.entry(rule).or_default().omitted = *omitted;
     }
     for unit in &plan.units {
-        let count = counts.entry(unit.rule).or_default();
-        if !counted_as_judged(unit, judgments, count) {
-            continue;
-        }
-        let (outcome, answers) = resolved(unit, judgments);
-        let outcome = if unnamed_value(unit, judgments) || few.contains(unit.id.as_str()) {
-            lowered(outcome)
-        } else {
-            outcome
-        };
-        let top = concern.entry(unit.rule).or_default();
-        *top = top.max(outcome.concern());
-        match strength_of(outcome) {
-            Some((strength, p)) => {
-                *match strength {
-                    Strength::Review => &mut count.review,
-                    Strength::Consider => &mut count.consider,
-                    Strength::Note => &mut count.note,
-                } += 1;
-                if unit.rule == catalog::COMMENTS {
-                    commented.push((
-                        unit,
-                        strength,
-                        p,
-                        comment_reason(&answers, documented(unit)),
-                    ));
-                } else {
-                    findings.push(finding(plan, unit, strength, p, &answers, judgments));
-                }
-            }
-            None if outcome == Outcome::Clear => count.clear += 1,
-            None => {
-                count.uncertain += 1;
-                undecided
-                    .entry(unit.rule)
-                    .or_default()
-                    .push(undecided_unit(unit, &answers));
-            }
-        }
-        if let (Detail::TestPair { names, subject }, Outcome::Review(p) | Outcome::Consider(p)) =
-            (&unit.detail, outcome)
-        {
-            redundant.push((unit, names, subject, p));
-        }
+        tally.add(plan, unit, judgments, &few);
     }
+    let Tally {
+        mut counts,
+        concern,
+        mut findings,
+        redundant,
+        commented,
+        mut undecided,
+    } = tally;
     findings.extend(over_tested(plan, &redundant));
     findings.extend(comment_findings(plan, &commented));
     let dimensions = plan
@@ -455,6 +415,76 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
         dimensions,
         findings,
         status,
+    }
+}
+
+/// What a file's units add up to, per rule, before comment findings and
+/// redundant tests are grouped.
+#[derive(Default)]
+struct Tally<'p> {
+    counts: BTreeMap<&'p str, UnitCounts>,
+    concern: BTreeMap<&'p str, f64>,
+    findings: Vec<Finding>,
+    redundant: Vec<(&'p UnitPlan, &'p [String; 2], &'p String, f64)>,
+    commented: Vec<(&'p UnitPlan, Strength, f64, &'static str)>,
+    undecided: BTreeMap<&'p str, Vec<Undecided>>,
+}
+
+impl<'p> Tally<'p> {
+    /// Counts one unit under its rule and keeps what it contributes: a
+    /// finding, a comment to group, a redundant test pair or an undecided unit.
+    fn add(
+        &mut self,
+        plan: &FilePlan,
+        unit: &'p UnitPlan,
+        judgments: &[Judgment],
+        few: &BTreeSet<&str>,
+    ) {
+        let count = self.counts.entry(unit.rule).or_default();
+        if !counted_as_judged(unit, judgments, count) {
+            return;
+        }
+        let (outcome, answers) = resolved(unit, judgments);
+        let outcome = if unnamed_value(unit, judgments) || few.contains(unit.id.as_str()) {
+            lowered(outcome)
+        } else {
+            outcome
+        };
+        let top = self.concern.entry(unit.rule).or_default();
+        *top = top.max(outcome.concern());
+        match strength_of(outcome) {
+            Some((strength, p)) => {
+                *match strength {
+                    Strength::Review => &mut count.review,
+                    Strength::Consider => &mut count.consider,
+                    Strength::Note => &mut count.note,
+                } += 1;
+                if unit.rule == catalog::COMMENTS {
+                    self.commented.push((
+                        unit,
+                        strength,
+                        p,
+                        comment_reason(&answers, documented(unit)),
+                    ));
+                } else {
+                    self.findings
+                        .push(finding(plan, unit, strength, p, &answers, judgments));
+                }
+            }
+            None if outcome == Outcome::Clear => count.clear += 1,
+            None => {
+                count.uncertain += 1;
+                self.undecided
+                    .entry(unit.rule)
+                    .or_default()
+                    .push(undecided_unit(unit, &answers));
+            }
+        }
+        if let (Detail::TestPair { names, subject }, Outcome::Review(p) | Outcome::Consider(p)) =
+            (&unit.detail, outcome)
+        {
+            self.redundant.push((unit, names, subject, p));
+        }
     }
 }
 

@@ -111,23 +111,7 @@ pub fn blocks(source: &str, section: &Section) -> Vec<Section> {
     let lines: Vec<&str> = source.lines().collect();
     let first = section.start_line - 1 + usize::from(!section.heading.is_empty());
     let last = section.end_line.min(lines.len());
-    let mut starts = Vec::new();
-    let (mut fence, mut blank) = (false, true);
-    for (index, line) in lines.iter().enumerate().take(last).skip(first) {
-        let fenced_line =
-            line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~");
-        if !fence
-            && !line.trim().is_empty()
-            && (blank || list_item(line))
-            && !line.starts_with([' ', '\t'])
-        {
-            starts.push(index);
-        }
-        if fenced_line {
-            fence = !fence;
-        }
-        blank = line.trim().is_empty();
-    }
+    let starts = block_starts(&lines, first, last);
     let mut blocks = Vec::new();
     for (i, &start) in starts.iter().enumerate() {
         let end = starts.get(i + 1).copied().unwrap_or(last);
@@ -148,6 +132,29 @@ pub fn blocks(source: &str, section: &Section) -> Vec<Section> {
         }
     }
     blocks
+}
+
+/// Indexes of the lines in `first..last` that start a block: an unindented
+/// line after a blank one, or an unindented list item, outside code fences.
+fn block_starts(lines: &[&str], first: usize, last: usize) -> Vec<usize> {
+    let mut starts = Vec::new();
+    let (mut fence, mut blank) = (false, true);
+    for (index, line) in lines.iter().enumerate().take(last).skip(first) {
+        let fenced_line =
+            line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~");
+        if !fence
+            && !line.trim().is_empty()
+            && (blank || list_item(line))
+            && !line.starts_with([' ', '\t'])
+        {
+            starts.push(index);
+        }
+        if fenced_line {
+            fence = !fence;
+        }
+        blank = line.trim().is_empty();
+    }
+    starts
 }
 
 /// A list item marker at the start of a line: `-`, `*`, `+` or `1.`.

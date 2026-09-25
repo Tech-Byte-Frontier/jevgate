@@ -240,10 +240,7 @@ fn visit(
         }
         // A JUnit 3 `TestCase` subclass: its `test…` methods are tests.
         "class_declaration" if crate::test_locations::junit3_class(node, source) => {
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                visit(child, source, pytest, true, found);
-            }
+            visit_children(node, source, pytest, true, found);
             return;
         }
         "function_definition" => {
@@ -260,18 +257,12 @@ fn visit(
         }
         "class_definition" => {
             let test_class = crate::test_locations::python_test_class(node, source, pytest);
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                visit(child, source, pytest, test_class, found);
-            }
+            visit_children(node, source, pytest, test_class, found);
             return;
         }
         // Ruby: `class OrderTest < Minitest::Test` holds `test_*` methods.
         "class" if crate::test_locations::ruby_test_class(node, source) => {
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                visit(child, source, pytest, true, found);
-            }
+            visit_children(node, source, pytest, true, found);
             return;
         }
         "method" => {
@@ -297,10 +288,7 @@ fn visit(
             return;
         }
         "class_declaration" if crate::analysis::php::test_class(node, source) => {
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                visit(child, source, pytest, true, found);
-            }
+            visit_children(node, source, pytest, true, found);
             return;
         }
         "expression_statement" => {
@@ -325,6 +313,16 @@ fn visit(
         }
         _ => {}
     }
+    visit_children(node, source, pytest, in_test_class, found);
+}
+
+fn visit_children(
+    node: Node<'_>,
+    source: &str,
+    pytest: bool,
+    in_test_class: bool,
+    found: &mut Vec<TestCase>,
+) {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         visit(child, source, pytest, in_test_class, found);

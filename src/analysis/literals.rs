@@ -475,28 +475,7 @@ fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
                 })
                 .collect()
         }
-        // Go: `const maxRows = 500` or a parenthesized group of specs.
-        "const_declaration" | "var_declaration" => {
-            let mut cursor = node.walk();
-            let mut specs: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
-            if let [list] = specs[..]
-                && list.kind() == "var_spec_list"
-            {
-                let mut inner = list.walk();
-                specs = list.named_children(&mut inner).collect();
-            }
-            specs
-                .into_iter()
-                .filter_map(|s| match s.kind() {
-                    "const_spec" | "var_spec" => s
-                        .child_by_field_name("name")
-                        .zip(s.child_by_field_name("value")),
-                    // PHP: `const LIMIT = 10;`
-                    "const_element" => s.named_child(0).zip(s.named_child(1)),
-                    _ => None,
-                })
-                .collect()
-        }
+        "const_declaration" | "var_declaration" => spec_bindings(node),
         "expression_statement" => node
             .named_child(0)
             .filter(|a| a.kind() == "assignment")
@@ -516,6 +495,29 @@ fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// Go's `const maxRows = 500` or a parenthesized group of specs, and PHP's
+/// `const LIMIT = 10;`.
+fn spec_bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
+    let mut cursor = node.walk();
+    let mut specs: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+    if let [list] = specs[..]
+        && list.kind() == "var_spec_list"
+    {
+        let mut inner = list.walk();
+        specs = list.named_children(&mut inner).collect();
+    }
+    specs
+        .into_iter()
+        .filter_map(|s| match s.kind() {
+            "const_spec" | "var_spec" => s
+                .child_by_field_name("name")
+                .zip(s.child_by_field_name("value")),
+            "const_element" => s.named_child(0).zip(s.named_child(1)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn is_value(node: Node<'_>) -> bool {
