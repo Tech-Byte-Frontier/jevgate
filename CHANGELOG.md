@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- Homebrew: `brew install tech-byte-frontier/tap/jevgate` installs the release binaries on macOS and Linux, and each release updates the formula.
+
 ## [0.17.0] - 2026-09-25
 
 - Release binaries for Linux (x86_64 and arm64, static), macOS (Apple silicon and Intel) and Windows (x86_64), with SHA-256 checksums and build provenance (`gh attestation verify`). `install.sh` installs a checked binary on Linux and macOS, and `cargo binstall jevgate` finds the archives on every platform.

@@ -127,6 +127,7 @@ Other files, such as Kotlin, are listed as skipped with the reason and never fai
 ## Install
 
 ```sh
+brew install tech-byte-frontier/tap/jevgate   # macOS and Linux, with Homebrew
 curl -fsSL https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/main/install.sh | sh   # Linux and macOS
 cargo binstall jevgate            # any platform, with cargo-binstall
 cargo install jevgate --locked    # build from source; needs Rust 1.90 or later

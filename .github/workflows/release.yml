@@ -2,7 +2,8 @@ name: Release
 # Pushing an annotated tag `vX.Y.Z` on main publishes that version: the CI
 # checks run and the binaries build first, then the crate goes to crates.io and
 # the tag's message body becomes the notes of a GitHub release that carries the
-# binaries, their checksums and build provenance. Every step can be rerun safely.
+# binaries, their checksums and build provenance; then the Homebrew formula in
+# Tech-Byte-Frontier/homebrew-tap installs it. Every step can be rerun safely.
 on:
   push:
     tags: ["v*"]
@@ -96,3 +97,32 @@ jobs:
 
           EOF
           gh release create "$TAG" dist/* --verify-tag --latest --title "JevGate $VERSION" --notes-file "$RUNNER_TEMP/release.md"
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The deploy key can write only to the tap.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Tech-Byte-Frontier/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: homebrew-tap
+      - name: Update the Homebrew formula
+        run: |
+          gh release download "$TAG" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          .github/homebrew-formula.sh "${TAG#v}" "$RUNNER_TEMP/SHA256SUMS" > homebrew-tap/Formula/jevgate.rb
+          cd homebrew-tap
+          if git diff --quiet; then
+            echo "The formula already installs $TAG"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "jevgate ${TAG#v}"
+          git push
