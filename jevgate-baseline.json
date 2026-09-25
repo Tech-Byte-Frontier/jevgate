@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "created_at": 1790308474,
+  "findings": [
+    {
+      "fingerprint": "2d086cdd11d41285bf1e2a3888489526d8c46a8a82ab5f6198d9524c0c42d2fc",
+      "rule": "maintainability/shared-logic",
+      "path": "src/analysis/ruby.rs",
+      "line": 185,
+      "strength": "consider",
+      "message": "`bound` (src/analysis/ruby.rs:185) and `imports` (src/analysis/units/import_names.rs:81) repeat related steps; a person should decide whether they belong together (0.84). Differences: `call`\u2192`string`, `bound`\u2192`imports`.",
+      "reason": "wrong"
+    }
+  ]
+}
