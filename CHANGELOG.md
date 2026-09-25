@@ -4,6 +4,7 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- `--format sarif` writes a SARIF 2.1.0 log for GitHub code scanning, GitLab and editors: the findings `--format github` annotates, as `error` when they fail the gate and `warning` otherwise, with every rule's question, related locations, the finding's fingerprint and probability. Run errors and files that could not be judged are tool notifications.
 - Agent output is colored on a terminal: the headline by the gate's outcome, review and consider headings, and each finding's location. `--color auto|always|never` chooses, and `NO_COLOR` and `CLICOLOR_FORCE` are honored; JSON and GitHub annotations are never colored.
 - `jevgate completions SHELL` prints a completion script for bash, zsh, fish, elvish or PowerShell, and `jevgate man [COMMAND]` a man page, both generated from the same definitions as `--help`. The Homebrew formula installs them.
 - Homebrew: `brew install tech-byte-frontier/tap/jevgate` installs the release binaries on macOS and Linux, and each release updates the formula.

@@ -19,7 +19,11 @@ fn validate(args: &CheckArgs) -> Result<()> {
         "--watch cannot be combined with --dry-run"
     );
     anyhow::ensure!(
-        !(args.watch && matches!(args.output_format(), Format::Json | Format::Github)),
+        !(args.watch
+            && matches!(
+                args.output_format(),
+                Format::Json | Format::Github | Format::Sarif
+            )),
         "Use --format jsonl for watch snapshots"
     );
     Ok(())
