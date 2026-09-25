@@ -53,6 +53,10 @@ const LITERALS: &[&str] = &[
     "none",
     "undefined",
     "boolean_literal",
+    "null_literal",
+    "character_literal",
+    "real_literal",
+    "verbatim_string_literal",
 ];
 
 const STATEMENTS: &[&str] = &[
@@ -67,6 +71,7 @@ const STATEMENTS: &[&str] = &[
     "var_declaration",
     "defer_statement",
     "go_statement",
+    "local_declaration_statement",
 ];
 
 /// Rust's standard formatting macros build text from their arguments.
@@ -84,6 +89,14 @@ const FORMAT_MACROS: &[&str] = &[
 
 /// Go functions that build text from a format string and values.
 const GO_FORMAT_CALLS: &[&str] = &["Sprintf", "Sprint", "Sprintln", "Errorf", "Fprintf"];
+
+/// C# methods that build text from a format string or pieces.
+const CSHARP_FORMAT_CALLS: &[&str] = &[
+    "string.Format",
+    "String.Format",
+    "string.Concat",
+    "String.Concat",
+];
 
 /// Sites of the body, one per statement, in source order with ids `S1…`.
 pub fn in_node(body: Node<'_>, source: &str) -> Vec<Site> {
@@ -125,6 +138,7 @@ const SETUP_STATEMENTS: &[&str] = &[
     "variable_declaration",
     "if_statement",
     "with_statement",
+    "local_declaration_statement",
 ];
 
 pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
@@ -135,6 +149,11 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
         let node = match node.kind() {
             "export_statement" => match node.child_by_field_name("declaration") {
                 Some(declaration) => declaration,
+                None => continue,
+            },
+            // A C# top-level statement, as `Program.cs` writes its setup.
+            "global_statement" => match node.named_child(0) {
+                Some(statement) => statement,
                 None => continue,
             },
             _ => node,
@@ -164,7 +183,12 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
 fn calls_something(node: Node<'_>) -> bool {
     matches!(
         node.kind(),
-        "call_expression" | "call" | "new_expression" | "macro_invocation"
+        "call_expression"
+            | "call"
+            | "new_expression"
+            | "macro_invocation"
+            | "invocation_expression"
+            | "object_creation_expression"
     ) || {
         let mut cursor = node.walk();
         node.named_children(&mut cursor).any(calls_something)
@@ -194,7 +218,9 @@ fn collect<'t>(
 fn priority(node: Node<'_>, source: &str) -> Option<Priority> {
     match node.kind() {
         "template_string" if has_child(node, "template_substitution") => Some(Priority::BuiltText),
-        "string" if has_child(node, "interpolation") => Some(Priority::BuiltText),
+        "string" | "interpolated_string_expression" if has_child(node, "interpolation") => {
+            Some(Priority::BuiltText)
+        }
         "binary_expression" | "binary_operator" if concatenates(node, source) => {
             Some(Priority::BuiltText)
         }
@@ -212,7 +238,18 @@ fn priority(node: Node<'_>, source: &str) -> Option<Priority> {
         {
             Some(Priority::BuiltText)
         }
-        "call_expression" | "call" | "new_expression" => Some(
+        "invocation_expression"
+            if node
+                .child_by_field_name("function")
+                .is_some_and(|f| CSHARP_FORMAT_CALLS.contains(&text(f, source))) =>
+        {
+            Some(Priority::BuiltText)
+        }
+        "call_expression"
+        | "call"
+        | "new_expression"
+        | "invocation_expression"
+        | "object_creation_expression" => Some(
             if node
                 .child_by_field_name("arguments")
                 .is_some_and(|args| has_value(args))
@@ -226,8 +263,15 @@ fn priority(node: Node<'_>, source: &str) -> Option<Priority> {
             if node.child_by_field_name("left").is_some_and(|left| {
                 matches!(
                     left.kind(),
-                    "member_expression" | "attribute" | "field_expression" | "subscript_expression"
-                )
+                    "member_expression"
+                        | "attribute"
+                        | "field_expression"
+                        | "subscript_expression"
+                        | "member_access_expression"
+                        | "element_access_expression"
+                ) || node
+                    .parent()
+                    .is_some_and(|p| p.kind() == "initializer_expression")
             }) =>
         {
             Some(Priority::FieldAssignment)
@@ -260,6 +304,8 @@ fn concatenates(node: Node<'_>, source: &str) -> bool {
                 | "template_string"
                 | "interpreted_string_literal"
                 | "raw_string_literal"
+                | "verbatim_string_literal"
+                | "interpolated_string_expression"
         )
     };
     matches!(operator, "+" | "%")
@@ -271,10 +317,13 @@ fn concatenates(node: Node<'_>, source: &str) -> bool {
 fn has_value(arguments: Node<'_>) -> bool {
     let mut cursor = arguments.walk();
     arguments.named_children(&mut cursor).any(|argument| {
-        let value = if argument.kind() == "keyword_argument" {
-            argument.child_by_field_name("value")
-        } else {
-            Some(argument)
+        let value = match argument.kind() {
+            "keyword_argument" => argument.child_by_field_name("value"),
+            // A C# argument wraps its expression, after any `name:`.
+            "argument" => {
+                argument.named_child(argument.named_child_count().saturating_sub(1) as u32)
+            }
+            _ => Some(argument),
         };
         value.is_some_and(|v| !LITERALS.contains(&v.kind()) && !is_comment(v))
     })

@@ -12,6 +12,13 @@ pub struct Imports {
 
 impl Imports {
     pub fn new(path: &Path, source: &str) -> Self {
+        let family = family(path);
+        if family == "csharp" {
+            return Self {
+                family,
+                lines: csharp_lines(source),
+            };
+        }
         let lines = source
             .lines()
             .map(str::trim)
@@ -26,20 +33,50 @@ impl Imports {
             })
             .map(str::to_string)
             .collect();
-        Self {
-            family: family(path),
-            lines,
-        }
+        Self { family, lines }
     }
 
-    /// True when these imports name the module that `target` defines.
+    /// True when these imports name the module that `target` defines. C#
+    /// files name no files: a `using` imports a whole namespace, so a file
+    /// reaches the class its target is named after (`BasketService.cs`) when
+    /// its code names that class or its interface (`IBasketService`).
     pub fn reach(&self, target: &Path) -> bool {
         if self.family.is_empty() || self.family != family(target) {
             return false;
         }
-        let name = module_name(target);
-        !name.is_empty() && self.lines.iter().any(|line| names_segment(line, &name))
+        let mut name = module_name(target);
+        if self.family == "csharp" {
+            // `Index.cshtml.cs` holds the page model of `Index.cshtml`.
+            name = name.split('.').next().unwrap_or("").to_string();
+        }
+        if name.is_empty() {
+            return false;
+        }
+        if self.family == "csharp" {
+            let interface = format!("I{name}");
+            return self
+                .lines
+                .iter()
+                .any(|line| names_segment(line, &name) || names_segment(line, &interface));
+        }
+        self.lines.iter().any(|line| names_segment(line, &name))
     }
+}
+
+/// The lines of C# code that can name a class: not blank, not a comment and
+/// not a `using` or `namespace` line.
+fn csharp_lines(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !["//", "/*", "*", "using ", "namespace "]
+                    .iter()
+                    .any(|prefix| line.starts_with(prefix))
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 fn family(path: &Path) -> &'static str {
@@ -47,6 +84,7 @@ fn family(path: &Path) -> &'static str {
         "rs" => "rust",
         "py" => "python",
         "go" => "go",
+        "cs" => "csharp",
         "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte"
         | "astro" => "javascript",
         _ => "",
@@ -84,7 +122,7 @@ mod tests {
 
     #[test]
     fn callers_need_an_import_of_the_module_in_the_same_language() {
-        let cases: [(&str, &str, &[&str], &[&str]); 3] = [
+        let cases: [(&str, &str, &[&str], &[&str]); 4] = [
             (
                 "src/game/view.ts",
                 "import { durationLabel } from './travel-presentation'\nconst x = update()\n",
@@ -102,6 +140,20 @@ mod tests {
                 "use crate::units::{self, compose};\nmod gate;\n",
                 &["src/units/mod.rs", "src/gate.rs"],
                 &["src/units/questions.rs"],
+            ),
+            (
+                "src/Web/Controllers/BasketController.cs",
+                "using Shop.Core.Services;\n\n// Uses OrderService indirectly.\npublic class BasketController(IBasketService basket, UriComposer uris) { }\n",
+                &[
+                    "src/Core/Services/BasketService.cs",
+                    "src/Core/UriComposer.cs",
+                    "src/Core/IBasketService.cs",
+                ],
+                &[
+                    "src/Core/Services/OrderService.cs",
+                    "src/Core/Services/Services.cs",
+                    "src/Core/basket.py",
+                ],
             ),
         ];
         for (caller, source, reached, unreached) in cases {

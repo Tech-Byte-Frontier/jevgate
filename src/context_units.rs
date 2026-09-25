@@ -88,7 +88,12 @@ fn collect(
     let kind = node.kind();
     if matches!(
         kind,
-        "use_declaration" | "import_statement" | "import_from_statement" | "inner_attribute_item"
+        "use_declaration"
+            | "import_statement"
+            | "import_from_statement"
+            | "inner_attribute_item"
+            | "using_directive"
+            | "file_scoped_namespace_declaration"
     ) || python_docstring(node, source)
     {
         scaffolding.push(definition_start(node)..node.end_byte());
@@ -102,7 +107,13 @@ fn collect(
     }
     if matches!(
         kind,
-        "source_file" | "program" | "module" | "declaration_list" | "class_body" | "block"
+        "source_file"
+            | "program"
+            | "module"
+            | "declaration_list"
+            | "class_body"
+            | "block"
+            | "compilation_unit"
     ) {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
@@ -140,13 +151,25 @@ fn container(
     units: &mut Vec<Unit>,
     scaffolding: &mut Vec<Range<usize>>,
 ) -> bool {
-    if !matches!(
+    let csharp = matches!(
         node.kind(),
-        "impl_item" | "mod_item" | "class_declaration" | "class_definition"
-    ) {
+        "namespace_declaration"
+            | "struct_declaration"
+            | "record_declaration"
+            | "interface_declaration"
+    );
+    if !csharp
+        && !matches!(
+            node.kind(),
+            "impl_item" | "mod_item" | "class_declaration" | "class_definition"
+        )
+    {
         return false;
     }
-    let Some(body) = node.child_by_field_name("body") else {
+    let Some(body) = node
+        .child_by_field_name("body")
+        .filter(|body| !csharp || body.kind() == "declaration_list")
+    else {
         return false;
     };
     let first = body
@@ -200,7 +223,12 @@ fn enclosing_owner(node: Node<'_>, source: &str) -> String {
     while let Some(parent) = owner {
         if matches!(
             parent.kind(),
-            "impl_item" | "class_declaration" | "class_definition"
+            "impl_item"
+                | "class_declaration"
+                | "class_definition"
+                | "struct_declaration"
+                | "record_declaration"
+                | "interface_declaration"
         ) {
             return parent
                 .child_by_field_name("type")

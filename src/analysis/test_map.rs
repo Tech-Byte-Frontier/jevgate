@@ -1,6 +1,7 @@
 //! Test cases, the non-test functions they call, and candidate redundant pairs.
 //! Rust `#[test]`-family functions, JavaScript and TypeScript `it`/`test`
-//! (including `.each`), and Python `test_*` functions.
+//! (including `.each`), Python `test_*` functions, Go `Test…` functions and
+//! C# methods marked `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]`.
 use super::{callee_name, fast_hash, is_comment, line_of, macro_calls, text};
 use anyhow::Result;
 use std::{collections::BTreeSet, ops::Range, path::Path};
@@ -65,6 +66,14 @@ fn collect_suites(node: Node<'_>, source: &str, suites: &mut Vec<(Range<usize>, 
     let title = match node.kind() {
         "call_expression" => suite_call(node, source),
         "class_definition" | "mod_item" => Some(name(node, source)).filter(|name| !name.is_empty()),
+        // A C# test class; TypeScript classes (`class_body`) do not group tests.
+        "class_declaration"
+            if node
+                .child_by_field_name("body")
+                .is_some_and(|b| b.kind() == "declaration_list") =>
+        {
+            Some(name(node, source)).filter(|name| !name.is_empty())
+        }
         _ => None,
     };
     if let Some(title) = title {
@@ -124,6 +133,10 @@ fn visit(
             return;
         }
         "function_declaration" if crate::test_locations::go_test_function(node, source) => {
+            push(node, node.start_byte(), name(node, source), source, found);
+            return;
+        }
+        "method_declaration" if crate::test_locations::csharp_test_method(node, source) => {
             push(node, node.start_byte(), name(node, source), source, found);
             return;
         }
@@ -242,7 +255,7 @@ fn walk<'a>(
         return;
     }
     match node.kind() {
-        "call_expression" | "call" => {
+        "call_expression" | "call" | "invocation_expression" => {
             if let Some(name) = node
                 .child_by_field_name("function")
                 .and_then(|f| callee_name(f, source))
@@ -253,6 +266,15 @@ fn walk<'a>(
         "jsx_opening_element" | "jsx_self_closing_element" => {
             if let Some(name) = node.child_by_field_name("name") {
                 calls.insert(text(name, source).to_string());
+            }
+        }
+        // C#: constructing the class under test calls its constructor.
+        "object_creation_expression" => {
+            if let Some(name) = node
+                .child_by_field_name("type")
+                .and_then(|t| callee_name(t, source))
+            {
+                calls.insert(name);
             }
         }
         "token_tree"
@@ -369,6 +391,23 @@ mod tests {
         assert_eq!(names("total_test.go", go), ["TestAdds", "BenchmarkTotal"]);
         let located = crate::test_locations::locate_tests(Path::new("total_test.go"), go).unwrap();
         assert_eq!(located.ranges.len(), 2);
+        let csharp = "using Xunit;\n\nnamespace Shop.Tests;\n\npublic class OrderTotal\n{\n    [Fact]\n    public void IsZeroForNewOrder()\n    {\n        Assert.Equal(0, new Order().Total());\n    }\n\n    [Theory]\n    [InlineData(1)]\n    public void Adds(int count) => Assert.Equal(count, Build(count).Total());\n\n    [Xunit.FactAttribute]\n    public void Qualified() { }\n\n    private static Order Build(int count) => new Order(count);\n}\n\n[TestClass]\npublic class Checks\n{\n    [TestMethod]\n    public void Runs() { }\n\n    [NUnit.Framework.TestCase(2)]\n    public void Case(int n) { }\n}\n";
+        assert_eq!(
+            names("OrderTotal.cs", csharp),
+            ["IsZeroForNewOrder", "Adds", "Qualified", "Runs", "Case"]
+        );
+        let found = cases(Path::new("OrderTotal.cs"), csharp).unwrap();
+        assert_eq!(found[0].suite, ["OrderTotal"]);
+        assert!(found[0].calls.contains("Order") && found[0].calls.contains("Total"));
+        assert!(found[1].calls.contains("Build"));
+        let located =
+            crate::test_locations::locate_tests(Path::new("OrderTotal.cs"), csharp).unwrap();
+        let lines: Vec<(usize, usize)> = located
+            .ranges
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect();
+        assert_eq!(lines, [(5, 21), (23, 31)], "whole test classes");
     }
 
     #[test]

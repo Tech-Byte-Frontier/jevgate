@@ -485,6 +485,11 @@ fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
             | "number"
             | "integer"
             | "float"
+            | "string_literal_content"
+            | "raw_string_content"
+            | "verbatim_string_literal"
+            | "real_literal"
+            | "character_literal"
     );
     if node.child_count() == 0 || literal {
         let text = text(node, source);
