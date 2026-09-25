@@ -17,6 +17,9 @@ use tree_sitter::Node;
 /// Candidate redundant pairs per test file.
 pub const PAIR_CAP: usize = 12;
 const SIMILARITY: f64 = 0.5;
+/// Tokens in a shingle: a pair's similarity is the share of these runs of
+/// tokens the two tests have in common.
+const SHINGLE_TOKENS: usize = 3;
 
 #[derive(Clone, Debug)]
 pub struct TestCase {
@@ -368,9 +371,40 @@ fn ruby_context(node: Node<'_>, source: &str, found: &mut [TestCase]) {
     };
     let mut bound = Vec::new();
     ruby::locals(node, source, &mut bound);
+    let (eager, lazy) = group_setup(node, source);
+    bound.extend(lazy.iter().map(|(name, _)| name.clone()));
+    let mut read = Vec::new();
+    identifiers(node, source, &mut read);
+    case.calls
+        .extend(read.iter().filter(|name| !bound.contains(name)).cloned());
+    for hook in &eager {
+        identifiers(*hook, source, &mut read);
+    }
+    let used = lazy_read(&lazy, &mut read, source, &bound, &mut case.calls);
+    let mut hooks: Vec<Node<'_>> = eager;
+    hooks.extend(
+        used.iter()
+            .filter(|u| !hooks.contains(u))
+            .copied()
+            .collect::<Vec<_>>(),
+    );
+    hooks.sort_by_key(|hook| hook.start_byte());
+    hooks.dedup();
+    for hook in &hooks {
+        read_calls(*hook, source, &bound, &mut case.hook_calls);
+    }
+    case.hooks = hooks.iter().map(|hook| hook.byte_range()).collect();
+}
+
+/// The setup a Ruby case's enclosing groups declare, innermost first: the
+/// hooks that run before it (`before`, `around`, `let!`, `subject!` and a
+/// Minitest `setup`), and each `let` and `subject` by name.
+type GroupSetup<'tree> = (Vec<Node<'tree>>, Vec<(String, Node<'tree>)>);
+
+fn group_setup<'tree>(node: Node<'tree>, source: &str) -> GroupSetup<'tree> {
     let mut eager = Vec::new();
     // Innermost first, so an inner `let` hides an outer one of the same name.
-    let mut lazy: Vec<(String, Node<'_>)> = Vec::new();
+    let mut lazy: Vec<(String, Node<'tree>)> = Vec::new();
     let mut ancestor = node.parent();
     while let Some(scope) = ancestor {
         if matches!(scope.kind(), "body_statement" | "block_body" | "program") {
@@ -404,16 +438,20 @@ fn ruby_context(node: Node<'_>, source: &str, found: &mut [TestCase]) {
         }
         ancestor = scope.parent();
     }
-    bound.extend(lazy.iter().map(|(name, _)| name.clone()));
-    let mut read = Vec::new();
-    identifiers(node, source, &mut read);
-    case.calls
-        .extend(read.iter().filter(|name| !bound.contains(name)).cloned());
-    for hook in &eager {
-        identifiers(*hook, source, &mut read);
-    }
-    // The `let` and `subject` definitions read, directly or through another.
-    let mut used: Vec<Node<'_>> = Vec::new();
+    (eager, lazy)
+}
+
+/// The `let` and `subject` definitions the names in `read` reach, directly
+/// or through another: each one adds the names it reads to `read` and what
+/// it calls to `calls`.
+fn lazy_read<'tree>(
+    lazy: &[(String, Node<'tree>)],
+    read: &mut Vec<String>,
+    source: &str,
+    bound: &[String],
+    calls: &mut BTreeSet<String>,
+) -> Vec<Node<'tree>> {
+    let mut used: Vec<Node<'tree>> = Vec::new();
     let mut next = 0;
     while next < read.len() {
         let name = read[next].clone();
@@ -422,45 +460,20 @@ fn ruby_context(node: Node<'_>, source: &str, found: &mut [TestCase]) {
             && !used.contains(definition)
         {
             used.push(*definition);
-            identifiers(*definition, source, &mut read);
-            let mut calls = BTreeSet::new();
-            walk(
-                *definition,
-                source,
-                &mut calls,
-                &mut Vec::new(),
-                &mut Vec::new(),
-            );
-            case.calls.extend(calls);
-            let mut names = Vec::new();
-            identifiers(*definition, source, &mut names);
-            case.calls
-                .extend(names.into_iter().filter(|name| !bound.contains(name)));
+            identifiers(*definition, source, read);
+            read_calls(*definition, source, bound, calls);
         }
     }
-    let mut hooks: Vec<Node<'_>> = eager;
-    hooks.extend(
-        used.iter()
-            .filter(|u| !hooks.contains(u))
-            .copied()
-            .collect::<Vec<_>>(),
-    );
-    hooks.sort_by_key(|hook| hook.start_byte());
-    hooks.dedup();
-    for hook in &hooks {
-        walk(
-            *hook,
-            source,
-            &mut case.hook_calls,
-            &mut Vec::new(),
-            &mut Vec::new(),
-        );
-        let mut names = Vec::new();
-        identifiers(*hook, source, &mut names);
-        case.hook_calls
-            .extend(names.into_iter().filter(|name| !bound.contains(name)));
-    }
-    case.hooks = hooks.iter().map(|hook| hook.byte_range()).collect();
+    used
+}
+
+/// What a hook or definition calls: its calls, and the bare names it reads
+/// that are not locals or `let`s (`bound`).
+fn read_calls(node: Node<'_>, source: &str, bound: &[String], calls: &mut BTreeSet<String>) {
+    walk(node, source, calls, &mut Vec::new(), &mut Vec::new());
+    let mut names = Vec::new();
+    identifiers(node, source, &mut names);
+    calls.extend(names.into_iter().filter(|name| !bound.contains(name)));
 }
 
 fn identifiers(node: Node<'_>, source: &str, names: &mut Vec<String>) {
@@ -527,7 +540,7 @@ fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Ve
     let mut tokens = Vec::new();
     let mut requests = Vec::new();
     walk(node, source, &mut calls, &mut tokens, &mut requests);
-    let shingles = tokens.windows(3).map(fast_hash).collect();
+    let shingles = tokens.windows(SHINGLE_TOKENS).map(fast_hash).collect();
     found.push(TestCase {
         name,
         span: start..node.end_byte(),
@@ -692,6 +705,29 @@ mod tests {
             .collect()
     }
 
+    /// Each case's name and suite.
+    fn named(found: &[TestCase]) -> Vec<(&str, Vec<&str>)> {
+        found
+            .iter()
+            .map(|c| {
+                (
+                    c.name.as_str(),
+                    c.suite.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// The first and last lines of the test code located in a file.
+    fn located(path: &str, source: &str) -> Vec<(usize, usize)> {
+        crate::test_locations::locate_tests(Path::new(path), source)
+            .unwrap()
+            .ranges
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect()
+    }
+
     #[test]
     fn phpunit_methods_and_pest_calls_are_test_cases() {
         let phpunit = "<?php\nnamespace Tests;\n\nuse PHPUnit\\Framework\\TestCase;\n\nfinal class TotalTest extends TestCase\n{\n    private function rows(): array { return [1]; }\n\n    public function testAdds(): void\n    {\n        $this->assertSame(3, total([1, 2]));\n    }\n\n    /** @test */\n    public function it_is_empty(): void\n    {\n        $this->assertSame(0, (new Summer())->total([]));\n    }\n\n    #[Test]\n    public function keeps_order(): void {}\n}\n\nclass Helper { public function testLike() {} }\n";
@@ -703,22 +739,15 @@ mod tests {
         assert!(found[0].calls.contains("total"));
         assert!(found[1].calls.contains("Summer"));
         assert_eq!(found[0].suite, ["TotalTest"]);
-        let located =
-            crate::test_locations::locate_tests(Path::new("tests/TotalTest.php"), phpunit).unwrap();
-        assert_eq!(
-            located.ranges.len(),
-            1,
-            "the TestCase class, not the helper"
-        );
-        assert_eq!(located.ranges[0].start_line, 6);
+        let classes = located("tests/TotalTest.php", phpunit);
+        assert_eq!(classes.len(), 1, "the TestCase class, not the helper");
+        assert_eq!(classes[0].0, 6);
         let pest = "<?php\n\ndescribe('total', function () {\n    it('adds', function () {\n        expect(total([1, 2]))->toBe(3);\n    });\n});\n\ntest('empty', fn () => expect(total([]))->toBe(0))->skip();\n\nfunction helper() { return 1; }\n";
         assert_eq!(names("tests/Unit/TotalTest.php", pest), ["adds", "empty"]);
         let found = cases(Path::new("tests/Unit/TotalTest.php"), pest).unwrap();
         assert_eq!(found[0].suite, ["total"]);
-        let located =
-            crate::test_locations::locate_tests(Path::new("tests/Unit/TotalTest.php"), pest)
-                .unwrap();
-        assert_eq!(located.ranges.len(), 2, "{:?}", located.ranges);
+        let calls = located("tests/Unit/TotalTest.php", pest);
+        assert_eq!(calls.len(), 2, "{calls:?}");
     }
 
     #[test]
@@ -747,8 +776,7 @@ mod tests {
         assert_eq!(suites("lib.rs", rust), [vec!["tests"], vec!["tests"]]);
         let go = "package total\n\nimport \"testing\"\n\nfunc TestAdds(t *testing.T) {\n\tif Total([]int{1, 2}) != 3 {\n\t\tt.Fatal(\"sum\")\n\t}\n}\n\nfunc BenchmarkTotal(b *testing.B) {\n\tfor i := 0; i < b.N; i++ {\n\t\tTotal(nil)\n\t}\n}\n\nfunc TestHelper() int { return 1 }\n";
         assert_eq!(names("total_test.go", go), ["TestAdds", "BenchmarkTotal"]);
-        let located = crate::test_locations::locate_tests(Path::new("total_test.go"), go).unwrap();
-        assert_eq!(located.ranges.len(), 2);
+        assert_eq!(located("total_test.go", go).len(), 2);
         let csharp = "using Xunit;\n\nnamespace Shop.Tests;\n\npublic class OrderTotal\n{\n    [Fact]\n    public void IsZeroForNewOrder()\n    {\n        Assert.Equal(0, new Order().Total());\n    }\n\n    [Theory]\n    [InlineData(1)]\n    public void Adds(int count) => Assert.Equal(count, Build(count).Total());\n\n    [Xunit.FactAttribute]\n    public void Qualified() { }\n\n    private static Order Build(int count) => new Order(count);\n}\n\n[TestClass]\npublic class Checks\n{\n    [TestMethod]\n    public void Runs() { }\n\n    [NUnit.Framework.TestCase(2)]\n    public void Case(int n) { }\n}\n";
         assert_eq!(
             names("OrderTotal.cs", csharp),
@@ -758,14 +786,11 @@ mod tests {
         assert_eq!(found[0].suite, ["OrderTotal"]);
         assert!(found[0].calls.contains("Order") && found[0].calls.contains("Total"));
         assert!(found[1].calls.contains("Build"));
-        let located =
-            crate::test_locations::locate_tests(Path::new("OrderTotal.cs"), csharp).unwrap();
-        let lines: Vec<(usize, usize)> = located
-            .ranges
-            .iter()
-            .map(|r| (r.start_line, r.end_line))
-            .collect();
-        assert_eq!(lines, [(5, 21), (23, 31)], "whole test classes");
+        assert_eq!(
+            located("OrderTotal.cs", csharp),
+            [(5, 21), (23, 31)],
+            "whole test classes"
+        );
     }
 
     const RSPEC: &str = "require 'spec_helper'\n\nRSpec.describe Invoice do\n  let(:rows) { [Row.new(2)] }\n  let(:unused) { expensive_fixture }\n  subject { Invoice.new(rows) }\n\n  before do\n    Currency.reset\n  end\n\n  it \"totals its rows\" do\n    expect(subject.total).to eq 2\n  end\n\n  context \"when empty\" do\n    let(:rows) { [] }\n\n    it { is_expected.to be_empty }\n    its(:total) { is_expected.to eq 0 }\n\n    it \"totals its rows\" do\n      expect(subject.total).to eq 0\n    end\n  end\n\n  describe \"#currency\" do\n    it \"is euro\" do\n      expect(currency_of(subject)).to eq \"EUR\"\n    end\n  end\nend\n";
@@ -773,17 +798,8 @@ mod tests {
     #[test]
     fn rspec_examples_get_their_groups_hooks_and_the_calls_of_what_they_read() {
         let found = cases(Path::new("spec/invoice_spec.rb"), RSPEC).unwrap();
-        let named: Vec<(&str, Vec<&str>)> = found
-            .iter()
-            .map(|c| {
-                (
-                    c.name.as_str(),
-                    c.suite.iter().map(String::as_str).collect(),
-                )
-            })
-            .collect();
         assert_eq!(
-            named,
+            named(&found),
             [
                 ("Invoice > totals its rows", vec!["Invoice"]),
                 (
@@ -820,10 +836,8 @@ mod tests {
         );
         assert_eq!(&RSPEC[empty.hooks[2].clone()], "let(:rows) { [] }");
         assert!(found[4].calls.contains("currency_of"), "a bare call");
-        let located =
-            crate::test_locations::locate_tests(Path::new("spec/invoice_spec.rb"), RSPEC).unwrap();
         assert_eq!(
-            located.ranges.len(),
+            located("spec/invoice_spec.rb", RSPEC).len(),
             1,
             "the outer group holds every example"
         );
@@ -833,11 +847,7 @@ mod tests {
     fn minitest_methods_and_rails_test_blocks_are_cases_and_rake_tasks_are_not() {
         let minitest = "require_relative 'test_helper'\n\nclass InvoiceTest < Minitest::Test\n  def setup\n    @invoice = Invoice.new\n  end\n\n  def test_total\n    assert_equal 0, @invoice.total\n  end\n\n  def build_row\n    Row.new\n  end\nend\n\nclass Helper\n  def test_like\n  end\nend\n";
         let found = cases(Path::new("test/invoice_test.rb"), minitest).unwrap();
-        assert_eq!(found.len(), 1);
-        assert_eq!(
-            (found[0].name.as_str(), found[0].suite.clone()),
-            ("test_total", vec!["InvoiceTest".to_string()])
-        );
+        assert_eq!(named(&found), [("test_total", vec!["InvoiceTest"])]);
         assert_eq!(
             &minitest[found[0].hooks[0].clone()],
             "def setup\n    @invoice = Invoice.new\n  end"
@@ -846,8 +856,7 @@ mod tests {
         assert_eq!(names("test/models/invoice_test.rb", rails), ["totals rows"]);
         let rakefile = "task :default => :test\n\ntest(:unit) do |t|\n  t.pattern = 'test/**/*_test.rb'\nend\n";
         assert!(names("tasks.rb", rakefile).is_empty());
-        let located = crate::test_locations::locate_tests(Path::new("tasks.rb"), rakefile).unwrap();
-        assert!(located.ranges.is_empty());
+        assert!(located("tasks.rb", rakefile).is_empty());
     }
 
     #[test]
@@ -872,17 +881,8 @@ mod tests {
     #[test]
     fn junit_methods_are_cases_and_nested_classes_are_their_suites() {
         let found = cases(Path::new("src/test/java/app/TotalTests.java"), JUNIT).unwrap();
-        let named: Vec<(&str, Vec<&str>)> = found
-            .iter()
-            .map(|c| {
-                (
-                    c.name.as_str(),
-                    c.suite.iter().map(String::as_str).collect(),
-                )
-            })
-            .collect();
         assert_eq!(
-            named,
+            named(&found),
             [
                 ("adds", vec![]),
                 ("keeps", vec![]),
@@ -892,26 +892,14 @@ mod tests {
         );
         assert!(found[0].calls.contains("sum") && found[3].calls.contains("Totals"));
         // The whole test class is test code, its fields and helpers included.
-        let located =
-            crate::test_locations::locate_tests(Path::new("TotalTests.java"), JUNIT).unwrap();
-        let ranges: Vec<(usize, usize)> = located
-            .ranges
-            .iter()
-            .map(|r| (r.start_line, r.end_line))
-            .collect();
-        assert_eq!(ranges, [(5, 36)]);
+        assert_eq!(located("TotalTests.java", JUNIT), [(5, 36)]);
         let junit3 = "public class TotalTest extends junit.framework.TestCase {\n\tpublic void testAdds() {\n\t\tassertEquals(3, Totals.sum(1, 2));\n\t}\n\n\tprivate void check() {}\n}\n";
         assert_eq!(names("TotalTest.java", junit3), ["testAdds"]);
         let subclass = "class HttpSessionTest extends SessionTest {\n\t@BeforeAll\n\tstatic void useHttp() {\n\t\tenableHttp();\n\t}\n}\n";
-        let located =
-            crate::test_locations::locate_tests(Path::new("HttpSessionTest.java"), subclass)
-                .unwrap();
-        assert_eq!(located.ranges.len(), 1);
+        assert_eq!(located("HttpSessionTest.java", subclass).len(), 1);
         let application = "class Totals {\n\tint sum(int... values) {\n\t\treturn 0;\n\t}\n\n\tvoid testConnection() {}\n}\n";
         assert!(names("Totals.java", application).is_empty());
-        let located =
-            crate::test_locations::locate_tests(Path::new("Totals.java"), application).unwrap();
-        assert!(located.ranges.is_empty());
+        assert!(located("Totals.java", application).is_empty());
     }
 
     #[test]
@@ -922,8 +910,7 @@ mod tests {
             &mut found,
             &BTreeSet::from(["setBirthDate".into(), "setName".into(), "validate".into()]),
         );
-        let (pairs, _) = pairs(&found);
-        assert_eq!(pairs[0].subject, "validate");
+        assert_eq!(pairs_of(&found)[0], "validate");
         // Accessors alone are still a shared subject.
         link(
             &mut found,
@@ -939,21 +926,27 @@ mod tests {
             &mut found,
             &BTreeSet::from(["build".into(), "transcode".into()]),
         );
-        let (found_pairs, _) = super::pairs(&found);
-        let decoded = found_pairs.iter().find(|p| (p.a, p.b) == (0, 1)).unwrap();
-        assert_eq!(decoded.subject, "transcode");
+        assert_eq!(subject_of(&found, (0, 1)), "transcode");
         // Among names most tests call, none is more the subject than another:
         // the first in order stays.
         link(
             &mut found,
             &BTreeSet::from(["build".into(), "title".into()]),
         );
-        let (found_pairs, _) = super::pairs(&found);
-        let first = found_pairs.iter().find(|p| (p.a, p.b) == (0, 1)).unwrap();
-        assert_eq!(first.subject, "build");
+        assert_eq!(subject_of(&found, (0, 1)), "build");
     }
 
     fn pairs_of(found: &[TestCase]) -> Vec<String> {
         pairs(found).0.into_iter().map(|p| p.subject).collect()
+    }
+
+    /// The subject of the pair of cases at `tests`.
+    fn subject_of(found: &[TestCase], tests: (usize, usize)) -> String {
+        pairs(found)
+            .0
+            .into_iter()
+            .find(|p| (p.a, p.b) == tests)
+            .unwrap()
+            .subject
     }
 }
