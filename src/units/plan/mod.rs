@@ -35,6 +35,7 @@ use std::{
 
 mod file;
 mod security_units;
+mod settings_modules;
 mod shared;
 
 use file::{java, plan_file};

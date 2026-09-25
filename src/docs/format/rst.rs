@@ -285,7 +285,7 @@ impl Rst<'_> {
 #[cfg(test)]
 mod tests {
     use crate::docs::{
-        format::tests::{headings, view_of},
+        format::tests::{headings, view_lines, view_of},
         markdown,
     };
 
@@ -301,11 +301,9 @@ mod tests {
                 (19, 2, "Usage".to_string()),
             ]
         );
-        let text = view_of("docs/index.rst", source);
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!((lines[0], lines[2], lines[7], lines[16]), ("", "", "", ""));
+        let lines = view_lines("docs/index.rst", source, &[0, 2, 7, 16]);
         assert_eq!(
-            (lines[21], lines[22]),
+            (lines[21].as_str(), lines[22].as_str()),
             ("Short", "--"),
             "an underline shorter than 4 and its title is text"
         );

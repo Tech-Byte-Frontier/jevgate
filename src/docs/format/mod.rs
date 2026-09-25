@@ -124,6 +124,20 @@ pub(super) mod tests {
         text
     }
 
+    /// The lines of the view of `source`, with those at `blank` checked to
+    /// read as blank.
+    pub(in crate::docs::format) fn view_lines(
+        path: &str,
+        source: &str,
+        blank: &[usize],
+    ) -> Vec<String> {
+        let lines: Vec<String> = view_of(path, source).lines().map(str::to_string).collect();
+        for &index in blank {
+            assert_eq!(lines[index], "", "line {index} of the view");
+        }
+        lines
+    }
+
     pub(in crate::docs::format) fn headings(
         path: &str,
         source: &str,

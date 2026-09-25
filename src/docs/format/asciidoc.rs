@@ -173,7 +173,7 @@ fn attribute_entry(line: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::docs::format::tests::{headings, view_of};
+    use crate::docs::format::tests::{headings, view_lines, view_of};
 
     #[test]
     fn asciidoc_titles_blocks_and_comments() {
@@ -186,16 +186,13 @@ mod tests {
                 (25, 3, "Deeper".to_string()),
             ]
         );
-        let text = view_of("docs/guide.adoc", source);
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!((lines[1], lines[2], lines[6], lines[7]), ("", "", "", ""));
+        let lines = view_lines("docs/guide.adoc", source, &[1, 2, 6, 7, 13, 14, 15, 18, 20]);
         assert_eq!(
             &lines[8..12],
             ["```sh", "# not a heading", "./gradlew build", "```"]
         );
-        assert_eq!((lines[13], lines[14], lines[15]), ("", "", ""));
         assert_eq!(lines[17], "Example title");
-        assert_eq!((lines[18], lines[19], lines[20]), ("", "Example text.", ""));
+        assert_eq!(lines[19], "Example text.");
         assert_eq!(lines[22], "include::`partials/setup.adoc`[]");
     }
 
