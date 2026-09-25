@@ -22,6 +22,7 @@ Consider (2):
     → Pass the values as bound query parameters
 ```
 
+- **[Documentation site](https://tech-byte-frontier.github.io/jevgate/)**: guides, troubleshooting and the full rule, configuration and command-line reference
 - [What it finds](#what-it-finds)
 - [Supported languages and frameworks](#supported-languages-and-frameworks)
 - [Install](#install)
