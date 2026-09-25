@@ -906,7 +906,7 @@ fn push(
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
         literals: body
-            .filter(|_| !equality)
+            .filter(|_| !equality && !super::literals::returns_constant(node))
             .map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
         sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source, file.django)),
         errors: body.map_or_else(Vec::new, |b| super::errors::created_errors(b, source)),
@@ -1647,6 +1647,30 @@ mod tests {
         // Static fields and interface constants are constants; instance fields are not.
         let constants: Vec<&str> = file.constants.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(constants, ["DEFAULT_CITY", "retries", "TABLE", "LIMIT"]);
+    }
+
+    #[test]
+    fn java_capacity_hints_and_numbers_a_method_returns_are_not_values() {
+        let java = "class Costs {\n\tint cost() {\n\t\treturn 7;\n\t}\n\n\tString host() {\n\t\treturn \"db.internal\";\n\t}\n\n\tList<String> names() {\n\t\tList<String> names = new ArrayList<>(16);\n\t\tStringBuilder text = new StringBuilder(64);\n\t\tnames.add(text.append(new Timeout(30)).toString());\n\t\treturn names.subList(0, 5);\n\t}\n}\n";
+        let file = parse(Path::new("Costs.java"), java).unwrap();
+        let values: Vec<(&str, Vec<&str>)> = file
+            .units
+            .iter()
+            .map(|u| {
+                (
+                    u.name.as_str(),
+                    u.literals.iter().map(|l| l.text.as_str()).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            values,
+            [
+                ("Costs::cost", vec![]),
+                ("Costs::host", vec!["\"db.internal\""]),
+                ("Costs::names", vec!["30", "5"]),
+            ]
+        );
     }
 
     #[test]
