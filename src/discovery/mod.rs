@@ -5,7 +5,18 @@ pub use copies::{generated_header, generated_source, vendored};
 use crate::{boundary::globs, config::Config};
 use anyhow::Result;
 use globset::GlobSet;
-use std::path::Path;
+use std::path::{Path, PathBuf, StripPrefixError};
+
+/// `path` relative to `root`, written with `/` on every platform, so reports,
+/// requests, baselines and path rules name a file the same way everywhere.
+pub fn relative(path: &Path, root: &Path) -> Result<PathBuf, StripPrefixError> {
+    let relative = path.strip_prefix(root)?;
+    Ok(if cfg!(windows) {
+        PathBuf::from(relative.to_string_lossy().replace('\\', "/"))
+    } else {
+        relative.to_path_buf()
+    })
+}
 
 pub const SKIPPED_DIRS: &[&str] = &[
     "node_modules",

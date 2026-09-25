@@ -142,7 +142,7 @@ fn source_paths(
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
-        let relative = path.strip_prefix(&context.root)?;
+        let relative = &discovery::relative(path, &context.root)?;
         if discovery::source(relative, &args.source_extension)
             && selected(relative)
             && boundary.permits(relative)
@@ -167,7 +167,7 @@ fn configuration_files(
     let mut files = Vec::new();
     if args.enabled(crate::catalog::ACCESS_CONTROL) {
         for entry in walker(&context.root).flatten() {
-            let relative = entry.path().strip_prefix(&context.root)?;
+            let relative = &discovery::relative(entry.path(), &context.root)?;
             if entry.file_type().is_some_and(|t| t.is_file())
                 && relative.extension().is_some_and(|e| e == "sql")
                 && in_scope(relative)
@@ -186,7 +186,7 @@ fn configuration_files(
             .flatten()
         {
             let path = entry.path();
-            let relative = path.strip_prefix(&context.root)?;
+            let relative = &discovery::relative(&path, &context.root)?;
             if path.is_file()
                 && path.extension().is_some_and(|e| e == "yml" || e == "yaml")
                 && in_scope(relative)
@@ -235,9 +235,7 @@ fn load(
     context: &ConfigContext,
     extra: &[super::context::ContextInput],
 ) -> Result<Input> {
-    let relative = path
-        .strip_prefix(&context.root)
-        .context("Source outside root")?;
+    let relative = &discovery::relative(&path, &context.root).context("Source outside root")?;
     let mut result = pending_result(relative, &role, args, extra);
     if !matches!(role.as_str(), "source" | "test") {
         return Ok(excluded(result, &role, relative));

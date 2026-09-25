@@ -37,7 +37,7 @@ fn source_patterns(root: &Path) -> Result<Vec<String>> {
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
-        let relative = entry.path().strip_prefix(root)?;
+        let relative = &crate::discovery::relative(entry.path(), root)?;
         if !syntax::supported(relative) || !matches!(classifier.role(relative), "source" | "test") {
             continue;
         }
