@@ -155,3 +155,101 @@ fn next_config_objects_are_one_module_unit_for_unsafe_settings() {
         Some("CWE-942 permissive CORS")
     );
 }
+
+#[test]
+fn only_questions_about_values_carry_the_framework_role() {
+    let route = "export async function GET(request: Request) {\n  const url = new URL(request.url);\n  const name = url.searchParams.get('name') ?? 'guest';\n  if (name.length > 40) {\n    return new Response('too long', { status: 400 });\n  }\n  const greeting = `Hello, ${name}`;\n  return new Response(greeting);\n}\n";
+    let (project, mut options) = next_project(&[("app/hello/route.ts", route)]);
+    options.rules.push(catalog::FUNCTION_SIMPLIFICATION.into());
+    let (_, plan) = planned(&project, &options);
+    let requests = requests_of(&plan, "app/hello/route.ts");
+    let stage = |r: &Value| r["jevgate"]["stage"].as_str().unwrap().to_string();
+    let with_role: Vec<String> = requests
+        .iter()
+        .filter(|r| r["state"]["file"]["framework"].is_string())
+        .map(|r| stage(r))
+        .collect();
+    let without: Vec<String> = requests
+        .iter()
+        .filter(|r| r["state"]["file"]["framework"].is_null())
+        .map(|r| stage(r))
+        .collect();
+    assert_eq!(with_role, ["security"]);
+    assert_eq!(without, ["functions"], "how code reads needs no role");
+}
+
+const PORTAL: &str = "'use server';\n\nimport { redirect } from 'next/navigation';\n\nexport async function goToSection(section: string) {\n  redirect(`/account/${section}?tab=billing`);\n}\n";
+
+const TARGETS: [&str; 5] = ["own", "checked", "given", "outside", "none"];
+
+/// The injection status of `app/actions.ts` and its settle requests, with
+/// the redirect check undecided and the target Choice answering `chosen`.
+fn settled_redirect(project: &Project, options: &CheckArgs, chosen: &str) -> (Status, u64) {
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("resource", noul_at(0.95)),
+        ("redirect", noul_at(0.4)),
+        ("origin", spread(0.0, 0.9, 0.1)),
+        ("redirect_target", choice_of(chosen, &TARGETS)),
+    ];
+    let report = run(project, options, &mut eval);
+    let file = report
+        .files
+        .iter()
+        .find(|f| f.path == std::path::Path::new("app/actions.ts"))
+        .unwrap();
+    (
+        file.dimensions[catalog::INJECTION].status.clone(),
+        report
+            .stages
+            .get("settle")
+            .map_or(0, |stage| stage.successful_requests),
+    )
+}
+
+#[test]
+fn an_undecided_redirect_is_settled_by_where_its_target_comes_from() {
+    let (project, mut options) = next_project(&[("app/actions.ts", PORTAL)]);
+    options.rules = vec![catalog::INJECTION.into()];
+    assert_eq!(
+        settled_redirect(&project, &options, "own"),
+        (Status::Clear, 1)
+    );
+    for chosen in ["given", "outside"] {
+        options.refresh = true;
+        assert_eq!(
+            settled_redirect(&project, &options, chosen),
+            (Status::Uncertain, 1),
+            "{chosen}"
+        );
+    }
+}
+
+#[test]
+fn a_url_note_clears_when_the_request_leaves_from_the_browser() {
+    let search = "'use client';\n\nexport function Search({ endpoint }: { endpoint: string }) {\n  async function run(term: string) {\n    const response = await fetch(`${endpoint}?q=${encodeURIComponent(term)}`);\n    return response.json();\n  }\n  return <input onChange={(event) => run(event.target.value)} />;\n}\n";
+    let (project, mut options) = next_project(&[("components/search.tsx", search)]);
+    options.rules = vec![catalog::INJECTION.into()];
+    let findings = |runs_in: &str, options: &CheckArgs| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("resource", noul_at(0.95)),
+            ("url", noul_at(0.6)),
+            ("origin", spread(0.0, 0.9, 0.1)),
+            (
+                "runs_in",
+                choice_of(runs_in, &["browser", "server", "either"]),
+            ),
+        ];
+        let report = run(&project, options, &mut eval);
+        let file = report
+            .files
+            .iter()
+            .find(|f| f.path == std::path::Path::new("components/search.tsx"))
+            .unwrap();
+        file.findings.iter().map(|f| f.strength).collect::<Vec<_>>()
+    };
+    assert!(findings("browser", &options).is_empty());
+    options.refresh = true;
+    assert_eq!(findings("server", &options), [Strength::Note]);
+}

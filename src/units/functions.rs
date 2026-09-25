@@ -121,7 +121,7 @@ fn build(file: &FileContext<'_>, items: &[Item], callees: Option<Vec<Value>>) ->
         }
     }
     let mut state = json!({
-        "file": file.file_state(),
+        "file": file.plain_state(),
         "functions": items.iter().map(|item| item.state.clone()).collect::<Vec<_>>(),
     });
     if let Some(callees) = callees {
@@ -195,7 +195,7 @@ fn locate(file: &FileContext<'_>, unit: &Unit, id: &str, blocks: &[Block]) -> (V
         Pass::Locate,
     );
     let state = json!({
-        "file": file.file_state(),
+        "file": file.plain_state(),
         "function": {
             "name": unit.name,
             "signature": unit.signature,

@@ -265,6 +265,24 @@ fn spread(p0: f64, p1: f64, p2: f64) -> Value {
         "probabilities":{"0":p0,"1":p1,"2":p2}})
 }
 
+/// A Choice of `chosen` at 0.9 among `options`.
+fn choice_of(chosen: &str, options: &[&str]) -> Value {
+    let probabilities: serde_json::Map<String, Value> = options
+        .iter()
+        .map(|o| {
+            (
+                o.to_string(),
+                json!(if *o == chosen {
+                    0.9
+                } else {
+                    0.1 / (options.len() - 1) as f64
+                }),
+            )
+        })
+        .collect();
+    json!({"type":"choice","choice":chosen,"confidence":0.9,"probabilities":probabilities})
+}
+
 fn noul_at(p: f64) -> Value {
     json!({"type":"noul","noul":p})
 }

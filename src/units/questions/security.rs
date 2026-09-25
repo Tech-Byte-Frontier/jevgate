@@ -132,8 +132,140 @@ pub fn security_url_parts(code: &str, callers: bool) -> Value {
     })
 }
 
-/// The option of the destination Choice that keeps error details a concern.
-pub const CLIENT: &str = "client";
+/// The option of the runs-in Choice that rules a forged request out.
+pub const BROWSER: &str = "browser";
+
+/// Where a function runs, asked when the URL check stays undecided: a fetch
+/// helper of a client component, handed a whole URL, stayed undecided, and
+/// offered beside the URL's parts, the browser lost to "a whole URL handed
+/// to it", which is true as well. Requests from the user's browser reach
+/// only what that user can.
+pub fn security_runs_in(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Where does `{code}` run once the program is deployed?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "browser": "Only in the user's web browser: in a client component, in a web page script, or in a component or hook that only client code uses.",
+            "server": "On a server or in a backend process: a route handler, server component, Server Action, API, job, or command-line tool.",
+            "either": "Either side may run it, such as shared code that both server and browser code import, or the code does not show which.",
+        },
+    })
+}
+
+/// Options of the redirect-target Choice that rule an open redirect out.
+pub const OWN_TARGETS: [&str; 3] = ["own", "checked", "none"];
+
+/// Where the targets a function redirects clients to come from, asked when
+/// the redirect check stays undecided: client components that navigate to
+/// fixed paths or to a checkout URL their server returns, and helpers that
+/// build a path their callers name, split on "a URL or path taken from a
+/// variable". Offered "a whole path handed to it" beside "what callers
+/// pass", helpers whose callers pass fixed paths took the first, which is
+/// true as well; with callers shown, that option is only for paths the
+/// callers do not explain.
+pub fn security_redirect_target(code: &str, callers: bool) -> Value {
+    let (own, given, note) = if callers {
+        (
+            "A path or URL written in the code, built from the program's own origin or configuration, or returned by the program's own server code or a service it calls, such as a payment provider's checkout page, in the function or in what `callers` pass it; variables fill only ids, names, numbers or messages in its segments or query.",
+            "A whole path or URL handed to the function as a parameter, where `callers` does not show where it comes from.",
+            format!("{CALLERS} {EVIDENCE}"),
+        )
+    } else {
+        (
+            "A path or URL written in the code, built from the program's own origin or configuration, or returned by the program's own server code or a service it calls, such as a payment provider's checkout page; variables fill only ids, names, numbers or messages in its segments or query.",
+            "A whole path or URL handed to the function as a parameter or field.",
+            EVIDENCE.to_string(),
+        )
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Where do the paths or URLs that `{code}` redirects or navigates the client to come from?"),
+            "note": note,
+        },
+        "criteria": {
+            "own": own,
+            "checked": "A path or URL from a variable that is checked before the redirect to be a path on the program's own site or on a host from an allowed list.",
+            "given": given,
+            "outside": "A whole path or URL that a request carries, such as a query parameter, form field, header or cookie, or an argument of a function clients call directly, without such a check.",
+            "none": "It redirects or navigates nowhere; it only builds or returns a path, or it has no redirect.",
+        },
+    })
+}
+
+/// Options of the markup Choice that rule a markup injection out.
+pub const INERT_MARKUP: [&str; 3] = ["escaped", "text", "none"];
+
+/// How the markup a function builds with variables is rendered, asked when
+/// the markup check stays undecided: React components with values in
+/// attributes, and snippets shown in a text field, split on "a variable put
+/// into markup without escaping".
+pub fn security_markup_output(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("How is the markup that `{code}` builds with variables rendered?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "escaped": "By JSX or a template engine that escapes each value: variables appear only as element children, attribute values or component props, or go through an escaping or sanitizing function first.",
+            "text": "It is never rendered as HTML: it is shown as plain text, such as a code snippet in a text field, or sent as text.",
+            "raw": "As raw HTML with a variable inside, unescaped: through dangerouslySetInnerHTML, innerHTML, insertAdjacentHTML, document.write, an iframe srcdoc, or an HTML response built as text.",
+            "none": "It builds no HTML or SVG markup with variables.",
+        },
+    })
+}
+
+/// Options of the logging Choice that rule a logged secret out.
+pub const PLAIN_LOGS: [&str; 2] = ["plain", "none"];
+
+/// What a function's log statements write, asked when the check for a
+/// logged object that holds a secret stays undecided: an error caught from a
+/// payment or database call, logged with a message, split on it.
+pub fn security_logged(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What do the log and console statements of `{code}` write?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "plain": "Only messages, ids, counts, statuses, or an error caught from a failed call, none of which holds a password, token or key.",
+            "secret": "A password, token, API key or other secret, or a whole object, configuration, request or argument list that holds one.",
+            "personal": "Personal data about a person, such as an email address, name, address or document number.",
+            "none": "It logs or prints nothing.",
+        },
+    })
+}
+
+/// Options of the CORS Choice that rule a credentialed-origin concern out.
+pub const SAFE_ORIGINS: [&str; 3] = ["unset", "listed", "public"];
+
+/// Which other sites a function lets send credentialed requests, asked when
+/// the CORS check stays undecided: route handlers that set cookies or answer
+/// preflights with `*` and no credentials split on "any origin allowed".
+pub fn security_cors_origins(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Which other sites does `{code}` let send requests that carry a user's cookies or credentials?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "unset": "None: it sets no CORS header or option.",
+            "listed": "Only origins written in the code or configuration, or the program's own origin.",
+            "public": "Any origin, but without allowing credentials: no `Access-Control-Allow-Credentials: true` or credentials option, as for a public or token-authenticated API.",
+            "any": "Any origin, or whatever origin a request names reflected back, with credentials allowed.",
+        },
+    })
+}
+
+/// The options of the destination Choice that rule error details out: every
+/// place but a remote client.
+pub const AWAY_FROM_CLIENTS: [&str; 4] = ["local", "logs", "caller", "stored"];
 
 /// Where a function's text goes, asked when an error-detail signal stays
 /// undecided. An error or body shaped for a response counts as the client:
@@ -265,7 +397,9 @@ const CALLERS: &str = "`callers` holds functions that call it.";
 /// its project root. One
 /// broad question ("is every variable bound, escaped or checked?") stayed
 /// undecided even for `eval` of model output; one literal check per kind
-/// decides, and names the kind.
+/// decides, and names the kind. The redirect check names a destination a
+/// user saved on purpose as handled: a link shortener's redirect to the
+/// target its owner saved was a review.
 pub const UNHANDLED: [Check; 7] = [
     Check {
         id: "sql",
@@ -317,8 +451,8 @@ pub const UNHANDLED: [Check; 7] = [
     Check {
         id: "redirect",
         question: "Does `{code}` redirect the client to a URL or path taken from a variable without checking where it leads?",
-        yes: "A URL or path that can come from a request, form field, query parameter or stored user input is passed to a redirect, such as redirect(), NextResponse.redirect, res.redirect or a Location header, without checking that it is a path on the program's own site or that its host is on an allowed list.",
-        no: "The target is fixed, is the program's own origin joined with a fixed path, is checked to be a path on its own site (a single leading slash) or a host on an allowed list, comes from the program's configuration, or it does not redirect.",
+        yes: "A URL or path that a request carries, such as a query parameter, form field, header or cookie, or an argument of a function that clients call directly, is passed to a redirect, such as redirect(), NextResponse.redirect, res.redirect, router.push or a Location header, without checking that it is a path on the program's own site or that its host is on an allowed list.",
+        no: "The target is fixed, is the program's own origin joined with a fixed path, is checked to be a path on its own site (a single leading slash) or a host on an allowed list, comes from the program's configuration, or is a destination a signed-in user saved on purpose, such as the target of a short link; or it does not redirect.",
         no_examples: &[],
     },
 ];

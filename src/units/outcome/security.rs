@@ -21,8 +21,9 @@ pub(in crate::units) fn origin_outcome(answer: &Answer) -> Outcome {
 }
 
 /// The outcomes of a rule's specific trace checks that were answered. An
-/// undecided URL check is clear when its settle Choice puts the host among
-/// the program's own at the threshold.
+/// undecided check is clear when a settle Choice that settles it puts its
+/// probability on the options that clear it at the threshold, such as a URL
+/// whose host is among the program's own.
 pub(in crate::units) fn checks<'a>(
     rule: &str,
     get: &impl Fn(&str) -> Option<&'a Answer>,
@@ -30,15 +31,20 @@ pub(in crate::units) fn checks<'a>(
     crate::units::security::checks(rule)
         .iter()
         .filter_map(|check| {
-            let outcome = noul(get(check.id)?);
-            let own_host = check.id == "url"
-                && choice_mass(get("url_parts"), &questions::OWN_PARTS).is_some_and(at_least);
-            Some(match outcome {
-                Outcome::Uncertain(_) if own_host => Outcome::Clear,
+            Some(match noul(get(check.id)?) {
+                Outcome::Uncertain(_) if settled(rule, check.id, get) => Outcome::Clear,
                 other => other,
             })
         })
         .collect()
+}
+
+/// Whether a settle Choice of `rule` clears the undecided check `id`.
+fn settled<'a>(rule: &str, id: &str, get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    crate::units::security::SETTLES
+        .iter()
+        .filter(|kind| kind.rule == rule && kind.checks.contains(&id))
+        .any(|kind| choice_mass(get(kind.question), kind.clears).is_some_and(at_least))
 }
 
 /// The share of a Choice's probability on `options`, when it was answered.
@@ -59,8 +65,7 @@ fn choice_mass(answer: Option<&Answer>, options: &[&str]) -> Option<f64> {
 /// Whether the settle Choice sends a function's text anywhere but a remote
 /// client, at the threshold.
 fn away_from_clients<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
-    choice_mass(get("destination"), &[questions::CLIENT])
-        .is_some_and(|client| at_least(1.0 - client))
+    settled(catalog::SENSITIVE_DATA, "error_details", get)
 }
 
 /// Kinds where a variable is a concern only when another party controls it:
@@ -210,7 +215,13 @@ pub(in crate::units) fn exposure_outcome<'a>(
         .collect::<Option<_>>()?;
     let specific: Vec<(Outcome, f64)> = crate::units::security::checks(rule)
         .iter()
-        .filter_map(|check| get(check.id).map(|a| judge(check.id, a)))
+        .filter_map(|check| {
+            let (outcome, lean) = judge(check.id, get(check.id)?);
+            Some(match outcome {
+                Outcome::Uncertain(_) if settled(rule, check.id, get) => (Outcome::Clear, 0.0),
+                _ => (outcome, lean),
+            })
+        })
         .collect();
     let ruled_out = presence.iter().all(|(o, _)| *o == Outcome::Clear)
         || (!specific.is_empty() && specific.iter().all(|(o, _)| *o == Outcome::Clear));

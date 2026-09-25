@@ -71,6 +71,15 @@ pub struct Block {
     pub location: Location,
 }
 
+/// A settle follow-up of a security unit: the Choice it asks, and its request.
+#[derive(Clone, Debug)]
+pub struct Settle {
+    /// The Choice's question id, which `security::SETTLES` maps to the checks
+    /// it settles and the options that clear them.
+    pub question: &'static str,
+    pub request: (Value, Asked),
+}
+
 #[derive(Clone, Debug)]
 pub enum Detail {
     Function {
@@ -116,9 +125,10 @@ pub enum Detail {
         /// for sensitive-data units.
         messages: Vec<String>,
         trace: Option<(Value, Asked)>,
-        /// Where its URLs come from or its output goes, asked when a check
-        /// stays undecided after the trace and recheck.
-        settle: Option<(Value, Asked)>,
+        /// One Choice per kind of check that can stay undecided after the
+        /// trace and recheck, such as where its URLs come from or its output
+        /// goes; each is asked only while its checks are undecided.
+        settles: Vec<Settle>,
     },
     /// A large document judged by its outline, with its top-level parts
     /// and the follow-up that locates a split.

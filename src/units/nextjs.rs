@@ -76,11 +76,12 @@ fn role(within: &Path, directive: Option<Directive>) -> Option<&'static str> {
         all => all,
     };
     let (file, directories) = parts.split_last()?;
-    let stem = file.split('.').next().unwrap_or("");
+    // The name before the extension, so `route.test.ts` is no route.
+    let stem = file.rsplit_once('.').map_or(*file, |(stem, _)| stem);
     if directories.is_empty() {
         return match stem {
             "middleware" | "proxy" => Some(MIDDLEWARE),
-            "next" if file.starts_with("next.config.") => Some(CONFIG),
+            "next.config" => Some(CONFIG),
             _ => None,
         };
     }
@@ -176,6 +177,8 @@ mod tests {
         );
         assert_eq!(with("apps/web/app/global-error.tsx", ""), ERROR_BOUNDARY);
         assert!(with("apps/web/lib/db.ts", "").is_empty());
+        assert!(with("apps/web/app/api/users/route.test.ts", "").is_empty());
+        assert!(with("apps/web/app/blog/page.stories.tsx", "").is_empty());
         assert!(with("apps/web/app/blog/styles.css", "").is_empty());
         // Outside a package that depends on `next`, paths mean nothing.
         let other = Package {

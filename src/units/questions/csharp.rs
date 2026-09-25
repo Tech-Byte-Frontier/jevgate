@@ -279,10 +279,14 @@ mod tests {
         assert_eq!(python, general);
         let mut csharp = general.clone();
         reword(CSHARP, "weakened", &mut csharp);
+        let base = general["criteria"]["true"]["examples"]
+            .as_array()
+            .unwrap()
+            .len();
         let examples = csharp["criteria"]["true"]["examples"].as_array().unwrap();
-        assert_eq!(examples.len(), 8);
+        assert_eq!(examples.len(), base + 3);
         assert!(
-            examples[7]
+            examples[base + 2]
                 .as_str()
                 .unwrap()
                 .starts_with("A signing or encryption key")
@@ -294,9 +298,11 @@ mod tests {
             sql["criteria"]["true"]["what"],
             questions::UNHANDLED[0].body("function.source")["criteria"]["true"]
         );
+        let handled = sql["criteria"]["false"]["examples"].as_array().unwrap();
         assert!(
-            sql["criteria"]["false"]["examples"][0]
-                .as_str()
+            handled
+                .last()
+                .and_then(Value::as_str)
                 .unwrap()
                 .contains("FromSqlInterpolated")
         );
