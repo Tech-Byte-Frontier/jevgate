@@ -177,15 +177,16 @@ impl<'a> Shared<'a> {
     }
 
     fn plan_pairs(&self, d: usize, file: &FileContext<'_>, out: &mut FilePlan) {
-        let owned: Vec<&SectionPair> = self
+        // Each pair this document owns, as its own section and the other.
+        let owned: Vec<SectionPair> = self
             .pairs
             .iter()
             .filter(|(a, b)| self.owner_of(*a, *b) == d)
+            .map(|&(a, b)| if a.0 == d { (a, b) } else { (b, a) })
             .collect();
         let names: Vec<String> = owned
             .iter()
-            .map(|(a, b)| {
-                let (mine, other) = if a.0 == d { (a, b) } else { (b, a) };
+            .map(|(mine, other)| {
                 let other_doc = &self.docs[other.0];
                 format!(
                     "{}~{}:{}",
@@ -196,77 +197,74 @@ impl<'a> Shared<'a> {
             })
             .collect();
         let ids = unique_ids("pair", names.iter().map(String::as_str));
-        for ((a, b), id) in owned.into_iter().zip(ids) {
-            let (mine, other) = if a.0 == d { (a, b) } else { (b, a) };
-            let section = &self.docs[d].sections[mine.1];
-            let other_doc = &self.docs[other.0];
-            let other_section = &other_doc.sections[other.1];
-            let other_path = &other_doc.input.result.path;
-            let mut questions = Questions::default();
-            for (key, body) in [
-                (
-                    "a_covers",
-                    super::questions::pair_covers("section_a", "section_b"),
-                ),
-                (
-                    "b_covers",
-                    super::questions::pair_covers("section_b", "section_a"),
-                ),
-                ("conflict", super::questions::pair_conflict()),
-                ("subject", super::questions::pair_subject()),
-                ("translation", super::questions::pair_translation()),
-            ] {
-                questions.ask(key.into(), body, &id, DOC_DUPLICATION, key, Pass::Trace);
-            }
-            let state = json!({
-                "section_a": {"path": file.path, "document": self.docs[d].title, "heading": section.heading, "text": section.text},
-                "section_b": {"path": other_path, "document": other_doc.title, "heading": other_section.heading, "text": other_section.text},
-            });
-            let sources = [
-                (file.path, file.source_hash),
-                (other_path, other_doc.input.result.source_hash.as_str()),
-            ];
-            let mut relation = Questions::default();
-            relation.ask(
-                "relation".into(),
-                super::questions::pair_relation(),
-                &id,
-                DOC_DUPLICATION,
-                "relation",
-                Pass::Settle,
-            );
-            let settle = request(file.model, "doc-checks", &sources, state.clone(), relation);
-            let (request, asked) = request(file.model, "doc-checks", &sources, state, questions);
-            let fits = file.budget.fits(&request);
-            let other = crate::schema::Location {
-                path: other_path.clone(),
-                start_line: other_section.start_line,
-                end_line: other_section.end_line,
-                symbol: Some(heading(other_section).to_string()),
-            };
-            out.units.push(UnitPlan {
-                rule: DOC_DUPLICATION,
-                id,
-                name: heading(section).to_string(),
-                presence: if fits {
-                    Presence::Judged
-                } else {
-                    Presence::NeedsContext
-                },
-                locations: vec![
-                    file.location(section.start_line, section.end_line, Some(heading(section))),
-                    other.clone(),
-                ],
-                quote: None,
-                lines: section.end_line + 1 - section.start_line,
-                identity: identity(&[&compact(&section.text), &compact(&other_section.text)]),
-                detail: Detail::DocPair {
-                    other,
-                    check: fits.then_some((request, asked)),
-                    settle: fits.then_some(settle),
-                },
-                recheck: None,
-            });
+        for ((mine, other), id) in owned.into_iter().zip(ids) {
+            out.units.push(self.pair_unit(file, mine, other, id));
+        }
+    }
+
+    /// The unit of one section pair: its check and the settle asked when the
+    /// check stays undecided, both about the two sections side by side.
+    fn pair_unit(
+        &self,
+        file: &FileContext<'_>,
+        mine: (usize, usize),
+        other: (usize, usize),
+        id: String,
+    ) -> UnitPlan {
+        let doc = &self.docs[mine.0];
+        let section = &doc.sections[mine.1];
+        let other_doc = &self.docs[other.0];
+        let other_section = &other_doc.sections[other.1];
+        let other_path = &other_doc.input.result.path;
+        let state = json!({
+            "section_a": {"path": file.path, "document": doc.title, "heading": section.heading, "text": section.text},
+            "section_b": {"path": other_path, "document": other_doc.title, "heading": other_section.heading, "text": other_section.text},
+        });
+        let sources = [
+            (file.path, file.source_hash),
+            (other_path, other_doc.input.result.source_hash.as_str()),
+        ];
+        let mut relation = Questions::default();
+        relation.ask(
+            "relation".into(),
+            super::questions::pair_relation(),
+            &id,
+            DOC_DUPLICATION,
+            "relation",
+            Pass::Settle,
+        );
+        let settle = request(file.model, "doc-checks", &sources, state.clone(), relation);
+        let questions = pair_questions(&id);
+        let (request, asked) = request(file.model, "doc-checks", &sources, state, questions);
+        let fits = file.budget.fits(&request);
+        let other = crate::schema::Location {
+            path: other_path.clone(),
+            start_line: other_section.start_line,
+            end_line: other_section.end_line,
+            symbol: Some(heading(other_section).to_string()),
+        };
+        UnitPlan {
+            rule: DOC_DUPLICATION,
+            id,
+            name: heading(section).to_string(),
+            presence: if fits {
+                Presence::Judged
+            } else {
+                Presence::NeedsContext
+            },
+            locations: vec![
+                file.location(section.start_line, section.end_line, Some(heading(section))),
+                other.clone(),
+            ],
+            quote: None,
+            lines: section.end_line + 1 - section.start_line,
+            identity: identity(&[&compact(&section.text), &compact(&other_section.text)]),
+            detail: Detail::DocPair {
+                other,
+                check: fits.then_some((request, asked)),
+                settle: fits.then_some(settle),
+            },
+            recheck: None,
         }
     }
 
@@ -276,6 +274,29 @@ impl<'a> Shared<'a> {
         let agent = |d: usize| self.docs[d].input.result.role == crate::inventory::INSTRUCTIONS;
         if agent(b.0) && !agent(a.0) { b.0 } else { a.0 }
     }
+}
+
+/// The questions asked of a section pair: whether each section states
+/// everything the other states, whether they disagree, whether they are
+/// about one subject, and whether one translates the other.
+fn pair_questions(id: &str) -> Questions {
+    let mut questions = Questions::default();
+    for (key, body) in [
+        (
+            "a_covers",
+            super::questions::pair_covers("section_a", "section_b"),
+        ),
+        (
+            "b_covers",
+            super::questions::pair_covers("section_b", "section_a"),
+        ),
+        ("conflict", super::questions::pair_conflict()),
+        ("subject", super::questions::pair_subject()),
+        ("translation", super::questions::pair_translation()),
+    ] {
+        questions.ask(key.into(), body, id, DOC_DUPLICATION, key, Pass::Trace);
+    }
+    questions
 }
 
 /// Sections of different documents that share much of their wording, as
@@ -468,6 +489,13 @@ fn facts(
     title: &str,
     missing: &[Vec<Missing>],
 ) -> Vec<String> {
+    let mut facts = release_tags(repository, path, title);
+    facts.extend(removed_paths(missing));
+    facts
+}
+
+/// A release tag for each version the document's path or title names.
+fn release_tags(repository: &Repository, path: &Path, title: &str) -> Vec<String> {
     let mut facts = Vec::new();
     for version in versions(&format!("{} {title}", path.display())) {
         let tagged = [format!("v{version}"), version.clone()]
@@ -477,6 +505,11 @@ fn facts(
             facts.push(format!("the repository has a release tag v{version}"));
         }
     }
+    facts
+}
+
+/// How many paths the document names were deleted or renamed, with a few of them.
+fn removed_paths(missing: &[Vec<Missing>]) -> Option<String> {
     let mut removed: Vec<&str> = Vec::new();
     for m in missing.iter().flatten() {
         if matches!(m.fate, Fate::Deleted | Fate::Renamed(_)) && !removed.contains(&m.name.as_str())
@@ -484,27 +517,27 @@ fn facts(
             removed.push(&m.name);
         }
     }
-    if !removed.is_empty() {
-        let shown: Vec<String> = removed
-            .iter()
-            .take(LISTED_PATHS)
-            .map(|n| format!("`{n}`"))
-            .collect();
-        let more = removed.len().saturating_sub(LISTED_PATHS);
-        facts.push(format!(
-            "{} path{} it names {} since removed, such as {}{}",
-            removed.len(),
-            if removed.len() == 1 { "" } else { "s" },
-            if removed.len() == 1 { "was" } else { "were" },
-            shown.join(", "),
-            if more > 0 {
-                format!(" and {more} more")
-            } else {
-                String::new()
-            }
-        ));
+    if removed.is_empty() {
+        return None;
     }
-    facts
+    let shown: Vec<String> = removed
+        .iter()
+        .take(LISTED_PATHS)
+        .map(|n| format!("`{n}`"))
+        .collect();
+    let more = removed.len().saturating_sub(LISTED_PATHS);
+    Some(format!(
+        "{} path{} it names {} since removed, such as {}{}",
+        removed.len(),
+        if removed.len() == 1 { "" } else { "s" },
+        if removed.len() == 1 { "was" } else { "were" },
+        shown.join(", "),
+        if more > 0 {
+            format!(" and {more} more")
+        } else {
+            String::new()
+        }
+    ))
 }
 
 /// A document's title: its frontmatter `title`, as MDX pages set it, else
