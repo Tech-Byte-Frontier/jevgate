@@ -88,6 +88,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | C# | `.cs` | ✅ | ✅ xUnit, NUnit, MSTest | ✅ | ➖ |
 | Ruby | `.rb` | ✅ | ✅ RSpec, Minitest, Rails `test "…" do` | ✅ no Ruby framework handlers yet | ➖ |
 | PHP | `.php` `.phtml` | ✅ | ✅ PHPUnit `…TestCase` classes, Pest `test`/`it` | ✅ | ➖ |
+| Java | `.java` | ✅ | ✅ JUnit 4 and 5, TestNG: `@Test`, `@ParameterizedTest`, `@Nested`, JUnit 3 `TestCase` | ✅ | ➖ |
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ➖ |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
 | GitHub Actions | `.github/workflows/*.yml` | ➖ | ➖ | ✅ workflows | ➖ |
@@ -110,10 +111,11 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | RSpec, Minitest | Examples with the groups they are declared in, the `before` hooks and the `let`/`subject` definitions they read, and the helpers they call from support files such as `spec/support` and `test_helper.rb` |
 | Sinatra and other Ruby DSLs | Methods of classes and modules (`def`, `def self.`, `class << self`, `define_method`); blocks passed at class or file level as units named by their call (`get('/invoices')`); constants as hardcoded values |
 | Monorepos | Copies are compared within a package and across packages linked by a local dependency, not across separate example apps or templates |
+| Java classes | Methods and constructors belong to their class, interface, enum constant or record; `static` fields are constants; `equals` and `hashCode` overrides are boilerplate, never copies or values to name; a class of the same package counts as imported |
 | Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
 | Copied libraries | A library copied into the repository (a versioned file name such as `jquery-3.6.0.js`, the readable build beside a `.min.js`, or a license banner naming a version) is skipped as vendored, whatever its size |
 
-Other files, such as Java, are listed as skipped with the reason and never fail the gate.
+Other files, such as Kotlin, are listed as skipped with the reason and never fail the gate.
 
 ## Install
 

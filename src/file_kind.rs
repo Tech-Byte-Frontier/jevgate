@@ -542,8 +542,8 @@ fn has_implementation(path: &Path, source: &str) -> bool {
     source.lines().any(|line| code_line(line, csharp))
 }
 
-/// A line that is neither blank, a comment nor an import; in C#, nor a
-/// namespace declaration or only the braces around one.
+/// A line that is neither blank, a comment, an import nor a Java `package`
+/// line; in C#, nor a namespace declaration or only the braces around one.
 fn code_line(line: &str, csharp: bool) -> bool {
     const NOT_CODE: &[&str] = &[
         "//",
@@ -556,6 +556,7 @@ fn code_line(line: &str, csharp: bool) -> bool {
         "from ",
         "require ",
         "require_relative ",
+        "package ",
     ];
     const NOT_CSHARP_CODE: &[&str] = &["using ", "namespace "];
     let line = line.trim();
@@ -767,6 +768,31 @@ mod tests {
         let view = view_of(&project, &args());
         assert_eq!(view.classification.kind, "mixed");
         assert_eq!(test_line_ranges(&view), [(8, 13)]);
+    }
+
+    #[test]
+    fn java_test_classes_are_test_files_without_a_purpose_request() {
+        let project = Project::new();
+        project.write(
+            "src/test/java/app/TotalTests.java",
+            "package app;\n\nimport org.junit.jupiter.api.Test;\n\nclass TotalTests {\n\t@Test\n\tvoid adds() {\n\t\tassertEquals(3, new Totals().sum(1, 2));\n\t}\n}\n",
+        );
+        let mut included = args();
+        included.include_tests = true;
+        let view = view_of(&project, &included);
+        assert_eq!(
+            (view.classification.kind.as_str(), view.tests),
+            ("tests", true)
+        );
+        assert_eq!(view.classification.language, "Java");
+        std::fs::remove_file(project.0.join("src/test/java/app/TotalTests.java")).unwrap();
+        project.write(
+            "src/main/java/app/Totals.java",
+            "package app;\n\nclass Totals {\n\tint sum(int... values) {\n\t\treturn java.util.Arrays.stream(values).sum();\n\t}\n}\n",
+        );
+        let view = view_of(&project, &included);
+        assert_eq!(view.classification.kind, "application");
+        assert!(view.test_lines.is_empty());
     }
 
     #[test]

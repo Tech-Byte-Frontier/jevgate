@@ -10,12 +10,13 @@ pub const MAX_BLOCKS: usize = 12;
 /// short setup above it.
 const LONG_STATEMENT_LINES: usize = 3;
 
-const BODY_KINDS: [&str; 5] = [
+const BODY_KINDS: [&str; 6] = [
     "block",
     "statement_block",
     "compound_statement",
     "body_statement",
     "block_body",
+    "constructor_body",
 ];
 
 /// Byte ranges of the body's blocks, in order, with leading comments attached.

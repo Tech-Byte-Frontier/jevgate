@@ -44,6 +44,10 @@ pub struct Unit {
     /// Errors the body creates with their message arguments, for error-detail questions.
     pub errors: Vec<super::errors::CreatedError>,
     pub calls: BTreeSet<String>,
+    /// A Java `equals(Object)` or `hashCode()` override: boilerplate whose
+    /// field-by-field copies and hash multipliers are the idiom, so it offers
+    /// no copies or literal values to judge.
+    pub equality: bool,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
     /// Plain identifiers, used only while parsing to find functions passed by name.
@@ -154,7 +158,11 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         "use_declaration" | "import_statement" | "import_from_statement" => {
             imports(node, source, &mut file.imports);
         }
-        "import_declaration" => go_imports(node, source, &mut file.imports),
+        // Go's import block, or one Java `import a.b.Name;`.
+        "import_declaration" => {
+            go_imports(node, source, &mut file.imports);
+            java_import(node, source, &mut file.imports);
+        }
         "using_directive" => csharp_import(node, source, &mut file.imports),
         "namespace_use_declaration" => super::php::imports(node, source, &mut file.imports),
         // PHP: `namespace App { … }` holds its declarations in a block.
@@ -175,8 +183,9 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                 push(definition, name, owner, Kind::Function, source, file);
             }
         }
-        // Go: `func (s *Store) Find(…)` is a method of `Store`; a C# method
-        // belongs to the class, struct or record around it.
+        // Go: `func (s *Store) Find(…)` is a method of `Store`; a C# or Java
+        // method belongs to the class, struct, record, interface or enum
+        // around it.
         "method_declaration" => {
             let receiver = node
                 .child_by_field_name("receiver")
@@ -191,7 +200,9 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                 file,
             );
         }
-        "constructor_declaration" | "destructor_declaration" => {
+        "constructor_declaration"
+        | "destructor_declaration"
+        | "compact_constructor_declaration" => {
             function(node, node, source, owner, file);
         }
         // A C# property or indexer whose accessors have statement bodies.
@@ -292,9 +303,23 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         "assignment" => ruby_assignment(node, source, owner, file),
         // Definitions made under a condition, such as `unless method_defined?(:x)`.
         "if" | "unless" | "then" | "else" | "begin" => children(node, source, owner, file),
-        "source_file" | "program" | "module" | "declaration_list" | "class_body"
-        | "export_statement" | "statement_block" | "compilation_unit" => {
-            children(node, source, owner, file)
+        "source_file"
+        | "program"
+        | "module"
+        | "declaration_list"
+        | "class_body"
+        | "export_statement"
+        | "statement_block"
+        | "compilation_unit"
+        | "interface_body"
+        | "enum_body"
+        | "enum_body_declarations" => children(node, source, owner, file),
+        // A Java enum constant with its own body, such as a state machine's
+        // `Data { void read(…) { … } }`: its methods belong to the constant.
+        "enum_constant" => {
+            if let Some(body) = node.child_by_field_name("body") {
+                children(body, source, &name_of(node, source), file);
+            }
         }
         // `export default { async fetch(request, env) { … } }`, as Cloudflare Workers write it.
         "object"
@@ -341,13 +366,31 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                 children(body, source, owner, file);
             }
         }
+        // A C# or PHP interface or enum is one type: its members have no
+        // bodies to judge. A Java interface's default methods and a Java
+        // enum's methods have them, so those are read like classes below.
+        "interface_declaration" | "enum_declaration"
+            if node.child_by_field_name("body").is_some_and(|b| {
+                matches!(
+                    b.kind(),
+                    "declaration_list" | "enum_member_declaration_list" | "enum_declaration_list"
+                )
+            }) =>
+        {
+            let name = name_of(node, source);
+            if !name.is_empty() {
+                push(Definition::whole(node), &name, "", Kind::Type, source, file);
+            }
+        }
         "class_declaration"
         | "class_definition"
         | "class"
         | "abstract_class_declaration"
         | "struct_declaration"
         | "record_declaration"
-        | "trait_declaration" => {
+        | "trait_declaration"
+        | "interface_declaration"
+        | "enum_declaration" => {
             let name = name_of(node, source);
             let before = file.units.len();
             if let Some(body) = node.child_by_field_name("body") {
@@ -404,10 +447,9 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         | "trait_item"
         | "type_item"
         | "union_item"
-        | "interface_declaration"
         | "type_alias_declaration"
-        | "enum_declaration"
-        | "delegate_declaration" => {
+        | "delegate_declaration"
+        | "annotation_type_declaration" => {
             let name = name_of(node, source);
             if !name.is_empty() {
                 push(Definition::whole(node), &name, "", Kind::Type, source, file);
@@ -840,6 +882,7 @@ fn push(
     if !owner.is_empty() {
         refs.insert(owner.to_string());
     }
+    let equality = equality_override(node, short_name, source);
     file.units.push(Unit {
         name: if owner.is_empty() {
             short_name.to_string()
@@ -862,13 +905,29 @@ fn push(
         nesting: body.map_or(0, |b| super::nesting::control(b).0),
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
-        literals: body.map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
+        literals: body
+            .filter(|_| !equality)
+            .map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
         sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source, file.django)),
         errors: body.map_or_else(Vec::new, |b| super::errors::created_errors(b, source)),
         calls: facts.calls,
+        equality,
         refs,
         mentions: facts.idents,
     });
+}
+
+/// A Java method that overrides `Object.equals` or `Object.hashCode`.
+fn equality_override(node: Node<'_>, name: &str, source: &str) -> bool {
+    node.kind() == "method_declaration"
+        && node.child_by_field_name("parameters").is_some_and(|p| {
+            let parameters = text(p, source);
+            match name {
+                "equals" => p.named_child_count() == 1 && parameters.contains("Object"),
+                "hashCode" => p.named_child_count() == 0,
+                _ => false,
+            }
+        })
 }
 
 /// Include documentation, comments and attributes directly above the definition.
@@ -923,6 +982,12 @@ impl Facts {
             "call_expression" | "call" | "invocation_expression" => {
                 if let Some(name) = call_name(node, source) {
                     self.calls.insert(name);
+                }
+            }
+            // Java: `repository.findById(id)`.
+            "method_invocation" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    self.calls.insert(text(name, source).to_string());
                 }
             }
             "new_expression" | "object_creation_expression" => {
@@ -1060,6 +1125,22 @@ fn csharp_import(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
         })
         .map(|n| text(n, source).to_string());
     names.extend(name.filter(|n| !n.is_empty()));
+}
+
+/// A Java import's last name: the class, or the member of a static import.
+/// A wildcard import names no one class.
+fn java_import(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
+    let mut cursor = node.walk();
+    let parts: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+    if parts.iter().any(|p| p.kind() == "asterisk") {
+        return;
+    }
+    let name = parts.iter().find_map(|p| match p.kind() {
+        "scoped_identifier" => p.child_by_field_name("name"),
+        "identifier" => Some(*p),
+        _ => None,
+    });
+    names.extend(name.map(|n| text(n, source).to_string()));
 }
 
 fn imports(node: Node<'_>, source: &str, names: &mut BTreeSet<String>) {
@@ -1469,15 +1550,115 @@ mod tests {
 
     #[test]
     fn unsupported_languages_are_unparsed() {
-        assert!(
-            !parse(Path::new("Main.java"), "class Main {}")
-                .unwrap()
-                .parsed
-        );
+        assert!(!parse(Path::new("Main.kt"), "class Main {}").unwrap().parsed);
     }
 
     #[test]
     fn syntax_errors_fail_instead_of_returning_no_units() {
         assert!(parse(Path::new("broken.rs"), "fn broken( {").is_err());
+    }
+
+    const OWNERS: &str = "package app.owner;\n\nimport java.util.*;\nimport java.util.List;\nimport static app.Checks.requireName;\n\n/** Owners of pets. */\npublic class OwnerService {\n\n\tprivate static final String DEFAULT_CITY = \"Madison\";\n\n\tstatic int retries = 5;\n\n\tprivate final int pageSize = 25;\n\n\tprivate final OwnerRepository owners;\n\n\tpublic OwnerService(OwnerRepository owners) {\n\t\tthis.owners = owners;\n\t}\n\n\t/**\n\t * Finds owners by last name.\n\t */\n\t@Transactional\n\tpublic List<Owner> find(String name, int page) {\n\t\tif (name == null) {\n\t\t\tthrow new IllegalArgumentException(\"name is required\");\n\t\t} else if (name.isBlank()) {\n\t\t\treturn new ArrayList<>();\n\t\t} else if (page > 100) {\n\t\t\treturn List.of();\n\t\t}\n\t\tString query = String.format(\"last_name = '%s'\", name);\n\t\tfor (Owner owner : owners.findAll(query)) {\n\t\t\towner.getPets().forEach(pet -> {\n\t\t\t\tswitch (pet.getKind()) {\n\t\t\t\t\tcase \"cat\" -> requireName(pet);\n\t\t\t\t\tdefault -> log(\"skipped \" + pet.getName());\n\t\t\t\t}\n\t\t\t});\n\t\t}\n\t\treturn owners.page(query, page * 3);\n\t}\n\n\t@Override\n\tpublic boolean equals(Object other) {\n\t\tif (this == other) return true;\n\t\tif (!(other instanceof OwnerService)) return false;\n\t\tOwnerService that = (OwnerService) other;\n\t\treturn owners.equals(that.owners);\n\t}\n\n\t@Override\n\tpublic int hashCode() {\n\t\tint result = 17;\n\t\tresult = 31 * result + owners.hashCode();\n\t\tresult = 31 * result + 7;\n\t\treturn result;\n\t}\n\n\tstatic class Page {\n\t\tint size() { return 10; }\n\t}\n}\n\ninterface OwnerRepository {\n\tString TABLE = \"owners\";\n\n\tList<Owner> findAll(String query);\n\n\tdefault List<Owner> page(String query, int size) {\n\t\treturn findAll(query).subList(0, size);\n\t}\n}\n\nenum State {\n\tOPEN {\n\t\tvoid enter(Owner owner) {\n\t\t\towner.open();\n\t\t}\n\t},\n\tCLOSED;\n\n\tprivate static final int LIMIT = 42;\n\n\tvoid enter(Owner owner) {}\n}\n\nrecord Visit(String date, String description) {\n\tVisit {\n\t\trequireName(description);\n\t}\n}\n\n@interface Audited {}\n";
+
+    #[test]
+    fn java_methods_belong_to_their_class_interface_enum_constant_or_record() {
+        let file = parse(Path::new("OwnerService.java"), OWNERS).unwrap();
+        let named: Vec<(&str, Kind, usize)> = file
+            .units
+            .iter()
+            .map(|u| (u.name.as_str(), u.kind, u.line))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("OwnerService::OwnerService", Kind::Method, 18),
+                ("OwnerService::find", Kind::Method, 25),
+                ("OwnerService::equals", Kind::Method, 46),
+                ("OwnerService::hashCode", Kind::Method, 54),
+                ("Page::size", Kind::Method, 63),
+                ("OwnerRepository::findAll", Kind::Method, 70),
+                ("OwnerRepository::page", Kind::Method, 72),
+                ("OPEN::enter", Kind::Method, 79),
+                ("State::enter", Kind::Method, 87),
+                ("Visit::Visit", Kind::Method, 91),
+                ("Audited", Kind::Type, 96),
+            ]
+        );
+        assert!(crate::syntax::supported(Path::new("OwnerService.java")));
+        // A wildcard import names no class; a static import names its member.
+        let imports: Vec<&str> = file.imports.iter().map(String::as_str).collect();
+        assert_eq!(imports, ["List", "requireName"]);
+    }
+
+    #[test]
+    fn a_java_method_has_its_calls_nesting_values_sites_and_errors() {
+        let file = parse(Path::new("OwnerService.java"), OWNERS).unwrap();
+        let find = &file.units[1];
+        assert_eq!(
+            find.signature,
+            "public List<Owner> find(String name, int page)"
+        );
+        assert_eq!(find.doc, "Finds owners by last name.");
+        assert!(find.source(OWNERS).starts_with("/**\n\t * Finds"));
+        for call in [
+            "findAll",
+            "forEach",
+            "requireName",
+            "format",
+            "ArrayList",
+            "page",
+        ] {
+            assert!(find.calls.contains(call), "{call}");
+        }
+        assert!(find.refs.contains("Owner") && find.refs.contains("OwnerService"));
+        // The else-if chain is one level; the loop, lambda block and switch nest.
+        assert_eq!((find.nesting, find.branch_chain), (3, 3));
+        let literals: Vec<&str> = find.literals.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(
+            literals,
+            [
+                "\"name is required\"",
+                "100",
+                "\"last_name = '%s'\"",
+                "\"cat\"",
+                "\"skipped \"",
+                "3"
+            ]
+        );
+        let sites: Vec<&str> = find.sites.iter().map(|s| s.text.as_str()).collect();
+        assert!(
+            sites.contains(&"String query = String.format(\"last_name = '%s'\", name);"),
+            "{sites:?}"
+        );
+        assert!(
+            sites.contains(&"log(\"skipped \" + pet.getName());"),
+            "{sites:?}"
+        );
+        let errors: Vec<(&str, &str)> = find
+            .errors
+            .iter()
+            .map(|e| (e.error.as_str(), e.message.as_str()))
+            .collect();
+        assert_eq!(
+            errors,
+            [("IllegalArgumentException", "\"name is required\"")]
+        );
+        assert_eq!(find.blocks.len(), 3);
+        // Static fields and interface constants are constants; instance fields are not.
+        let constants: Vec<&str> = file.constants.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(constants, ["DEFAULT_CITY", "retries", "TABLE", "LIMIT"]);
+    }
+
+    #[test]
+    fn java_equals_and_hash_code_offer_no_values() {
+        let file = parse(Path::new("OwnerService.java"), OWNERS).unwrap();
+        let equality: Vec<&str> = file
+            .units
+            .iter()
+            .filter(|u| u.equality)
+            .map(|u| u.name.as_str())
+            .collect();
+        assert_eq!(equality, ["OwnerService::equals", "OwnerService::hashCode"]);
+        assert!(file.units[3].literals.is_empty());
     }
 }

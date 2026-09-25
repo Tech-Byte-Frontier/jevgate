@@ -246,6 +246,8 @@ struct Shared<'a> {
     imports: BTreeMap<usize, Imports>,
     /// Callable short names to their signatures, for test subjects.
     subjects: BTreeMap<String, String>,
+    /// Callable short names to the types that own a method of that name.
+    subject_owners: BTreeMap<String, BTreeSet<String>>,
     /// Callable short names to their file and source, for the test recheck.
     subject_sources: BTreeMap<String, test_units::SubjectSource>,
     /// Ruby methods defined among tests (in a test class, an example group
@@ -263,6 +265,22 @@ struct Shared<'a> {
 }
 
 impl<'a> Shared<'a> {
+    /// Name each subject by the type that owns it, `StringUtil::isBlank`,
+    /// when one type in scope has a method of that name: an outline of bare
+    /// method names hid that a test file covers one class.
+    fn qualify_subjects(&self, cases: &mut [TestCase]) {
+        for case in cases {
+            for subject in &mut case.subjects {
+                if let Some(owners) = self.subject_owners.get(subject.as_str())
+                    && let [owner] = owners.iter().collect::<Vec<_>>()[..]
+                    && !owner.is_empty()
+                {
+                    *subject = format!("{owner}::{subject}");
+                }
+            }
+        }
+    }
+
     fn new(scope: &Scope<'_>, args: &'a CheckArgs) -> Self {
         let cases = test_cases(scope);
         let mut shared = Self {
@@ -270,6 +288,7 @@ impl<'a> Shared<'a> {
             pairs: clones::Candidates::default(),
             imports: imports(scope),
             subjects: BTreeMap::new(),
+            subject_owners: BTreeMap::new(),
             subject_sources: BTreeMap::new(),
             helpers: test_helpers(scope, &cases),
             module_helpers: BTreeMap::new(),
@@ -286,6 +305,11 @@ impl<'a> Shared<'a> {
                 .subjects
                 .entry(unit.short_name.clone())
                 .or_insert_with(|| unit.signature.clone());
+            shared
+                .subject_owners
+                .entry(unit.short_name.clone())
+                .or_default()
+                .insert(unit.owner.clone());
             shared
                 .subject_sources
                 .entry(unit.short_name.clone())
@@ -433,6 +457,7 @@ fn plan_file(
         file.rules.insert(catalog::FILE_ORGANIZATION, 0);
         let mut cases = test_map::cases(context.path, context.source).unwrap_or_default();
         test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
+        shared.qualify_subjects(&mut cases);
         outline::plan_tests(&context, &scope.units[&owner], &cases, &mut file, requests);
     }
     if shared.enabled(catalog::HARDCODED_VALUES) && view.application {

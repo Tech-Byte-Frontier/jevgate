@@ -55,6 +55,7 @@ impl Classifier {
             || test_name(&name)
             || name.ends_with(".rb") && under(&["spec", "step_definitions"])
             || phpunit_name(path)
+            || java_test_name(path)
         {
             "test"
         } else {
@@ -115,6 +116,20 @@ fn phpunit_name(path: &Path) -> bool {
         .is_some_and(|stem| !stem.is_empty())
 }
 
+/// Java test classes as Maven Surefire and Failsafe name them: `…Test`,
+/// `…Tests`, `…TestCase` and `…IT`, by case, since `Contest.java` is not one.
+fn java_test_name(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "java")
+        && path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|stem| {
+                ["Test", "Tests", "TestCase", "IT"]
+                    .iter()
+                    .any(|suffix| stem.len() > suffix.len() && stem.ends_with(suffix))
+            })
+}
+
 fn file_extension(path: &Path) -> String {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -171,6 +186,18 @@ mod tests {
             "fixture"
         );
         assert_eq!(classifier.role(Path::new("lib/spec/openapi.ts")), "source");
+        for java in ["OrdersTest.java", "OrdersTests.java", "OrdersIT.java"] {
+            let path = std::path::PathBuf::from("module/src/integration/java").join(java);
+            assert_eq!(classifier.role(&path), "test", "{java}");
+        }
+        assert_eq!(
+            classifier.role(Path::new("src/main/java/app/Contest.java")),
+            "source"
+        );
+        assert_eq!(
+            classifier.role(Path::new("src/test/java/app/Fixtures.java")),
+            "test"
+        );
     }
 
     #[test]

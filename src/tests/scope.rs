@@ -7,7 +7,7 @@ fn unparseable_binary_and_unsupported_files_are_skipped_without_blocking_the_run
     let project = Project::new();
     project.write("large.rs", &function("too_large"));
     project.write("invalid.rs", "fn broken( {");
-    project.write("Main.java", "class Main {\n    void run() {}\n}\n");
+    project.write("Main.kt", "class Main {\n    fun run() {}\n}\n");
     project.write("ok.rs", &function("ok"));
     std::fs::write(project.0.join("latin1.rs"), b"fn caf\xe9() {}\n").unwrap();
     let mut options = args();
@@ -25,7 +25,7 @@ fn unparseable_binary_and_unsupported_files_are_skipped_without_blocking_the_run
             .unwrap()
     };
     assert_eq!(file("ok.rs").status, schema::Status::Clear);
-    for name in ["invalid.rs", "Main.java", "latin1.rs"] {
+    for name in ["invalid.rs", "Main.kt", "latin1.rs"] {
         assert_eq!(file(name).status, schema::Status::Skipped, "{name}");
         assert!(
             file(name).error.as_ref().unwrap().contains("not judged"),

@@ -86,6 +86,7 @@ fn grammar(path: &Path) -> Option<tree_sitter::Language> {
         "cs" => tree_sitter_c_sharp::LANGUAGE,
         "rb" => tree_sitter_ruby::LANGUAGE,
         "php" | "phtml" => tree_sitter_php::LANGUAGE_PHP,
+        "java" => tree_sitter_java::LANGUAGE,
         _ => return None,
     };
     Some(language.into())

@@ -67,6 +67,12 @@ const LITERALS: &[&str] = &[
     "real_literal",
     "verbatim_string_literal",
     "boolean",
+    "decimal_integer_literal",
+    "hex_integer_literal",
+    "octal_integer_literal",
+    "binary_integer_literal",
+    "decimal_floating_point_literal",
+    "hex_floating_point_literal",
 ];
 
 const STATEMENTS: &[&str] = &[
@@ -87,6 +93,8 @@ const STATEMENTS: &[&str] = &[
     "operator_assignment",
     "return",
     "echo_statement",
+    "local_variable_declaration",
+    "throw_statement",
 ];
 
 /// Rust's standard formatting macros build text from their arguments.
@@ -112,6 +120,9 @@ const CSHARP_FORMAT_CALLS: &[&str] = &[
     "string.Concat",
     "String.Concat",
 ];
+/// Java methods that build text from a format string and values:
+/// `String.format`, `"…".formatted(…)`, `printf` and `MessageFormat.format`.
+const JAVA_FORMAT_CALLS: &[&str] = &["format", "formatted", "printf"];
 
 /// Sites of the body, one per statement, in source order with ids `S1…`.
 /// In Django code (`django`), assignments to a subscript such as
@@ -404,6 +415,7 @@ fn calls_something(node: Node<'_>) -> bool {
             | "new_expression"
             | "macro_invocation"
             | "invocation_expression"
+            | "method_invocation"
             | "object_creation_expression"
     ) || {
         let mut cursor = node.walk();
@@ -504,10 +516,18 @@ fn priority(node: Node<'_>, source: &str, mode: Mode) -> Option<Priority> {
         {
             Some(Priority::BuiltText)
         }
+        "method_invocation"
+            if node
+                .child_by_field_name("name")
+                .is_some_and(|name| JAVA_FORMAT_CALLS.contains(&text(name, source))) =>
+        {
+            Some(Priority::BuiltText)
+        }
         "call_expression"
         | "call"
         | "new_expression"
         | "invocation_expression"
+        | "method_invocation"
         | "object_creation_expression" => Some(
             // PHP's `new` holds its arguments without a field name.
             if super::php::arguments(node).is_some_and(|args| has_value(args)) {
@@ -536,7 +556,9 @@ fn field_assignment(node: Node<'_>, mode: Mode) -> Option<Priority> {
             | "subscript_expression"
             | "member_access_expression"
             | "element_access_expression"
-            | "scoped_property_access_expression" => true,
+            | "scoped_property_access_expression"
+            | "field_access"
+            | "array_access" => true,
             "subscript" => mode.django,
             _ => false,
         })

@@ -17,7 +17,8 @@ pub const MAX_ERRORS: usize = 12;
 /// `new …Error(…)` or `new …Exception(…)` and any call or `new` a `throw`
 /// statement makes, the call a Python `raise` makes, Go's `errors.New`
 /// and `fmt.Errorf`, C# and PHP `new …Exception(…)` or any object a `throw`
-/// creates, and a Ruby `raise`. The message is the
+/// creates, a Ruby `raise`, and Java's `new …Exception(…)` or `new …Error(…)`
+/// and any `new` or call a `throw` makes. The message is the
 /// first argument, or a Python `detail`, `message` or `msg` keyword. They
 /// are evidence of what the messages say; Jev judges where their text comes from.
 pub fn created_errors(body: Node<'_>, source: &str) -> Vec<CreatedError> {
@@ -44,7 +45,7 @@ fn errors_in(node: Node<'_>, source: &str, found: &mut Vec<CreatedError>) {
         "call" if node.parent().is_some_and(|p| p.kind() == "raise_statement") => {
             node.child_by_field_name("function")
         }
-        // C#: `new OrderNotFoundException(…)`; PHP: `new \App\NotFound(…)`;
+        // C# and Java: `new OrderNotFoundException(…)`; PHP: `new \App\NotFound(…)`;
         // or any object a `throw` creates.
         "object_creation_expression" => node
             .child_by_field_name("type")
@@ -63,6 +64,10 @@ fn errors_in(node: Node<'_>, source: &str, found: &mut Vec<CreatedError>) {
                         .parent()
                         .is_some_and(|p| matches!(p.kind(), "throw_statement" | "throw_expression"))
             }),
+        // Java: `throw fail("…")`.
+        "method_invocation" if node.parent().is_some_and(|p| p.kind() == "throw_statement") => {
+            node.child_by_field_name("name")
+        }
         // Go: `errors.New("…")` and `fmt.Errorf("…", err)`.
         "call_expression" => node
             .child_by_field_name("function")

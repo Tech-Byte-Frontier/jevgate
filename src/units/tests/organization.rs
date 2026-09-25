@@ -180,6 +180,51 @@ fn test_files_are_outlined_by_suite_without_include_tests() {
 }
 
 #[test]
+fn a_java_test_outline_names_each_subject_by_the_class_that_owns_it() {
+    let project = Project::new();
+    project.write(
+        "src/main/java/app/StringUtil.java",
+        "package app;\n\nclass StringUtil {\n\tstatic boolean isBlank(String s) {\n\t\treturn s.isBlank();\n\t}\n\n\tstatic String join(String a, String b) {\n\t\treturn a + b;\n\t}\n}\n",
+    );
+    project.write(
+        "src/main/java/app/Paths.java",
+        "package app;\n\nclass Paths {\n\tstatic String join(String a, String b) {\n\t\treturn a + \"/\" + b;\n\t}\n}\n",
+    );
+    let mut tests = String::from("package app;\n\nclass StringUtilTest {\n");
+    for i in 0..12 {
+        let call = if i % 2 == 0 {
+            "StringUtil.isBlank(\" \")"
+        } else {
+            "StringUtil.join(\"a\", \"b\")"
+        };
+        tests.push_str(&format!(
+            "\t@Test\n\tvoid case{i}() {{\n\t\tObject value = {call};\n\t\tassertNotNull(value);\n\t\tassertEquals(value, value);\n\t\tassertTrue(value != null);\n\t\tassertFalse(value == null);\n\t\tassertSame(value, value);\n\t}}\n\n"
+        ));
+    }
+    tests.push_str("}\n");
+    project.write("src/test/java/app/StringUtilTest.java", &tests);
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    let (_, plan) = planned(&project, &options);
+    let outline = plan
+        .requests
+        .iter()
+        .map(|p| &p.request["state"])
+        .find(|s| s["file"]["path"] == "src/test/java/app/StringUtilTest.java")
+        .unwrap();
+    let subjects: Vec<&Value> = outline["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .take(2)
+        .map(|m| &m["subjects"][0])
+        .collect();
+    // `join` has two owners, so it stays a bare name.
+    assert_eq!(subjects, [&json!("StringUtil::isBlank"), &json!("join")]);
+    assert!(outline["members"][0].get("suite").is_none());
+}
+
+#[test]
 fn short_files_are_too_small_to_split_and_never_clear() {
     let project = Project::new();
     project.write(

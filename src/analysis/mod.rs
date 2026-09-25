@@ -38,6 +38,11 @@ pub(crate) fn callee_name(node: Node<'_>, source: &str) -> Option<String> {
     loop {
         node = match node.kind() {
             "generic_function" => node.child_by_field_name("function")?,
+            // Java: `new ArrayList<>()` and `new Outer.Inner()`.
+            "generic_type" => node.named_child(0)?,
+            "scoped_type_identifier" => {
+                node.named_child(node.named_child_count().checked_sub(1)? as u32)?
+            }
             "scoped_identifier" => node.child_by_field_name("name")?,
             "field_expression" => node.child_by_field_name("field")?,
             "member_expression" => node.child_by_field_name("property")?,

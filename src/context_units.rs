@@ -94,6 +94,9 @@ fn collect(
             | "inner_attribute_item"
             | "using_directive"
             | "file_scoped_namespace_declaration"
+            | "import_declaration"
+            | "package_clause"
+            | "package_declaration"
     ) || python_docstring(node, source)
         || crate::analysis::ruby::required(node, source).is_some()
     {
@@ -115,6 +118,7 @@ fn collect(
             | "class_body"
             | "block"
             | "compilation_unit"
+            | "enum_body_declarations"
     ) {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
@@ -152,26 +156,26 @@ fn container(
     units: &mut Vec<Unit>,
     scaffolding: &mut Vec<Range<usize>>,
 ) -> bool {
+    let body = node.child_by_field_name("body");
+    // Java records and interfaces share these names; their bodies differ.
     let csharp = matches!(
         node.kind(),
         "namespace_declaration"
             | "struct_declaration"
             | "record_declaration"
             | "interface_declaration"
-    );
-    if !csharp
-        && !matches!(
+    ) && body.is_some_and(|body| body.kind() == "declaration_list");
+    if !(csharp
+        || matches!(
             node.kind(),
             "impl_item" | "mod_item" | "class_declaration" | "class_definition" | "singleton_class"
         )
-        && !ruby_namespace(node)
+        || java_type(node)
+        || ruby_namespace(node))
     {
         return false;
     }
-    let Some(body) = node
-        .child_by_field_name("body")
-        .filter(|body| !csharp || body.kind() == "declaration_list")
-    else {
+    let Some(body) = body else {
         return false;
     };
     let first = body
@@ -197,6 +201,32 @@ fn ruby_namespace(node: Node<'_>) -> bool {
             .is_some_and(|n| matches!(n.kind(), "constant" | "scope_resolution"))
 }
 
+/// A Java record, or an interface or enum whose body holds Java members.
+/// TypeScript interfaces and enums share the names and stay one unit.
+fn java_type(node: Node<'_>) -> bool {
+    const MEMBERS: &[&str] = &[
+        "method_declaration",
+        "constructor_declaration",
+        "constant_declaration",
+        "field_declaration",
+        "enum_constant",
+        "enum_body_declarations",
+        "class_declaration",
+        "interface_declaration",
+    ];
+    match node.kind() {
+        "record_declaration" => true,
+        "interface_declaration" | "enum_declaration" => {
+            node.child_by_field_name("body").is_some_and(|body| {
+                let mut cursor = body.walk();
+                body.named_children(&mut cursor)
+                    .any(|member| MEMBERS.contains(&member.kind()))
+            })
+        }
+        _ => false,
+    }
+}
+
 /// Names a definition binds. Bindings and export wrappers may name the
 /// definition below their root.
 fn unit_names(node: Node<'_>, source: &str) -> BTreeSet<String> {
@@ -217,6 +247,8 @@ fn unit_names(node: Node<'_>, source: &str) -> BTreeSet<String> {
                 | "variable_declaration"
                 | "expression_statement"
                 | "decorated_definition"
+                | "field_declaration"
+                | "constant_declaration"
         )
     {
         let mut cursor = node.walk();
@@ -240,6 +272,7 @@ fn enclosing_owner(node: Node<'_>, source: &str) -> String {
                 | "record_declaration"
                 | "interface_declaration"
         ) || ruby_namespace(parent)
+            || java_type(parent)
         {
             return parent
                 .child_by_field_name("type")
@@ -301,5 +334,39 @@ fn target_name(unit: &Unit, line: usize) -> String {
         name
     } else {
         format!("{}::{name}", unit.owner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::review_targets;
+    use std::path::Path;
+
+    #[test]
+    fn java_members_are_targets_and_package_and_imports_are_scaffolding() {
+        let java = "package app;\n\nimport java.util.List;\n\nclass Totals {\n\tprivate static final int LIMIT = 3;\n\n\tint sum(List<Integer> values) {\n\t\treturn values.size();\n\t}\n}\n\nenum Mode {\n\tFAST,\n\tSLOW;\n\n\tboolean quick() {\n\t\treturn this == FAST;\n\t}\n}\n\nrecord Visit(String date) {\n\tVisit {\n\t\tcheck(date);\n\t}\n}\n\ninterface Store {\n\tdefault int size() {\n\t\treturn 0;\n\t}\n}\n";
+        let names: Vec<String> = review_targets(Path::new("Totals.java"), java)
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Totals::LIMIT",
+                "Totals::sum",
+                "Mode::FAST",
+                "Mode::SLOW",
+                "Mode::quick",
+                "Visit::Visit",
+                "Store::size"
+            ]
+        );
+        let typescript = "interface Row {\n  id: string\n}\nenum Mode { Fast, Slow }\n";
+        // A TypeScript enum stays one target and an interface none.
+        let names: Vec<String> = review_targets(Path::new("row.ts"), typescript)
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        assert_eq!(names, ["Mode"]);
     }
 }

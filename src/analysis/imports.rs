@@ -1,13 +1,21 @@
 //! Which files can reach another file's members: a caller counts only when it
 //! is in the same language family and one of its import lines names the
 //! target's module. Matching calls by bare name alone linked unrelated files,
-//! such as a Python `update` to a JavaScript `decipher.update`.
-use std::path::Path;
+//! such as a Python `update` to a JavaScript `decipher.update`. Java code
+//! uses the classes of its own package without importing them, so a Java file
+//! also reaches a file of its directory whose class it names.
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 /// Import and module lines of one file, kept for repeated lookups.
 pub struct Imports {
     family: &'static str,
     lines: Vec<String>,
+    /// For Java: the file's directory and the capitalized names its code
+    /// mentions, the classes of its package it can use without an import.
+    package: Option<(PathBuf, BTreeSet<String>)>,
 }
 
 impl Imports {
@@ -17,6 +25,7 @@ impl Imports {
             return Self {
                 family,
                 lines: csharp_lines(source),
+                package: None,
             };
         }
         let lines = source
@@ -39,7 +48,19 @@ impl Imports {
             })
             .map(str::to_string)
             .collect();
-        Self { family, lines }
+        let package = (family == "java").then(|| {
+            let names = source
+                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
+                .filter(|word| word.starts_with(|c: char| c.is_ascii_uppercase()))
+                .map(str::to_string)
+                .collect();
+            (path.parent().unwrap_or(Path::new("")).to_path_buf(), names)
+        });
+        Self {
+            family,
+            lines,
+            package,
+        }
     }
 
     /// True when these imports name the module that `target` defines. C#
@@ -65,7 +86,10 @@ impl Imports {
                 .iter()
                 .any(|line| names_segment(line, &name) || names_segment(line, &interface));
         }
-        self.lines.iter().any(|line| names_segment(line, &name))
+        let same_package = self.package.as_ref().is_some_and(|(directory, names)| {
+            target.parent().unwrap_or(Path::new("")) == directory && names.contains(&name)
+        });
+        same_package || self.lines.iter().any(|line| names_segment(line, &name))
     }
 }
 
@@ -93,6 +117,7 @@ fn family(path: &Path) -> &'static str {
         "cs" => "csharp",
         "rb" => "ruby",
         "php" | "phtml" => "php",
+        "java" => "java",
         "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte"
         | "astro" => "javascript",
         _ => "",
@@ -130,7 +155,7 @@ mod tests {
 
     #[test]
     fn callers_need_an_import_of_the_module_in_the_same_language() {
-        let cases: [(&str, &str, &[&str], &[&str]); 5] = [
+        let cases: [(&str, &str, &[&str], &[&str]); 6] = [
             (
                 "app/routes.php",
                 "<?php\nuse App\\Application\\Actions\\User\\ListUsersAction;\nrequire_once __DIR__ . '/helpers.php';\n",
@@ -173,6 +198,19 @@ mod tests {
                     "src/Core/Services/OrderService.cs",
                     "src/Core/Services/Services.cs",
                     "src/Core/basket.py",
+                ],
+            ),
+            (
+                "src/main/java/app/owner/OwnerController.java",
+                "package app.owner;\n\nimport app.model.Person;\n\nclass OwnerController {\n    private final OwnerRepository owners;\n}\n",
+                &[
+                    "src/main/java/app/owner/OwnerRepository.java",
+                    "src/main/java/app/model/Person.java",
+                ],
+                &[
+                    "src/main/java/app/owner/PetValidator.java",
+                    "src/main/java/app/vet/OwnerRepository.java",
+                    "src/main/java/app/owner/owner_repository.py",
                 ],
             ),
         ];
