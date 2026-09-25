@@ -94,7 +94,26 @@ pub fn test_own_logic(path: &str, evidence: TestEvidence) -> Value {
 /// stub the code chose (a router's matched handler) or the view and status a
 /// Spring MVC controller chose for stubbed data: every assertion is vacuously
 /// about the mocks, or the checked values came from them.
+///
+/// The recheck, which shows the bodies the test calls, also names what code
+/// does around its stubs: express's service tests expecting the error a
+/// missing record raises, or a flag the service adds to a stubbed profile,
+/// and zero2prod's tests that a mock email server received one request,
+/// stayed undecided without these examples.
 pub fn test_mock_only(path: &str, evidence: TestEvidence) -> Value {
+    let mut no = vec![
+        "The test sets up no mock or stub: the code runs with real objects, as when a value set through a setter is read back, an object survives a round trip, or a benchmark or smoke run asserts nothing",
+        "Which stub or handler the code chose, such as the handler a router matched for a path",
+        "The status, view, redirect or response format a request handler chose, even when the data it shows came from a stub",
+        "A result the code picked, filtered or computed from stubbed input, such as the item it found by name in a stubbed list",
+    ];
+    if evidence != TestEvidence::First {
+        no.extend([
+            "The error the code raises or the status it returns when a stub returns nothing, such as a not-found error for a missing record",
+            "A field the code adds to or derives from stubbed data, such as a count or a flag it computes",
+            "That the code made the calls a mock expects, such as a mock server's expectation of one request",
+        ]);
+    }
     json!({
         "type": "noul",
         "instructions": {
@@ -110,12 +129,7 @@ pub fn test_mock_only(path: &str, evidence: TestEvidence) -> Value {
             },
             "false": {
                 "what": "At least one assertion checks what the code under test produces, including a value it builds from definitions, routes, records or settings the test gives it, even when that input spells out the expected value.",
-                "examples": [
-                    "The test sets up no mock or stub: the code runs with real objects, as when a value set through a setter is read back, an object survives a round trip, or a benchmark or smoke run asserts nothing",
-                    "Which stub or handler the code chose, such as the handler a router matched for a path",
-                    "The status, view, redirect or response format a request handler chose, even when the data it shows came from a stub",
-                    "A result the code picked, filtered or computed from stubbed input, such as the item it found by name in a stubbed list"
-                ]
+                "examples": no,
             }
         },
     })
