@@ -34,7 +34,7 @@ def rules_page(binary):
         "",
         f"Generated from `jevgate rules --format json` ({version}). A rule is named by its ID,",
         "its key or its group anywhere a rule is accepted: `--rule`, `--skip-rule`,",
-        "`--fail-on TARGET=LEVEL`, `[rules]` and `[[scope]]`.",
+        "`--fail-on TARGET=LEVEL`, `[rules]`, `[[scope]]` and `jevgate: allow(…)` comments.",
         "",
         "| Rule | Key | Default | Question |",
         "|---|---|---|---|",
