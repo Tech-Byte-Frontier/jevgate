@@ -190,11 +190,28 @@ fn example_directory(part: &str) -> bool {
 }
 
 /// Whether a file is example code, written to be read beside other examples.
+/// Also a top-level `samples` or `sample` directory (a Java package named
+/// `samples` is source), a .NET project named like `MediatR.Examples.Autofac`,
+/// and Go's `example_*_test.go` files, which show how to call a package.
 pub(crate) fn example_code(path: &Path) -> bool {
-    path.parent().is_some_and(|dir| {
-        dir.iter()
-            .any(|part| example_directory(&part.to_string_lossy()))
-    })
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let top = path
+        .iter()
+        .next()
+        .map(|p| p.to_string_lossy().to_ascii_lowercase())
+        .filter(|_| path.iter().count() > 1)
+        .unwrap_or_default();
+    (name.starts_with("example_") && name.ends_with("_test.go"))
+        || matches!(top.as_str(), "samples" | "sample")
+        || path.parent().is_some_and(|dir| {
+            dir.iter().any(|part| {
+                let part = part.to_string_lossy();
+                example_directory(&part) || part.to_ascii_lowercase().contains(".examples")
+            })
+        })
 }
 
 /// Whether two files are separate variants of one example, kept side by
@@ -1541,6 +1558,16 @@ mod tests {
             assert!(super::example_code(Path::new(path)), "{path}");
         }
         assert!(!super::example_code(Path::new("src/examples.rs")));
+        for path in [
+            "samples/MediatR.Examples/Runner.cs",
+            "src/MediatR.Examples.Autofac/Program.cs",
+            "example_authentication_middleware_test.go",
+        ] {
+            assert!(super::example_code(Path::new(path)), "{path}");
+        }
+        assert!(!super::example_code(Path::new(
+            "src/main/java/org/springframework/samples/petclinic/Owner.java"
+        )));
     }
 
     #[test]

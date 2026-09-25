@@ -644,6 +644,7 @@ pub(super) fn plan_pairs(
                 names: [a.name.clone(), b.name.clone()],
                 subject: pair.subject.clone(),
                 table,
+                unseen_setup: !ruby && a.suite != b.suite,
                 identical: a.suite == b.suite
                     && words(&a.source(file.source).replace(a.name.as_str(), ""))
                         == words(&b.source(file.source).replace(b.name.as_str(), "")),

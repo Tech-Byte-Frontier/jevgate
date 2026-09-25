@@ -144,6 +144,8 @@ pub(in crate::units) fn shared_outcome(
     Some(match (&unit.detail, same) {
         (_, Outcome::Review(p) | Outcome::Consider(p)) if examples => Outcome::Note(p),
         (Detail::Pair { in_cases: true, .. }, _) if short => lowered(lowered(same)),
+        // Short copies in test support, such as a run of one-line assertions.
+        (Detail::Pair { in_tests: true, .. }, _) if short => lowered(same),
         (Detail::Pair { in_cases: true, .. }, _) => lowered(same),
         (_, Outcome::Review(p)) if short => Outcome::Consider(p),
         _ => same,

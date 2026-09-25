@@ -398,6 +398,11 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
     } = tally;
     // A pair of tests in a group of three or more is reported by the group.
     let (groups, grouped) = over_tested(plan, &redundant);
+    // A pair in a group reaches the group's consider; a lone pair is a note.
+    if let Some(count) = counts.get_mut(catalog::TEST_REDUNDANCY) {
+        count.note -= grouped.len();
+        count.consider += grouped.len();
+    }
     let mut index = 0;
     findings.retain(|_| {
         index += 1;
@@ -445,7 +450,7 @@ struct Tally<'p> {
 fn drop_copies_of_redundant_tests(findings: &mut Vec<Finding>) {
     let tests: Vec<crate::schema::Location> = findings
         .iter()
-        .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY) && f.strength != Strength::Note)
+        .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
         .flat_map(|f| f.locations.iter().cloned())
         .collect();
     let named = |l: &crate::schema::Location| {
@@ -460,8 +465,8 @@ fn drop_copies_of_redundant_tests(findings: &mut Vec<Finding>) {
     });
 }
 
-/// A redundant test pair, with the index of its finding when it is a
-/// consider, which a group of three or more tests reports instead.
+/// A redundant test pair, with the index of its finding (a note) when it
+/// reached a consider, which a group of three or more tests reports instead.
 struct Redundant<'p> {
     unit: &'p UnitPlan,
     names: &'p [String; 2],
@@ -491,6 +496,15 @@ impl<'p> Tally<'p> {
             lowered(outcome)
         } else {
             outcome
+        };
+        // Two tests that check one behavior with different inputs are a note
+        // on their own; three or more linked by such pairs are grouped into a
+        // consider below. Labeled by hand on just, express, gson and
+        // lobsters, lone pairs were mostly style, with few worth merging.
+        let grouping = outcome;
+        let outcome = match (&unit.detail, outcome) {
+            (Detail::TestPair { .. }, Outcome::Consider(p)) => Outcome::Note(p),
+            _ => outcome,
         };
         let top = self.concern.entry(unit.rule).or_default();
         *top = top.max(outcome.concern());
@@ -525,10 +539,10 @@ impl<'p> Tally<'p> {
         if let (
             Detail::TestPair { names, subject, .. },
             Outcome::Review(p) | Outcome::Consider(p),
-        ) = (&unit.detail, outcome)
+        ) = (&unit.detail, grouping)
         {
             // A review pair stays its own finding: it says a test adds nothing.
-            let finding = matches!(outcome, Outcome::Consider(_)).then(|| self.findings.len() - 1);
+            let finding = matches!(grouping, Outcome::Consider(_)).then(|| self.findings.len() - 1);
             self.redundant.push(Redundant {
                 unit,
                 names,

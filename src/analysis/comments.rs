@@ -465,6 +465,12 @@ fn place(
     } else {
         comment.unit = enclosing(units, &comment);
         comment.code = nearby(lines, &comment, starts);
+        // A doc block documents the declaration below it even when that has
+        // no unit: an interface method, a property, a constant or a field,
+        // as oauth2-server's interfaces and just's enum variants have.
+        if doc_block(&comment.text) && !comment.code.is_empty() {
+            comment.placement = Placement::Declaration;
+        }
     }
     if comment.unit.is_none() && comment.definition.is_none() {
         comment.definition = member_of(units, &comment, lines);
@@ -583,6 +589,14 @@ fn member_of(units: &[Unit], comment: &Comment, lines: &[&str]) -> Option<String
     let same = before.is_some_and(|u| u.owner == after.owner);
     (!after.owner.is_empty() && (same || indented && before.is_none_or(|u| u.owner.is_empty())))
         .then(|| after.owner.clone())
+}
+
+/// A documentation comment by its markers: `/** … */`, `///` or `//!`.
+fn doc_block(text: &str) -> bool {
+    let text = text.trim_start();
+    (text.starts_with("/**") && !text.starts_with("/**/"))
+        || text.starts_with("///") && !text.starts_with("////")
+        || text.starts_with("//!")
 }
 
 fn enclosing(units: &[Unit], comment: &Comment) -> Option<usize> {
@@ -765,6 +779,18 @@ mod tests {
     fn a_php_file_s_header_after_its_opening_tag_documents_the_file() {
         let source = "<?php\n\n/*\n * Custom JWT middleware: the package's token name cannot be configured.\n */\n\nnamespace App\\Http;\n\nclass Auth {}\n";
         assert_eq!(found("Auth.php", source)[0].placement, Placement::File);
+    }
+
+    #[test]
+    fn doc_blocks_above_declarations_without_units_are_documentation() {
+        let source = "<?php\n\ninterface ClientEntityInterface\n{\n    /**\n     * Get the client's name, as shown to the user who approves it.\n     */\n    public function getName(): string;\n}\n";
+        let comments = found("ClientEntityInterface.php", source);
+        assert_eq!(comments[0].placement, Placement::Declaration);
+        let rust = "enum Expression {\n    /// `lhs && rhs`, true when both sides are\n    And { lhs: Box<Expression>, rhs: Box<Expression> },\n    Or,\n}\n";
+        assert_eq!(
+            found("expression.rs", rust)[0].placement,
+            Placement::Declaration
+        );
     }
 
     #[test]

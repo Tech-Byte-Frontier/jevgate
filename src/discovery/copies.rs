@@ -23,8 +23,33 @@ pub fn vendored(path: &Path, source: Option<&str>) -> bool {
             .is_file();
     (script && versioned_name(&name))
         || minified_sibling
+        || shadcn(path)
         || source.is_some_and(license_banner)
         || script && asset(path) && source.is_some_and(license_text)
+}
+
+/// A component the shadcn CLI copied in: under a `shadcn` directory, or
+/// under `ui` in a project whose `components.json` names ui.shadcn.com.
+/// makerkit's `packages/ui/src/shadcn` says never to edit these files.
+fn shadcn(path: &Path) -> bool {
+    let component =
+        ["tsx", "ts", "jsx", "js", "vue", "svelte"].contains(&file_extension(path).as_str());
+    if !component {
+        return false;
+    }
+    if path.iter().any(|part| part == "shadcn") {
+        return true;
+    }
+    let Some(dir) = path
+        .parent()
+        .filter(|d| d.file_name().is_some_and(|n| n == "ui"))
+    else {
+        return false;
+    };
+    dir.ancestors().skip(1).take(4).any(|ancestor| {
+        std::fs::read_to_string(ancestor.join("components.json"))
+            .is_ok_and(|text| text.contains("ui.shadcn.com"))
+    })
 }
 
 /// A path under a directory that serves static files or holds copied code.

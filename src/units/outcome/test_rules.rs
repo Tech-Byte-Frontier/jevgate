@@ -57,10 +57,15 @@ pub(in crate::units) fn redundancy_outcome<'a>(
         && ["same_input", "same_outcome"]
             .iter()
             .any(|q| matches!(get(q), Some(Answer::Noul { noul }) if !at_least(*noul)));
+    // Different inputs with outcomes that clearly differ, such as a range
+    // that parses and one that does not, are separate behaviors to keep.
+    let outcomes_differ = !identical
+        && matches!(get("same_outcome"), Some(Answer::Noul { noul }) if at_least(1.0 - noul));
     match (outcome, levels(overlap)) {
         (Outcome::Review(_), Some([_, middle, top])) if separable || differs => {
             Outcome::Consider(middle + top)
         }
+        (Outcome::Consider(p), _) if outcomes_differ => Outcome::Note(p),
         _ => outcome,
     }
 }

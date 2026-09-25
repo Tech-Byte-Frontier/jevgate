@@ -202,6 +202,9 @@ pub enum Detail {
         identical: bool,
         /// Whether their file's tests can be parameterized.
         table: bool,
+        /// Tests in different groups whose setup is not sent (outside Ruby):
+        /// each group's `before` hook may build a different case.
+        unseen_setup: bool,
     },
 }
 

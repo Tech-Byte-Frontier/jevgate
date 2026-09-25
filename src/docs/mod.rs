@@ -111,13 +111,15 @@ fn generated(source: &str) -> bool {
 /// code is written for learners, as mini-redis ("intended to be a learning
 /// resource", "Contributions should come with extensive comments") and wtf
 /// ("built for educational purposes") do.
-const TEACHING: [&str; 6] = [
+const TEACHING: [&str; 8] = [
     "educational purpose",
     "learning resource",
     "extensive comments",
     "demonstration project",
     "for teaching",
     "is teaching",
+    "serves as a commentary",
+    "all comments in this project",
 ];
 
 /// Whether the repository at `root` says its code is written for learners,

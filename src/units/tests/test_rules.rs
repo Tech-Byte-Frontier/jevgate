@@ -273,7 +273,8 @@ fn ruby_pairs_are_a_review_only_when_neither_test_checks_something_the_other_doe
         file.findings[0].strength
     };
     assert_eq!(strength(0.05, false), Strength::Review);
-    assert_eq!(strength(0.3, true), Strength::Consider);
+    // Lowered to a consider, a lone pair is a note.
+    assert_eq!(strength(0.3, true), Strength::Note);
 }
 
 /// Two pairs of tests of `total`, each alike within and unlike the other.
@@ -374,6 +375,20 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
     options.refresh = true;
     assert_eq!(strengths(&options, 0.69, 0.95), Some(Strength::Consider));
     assert_eq!(strengths(&options, 0.95, 0.05), Some(Strength::Consider));
+    // Different inputs whose outcomes clearly differ are a note.
+    let mut eval = scripted(2);
+    eval.overrides = vec![
+        ("overlap", spread(0.0, 0.9, 0.1)),
+        ("same_outcome", noul_at(0.05)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    assert!(
+        report.files[0]
+            .findings
+            .iter()
+            .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
+            .all(|f| f.strength == Strength::Note)
+    );
     // Tests that read the same apart from their names stay a review.
     let twins = "fn total(values: &[i32]) -> i32 {\n    values.iter().sum()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn when_empty() {\n        let values = vec![1, 2];\n        assert_eq!(total(&values), 3);\n    }\n\n    #[test]\n    fn when_full() {\n        let values = vec![1, 2];\n        assert_eq!(total(&values), 3);\n    }\n}\n";
     let (project, options) = tests_project(&[("lib.rs", twins)], catalog::TEST_REDUNDANCY);
@@ -385,11 +400,12 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
     ];
     let report = run(&project, &options, &mut eval);
     assert_eq!(report.files[0].findings[0].strength, Strength::Review);
-    // A space inside a string can be what the tests differ in.
+    // A space inside a string can be what the tests differ in: not a
+    // review, and a lone pair below one is a note.
     let spaced = twins.replacen("vec![1, 2]", "vec![1,2]", 1);
     let (project, options) = tests_project(&[("lib.rs", &spaced)], catalog::TEST_REDUNDANCY);
     let report = run(&project, &options, &mut eval);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Consider);
+    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
     // Without a crate for parameterized tests, merging them is only a note.
     let (project, options) = project_with(&[("lib.rs", &spaced)], &[catalog::TEST_REDUNDANCY]);
     let mut options = options;
@@ -421,7 +437,6 @@ fn copies_inside_tests_a_redundancy_finding_names_are_reported_once() {
     let rules: Vec<&str> = report.files[0]
         .findings
         .iter()
-        .filter(|f| f.strength != Strength::Note)
         .map(|f| f.rule.as_str())
         .collect();
     assert_eq!(rules, [catalog::id(catalog::TEST_REDUNDANCY)], "{rules:?}");

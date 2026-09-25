@@ -304,6 +304,17 @@ mod tests {
             !super::vendored(&at("src/socket.js"), Some(mit)),
             "a project's own licensed source"
         );
+        assert!(super::vendored(
+            &at("packages/ui/src/shadcn/carousel.tsx"),
+            None
+        ));
+        dir.write(
+            "components.json",
+            r#"{"$schema": "https://ui.shadcn.com/schema.json"}"#,
+        );
+        dir.write("components/ui/button.tsx", "export const Button = 1;\n");
+        assert!(super::vendored(&at("components/ui/button.tsx"), None));
+        assert!(!super::vendored(&at("components/nav.tsx"), None));
     }
 
     #[test]

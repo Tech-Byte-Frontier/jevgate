@@ -204,9 +204,19 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
                 }
             );
             let table = !matches!(unit.detail, Detail::TestPair { table: false, .. });
+            // Express's `when false` and `when true` groups run one body on
+            // apps their `before` hooks build differently.
+            let unseen_setup = matches!(
+                unit.detail,
+                Detail::TestPair {
+                    unseen_setup: true,
+                    ..
+                }
+            );
             get("overlap").map(|overlap| {
                 // A suggestion to parameterize is only a note where tests cannot be.
                 match redundancy_outcome(overlap, &get, identical) {
+                    Outcome::Review(p) if unseen_setup => Outcome::Consider(p),
                     Outcome::Consider(p) if !table => Outcome::Note(p),
                     outcome => outcome,
                 }
@@ -271,15 +281,21 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     let outcome = result.unwrap_or(Outcome::Missing);
     // Example code is written to be read in one piece, and its settings to be
     // copied and changed: debug-toolbar's example project keeps a literal
-    // SECRET_KEY, and sqlmodel's tutorials run each step in one function.
-    let example = matches!(
-        unit.rule,
-        catalog::FUNCTION_SIMPLIFICATION | catalog::UNSAFE_SETTINGS
-    ) && unit
+    // SECRET_KEY, sqlmodel's tutorials run each step in one function, and
+    // express's examples keep session cookies simple. Its findings are at
+    // most notes; a place it passes outside input to a query or command is
+    // still a consider, since examples are copied.
+    let example = unit
         .locations
         .iter()
-        .all(|l| crate::analysis::clones::example_code(&l.path));
+        .all(|l| crate::analysis::clones::example_code(&l.path))
+        && !unit.locations.is_empty();
     match outcome {
+        Outcome::Review(p) | Outcome::Consider(p)
+            if example && matches!(unit.rule, catalog::INJECTION | catalog::SENSITIVE_DATA) =>
+        {
+            Outcome::Consider(p)
+        }
         Outcome::Review(p) | Outcome::Consider(p) if example => Outcome::Note(p),
         outcome => outcome,
     }

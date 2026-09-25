@@ -335,6 +335,15 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
             children(node, source, owner, file)
         }
         "expression_statement" => {
+            if let Some((object, name, function)) = assigned_function(node, source) {
+                let definition = Definition {
+                    outer: node,
+                    node: function,
+                    body: function.child_by_field_name("body"),
+                };
+                push(definition, name, object, Kind::Method, source, file);
+                return;
+            }
             let callbacks = if node.named_child(0).is_some_and(super::php::registers) {
                 super::php::registered_callbacks(node, source)
             } else {
@@ -460,6 +469,48 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         }
         _ => {}
     }
+}
+
+/// A function a module assigns to an object's property, as CommonJS modules
+/// define their API: `res.status = function status(code) { … }` is `status`
+/// of `res`. The object is named by its last part (`app.response` is
+/// `response`); `module.exports = function …` is named by the function.
+fn assigned_function<'t>(
+    statement: Node<'t>,
+    source: &'t str,
+) -> Option<(&'t str, &'t str, Node<'t>)> {
+    let assignment = statement
+        .named_child(0)
+        .filter(|n| n.kind() == "assignment_expression")?;
+    let (left, right) = (
+        assignment.child_by_field_name("left")?,
+        assignment.child_by_field_name("right")?,
+    );
+    if !matches!(
+        right.kind(),
+        "function_expression" | "function" | "arrow_function"
+    ) || left.kind() != "member_expression"
+    {
+        return None;
+    }
+    let object = left.child_by_field_name("object")?;
+    let property = text(left.child_by_field_name("property")?, source);
+    // `Router.prototype.handle` is `handle` of `Router`.
+    let owner = match object.kind() {
+        "member_expression" => {
+            let last = text(object.child_by_field_name("property")?, source);
+            match object.child_by_field_name("object") {
+                Some(inner) if last == "prototype" => text(inner, source),
+                _ => last,
+            }
+        }
+        _ => text(object, source),
+    };
+    if owner == "module" && property == "exports" || owner == "exports" && property == "default" {
+        let name = right.child_by_field_name("name").map(|n| text(n, source))?;
+        return Some(("", name, right));
+    }
+    Some((owner, property, right))
 }
 
 /// The object literal a declaration's value is, through TypeScript's
