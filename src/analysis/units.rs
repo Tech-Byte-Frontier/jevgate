@@ -48,6 +48,9 @@ pub struct Unit {
     /// field-by-field copies and hash multipliers are the idiom, so it offers
     /// no copies or literal values to judge.
     pub equality: bool,
+    /// Spring MVC routes a Java controller method maps, so tests that send
+    /// requests to them are linked to it.
+    pub routes: Vec<super::routes::Route>,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
     /// Plain identifiers, used only while parsing to find functions passed by name.
@@ -912,6 +915,7 @@ fn push(
         errors: body.map_or_else(Vec::new, |b| super::errors::created_errors(b, source)),
         calls: facts.calls,
         equality,
+        routes: super::routes::spring(node, source),
         refs,
         mentions: facts.idents,
     });

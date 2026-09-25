@@ -21,6 +21,7 @@ use crate::{
     analysis::{
         clones::{self, SourceFile},
         imports::Imports,
+        routes::Route,
         test_map::{self, TestCase},
         units::{self as parsed, FileUnits, Unit},
     },
@@ -246,13 +247,17 @@ struct Shared<'a> {
     imports: BTreeMap<usize, Imports>,
     /// Callable short names to their signatures, for test subjects.
     subjects: BTreeMap<String, String>,
-    /// Callable short names to the types that own a method of that name.
+    /// Java method short names to the Java types that own a method of that name.
     subject_owners: BTreeMap<String, BTreeSet<String>>,
     /// Callable short names to their file and source, for the test recheck.
     subject_sources: BTreeMap<String, test_units::SubjectSource>,
     /// Ruby methods defined among tests (in a test class, an example group
     /// or a support file) by short name, as the helpers a test calls.
     helpers: BTreeMap<String, Vec<test_units::SubjectSource>>,
+    /// Web routes and the full name of the controller method that serves each.
+    routes: Vec<(Route, String)>,
+    /// Each controller method's first route, as `GET /owners/{ownerId}`.
+    route_labels: BTreeMap<String, String>,
     /// With access control, every callable by short name, for SpacetimeDB helpers.
     module_helpers: BTreeMap<String, Vec<spacetimedb::Helper>>,
     /// Test cases of each selected file with a test view, inside its test lines.
@@ -265,9 +270,34 @@ struct Shared<'a> {
 }
 
 impl<'a> Shared<'a> {
+    /// A test that sends a request, such as MockMvc's `get("/owners/{id}")`,
+    /// calls the controller method whose route serves it, by its full name:
+    /// controllers share method names such as `initCreationForm`.
+    fn link_routes(&self, cases: &mut [TestCase]) {
+        for case in cases {
+            for request in &case.requests {
+                let served: Vec<(usize, &String)> = self
+                    .routes
+                    .iter()
+                    .filter_map(|(route, name)| {
+                        route.serves(request).map(|literal| (literal, name))
+                    })
+                    .collect();
+                let best = served.iter().map(|(literal, _)| *literal).max();
+                for (literal, name) in &served {
+                    if Some(*literal) == best {
+                        case.calls.insert((*name).clone());
+                    }
+                }
+            }
+        }
+    }
+
     /// Name each subject by the type that owns it, `StringUtil::isBlank`,
-    /// when one type in scope has a method of that name: an outline of bare
-    /// method names hid that a test file covers one class.
+    /// when one Java type in scope has a method of that name: an outline of
+    /// bare method names hid that a Java test file covers one class. Other
+    /// languages keep bare names: a Go test's `resp.Body.Close()` was named
+    /// after the one type of the package that had a `Close` method.
     fn qualify_subjects(&self, cases: &mut [TestCase]) {
         for case in cases {
             for subject in &mut case.subjects {
@@ -291,6 +321,8 @@ impl<'a> Shared<'a> {
             subject_owners: BTreeMap::new(),
             subject_sources: BTreeMap::new(),
             helpers: test_helpers(scope, &cases),
+            routes: Vec::new(),
+            route_labels: BTreeMap::new(),
             module_helpers: BTreeMap::new(),
             cases,
             enums: BTreeMap::new(),
@@ -305,11 +337,13 @@ impl<'a> Shared<'a> {
                 .subjects
                 .entry(unit.short_name.clone())
                 .or_insert_with(|| unit.signature.clone());
-            shared
-                .subject_owners
-                .entry(unit.short_name.clone())
-                .or_default()
-                .insert(unit.owner.clone());
+            if java(path) {
+                shared
+                    .subject_owners
+                    .entry(unit.short_name.clone())
+                    .or_default()
+                    .insert(unit.owner.clone());
+            }
             shared
                 .subject_sources
                 .entry(unit.short_name.clone())
@@ -318,6 +352,31 @@ impl<'a> Shared<'a> {
                     source: unit.source(source).to_string(),
                     shared: true,
                 });
+            if !unit.routes.is_empty() {
+                shared
+                    .subjects
+                    .insert(unit.name.clone(), unit.signature.clone());
+                shared.subject_sources.insert(
+                    unit.name.clone(),
+                    test_units::SubjectSource {
+                        path: path.to_path_buf(),
+                        source: unit.source(source).to_string(),
+                        shared: true,
+                    },
+                );
+                for route in &unit.routes {
+                    shared.routes.push((route.clone(), unit.name.clone()));
+                }
+                let first = &unit.routes[0];
+                let method = if first.method.is_empty() {
+                    "ANY".to_string()
+                } else {
+                    first.method.to_uppercase()
+                };
+                shared
+                    .route_labels
+                    .insert(unit.name.clone(), format!("{method} {}", first.path));
+            }
         }
         for &owner in &scope.owners {
             let result = &scope.inputs[owner].result;
@@ -456,8 +515,11 @@ fn plan_file(
     {
         file.rules.insert(catalog::FILE_ORGANIZATION, 0);
         let mut cases = test_map::cases(context.path, context.source).unwrap_or_default();
+        shared.link_routes(&mut cases);
         test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
-        shared.qualify_subjects(&mut cases);
+        if java(context.path) {
+            shared.qualify_subjects(&mut cases);
+        }
         outline::plan_tests(&context, &scope.units[&owner], &cases, &mut file, requests);
     }
     if shared.enabled(catalog::HARDCODED_VALUES) && view.application {
@@ -859,6 +921,10 @@ fn plan_functions(
     }
 }
 
+fn java(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "java")
+}
+
 /// Test value and redundancy, with each test linked to the functions it calls.
 fn plan_tests(
     shared: &Shared<'_>,
@@ -868,6 +934,7 @@ fn plan_tests(
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
+    shared.link_routes(&mut cases);
     test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
     if shared.enabled(catalog::TEST_VALUE) {
         file.rules.insert(catalog::TEST_VALUE, 0);
@@ -876,6 +943,7 @@ fn plan_tests(
             sources: &shared.subject_sources,
             helpers: &shared.helpers,
             hashes: &shared.hashes,
+            routes: &shared.route_labels,
         };
         test_units::plan_values(context, &cases, &subjects, test_lines, file, requests);
     }

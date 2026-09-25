@@ -112,6 +112,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | Sinatra and other Ruby DSLs | Methods of classes and modules (`def`, `def self.`, `class << self`, `define_method`); blocks passed at class or file level as units named by their call (`get('/invoices')`); constants as hardcoded values |
 | Monorepos | Copies are compared within a package and across packages linked by a local dependency, not across separate example apps or templates |
 | Java classes | Methods and constructors belong to their class, interface, enum constant or record; `static` fields are constants; `equals` and `hashCode` overrides and constructors storing fields are boilerplate, never copies; initial capacities and a number a method returns whole are not values to name; a class of the same package counts as imported |
+| Spring MVC | A MockMvc or RestTemplate test request reaches the controller method whose `@GetMapping`, `@PostMapping` or `@RequestMapping` route serves it, so the test is judged with that method as its code under test |
 | Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
 | Copied libraries | A library copied into the repository (a versioned file name such as `jquery-3.6.0.js`, the readable build beside a `.min.js`, or a license banner naming a version) is skipped as vendored, whatever its size |
 

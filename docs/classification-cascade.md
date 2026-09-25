@@ -37,7 +37,13 @@ signatures, or one candidate pair.
    `@Test`, `@ParameterizedTest` or another test annotation (a composed one
    whose name ends in `Test` included), a JUnit lifecycle method such as
    `@BeforeEach`, a nested test class, or extends JUnit 3's `TestCase`;
-   `…Test`, `…Tests`, `…TestCase` and `…IT` files are test paths.
+   `…Test`, `…Tests`, `…TestCase` and `…IT` files are test paths. A test
+   that sends a request to a literal path (MockMvc's `get("/owners/{id}")`,
+   RestTemplate's `RequestEntity.get(…)`) calls the Spring controller method
+   whose `@GetMapping`, `@PostMapping` or `@RequestMapping` route serves it,
+   under its class's prefix, by full name, the most literal route winning:
+   controllers share method names such as `initCreationForm`, and a request
+   names no method, so such tests had no code under test.
    Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
    contents, with every other byte a space, so lines stay the file's.
@@ -119,6 +125,7 @@ signatures, or one candidate pair.
    nothing" is a review only when that is ruled out at 0.80. Copied RSpec
    examples for an alias and its original (`each` and `each_pair`) or for two
    predicates of one record were otherwise reviews.
+   A controller method a test reaches through a request carries that route.
    The first pass names a literal worked out by hand, even with the
    arithmetic in a comment, as not re-implementing the code.
    Then one locate Choice per split finding picks the body block to extract,
