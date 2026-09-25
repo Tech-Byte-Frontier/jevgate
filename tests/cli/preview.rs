@@ -231,3 +231,25 @@ fn a_closed_output_pipe_ends_output_without_a_panic() {
         assert_eq!(output.status.code(), Some(0), "{args:?}: {stderr}");
     }
 }
+
+#[test]
+fn sarif_is_a_log_on_stdout_and_not_a_watch_format() {
+    let project = Project::new();
+    std::fs::write(project.0.join("app.py"), "def run():\n    return 1\n").unwrap();
+    let output = project
+        .command()
+        .args(["check", "--dry-run", "--format", "sarif"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let log: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(log["version"], "2.1.0");
+    assert_eq!(log["runs"][0]["tool"]["driver"]["name"], "JevGate");
+    let watch = project
+        .command()
+        .args(["check", "--watch", "--format", "sarif"])
+        .output()
+        .unwrap();
+    assert_eq!(watch.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&watch.stderr).contains("--format jsonl"));
+}

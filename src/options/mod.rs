@@ -17,6 +17,8 @@ pub enum Format {
     Jsonl,
     /// GitHub Actions annotations and a job summary, then the agent text
     Github,
+    /// A SARIF 2.1.0 log, for GitHub code scanning and other SARIF readers
+    Sarif,
 }
 
 /// When agent output is colored.

@@ -48,6 +48,7 @@ mod provider_error;
 mod requests;
 mod response;
 mod revision;
+mod sarif;
 mod schema;
 mod server;
 mod storage;
