@@ -19,6 +19,11 @@ signatures, or one candidate pair.
    decide which code the application rules and the test rules see. Only a test
    path without structural tests gets a file-purpose request. Go tests are
    `Test…`, `Benchmark…` and `Fuzz…` functions taking `*testing.T`, `.B` or `.F`.
+   C# tests are whole classes marked `[TestFixture]` or `[TestClass]` or
+   holding a method marked `[Fact]`, `[Theory]`, `[Test]`, `[TestCase]`,
+   `[TestCaseSource]`, `[TestMethod]` or `[DataTestMethod]`, and every C# file
+   of a test project directory named like `Shop.Tests`; `.Designer.cs`,
+   `.g.cs` and `.g.i.cs` files are generated.
    Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
    contents, with every other byte a space, so lines stay the file's.
@@ -88,13 +93,31 @@ signatures, or one candidate pair.
    cleared real leaks. Each registered error handler (`.onError(…)`,
    `.setErrorHandler(…)`, Express four-parameter `.use(…)` middleware, Flask
    and FastAPI decorators, NestJS `@Catch` filters, axum `IntoResponse` and
-   actix-web `ResponseError` for an error type, Rocket catchers) is asked once
+   actix-web `ResponseError` for an error type, Rocket catchers, ASP.NET Core
+   `UseExceptionHandler` lambdas, exception filters, `IExceptionHandler` and
+   middleware classes whose `Invoke` catches what the pipeline throws; a path
+   given to `UseExceptionHandler` re-executes a page judged as its own code)
+   is asked once
    whether it sends clients more than the program's own messages and codes,
    with the program's `…Error` classes (Rust enums with their `#[error]`
    messages) and the functions of its file that it calls. A registration
    inside a comment or string literal registers nothing. An injection trace
    also gets the definitions of enums its sites name (`ConfigKey.aiTag`), so
    a fixed choice does not read as a parameter.
+   Questions about C# files carry ASP.NET Core's names for what they ask
+   (`FromSqlInterpolated` binds, `ServerCertificateCustomValidationCallback`
+   returning true skips certificates, `ValidateIssuer` checks claims, not
+   certificates), and C# traces ask three more weak-setting checks (developer
+   exception pages outside development, token signature or lifetime checks
+   turned off, signing keys written in the code) and one injection check
+   (types named by input or chosen by deserialized data). An unsafe-settings
+   trace in C# also gets the `const` and `static readonly` fields the code
+   names, often declared in another file, so a key written in the code does
+   not read as configuration. Other languages keep their wording: the
+   additions were measured on ASP.NET Core projects only. A broad weak-setting
+   answer that none of the specific checks leans toward names no setting to
+   change and is at most a note: on an action marked `[AllowAnonymous]` on
+   purpose it was 0.85 while every check stayed at 0.30 or less.
    A security unit still uncertain after its trace and recheck is asked, in a
    request of its own, one literal Choice that can only clear: where its URLs
    come from (a host of the program's own at 0.80 clears an undecided URL

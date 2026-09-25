@@ -47,6 +47,16 @@ impl Questions {
         });
     }
 
+    /// The questions as they read about a file in `language`.
+    pub(super) fn reworded(mut self, language: &str) -> Self {
+        for question in &self.asked.questions {
+            if let Some(body) = self.bodies.get_mut(&question.key) {
+                questions::reword(language, question.question, body);
+            }
+        }
+        self
+    }
+
     pub(super) fn finish(self) -> (Map<String, Value>, Asked) {
         (self.bodies, self.asked)
     }

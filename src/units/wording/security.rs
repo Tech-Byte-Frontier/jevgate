@@ -70,7 +70,7 @@ pub(in crate::units) fn privilege_wording(
 }
 
 /// Injection kinds: the text a variable is placed into, its weakness and remedy.
-const INJECTIONS: [(&str, &str, &str, &str); 7] = [
+const INJECTIONS: [(&str, &str, &str, &str); 8] = [
     (
         "sql",
         "a database query",
@@ -108,6 +108,12 @@ const INJECTIONS: [(&str, &str, &str, &str); 7] = [
         "Check the host against an allowed list before requesting it",
     ),
     (
+        "type",
+        "the types of objects it creates or deserializes",
+        "CWE-502 deserialization of untrusted data",
+        "Create and deserialize only types fixed in the code or on an allowed list",
+    ),
+    (
         "",
         "text another program interprets",
         "CWE-74 injection",
@@ -116,7 +122,7 @@ const INJECTIONS: [(&str, &str, &str, &str); 7] = [
 ];
 
 /// Weak settings: what the code does, its weakness and remedy.
-const SETTINGS: [(&str, &str, &str, &str); 6] = [
+const SETTINGS: [(&str, &str, &str, &str); 9] = [
     (
         "tls",
         "turns off certificate or signature verification",
@@ -131,8 +137,8 @@ const SETTINGS: [(&str, &str, &str, &str); 6] = [
     ),
     (
         "random",
-        "makes secret tokens or identifiers with a non-cryptographic random generator",
-        "CWE-338 weak random for secrets",
+        "makes secret tokens or identifiers that can be guessed, with a non-cryptographic random generator or from known data",
+        "CWE-330 insufficiently random values",
         "Use a cryptographically secure random generator",
     ),
     (
@@ -146,6 +152,24 @@ const SETTINGS: [(&str, &str, &str, &str); 6] = [
         "sets session cookies without HttpOnly, Secure or SameSite",
         "CWE-1004 cookie without HttpOnly or Secure",
         "Set HttpOnly, Secure and SameSite on session cookies",
+    ),
+    (
+        "debug",
+        "shows detailed error pages or debugging tools outside development",
+        "CWE-489 active debug code",
+        "Turn detailed errors and debug tools on only in the development environment",
+    ),
+    (
+        "token",
+        "accepts tokens without checking their signature or expiry",
+        "CWE-347 improper verification of cryptographic signature",
+        "Validate each token's signature and lifetime",
+    ),
+    (
+        "key",
+        "signs or encrypts with a key written in the code",
+        "CWE-321 hard-coded cryptographic key",
+        "Read the key from configuration or a secret store, and replace the one in the code",
     ),
     (
         "",

@@ -252,6 +252,8 @@ struct Shared<'a> {
     cases: BTreeMap<PathBuf, Vec<TestCase>>,
     /// Enum definitions by name, from selected files and context, for security traces.
     enums: BTreeMap<String, String>,
+    /// C# constants by field name, as `Class.Field = value`, for security traces.
+    constants: BTreeMap<String, Vec<String>>,
     hashes: BTreeMap<PathBuf, String>,
 }
 
@@ -266,6 +268,7 @@ impl<'a> Shared<'a> {
             module_helpers: BTreeMap::new(),
             cases: test_cases(scope),
             enums: BTreeMap::new(),
+            constants: BTreeMap::new(),
             hashes: BTreeMap::new(),
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
@@ -302,6 +305,9 @@ impl<'a> Shared<'a> {
         }
         if shared.enabled(catalog::INJECTION) {
             shared.enums = enums(scope);
+        }
+        if shared.enabled(catalog::UNSAFE_SETTINGS) {
+            shared.constants = csharp_constants(scope);
         }
         shared
     }
@@ -475,10 +481,10 @@ fn plan_security(
             } else {
                 Vec::new()
             };
-            security::function_subject(context, unit, callers, &shared.enums)
+            security::function_subject(context, unit, callers, &shared.enums, &shared.constants)
         })
         .collect();
-    let setup = security::setup_subject(context, &parsed.setup)
+    let setup = security::setup_subject(context, &parsed.setup, &shared.constants)
         .filter(|_| parsed.setup.statements.iter().all(|s| outside_tests(s.1)));
     security::plan(context, &subjects, setup, rules, file, requests);
 }
@@ -609,6 +615,47 @@ fn enums(scope: &Scope<'_>) -> BTreeMap<String, String> {
         .into_iter()
         .filter_map(|(name, text)| Some((name, text?)))
         .collect()
+}
+
+/// A constant shown with a security trace is at most this long.
+const CONSTANT_BYTES: usize = 200;
+
+/// The `const` and `static readonly` fields of C# files among the selected
+/// files and context, by field name. C# declares them in a class, often in
+/// another file than the code that names them (`AuthorizationConstants`), so
+/// a trace could not tell a key written in the code from one read from
+/// configuration.
+fn csharp_constants(scope: &Scope<'_>) -> BTreeMap<String, Vec<String>> {
+    let selected = scope.owners.iter().map(|&owner| {
+        (
+            scope.inputs[owner].result.path.as_path(),
+            &scope.units[&owner].constants,
+        )
+    });
+    let context = scope
+        .context
+        .iter()
+        .map(|(path, _, units)| (path.as_path(), &units.constants));
+    let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (path, constants) in selected.chain(context) {
+        if path.extension().is_none_or(|e| e != "cs") {
+            continue;
+        }
+        for constant in constants {
+            let Some(value) = &constant.value else {
+                continue;
+            };
+            let field = constant.name.rsplit('.').next().unwrap_or(&constant.name);
+            let declaration = format!("{} = {value}", constant.name);
+            if declaration.len() <= CONSTANT_BYTES {
+                found
+                    .entry(field.to_string())
+                    .or_default()
+                    .push(declaration);
+            }
+        }
+    }
+    found
 }
 
 /// Selected files, with test lines excluded unless tests are judged, then the

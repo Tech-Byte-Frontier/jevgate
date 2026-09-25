@@ -55,9 +55,9 @@ Consider (2):
 
 | Rule | Covers |
 |---|---|
-| Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths or outbound URLs without binding, escaping or checks |
-| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per error handler (`app.onError`, `setErrorHandler`, Express error middleware, Flask and FastAPI handlers, NestJS filters, axum `IntoResponse` and actix-web `ResponseError` for error types) |
-| Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly` |
+| Injection | Variables reaching SQL, shell commands, evaluated code, HTML, file paths or outbound URLs without binding, escaping or checks; in C#, types named by input or chosen by the data being deserialized |
+| Sensitive data | Passwords, tokens or personal data written to logs; internal error details sent to clients, judged per error message and once per error handler (`app.onError`, `setErrorHandler`, Express error middleware, Flask and FastAPI handlers, NestJS filters, axum `IntoResponse` and actix-web `ResponseError` for error types, ASP.NET Core exception handlers) |
+| Unsafe settings | Certificate checks turned off, weak password hashing, non-cryptographic random secrets, permissive CORS, session cookies without `Secure`/`HttpOnly`; in C#, also developer exception pages outside development, token signature or lifetime checks turned off, signing keys written in the code, and secrets derived from data others know |
 | Access control | SQL row-level policies that let every user reach other users' rows or trust `user_metadata`; SECURITY DEFINER functions without a fixed `search_path` or a caller check; grants that open writes to every user. SpacetimeDB modules (TypeScript and Rust, any kind of application): public tables of users' private data, views that return other users' rows, reducers that change rows their arguments choose or admin-only settings without checking the caller, and scheduled reducers clients can call in 1.x |
 | Workflows | GitHub Actions `run` scripts that execute text outside people write (`${{ github.event.pull_request.title }}`); `pull_request_target` or `workflow_run` jobs that run pull request code with secrets |
 
@@ -85,6 +85,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | JavaScript | `.js` `.jsx` `.mjs` `.cjs` | ✅ | ✅ `describe`/`it`/`test` | ✅ | ➖ |
 | TypeScript | `.ts` `.tsx` `.mts` `.cts` | ✅ | ✅ `describe`/`it`/`test` | ✅ | ➖ |
 | Go | `.go` | ✅ | ✅ `Test…(t *testing.T)` | ✅ | ➖ |
+| C# | `.cs` | ✅ | ✅ xUnit, NUnit, MSTest | ✅ | ➖ |
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ➖ |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
 | GitHub Actions | `.github/workflows/*.yml` | ➖ | ➖ | ✅ workflows | ➖ |
@@ -96,6 +97,8 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | NestJS | Exception filters (`@Catch`) |
 | Flask, FastAPI | Error handlers (`@app.errorhandler`, `@app.exception_handler`) |
 | axum, actix-web, Rocket | Error responses (`IntoResponse` or `ResponseError` for an error type, `#[catch]`) |
+| ASP.NET Core | Controller actions, minimal API route handlers (`app.MapGet("/orders", …)`) and inline middleware; exception handlers (`UseExceptionHandler` with a handler, `IExceptionFilter`, `IExceptionHandler`, middleware classes that catch what the pipeline throws); Entity Framework Core raw and interpolated SQL, CORS and cookie options, `UseDeveloperExceptionPage`, JWT validation options and the constants a setup names |
+| .NET projects | Test projects named like `Shop.Tests` or `Shop.UnitTests`, and classes of `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]` methods anywhere; designer and source-generated files (`.Designer.cs`, `.g.cs`) are skipped as generated |
 | Supabase and PostgreSQL | Row-level security policies, `SECURITY DEFINER` functions, grants, and the claims an access token hook sets |
 | SpacetimeDB (TypeScript and Rust modules) | Public tables, views and reducers, checked against the caller (`ctx.sender`) and the framework version's scheduling rules |
 | React | JSX components and hooks as functions; text shown as a JSX child is not treated as markup injection |
@@ -103,7 +106,7 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
 | Copied libraries | A library copied into the repository (a versioned file name such as `jquery-3.6.0.js`, the readable build beside a `.min.js`, or a license banner naming a version) is skipped as vendored, whatever its size |
 
-Other files, such as Java, C#, PHP or Ruby, are listed as skipped with the reason and never fail the gate.
+Other files, such as Java, PHP or Ruby, are listed as skipped with the reason and never fail the gate.
 
 ## Install
 

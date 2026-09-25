@@ -225,7 +225,20 @@ pub(in crate::units) fn exposure_outcome<'a>(
         .filter(|(o, _)| matches!(o, Outcome::Uncertain(_)))
         .map(|(_, lean)| *lean)
         .fold(0.0, f64::max);
-    let outcome = if !found.is_empty() {
+    // The weak-settings checks name each kind the broad question looks for;
+    // when none leans toward its kind, the broad answer alone names no
+    // setting to change, so it is at most a note. On an ASP.NET Core action
+    // marked `[AllowAnonymous]` on purpose it was 0.85 while every check
+    // stayed at 0.30 or less.
+    let unnamed = rule == catalog::UNSAFE_SETTINGS
+        && !specific.is_empty()
+        && specific.iter().all(|(o, lean)| {
+            !probability_at_least(*lean, LEADING_PROBABILITY)
+                && !matches!(o, Outcome::Review(_) | Outcome::Consider(_))
+        });
+    let outcome = if unnamed && !found.is_empty() {
+        Outcome::Note(strongest(&found).concern())
+    } else if !found.is_empty() {
         strongest(&found)
     } else if ruled_out {
         Outcome::Clear

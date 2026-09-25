@@ -386,6 +386,7 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "markup",
             "path",
             "url",
+            "type",
         ],
         catalog::SENSITIVE_DATA => &[
             "logs_secret",
@@ -394,7 +395,9 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "exception_to_client",
             "handler_leaks",
         ],
-        catalog::UNSAFE_SETTINGS => &["weakened", "tls", "hash", "random", "cors", "cookie"],
+        catalog::UNSAFE_SETTINGS => &[
+            "weakened", "tls", "hash", "random", "cors", "cookie", "debug", "token", "key",
+        ],
         catalog::ACCESS_CONTROL => &[
             "others",
             "editable",

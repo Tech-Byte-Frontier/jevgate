@@ -229,11 +229,11 @@ pub fn security_site(what: &str, sites: &[String]) -> Value {
 /// question with `{code}` for the source path, and both answers.
 pub struct Check {
     pub id: &'static str,
-    question: &'static str,
-    yes: &'static str,
-    no: &'static str,
+    pub(super) question: &'static str,
+    pub(super) yes: &'static str,
+    pub(super) no: &'static str,
     /// Examples of the "false" answer, when the plain criterion is not enough.
-    no_examples: &'static [&'static str],
+    pub(super) no_examples: &'static [&'static str],
 }
 
 impl Check {
