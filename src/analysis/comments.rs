@@ -393,85 +393,84 @@ fn place(
 ) -> Comment {
     let span = &block.span;
     if block.docstring {
-        // The innermost definition it opens; none for a module's.
-        let owner = innermost(units, |u| {
-            u.span.contains(&span.start) && u.line < comment.line
-        });
-        comment.unit = owner;
-        match owner {
-            Some(index) => {
-                comment.placement = Placement::Declaration;
-                let unit = &units[index];
-                let definition = line_start(source, source_offset(lines, unit.line));
-                // The docstring's lines are left out, so the rest reads as code.
-                let after = source[span.end..unit.span.end]
-                    .find('\n')
-                    .map_or(unit.span.end, |i| span.end + i + 1);
-                let shown = format!(
-                    "{}{}",
-                    &source[definition..line_start(source, span.start)],
-                    &source[after..unit.span.end]
-                );
-                comment.code = declaration_code(&shown, unit);
-            }
-            // A definition the parser keeps no unit for, such as a class
-            // of fields only: shown whole, or by its first line when long.
-            None => match &block.definition {
-                Some((definition, name)) => {
-                    comment.placement = Placement::Declaration;
-                    comment.definition = Some(name.clone()).filter(|n| !n.is_empty());
-                    let after = source[span.end..definition.end]
-                        .find('\n')
-                        .map_or(definition.end, |i| span.end + i + 1);
-                    let shown = format!(
-                        "{}{}",
-                        &source[definition.start..line_start(source, span.start)],
-                        &source[after..definition.end]
-                    );
-                    comment.code = if shown.lines().count() <= DECLARATION_LINES {
-                        shown.trim_end().to_string()
-                    } else {
-                        shown.lines().take(2).collect::<Vec<_>>().join("\n")
-                    };
-                }
-                None => {
-                    comment.placement = Placement::File;
-                    comment.code = file_code(units);
-                }
-            },
-        }
-        return comment;
-    }
-    if !own_line(source, span.start) {
+        place_docstring(&mut comment, block, source, lines, units);
+    } else if !own_line(source, span.start) {
         comment.placement = Placement::Trailing;
         comment.code = source[line_start(source, span.start)..span.start]
             .trim()
             .to_string();
         comment.unit = enclosing(units, &comment);
-        return comment;
-    }
-    // Documentation directly above a declaration, with only attributes or
-    // decorators between them. A declaration's own span may start after the
-    // comment's line, as `function` does inside `export function`.
-    let documented = innermost(units, |u| {
-        comment.end_line < u.line && (comment.end_line + 1..u.line).all(|l| attribute(lines[l - 1]))
-    });
-    if let Some(index) = documented {
+    } else if let Some(index) = documented(units, lines, &comment) {
         let unit = &units[index];
         comment.placement = Placement::Declaration;
         comment.unit = Some(index);
         let definition = source_offset(lines, comment.end_line + 1);
         comment.code = declaration_code(&source[definition..unit.span.end], unit);
-        return comment;
-    }
-    if span.end <= first_code {
+    } else if span.end <= first_code {
         comment.placement = Placement::File;
         comment.code = file_code(units);
-        return comment;
+    } else {
+        comment.unit = enclosing(units, &comment);
+        comment.code = nearby(lines, &comment, starts);
     }
-    comment.unit = enclosing(units, &comment);
-    comment.code = nearby(lines, &comment, starts);
     comment
+}
+
+/// A docstring documents the innermost definition it opens, or the module.
+fn place_docstring(
+    comment: &mut Comment,
+    block: &Block,
+    source: &str,
+    lines: &[&str],
+    units: &[Unit],
+) {
+    let span = &block.span;
+    let owner = innermost(units, |u| {
+        u.span.contains(&span.start) && u.line < comment.line
+    });
+    comment.unit = owner;
+    comment.placement = Placement::Declaration;
+    if let Some(index) = owner {
+        let unit = &units[index];
+        let definition = line_start(source, source_offset(lines, unit.line));
+        let shown = without_docstring(source, definition..unit.span.end, span);
+        comment.code = declaration_code(&shown, unit);
+    } else if let Some((definition, name)) = &block.definition {
+        // A definition the parser keeps no unit for, such as a class of
+        // fields only: shown whole, or by its first line when long.
+        comment.definition = Some(name.clone()).filter(|n| !n.is_empty());
+        let shown = without_docstring(source, definition.clone(), span);
+        comment.code = if shown.lines().count() <= DECLARATION_LINES {
+            shown.trim_end().to_string()
+        } else {
+            shown.lines().take(2).collect::<Vec<_>>().join("\n")
+        };
+    } else {
+        comment.placement = Placement::File;
+        comment.code = file_code(units);
+    }
+}
+
+/// A definition's source without the lines of its docstring at `docstring`,
+/// so the rest reads as code.
+fn without_docstring(source: &str, definition: Range<usize>, docstring: &Range<usize>) -> String {
+    let after = source[docstring.end..definition.end]
+        .find('\n')
+        .map_or(definition.end, |i| docstring.end + i + 1);
+    format!(
+        "{}{}",
+        &source[definition.start..line_start(source, docstring.start)],
+        &source[after..definition.end]
+    )
+}
+
+/// The unit a comment directly above documents, with only attributes or
+/// decorators between them. A declaration's own span may start after the
+/// comment's line, as `function` does inside `export function`.
+fn documented(units: &[Unit], lines: &[&str], comment: &Comment) -> Option<usize> {
+    innermost(units, |u| {
+        comment.end_line < u.line && (comment.end_line + 1..u.line).all(|l| attribute(lines[l - 1]))
+    })
 }
 
 /// The byte offset where 1-based `line` starts.

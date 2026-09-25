@@ -308,62 +308,67 @@ fn csharp_constants(node: Node<'_>, source: &str, owner: &str, found: &mut Vec<C
             "field_declaration" | "global_statement"
                 if child.kind() == "global_statement" || fixed_field(child, source) =>
             {
-                // A top-level statement binds like a module-level variable.
-                let child = match child.named_child(0) {
-                    Some(local)
-                        if child.kind() == "global_statement"
-                            && local.kind() == "local_declaration_statement" =>
-                    {
-                        local
-                    }
-                    _ if child.kind() == "global_statement" => continue,
-                    _ => child,
-                };
-                let mut inner = child.walk();
-                let declarators = child
-                    .named_children(&mut inner)
-                    .filter(|c| c.kind() == "variable_declaration")
-                    .flat_map(|d| {
-                        let mut cursor = d.walk();
-                        d.named_children(&mut cursor)
-                            .filter(|c| c.kind() == "variable_declarator")
-                            .collect::<Vec<_>>()
-                    });
-                for declarator in declarators {
-                    let name = declarator.child_by_field_name("name");
-                    let value = declarator
-                        .named_child(declarator.named_child_count().saturating_sub(1) as u32)
-                        .filter(|v| Some(*v) != name);
-                    let (Some(name), Some(value)) = (name, value) else {
-                        continue;
-                    };
-                    let values = in_node(value, source);
-                    // A top-level `var` that calls something, such as
-                    // `builder.Configuration.GetValue(…, "CatalogBaseUrl")`,
-                    // reads a value; its literal is a key, not the value.
-                    let read = child.kind() == "local_declaration_statement"
-                        && !fixed_field(child, source)
-                        && calls(value);
-                    if values.is_empty() || !is_value(value) || read {
-                        continue;
-                    }
-                    let whole = text(value, source);
-                    let name = text(name, source);
-                    found.push(Constant {
-                        name: if owner.is_empty() {
-                            name.to_string()
-                        } else {
-                            format!("{owner}.{name}")
-                        },
-                        value: (whole.chars().count() <= MAX_VALUE).then(|| whole.to_string()),
-                        values: values.into_iter().map(|l| l.text).collect(),
-                        line: line_of(source, child.start_byte()),
-                        end_line: line_of(source, child.end_byte().saturating_sub(1)),
-                    });
-                }
+                csharp_field(child, source, owner, found);
             }
             _ => {}
         }
+    }
+}
+
+/// The constants one C# field declaration, or one top-level statement,
+/// binds: a top-level statement binds like a module-level variable.
+fn csharp_field(child: Node<'_>, source: &str, owner: &str, found: &mut Vec<Constant>) {
+    let child = match child.named_child(0) {
+        Some(local)
+            if child.kind() == "global_statement"
+                && local.kind() == "local_declaration_statement" =>
+        {
+            local
+        }
+        _ if child.kind() == "global_statement" => return,
+        _ => child,
+    };
+    let mut inner = child.walk();
+    let declarators = child
+        .named_children(&mut inner)
+        .filter(|c| c.kind() == "variable_declaration")
+        .flat_map(|d| {
+            let mut cursor = d.walk();
+            d.named_children(&mut cursor)
+                .filter(|c| c.kind() == "variable_declarator")
+                .collect::<Vec<_>>()
+        });
+    for declarator in declarators {
+        let name = declarator.child_by_field_name("name");
+        let value = declarator
+            .named_child(declarator.named_child_count().saturating_sub(1) as u32)
+            .filter(|v| Some(*v) != name);
+        let (Some(name), Some(value)) = (name, value) else {
+            continue;
+        };
+        let values = in_node(value, source);
+        // A top-level `var` that calls something, such as
+        // `builder.Configuration.GetValue(…, "CatalogBaseUrl")`,
+        // reads a value; its literal is a key, not the value.
+        let read = child.kind() == "local_declaration_statement"
+            && !fixed_field(child, source)
+            && calls(value);
+        if values.is_empty() || !is_value(value) || read {
+            continue;
+        }
+        let whole = text(value, source);
+        let name = text(name, source);
+        found.push(Constant {
+            name: if owner.is_empty() {
+                name.to_string()
+            } else {
+                format!("{owner}.{name}")
+            },
+            value: (whole.chars().count() <= MAX_VALUE).then(|| whole.to_string()),
+            values: values.into_iter().map(|l| l.text).collect(),
+            line: line_of(source, child.start_byte()),
+            end_line: line_of(source, child.end_byte().saturating_sub(1)),
+        });
     }
 }
 

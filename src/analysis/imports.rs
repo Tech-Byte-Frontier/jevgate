@@ -9,6 +9,40 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Lines that import, load or declare another module.
+fn import_lines(source: &str, family: &str) -> Vec<String> {
+    source
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            [
+                "import ", "from ", "use ", "pub use ", "mod ", "pub mod ", "export ",
+            ]
+            .iter()
+            .any(|prefix| line.starts_with(prefix))
+                || line.contains("require(")
+                || line.contains("import(")
+                || ["require ", "require_relative ", "load ", "autoload "]
+                    .iter()
+                    .any(|prefix| line.starts_with(prefix))
+                // PHP runs other files with `require_once __DIR__ . '/x.php';`.
+                || family == "php"
+                    && ["require", "include"].iter().any(|p| line.starts_with(p))
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// A Java file's directory and the capitalized names its code mentions.
+fn java_package(path: &Path, source: &str) -> (PathBuf, BTreeSet<String>) {
+    let names = source
+        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
+        .filter(|word| word.starts_with(|c: char| c.is_ascii_uppercase()))
+        .map(str::to_string)
+        .collect();
+    (path.parent().unwrap_or(Path::new("")).to_path_buf(), names)
+}
+
 /// Import and module lines of one file, kept for repeated lookups.
 pub struct Imports {
     family: &'static str,
@@ -28,38 +62,10 @@ impl Imports {
                 package: None,
             };
         }
-        let lines = source
-            .lines()
-            .map(str::trim)
-            .filter(|line| {
-                [
-                    "import ", "from ", "use ", "pub use ", "mod ", "pub mod ", "export ",
-                ]
-                .iter()
-                .any(|prefix| line.starts_with(prefix))
-                    || line.contains("require(")
-                    || line.contains("import(")
-                    || ["require ", "require_relative ", "load ", "autoload "]
-                        .iter()
-                        .any(|prefix| line.starts_with(prefix))
-                    // PHP runs other files with `require_once __DIR__ . '/x.php';`.
-                    || family == "php"
-                        && ["require", "include"].iter().any(|p| line.starts_with(p))
-            })
-            .map(str::to_string)
-            .collect();
-        let package = (family == "java").then(|| {
-            let names = source
-                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
-                .filter(|word| word.starts_with(|c: char| c.is_ascii_uppercase()))
-                .map(str::to_string)
-                .collect();
-            (path.parent().unwrap_or(Path::new("")).to_path_buf(), names)
-        });
         Self {
             family,
-            lines,
-            package,
+            lines: import_lines(source, family),
+            package: (family == "java").then(|| java_package(path, source)),
         }
     }
 

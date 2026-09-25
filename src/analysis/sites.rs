@@ -216,32 +216,13 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>], settings: boo
     let mut best = BTreeMap::<usize, (Priority, Node<'_>)>::new();
     let mut cursor = root.walk();
     for node in root.named_children(&mut cursor) {
-        let node = match node.kind() {
-            "export_statement" => match node.child_by_field_name("declaration") {
-                Some(declaration) => declaration,
-                None => continue,
-            },
-            // A C# top-level statement, as `Program.cs` writes its setup.
-            "global_statement" => match node.named_child(0) {
-                Some(statement) => statement,
-                None => continue,
-            },
-            _ => node,
+        let Some(node) = opened(node) else {
+            continue;
         };
-        let range = node.byte_range();
-        // Settings modules also choose values in `try` blocks, such as a
-        // local override imported when present.
-        let statement =
-            SETUP_STATEMENTS.contains(&node.kind()) || settings && node.kind() == "try_statement";
-        if !statement
-            || super::ruby::required(node, source).is_some()
-            || units
-                .iter()
-                .any(|u| u.start < range.end && range.start < u.end)
-            || !(calls_something(node) || settings && assigns_setting(node, source))
-        {
+        if !setup_statement(node, source, units, settings) {
             continue;
         }
+        let range = node.byte_range();
         statements.push((
             range,
             line_of(source, node.start_byte()),
@@ -271,6 +252,32 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>], settings: boo
         assigned,
         script: false,
     }
+}
+
+/// The statement a top-level node holds: an export's declaration, or a C#
+/// top-level statement, as `Program.cs` writes its setup.
+fn opened(node: Node<'_>) -> Option<Node<'_>> {
+    match node.kind() {
+        "export_statement" => node.child_by_field_name("declaration"),
+        "global_statement" => node.named_child(0),
+        _ => Some(node),
+    }
+}
+
+/// A top-level statement outside every unit that calls something (or, in a
+/// settings module, assigns a setting), other than a Ruby `require`.
+fn setup_statement(node: Node<'_>, source: &str, units: &[Range<usize>], settings: bool) -> bool {
+    let range = node.byte_range();
+    // Settings modules also choose values in `try` blocks, such as a
+    // local override imported when present.
+    let statement =
+        SETUP_STATEMENTS.contains(&node.kind()) || settings && node.kind() == "try_statement";
+    statement
+        && super::ruby::required(node, source).is_none()
+        && !units
+            .iter()
+            .any(|u| u.start < range.end && range.start < u.end)
+        && (calls_something(node) || settings && assigns_setting(node, source))
 }
 
 /// Whether a statement assigns a setting or changes part of one, directly
@@ -446,37 +453,18 @@ fn collect<'t>(
 
 fn priority(node: Node<'_>, source: &str, mode: Mode) -> Option<Priority> {
     match node.kind() {
-        "assignment" if mode.settings => {
-            let left = node.child_by_field_name("left")?;
-            let name = text(left, source);
-            if left.kind() != "identifier" || !django::setting_name(name) {
-                return field_assignment(node, mode);
-            }
-            Some(if django::security_setting(name) {
-                Priority::SecuritySetting
-            } else {
-                Priority::Setting
-            })
-        }
+        "assignment" if mode.settings => setting_assignment(node, source, mode),
         // PHP: `"… $id …"`, a heredoc, and a backtick command.
         "encapsed_string" | "heredoc" if super::php::interpolates(node) => {
             Some(Priority::BuiltText)
         }
         "shell_command_expression" => Some(Priority::BuiltText),
-        kind if super::php::CALLS.contains(&kind) => Some(
-            if super::php::arguments(node).is_some_and(|args| has_value(args)) {
-                Priority::CallWithValue
-            } else {
-                Priority::Call
-            },
-        ),
+        kind if super::php::CALLS.contains(&kind) => Some(call_priority(
+            super::php::arguments(node).is_some_and(|args| has_value(args)),
+        )),
         // PHP writes to the page with `echo`, `print` and `<?= … ?>`, and runs
         // other files with `include` and `require`.
-        kind if super::php::OUTPUT.contains(&kind) => Some(if has_value(node) {
-            Priority::CallWithValue
-        } else {
-            Priority::Call
-        }),
+        kind if super::php::OUTPUT.contains(&kind) => Some(call_priority(has_value(node))),
         "expression_statement" if super::php::short_echo(node, source) => {
             Some(Priority::CallWithValue)
         }
@@ -500,46 +488,62 @@ fn priority(node: Node<'_>, source: &str, mode: Mode) -> Option<Priority> {
             .map(|name| text(name, source).rsplit("::").next().unwrap_or(""))
             .filter(|name| FORMAT_MACROS.contains(name))
             .map(|_| Priority::BuiltText),
-        "call_expression"
-            if node
-                .child_by_field_name("function")
-                .filter(|f| f.kind() == "selector_expression")
-                .and_then(|f| f.child_by_field_name("field"))
-                .is_some_and(|f| GO_FORMAT_CALLS.contains(&text(f, source))) =>
-        {
-            Some(Priority::BuiltText)
-        }
-        "invocation_expression"
-            if node
-                .child_by_field_name("function")
-                .is_some_and(|f| CSHARP_FORMAT_CALLS.contains(&text(f, source))) =>
-        {
-            Some(Priority::BuiltText)
-        }
-        "method_invocation"
-            if node
-                .child_by_field_name("name")
-                .is_some_and(|name| JAVA_FORMAT_CALLS.contains(&text(name, source))) =>
-        {
-            Some(Priority::BuiltText)
-        }
+        _ if format_call(node, source) => Some(Priority::BuiltText),
         "call_expression"
         | "call"
         | "new_expression"
         | "invocation_expression"
         | "method_invocation"
-        | "object_creation_expression" => Some(
+        | "object_creation_expression" => Some(call_priority(
             // PHP's `new` holds its arguments without a field name.
-            if super::php::arguments(node).is_some_and(|args| has_value(args)) {
-                Priority::CallWithValue
-            } else {
-                Priority::Call
-            },
-        ),
+            super::php::arguments(node).is_some_and(|args| has_value(args)),
+        )),
         "assignment_expression" | "assignment" | "augmented_assignment_expression" => {
             field_assignment(node, mode)
         }
         _ => None,
+    }
+}
+
+fn call_priority(with_value: bool) -> Priority {
+    if with_value {
+        Priority::CallWithValue
+    } else {
+        Priority::Call
+    }
+}
+
+/// An assignment in a settings module: a named setting, security settings
+/// first, or else a field assignment.
+fn setting_assignment(node: Node<'_>, source: &str, mode: Mode) -> Option<Priority> {
+    let left = node.child_by_field_name("left")?;
+    let name = text(left, source);
+    if left.kind() != "identifier" || !django::setting_name(name) {
+        return field_assignment(node, mode);
+    }
+    Some(if django::security_setting(name) {
+        Priority::SecuritySetting
+    } else {
+        Priority::Setting
+    })
+}
+
+/// A call that builds text from a format or pieces, by the names each
+/// language gives them (Go, C# and Java).
+fn format_call(node: Node<'_>, source: &str) -> bool {
+    match node.kind() {
+        "call_expression" => node
+            .child_by_field_name("function")
+            .filter(|f| f.kind() == "selector_expression")
+            .and_then(|f| f.child_by_field_name("field"))
+            .is_some_and(|f| GO_FORMAT_CALLS.contains(&text(f, source))),
+        "invocation_expression" => node
+            .child_by_field_name("function")
+            .is_some_and(|f| CSHARP_FORMAT_CALLS.contains(&text(f, source))),
+        "method_invocation" => node
+            .child_by_field_name("name")
+            .is_some_and(|name| JAVA_FORMAT_CALLS.contains(&text(name, source))),
+        _ => false,
     }
 }
 
