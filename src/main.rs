@@ -36,6 +36,7 @@ mod evaluate;
 mod file_kind;
 mod gate;
 mod github;
+mod gitlab;
 mod html_report;
 mod init;
 mod inventory;
