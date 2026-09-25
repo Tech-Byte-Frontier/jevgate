@@ -14,7 +14,7 @@ use std::{io::Write, path::Path};
 pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<()> {
     let issues: Vec<Value> = output::ranked(report)
         .into_iter()
-        .filter(|(_, f)| f.strength != Strength::Note && !f.baselined)
+        .filter(|(_, f)| f.strength != Strength::Note && !f.accepted())
         .map(|(path, finding)| issue(path, finding, crate::gate::fails(finding, path, args)))
         .collect();
     serde_json::to_writer_pretty(&mut *out, &issues)?;

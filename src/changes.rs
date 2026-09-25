@@ -157,6 +157,7 @@ mod tests {
             fingerprint: fingerprint.into(),
             rank: 1.0,
             baselined: false,
+            suppressed: None,
         }
     }
 

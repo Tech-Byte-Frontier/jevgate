@@ -352,15 +352,12 @@ fn emit_context_load(out: &mut impl Write, load: &crate::docs::load::ContextLoad
 /// the rule dim.
 fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Style) -> Result<()> {
     let location = format!("{}:{}", path.display(), finding.line);
-    let rule = format!(
-        "[{}]{}",
-        finding.rule,
-        if finding.baselined {
-            " (baselined)"
-        } else {
-            ""
-        }
-    );
+    let accepted = match (&finding.suppressed, finding.baselined) {
+        (_, true) => " (baselined)".to_string(),
+        (Some(reason), false) => format!(" (allowed: {reason})"),
+        (None, false) => String::new(),
+    };
+    let rule = format!("[{}]{accepted}", finding.rule);
     writeln!(
         out,
         "  {} {} {}",

@@ -15,6 +15,9 @@ pub struct Gate {
     pub reasons: Vec<String>,
     pub new_findings: usize,
     pub baselined_findings: usize,
+    /// Findings accepted by an inline `jevgate: allow` comment.
+    #[serde(default)]
+    pub suppressed_findings: usize,
 }
 
 /// Exit 0 when the gate passes, 1 when it fails, 2 when the run is incomplete.
@@ -34,13 +37,18 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
         .flat_map(|f| f.findings.iter().map(|finding| (f.path.as_path(), finding)))
         .filter(|(_, f)| f.strength != Strength::Note);
     let baselined = findings.clone().filter(|(_, f)| f.baselined).count();
-    let new: Vec<_> = findings.filter(|(_, f)| !f.baselined).collect();
+    let suppressed = findings
+        .clone()
+        .filter(|(_, f)| !f.baselined && f.suppressed.is_some())
+        .count();
+    let new: Vec<_> = findings.filter(|(_, f)| !f.accepted()).collect();
     let reasons = failures(report, &new, args);
     report.gate = report.complete.then_some(Gate {
         passed: reasons.is_empty(),
         reasons,
         new_findings: new.len(),
         baselined_findings: baselined,
+        suppressed_findings: suppressed,
     });
 }
 
@@ -49,7 +57,7 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
 /// on review findings.
 pub fn fails(finding: &Finding, path: &Path, args: &CheckArgs) -> bool {
     let levels = args.levels_at(&finding.rule, path);
-    !finding.baselined
+    !finding.accepted()
         && finding.strength != Strength::Note
         && (levels.contains(&FailOn::Consider)
             || (finding.strength == Strength::Review && levels.contains(&FailOn::Review)))
@@ -99,6 +107,7 @@ fn failures(report: &Report, new: &[(&Path, &Finding)], args: &CheckArgs) -> Vec
 
 /// Apply the baseline and the gate policy to a settled report.
 pub fn settle(root: &Path, report: &mut Report, args: &CheckArgs) -> Result<()> {
+    crate::suppress::apply(root, report);
     crate::baseline::apply(root, report)?;
     evaluate(report, args);
     Ok(())

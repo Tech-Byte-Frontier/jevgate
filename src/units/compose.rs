@@ -1054,6 +1054,7 @@ fn finding(
         fingerprint: fingerprint(unit.rule, plan, &unit.identity),
         rank: rank(p, lines),
         baselined: false,
+        suppressed: None,
     }
 }
 
@@ -1255,6 +1256,7 @@ fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         fingerprint: fingerprint(catalog::TEST_REDUNDANCY, plan, &super::identity(&identity)),
         rank: rank(p, lines),
         baselined: false,
+        suppressed: None,
     }
 }
 
@@ -1342,6 +1344,7 @@ fn comment_findings(
                 fingerprint: fingerprint(catalog::COMMENTS, plan, &super::identity(&identities)),
                 rank: rank(p, lines),
                 baselined: false,
+                suppressed: None,
             }
         })
         .collect()
