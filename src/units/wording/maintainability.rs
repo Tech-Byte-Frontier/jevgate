@@ -293,7 +293,7 @@ pub(in crate::units) fn values_wording(
         ""
     };
     let unnamed = if unnamed {
-        " Which value it means was not found, so it is one level lower."
+        " No single value stood out, so it is one level lower."
     } else {
         ""
     };

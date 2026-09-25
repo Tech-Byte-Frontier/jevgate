@@ -70,6 +70,7 @@ pub fn comments(path: &Path, source: &str, units: &[Unit]) -> Result<Vec<Comment
     for block in blocks {
         let text = &source[block.span.clone()];
         let line = line_of(source, block.span.start);
+        let text = &without_version_notes(text);
         if !eligible(text, line) {
             continue;
         }
@@ -140,7 +141,7 @@ fn collect(node: Node<'_>, source: &str, found: &mut Vec<Raw>) {
 
 /// The string of an expression statement that opens a Python module,
 /// function or class body.
-fn docstring(node: Node<'_>) -> Option<Node<'_>> {
+pub(crate) fn docstring(node: Node<'_>) -> Option<Node<'_>> {
     if node.kind() != "expression_statement" || node.named_child_count() != 1 {
         return None;
     }
@@ -325,6 +326,42 @@ const DIRECTIVES: &[&str] = &[
     "rustfmt::",
     "clippy::",
 ];
+
+/// Sphinx directives that record the release a behavior appeared or changed
+/// in, with their indented bodies: documentation tools expect them, and
+/// flask's `.. versionchanged:: 2.2` read as narrating an edit.
+const VERSION_NOTES: [&str; 3] = [
+    ".. versionadded::",
+    ".. versionchanged::",
+    ".. deprecated::",
+];
+
+/// A comment's text without its Sphinx version notes.
+fn without_version_notes(text: &str) -> std::borrow::Cow<'_, str> {
+    if !VERSION_NOTES.iter().any(|note| text.contains(note)) {
+        return text.into();
+    }
+    let indent = |line: &str| line.len() - line.trim_start().len();
+    let mut kept = Vec::new();
+    let mut inside: Option<usize> = None;
+    for line in text.split('\n') {
+        if let Some(depth) = inside {
+            if line.trim().is_empty() || indent(line) > depth {
+                continue;
+            }
+            inside = None;
+        }
+        if VERSION_NOTES
+            .iter()
+            .any(|note| line.trim_start().starts_with(note))
+        {
+            inside = Some(indent(line));
+            continue;
+        }
+        kept.push(line);
+    }
+    kept.join("\n").into()
+}
 
 /// A comment with prose a reader could do without: not a directive, a
 /// license or generated-code header, a shebang or a decoration.
@@ -670,6 +707,20 @@ mod tests {
             "// Retry once: the first request is often refused."
         ));
         assert!(!code_like("// Mutations"));
+    }
+
+    #[test]
+    fn sphinx_version_notes_are_left_out_of_a_docstring() {
+        let source = "def open_resource(name, mode=\"rb\"):\n    \"\"\"Open a resource file relative to the root path.\n\n    .. versionchanged:: 3.1\n        Added the ``encoding`` parameter.\n\n    :param name: Path to the resource.\n    \"\"\"\n    return open(name, mode)\n\n\ndef legacy():\n    \"\"\"\n    .. deprecated:: 2.3\n        Use ``open_resource`` instead.\n    \"\"\"\n    return None\n";
+        let comments = found("app.py", source);
+        assert_eq!(
+            comments.len(),
+            1,
+            "a docstring of version notes only is left out"
+        );
+        assert!(!comments[0].text.contains("versionchanged"));
+        assert!(!comments[0].text.contains("Added the"));
+        assert!(comments[0].text.contains(":param name:"));
     }
 
     #[test]

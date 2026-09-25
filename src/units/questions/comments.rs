@@ -80,7 +80,7 @@ pub fn comment_disabled(path: &str) -> Value {
     noul(
         format!("Is the comment in `{path}.text` code turned off by commenting it out?"),
         "Most of it is statements, declarations or markup that would run if the comment markers were removed.",
-        "It is prose, or shows code as an example of how to call or use something.",
+        "It is prose, or shows code as an example of how to call or use something, or it is optional code kept for readers to switch on, introduced by a sentence saying how or when, such as `Uncomment the following lines to enable the Prometheus exporter`.",
     )
 }
 

@@ -911,7 +911,9 @@ fn block_statements(
     let mut statements = Vec::new();
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        if is_comment(child) {
+        // A docstring documents; counted as a statement, it made one-line
+        // wrappers such as flask's `render_template` read as copies.
+        if is_comment(child) || super::comments::docstring(child).is_some() {
             continue;
         }
         let line = line_of(file.source, child.start_byte());
@@ -1365,6 +1367,9 @@ mod tests {
         );
         let short = "fn a(x: i32) -> i32 {\n    let y = x + 1;\n    y * 2\n}\nfn b(x: i32) -> i32 {\n    let y = x + 1;\n    y * 2\n}\n";
         assert!(run(&[("s.rs", short, true)]).pairs.is_empty());
+        // A docstring is not a statement: two statements stay too few.
+        let wrappers = "def render_template(name, **context):\n    \"\"\"Render a template by name with the given context and return the resulting page.\"\"\"\n    app = current_app._get_current_object()\n    return _render(app, app.jinja_env.get_or_select_template(name), context)\n\n\ndef stream_template(name, **context):\n    \"\"\"Render a template by name with the given context as a stream of page parts.\"\"\"\n    app = current_app._get_current_object()\n    return _stream(app, app.jinja_env.get_or_select_template(name), context)\n";
+        assert!(run(&[("templating.py", wrappers, true)]).pairs.is_empty());
     }
 
     #[test]

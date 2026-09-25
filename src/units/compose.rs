@@ -859,7 +859,8 @@ fn finding(
     let mut category = None;
     let (message, action) = match &unit.detail {
         Detail::Function { blocks, .. } => {
-            block = located_block(unit, blocks, judgments, "block");
+            block = located_block(unit, blocks, judgments, "block")
+                .filter(|b| !most_of(&b.location, &unit.locations));
             function_wording(name, strength, p, answers, block)
         }
         Detail::Outline { tests, groups, .. } => {
@@ -1090,6 +1091,16 @@ fn located_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<String> {
     let (id, _) = choice(located.get("value").copied())?;
     let index: usize = id.strip_prefix('v')?.parse().ok()?;
     choices.get(index).cloned()
+}
+
+/// Whether a block spans most of its function, three quarters or more:
+/// naming it as the part to extract says no more than the finding does, as
+/// lines 206–390 of just's 198-line `Justfile::run` did.
+fn most_of(block: &crate::schema::Location, function: &[crate::schema::Location]) -> bool {
+    let lines = |l: &crate::schema::Location| l.end_line + 1 - l.start_line;
+    function
+        .first()
+        .is_some_and(|f| lines(block) * 4 >= lines(f) * 3)
 }
 
 /// The block chosen by the locate follow-up `question`, when its choice is clear.

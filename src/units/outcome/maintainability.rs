@@ -110,14 +110,17 @@ pub(in crate::units) fn several_kind<'a>(
 }
 
 /// Lines a copy may span and still be short: sharing it saves little.
-const SHORT_COPY_LINES: usize = 3;
+const SHORT_COPY_LINES: usize = 4;
 
 /// Repetition the behavior requires is not a concern. Copies whose every site
 /// is inside test cases are one level lower: spelling out each case is how
 /// tests are written, so a table of cases or a fixture is a style choice.
-/// Short copies are at most a consider: three lines, such as a pooled
+/// Short copies are at most a consider: four lines, such as a pooled
 /// builder borrowed and released around one call, repeat in two places as an
-/// idiom as often as they hide a missing helper.
+/// idiom as often as they hide a missing helper. On 17 projects, 5 of the 9
+/// reviews of copies that short were idioms: constructor middleware
+/// declarations, hook preambles, a Go validator's field copies. Short copies
+/// inside test cases, a login step or an assertion tail, are notes.
 pub(in crate::units) fn shared_outcome(
     required: Option<&Answer>,
     same: Option<&Answer>,
@@ -132,6 +135,7 @@ pub(in crate::units) fn shared_outcome(
         .iter()
         .all(|l| l.end_line + 1 - l.start_line <= SHORT_COPY_LINES);
     Some(match (&unit.detail, same) {
+        (Detail::Pair { in_cases: true, .. }, _) if short => lowered(lowered(same)),
         (Detail::Pair { in_cases: true, .. }, _) => lowered(same),
         (_, Outcome::Review(p)) if short => Outcome::Consider(p),
         _ => same,

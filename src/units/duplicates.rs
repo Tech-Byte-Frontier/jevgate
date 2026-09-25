@@ -59,6 +59,19 @@ pub(super) fn plan(
         out.units.push(UnitPlan {
             rule: SHARED_LOGIC,
             name: match pair.copies.len() {
+                // Two places in one function: `search` (…:26) and `search` (…:32) read as two functions.
+                0 if pair.a.path == pair.b.path
+                    && pair.a.function.is_some()
+                    && pair.a.function == pair.b.function =>
+                {
+                    format!(
+                        "Lines {} and {} of `{}` ({})",
+                        pair.a.start_line,
+                        pair.b.start_line,
+                        pair.a.function.as_deref().unwrap_or(""),
+                        pair.a.path.display()
+                    )
+                }
                 0 => format!("{} and {}", site_label(&pair.a), site_label(&pair.b)),
                 n => format!(
                     "{}, {} and {n} more cop{}",

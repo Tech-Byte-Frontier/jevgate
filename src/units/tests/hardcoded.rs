@@ -51,7 +51,7 @@ fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
     assert_eq!(finding.rule, "maintainability/hardcoded-values");
     assert!(
         finding.message.starts_with(
-            "`connect` special-cases one specific identity (0.90). Which value it means was not found"
+            "`connect` special-cases one specific identity (0.90). No single value stood out"
         ),
         "{}",
         finding.message

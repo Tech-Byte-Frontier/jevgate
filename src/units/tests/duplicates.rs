@@ -6,7 +6,7 @@ const LOAD: &str = "fn load_user(path: &str) -> Result<User> {\n    let text = s
 #[test]
 fn copies_inside_one_test_raise_at_most_a_consider() {
     let project = Project::new();
-    let block = "    let text = std::fs::read_to_string(path).unwrap();\n    let value: Value = serde_json::from_str(&text).unwrap();\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    assert_eq!(name, expected);\n";
+    let block = "    let text = std::fs::read_to_string(path).unwrap();\n    let value: Value = serde_json::from_str(&text).unwrap();\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    let name = name.to_lowercase();\n    assert_eq!(name, expected);\n";
     let second = block.replace("text", "body").replace("value", "parsed");
     project.write(
         "tests/cases.rs",
@@ -36,7 +36,7 @@ fn copies_inside_one_test_raise_at_most_a_consider() {
 
 #[test]
 fn copies_across_test_cases_are_one_level_lower_than_copies_in_support_code() {
-    let block = "    let text = std::fs::read_to_string(path).unwrap();\n    let value: Value = serde_json::from_str(&text).unwrap();\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n";
+    let block = "    let text = std::fs::read_to_string(path).unwrap();\n    let value: Value = serde_json::from_str(&text).unwrap();\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    let name = name.to_lowercase();\n";
     let second = block.replace("text", "body").replace("value", "parsed");
     let cases = format!(
         "#[test]\nfn reads_a() {{\n    let path = \"a.json\";\n{block}    assert_eq!(name, \"a\");\n}}\n\n#[test]\nfn reads_b() {{\n    let path = \"b.json\";\n{second}    assert_eq!(name, \"b\");\n}}\n"
@@ -61,12 +61,24 @@ fn copies_across_test_cases_are_one_level_lower_than_copies_in_support_code() {
     assert_eq!(in_cases, Strength::Consider);
     assert!(message.contains("across test cases"), "{message}");
     assert_eq!(strength(&support).0, Strength::Review);
+    // A short copy across test cases, such as a login step, is a note.
+    let short = cases
+        .replace("    let name = name.to_lowercase();\n", "")
+        .replace(
+            "    let text = std::fs::read_to_string(path).unwrap();\n",
+            "",
+        )
+        .replace(
+            "    let body = std::fs::read_to_string(path).unwrap();\n",
+            "",
+        );
+    assert_eq!(strength(&short).0, Strength::Note);
 }
 
 #[test]
 fn short_copies_are_at_most_a_consider() {
     let body = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\treturn StringUtil.releaseBuilder(builder);\n";
-    let longer = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\tbuilder.append(tagName).append(attributes.size());\n\t\treturn StringUtil.releaseBuilder(builder);\n";
+    let longer = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\tbuilder.append(tagName).append(attributes.size());\n\t\tbuilder.append(namespace);\n\t\treturn StringUtil.releaseBuilder(builder);\n";
     let mut options = args();
     only(&mut options, catalog::SHARED_LOGIC);
     let strength = |body: &str| {
