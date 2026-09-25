@@ -226,7 +226,8 @@ fn own_line(source: &str, byte: usize) -> bool {
 fn first_code_byte(root: Node<'_>, blocks: &[Block]) -> usize {
     let mut cursor = root.walk();
     root.named_children(&mut cursor)
-        .filter(|c| !is_comment(*c))
+        // PHP's opening tag starts the file; the code comes after it.
+        .filter(|c| !is_comment(*c) && c.kind() != "php_tag")
         .filter(|c| {
             !blocks
                 .iter()
@@ -235,6 +236,17 @@ fn first_code_byte(root: Node<'_>, blocks: &[Block]) -> usize {
         .map(|c| c.start_byte())
         .next()
         .unwrap_or(usize::MAX)
+}
+
+/// A section banner framed by rules of dashes, as Laravel's skeleton heads
+/// each configuration section and route file: `|------|`, a title, then an
+/// explanation. It documents the section below it, like a docstring.
+pub fn banner(text: &str) -> bool {
+    text.lines().any(|line| {
+        let rule = line.trim().trim_start_matches(['/', '*', '#', ' ']);
+        rule.strip_prefix('|')
+            .is_some_and(|rest| rest.len() >= 10 && rest.chars().all(|c| c == '-'))
+    })
 }
 
 /// Words a reader reads: the text without comment markers.
@@ -741,6 +753,22 @@ mod tests {
         for comment in &comments {
             assert_eq!(comment.definition.as_deref(), Some("ArticleController"));
         }
+    }
+
+    #[test]
+    fn a_php_file_s_header_after_its_opening_tag_documents_the_file() {
+        let source = "<?php\n\n/*\n * Custom JWT middleware: the package's token name cannot be configured.\n */\n\nnamespace App\\Http;\n\nclass Auth {}\n";
+        assert_eq!(found("Auth.php", source)[0].placement, Placement::File);
+    }
+
+    #[test]
+    fn framework_section_banners_are_recognized() {
+        let laravel = "/*\n|--------------------------------------------------------------------------\n| Web Routes\n|--------------------------------------------------------------------------\n|\n| Here is where you can register web routes for your application.\n*/";
+        assert!(banner(laravel));
+        assert!(banner(&laravel.replace("\n|", "\n |")));
+        assert!(!banner(
+            "// Retry once: the first request is often refused.\n// | a | b |"
+        ));
     }
 
     #[test]

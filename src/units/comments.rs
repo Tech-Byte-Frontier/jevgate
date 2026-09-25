@@ -80,7 +80,7 @@ pub(super) fn plan(
                 documentation: matches!(
                     comment.placement,
                     Placement::Declaration | Placement::File
-                ),
+                ) || crate::analysis::comments::banner(&comment.text),
                 kind,
             },
             recheck,
