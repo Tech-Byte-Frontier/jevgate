@@ -180,6 +180,17 @@ pub struct Finding {
     pub rank: f64,
     #[serde(default)]
     pub baselined: bool,
+    /// The reason an inline `jevgate: allow(RULE) reason` comment gives; such a
+    /// finding is accepted as a baselined one is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppressed: Option<String>,
+}
+
+impl Finding {
+    /// Accepted by the baseline or by an inline comment, so it never fails the gate.
+    pub fn accepted(&self) -> bool {
+        self.baselined || self.suppressed.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

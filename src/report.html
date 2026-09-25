@@ -72,7 +72,7 @@ const order=['review','consider','note','error','needs-context','uncertain','pen
 const files=[...data.files].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status)||a.path.localeCompare(b.path));
 function findingRow(finding){
  const row=el('details',null,'row finding-row'),summary=el('summary'),main=el('span',null,'main');
- main.append(el('span','Line '+finding.line+(finding.baselined?' · baselined':''),'path'),el('span',finding.message,'lead'));
+ main.append(el('span','Line '+finding.line+(finding.baselined?' · baselined':finding.suppressed?' · allowed: '+finding.suppressed:''),'path'),el('span',finding.message,'lead'));
  summary.append(main,el('span',name(finding.rule),'count'),badge(finding.strength));row.append(summary);
  const body=el('div',null,'detail');row.append(body);
  p(body,finding.action);

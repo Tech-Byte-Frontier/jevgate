@@ -207,3 +207,41 @@ fn baseline_reasons_are_marked_counted_and_kept_across_rewrites() {
     assert_eq!(baseline::stats(&project.0).unwrap()[rule].wrong, 1);
     assert!(baseline::stats_table(&counts).contains("50%"));
 }
+
+#[test]
+fn an_allow_comment_accepts_a_finding_only_with_a_reason() {
+    let project = Project::new();
+    let options = args();
+    let mut mock = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    for (comment, accepted) in [
+        (
+            "// jevgate: allow(maintainability) kept as the protocol spells it\n",
+            true,
+        ),
+        ("// jevgate: allow(maintainability)\n", false),
+        (
+            "// jevgate: allow(security) kept as the protocol spells it\n",
+            false,
+        ),
+    ] {
+        project.write("lib.rs", &format!("{comment}{}", function("f")));
+        let report = run(&project, &options, &mut mock);
+        let finding = &report.files[0].findings[0];
+        assert_eq!(finding.suppressed.is_some(), accepted, "{comment}");
+        assert_eq!(
+            gate::exit_code(&report),
+            if accepted { 0 } else { 1 },
+            "{comment}"
+        );
+        let gate = report.gate.as_ref().unwrap();
+        assert_eq!(gate.suppressed_findings, usize::from(accepted));
+        assert_eq!(
+            finding.message.contains("ignored: it gives no reason"),
+            comment.ends_with(")\n"),
+            "{comment}"
+        );
+    }
+}

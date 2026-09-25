@@ -41,6 +41,9 @@ pub enum JevCommand {
     /// fingerprint of rule, path, unit and evidence, so unrelated edits keep
     /// them accepted. Offline: no source is read or sent.
     ///
+    /// A single finding can instead be accepted in the code, with a comment
+    /// `jevgate: allow(RULE) reason` on its line or directly above it.
+    ///
     /// Each accepted finding can record why it was accepted: `intended` (right
     /// about the code, which is meant to be this way), `later` (right, to fix
     /// later) or `wrong` (the finding is mistaken). `baseline stats` turns

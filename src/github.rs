@@ -29,7 +29,7 @@ pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<(
     }
     let shown: Vec<(&Path, &Finding)> = output::ranked(report)
         .into_iter()
-        .filter(|(_, f)| f.strength != Strength::Note && !f.baselined)
+        .filter(|(_, f)| f.strength != Strength::Note && !f.accepted())
         .collect();
     for (path, finding) in &shown {
         writeln!(

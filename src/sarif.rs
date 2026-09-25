@@ -19,7 +19,7 @@ const HOME: &str = "https://github.com/Tech-Byte-Frontier/jevgate";
 pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<()> {
     let shown: Vec<(&Path, &Finding)> = output::ranked(report)
         .into_iter()
-        .filter(|(_, f)| f.strength != Strength::Note && !f.baselined)
+        .filter(|(_, f)| f.strength != Strength::Note && !f.accepted())
         .collect();
     serde_json::to_writer_pretty(&mut *out, &document(report, &shown, args))?;
     writeln!(out)?;

@@ -269,6 +269,7 @@ pub fn prose(text: &str) -> String {
 /// Prefixes of comments that instruct a tool rather than a reader.
 const DIRECTIVES: &[&str] = &[
     "eslint",
+    "jevgate:",
     "prettier-ignore",
     "@ts-",
     "tslint:",

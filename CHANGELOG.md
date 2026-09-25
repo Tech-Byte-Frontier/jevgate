@@ -4,6 +4,7 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- Inline suppressions: a comment `jevgate: allow(RULE) reason` on a finding's line, or in the comments and attributes directly above it, accepts that finding as the baseline does. RULE is a rule ID, key or group, and the reason is required; the report keeps the finding with its reason (`suppressed`, and `gate.suppressed_findings`), and `jevgate baseline` leaves it out.
 - `jevgate mcp` runs a Model Context Protocol server on stdin and stdout, so coding agents can call JevGate as a tool: `jevgate_check` runs a check and returns its findings (an incomplete run is a tool error), `jevgate_findings` reads the last report, and `jevgate_rules` lists the rules.
 
 ## [0.18.0] - 2026-09-25

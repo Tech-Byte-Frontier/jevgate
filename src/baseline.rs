@@ -89,15 +89,20 @@ pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Wr
         .files
         .iter()
         .flat_map(|file| {
-            file.findings.iter().map(|f| Accepted {
-                fingerprint: f.fingerprint.clone(),
-                rule: f.rule.clone(),
-                path: file.path.clone(),
-                line: Some(f.line),
-                strength: Some(f.strength),
-                message: f.message.clone(),
-                reason,
-            })
+            // A suppressed finding is accepted where its comment is; removing
+            // the comment brings it back.
+            file.findings
+                .iter()
+                .filter(|f| f.suppressed.is_none())
+                .map(|f| Accepted {
+                    fingerprint: f.fingerprint.clone(),
+                    rule: f.rule.clone(),
+                    path: file.path.clone(),
+                    line: Some(f.line),
+                    strength: Some(f.strength),
+                    message: f.message.clone(),
+                    reason,
+                })
         })
         .collect();
     let accepted = findings.len();

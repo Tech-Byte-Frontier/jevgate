@@ -56,6 +56,7 @@ mod sarif;
 mod schema;
 mod server;
 mod storage;
+mod suppress;
 mod syntax;
 mod test_locations;
 mod token_budget;

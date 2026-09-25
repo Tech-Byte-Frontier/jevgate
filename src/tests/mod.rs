@@ -65,6 +65,7 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
         fingerprint: String::new(),
         rank: 1.0,
         baselined: false,
+        suppressed: None,
     }
 }
 
