@@ -4,6 +4,9 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- Release binaries for Linux (x86_64 and arm64, static), macOS (Apple silicon and Intel) and Windows (x86_64), with SHA-256 checksums and build provenance (`gh attestation verify`). `install.sh` installs a checked binary on Linux and macOS, and `cargo binstall jevgate` finds the archives on every platform.
+- Windows: files are named with forward slashes, as on other platforms, so path rules (Next.js routes, Django modules, documentation roles) match there, and reports and baselines name a file the same way everywhere. Requests on Linux and macOS are unchanged, so cached answers stay valid.
+
 ## [0.16.0] - 2026-09-25
 
 Checked against 40 open-source projects in every supported stack (Rust, Python, JavaScript/TypeScript, Go, C#, Java, PHP, Ruby, Svelte, Astro, Vue, Supabase SQL, GitHub Actions), with every review and consider labeled by hand. On the first 17, reviews went from 140 to 107 and considers from 935 to 293, mostly false positives and repeated findings removed; undecided units stayed near 2%.
