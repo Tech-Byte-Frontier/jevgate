@@ -1,7 +1,7 @@
 //! Watching: debounced updates and the writer lock.
 use super::*;
+use std::time::{Duration, Instant};
 
-#[cfg(unix)]
 #[test]
 fn watcher_debounces_updates_and_releases_lock_after_credential_failure() {
     let project = Project::new();

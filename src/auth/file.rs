@@ -3,7 +3,7 @@ use super::secret::{MAX_KEY_BYTES, Secret};
 use anyhow::{Context, Result, ensure};
 use std::{
     fs,
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -116,6 +116,7 @@ pub fn save(path: &Path, secret: &Secret) -> Result<()> {
     }
     #[cfg(unix)]
     {
+        use std::io::Write;
         use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
         let parent = path.parent().context("Missing credential directory")?;
         fs::DirBuilder::new()
