@@ -153,3 +153,114 @@ fn a_test_files_setup_is_its_head_and_hooks_and_long_parts_are_left_out() {
     let long = format!("{}it('x', () => {{}})\n", "// padding\n".repeat(500));
     assert_eq!(test_units::file_setup(&long, 1, 501), "");
 }
+
+const INVOICE_RB: &str = "class Invoice\n  def initialize(rows)\n    @rows = rows\n  end\n\n  def total\n    @rows.sum { |row| row * 2 }\n  end\nend\n";
+const INVOICE_SPEC: &str = "require 'spec_helper'\n\nRSpec.describe Invoice do\n  def build_rows(count)\n    Array.new(count) { 1 }\n  end\n\n  let(:rows) { build_rows(2) }\n  let(:unused) { build_rows(9) }\n  subject { Invoice.new(rows) }\n\n  it \"doubles each row\" do\n    expect(subject.total).to eq 4\n  end\n\n  it \"doubles each row again\" do\n    expect(subject.total).to eq 4\n  end\nend\n";
+
+#[test]
+fn a_ruby_test_is_rechecked_with_its_groups_the_setup_it_reads_and_its_helpers() {
+    let project = Project::new();
+    project.write("lib/invoice.rb", INVOICE_RB);
+    project.write("spec/invoice_spec.rb", INVOICE_SPEC);
+    let mut options = args();
+    options.include_tests = true;
+    only(&mut options, catalog::TEST_VALUE);
+    let (_, plan) = planned(&project, &options);
+    let file = plan
+        .files
+        .values()
+        .find(|f| f.path.ends_with("invoice_spec.rb"))
+        .unwrap();
+    let first = plan
+        .requests
+        .iter()
+        .find(|p| p.request["jevgate"]["stage"] == "tests")
+        .unwrap();
+    assert_eq!(first.request["state"]["tests"][0]["suite"], "Invoice");
+    let (request, _) = file.units[0].recheck.as_ref().expect("a recheck");
+    let setup = request["state"]["setup"].as_str().unwrap();
+    assert_eq!(
+        setup,
+        "require 'spec_helper'\n\nlet(:rows) { build_rows(2) }\n\nsubject { Invoice.new(rows) }\n\ndef build_rows(count)\n    Array.new(count) { 1 }\n  end",
+        "the `let` the test never reads is left out"
+    );
+    assert!(
+        request["state"]["subjects"][0]["source"]
+            .as_str()
+            .unwrap()
+            .contains("@rows.sum")
+    );
+    let note = request["questions"]["mock_only"]["instructions"]["note"]
+        .as_str()
+        .unwrap();
+    assert!(
+        note.contains("`let` and `subject` definitions it reads"),
+        "{note}"
+    );
+}
+
+#[test]
+fn a_ruby_helper_is_found_in_the_tests_file_or_the_nearest_support_file() {
+    let helper = |path: &str| test_units::SubjectSource {
+        path: path.into(),
+        source: format!("def mock_app # {path}"),
+        shared: !path.ends_with("_test.rb"),
+    };
+    let found = |paths: &[&str]| {
+        let defined: Vec<_> = paths.iter().map(|p| helper(p)).collect();
+        test_units::nearest(std::path::Path::new("test/routing_test.rb"), &defined)
+            .map(|h| h.path.to_str().unwrap().to_string())
+    };
+    let support = "test/test_helper.rb";
+    let other_tree = "rack-protection/spec/support/spec_helpers.rb";
+    let other_case_file = "test/json_test.rb";
+    assert_eq!(
+        found(&[other_tree, other_case_file, support]).as_deref(),
+        Some(support)
+    );
+    assert_eq!(
+        found(&[support, "test/routing_test.rb"]).as_deref(),
+        Some("test/routing_test.rb")
+    );
+    assert_eq!(found(&[other_tree, other_case_file]), None);
+    assert_eq!(found(&[support, "test/app_helper.rb"]), None);
+}
+
+#[test]
+fn ruby_pairs_are_a_review_only_when_neither_test_checks_something_the_other_does_not() {
+    let project = Project::new();
+    project.write("lib/invoice.rb", INVOICE_RB);
+    project.write("spec/invoice_spec.rb", INVOICE_SPEC);
+    let mut options = args();
+    options.include_tests = true;
+    only(&mut options, catalog::TEST_REDUNDANCY);
+    let (_, plan) = planned(&project, &options);
+    let pair = plan
+        .requests
+        .iter()
+        .find(|p| p.request["jevgate"]["stage"] == "test-pair")
+        .unwrap();
+    assert!(pair.request["questions"]["distinct"].is_object());
+    let note = pair.request["questions"]["overlap"]["instructions"]["note"]
+        .as_str()
+        .unwrap();
+    assert!(note.contains("an alias and its original"), "{note}");
+    let strength = |distinct: f64, refresh: bool| {
+        let mut options = args();
+        options.include_tests = true;
+        only(&mut options, catalog::TEST_REDUNDANCY);
+        options.refresh = refresh;
+        let mut eval = scripted(2);
+        eval.overrides = vec![("distinct", noul_at(distinct))];
+        let report = run(&project, &options, &mut eval);
+        let file = report
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("invoice_spec.rb"))
+            .unwrap()
+            .clone();
+        file.findings[0].strength
+    };
+    assert_eq!(strength(0.05, false), Strength::Review);
+    assert_eq!(strength(0.3, true), Strength::Consider);
+}

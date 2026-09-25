@@ -9,6 +9,7 @@ use crate::{
     analysis::test_map::{self, TestCase},
     catalog::{TEST_REDUNDANCY, TEST_VALUE},
     schema::Pass,
+    units::questions::TestEvidence,
 };
 use serde_json::{Value, json};
 use std::{
@@ -31,12 +32,17 @@ const HOOK_BYTES: usize = 1500;
 pub(super) struct SubjectSource {
     pub path: PathBuf,
     pub source: String,
+    /// Whether other files can call it: false for a Ruby helper defined in a
+    /// file of test cases.
+    pub shared: bool,
 }
 
 /// What the scope knows about the functions tests call.
 pub(super) struct Subjects<'a> {
     pub signatures: &'a BTreeMap<String, String>,
     pub sources: &'a BTreeMap<String, SubjectSource>,
+    /// Ruby test helpers by short name, for the recheck's setup.
+    pub helpers: &'a BTreeMap<String, Vec<SubjectSource>>,
     /// Source hashes of selected and context files, for freshness checks.
     pub hashes: &'a BTreeMap<PathBuf, String>,
 }
@@ -62,20 +68,34 @@ pub(super) fn plan_values(
     requests: &mut Vec<Planned>,
 ) {
     let ids = unique_ids("test", cases.iter().map(|c| c.name.as_str()));
-    let setup = cases
+    let (setup, head) = cases
         .first()
         .map(|first| {
             let region = test_lines
                 .iter()
                 .find(|r| r.contains(&first.line))
                 .map_or(1, |r| r.start);
-            file_setup(file.source, region, first.line)
+            let lines: Vec<&str> = file.source.lines().collect();
+            let start = region.saturating_sub(1).min(lines.len());
+            (
+                file_setup(file.source, region, first.line),
+                setup_head(&lines, start, first.line),
+            )
         })
         .unwrap_or_default();
+    let ruby = file.path.extension().is_some_and(|e| e == "rb");
     let mut items = Vec::new();
     for (case, id) in cases.iter().zip(ids) {
         let source = case.source(file.source);
-        let recheck = value_recheck(file, case, &id, subjects, &setup);
+        // A Ruby case gets the setup its groups declare for it, not every
+        // hook of the file (an RSpec file's groups often set up differently),
+        // and the test helpers it and its hooks call.
+        let (own, helper_paths) = if ruby {
+            ruby_setup(file, case, head.clone(), subjects.helpers)
+        } else {
+            (setup.clone(), Vec::new())
+        };
+        let recheck = value_recheck(file, case, &id, subjects, &own, &helper_paths);
         out.units.push(UnitPlan {
             rule: TEST_VALUE,
             id: id.clone(),
@@ -88,12 +108,7 @@ pub(super) fn plan_values(
             detail: Detail::Test,
             recheck,
         });
-        items.push((
-            out.units.len() - 1,
-            id,
-            case,
-            json!({"name": case.name, "source": source}),
-        ));
+        items.push((out.units.len() - 1, id, case, test_item(case, source, ruby)));
     }
     for group in pack(items, TEST_PACK_ITEMS, |(_, _, _, item)| item) {
         let (request, asked) = value_request(file, &group, subjects.signatures);
@@ -120,8 +135,16 @@ fn value_recheck(
     id: &str,
     subjects: &Subjects<'_>,
     setup: &str,
+    setup_paths: &[PathBuf],
 ) -> Option<(Value, Asked)> {
     let mut sources = vec![(file.path.to_path_buf(), file.source_hash.to_string())];
+    for path in setup_paths {
+        if let Some(hash) = subjects.hashes.get(path)
+            && !sources.iter().any(|(known, _)| known == path)
+        {
+            sources.push((path.clone(), hash.clone()));
+        }
+    }
     let names: Vec<&String> = case.subjects.iter().collect();
     let mut listed = subject_state(&names, subjects.signatures);
     for subject in listed.iter_mut().take(SOURCED_SUBJECTS) {
@@ -144,11 +167,17 @@ fn value_recheck(
     if !sourced && setup.is_empty() {
         return None;
     }
+    let ruby = file.path.extension().is_some_and(|e| e == "rb");
+    let evidence = if ruby {
+        TestEvidence::RecheckGroups
+    } else {
+        TestEvidence::Recheck
+    };
     let mut questions = Questions::default();
     let path = "tests[0].source";
     for (question, body) in [
-        ("own_logic", questions::test_own_logic(path, true)),
-        ("mock_only", questions::test_mock_only(path, true)),
+        ("own_logic", questions::test_own_logic(path, evidence)),
+        ("mock_only", questions::test_mock_only(path, evidence)),
     ] {
         questions.ask(
             question.into(),
@@ -161,7 +190,7 @@ fn value_recheck(
     }
     let state = json!({
         "file": file.plain_state(),
-        "tests": [{"name": case.name, "source": case.source(file.source)}],
+        "tests": [test_item(case, case.source(file.source), ruby)],
         "subjects": listed,
         "setup": setup,
     });
@@ -171,6 +200,129 @@ fn value_recheck(
         .collect();
     let (request, asked) = super::request(file.model, "recheck", &paths, state, questions);
     file.budget.fits(&request).then_some((request, asked))
+}
+
+/// A test as sent: its name and source, and for Ruby the groups it is
+/// declared in. An RSpec example reads as a sentence that continues its
+/// groups (`describe Registry` … `it "finds a registered object"`), and the
+/// outer group often names the class under test.
+fn test_item(case: &TestCase, source: &str, ruby: bool) -> Value {
+    let mut item = json!({"name": case.name, "source": source});
+    if ruby && !case.suite.is_empty() {
+        item["suite"] = json!(case.suite.join(" > "));
+    }
+    item
+}
+
+/// Test helpers shown with one Ruby case, at most.
+const HELPERS: usize = 4;
+
+/// A Ruby case's setup: the file's head, the hooks its groups declare, then
+/// the test helpers the case and its hooks call, and the helpers those call.
+/// Also the other files the helpers come from.
+fn ruby_setup(
+    file: &FileContext<'_>,
+    case: &TestCase,
+    head: Option<String>,
+    helpers: &BTreeMap<String, Vec<SubjectSource>>,
+) -> (String, Vec<PathBuf>) {
+    let setup = case_setup(file.source, head, &case.hooks);
+    let mut names: Vec<String> = case.calls.iter().chain(&case.hook_calls).cloned().collect();
+    let mut shown: Vec<&SubjectSource> = Vec::new();
+    let mut next = 0;
+    while next < names.len() && shown.len() < HELPERS {
+        let name = names[next].clone();
+        next += 1;
+        let Some(defined) = helpers.get(&name) else {
+            continue;
+        };
+        let found = nearest(file.path, defined);
+        let Some(helper) = found.filter(|h| {
+            h.source.len() <= HOOK_BYTES
+                && !setup.contains(h.source.as_str())
+                && !shown.iter().any(|s| s.source == h.source)
+        }) else {
+            continue;
+        };
+        shown.push(helper);
+        if let Some(tree) = crate::syntax::parse(&helper.path, &helper.source)
+            .ok()
+            .flatten()
+        {
+            let mut calls = Vec::new();
+            crate::analysis::ruby::called_names(tree.root_node(), &helper.source, &mut calls);
+            names.extend(calls);
+        }
+    }
+    let mut parts: Vec<String> = (!setup.is_empty()).then_some(setup).into_iter().collect();
+    parts.extend(shown.iter().map(|h| h.source.clone()));
+    let paths = shown
+        .iter()
+        .filter(|h| h.path != file.path)
+        .map(|h| h.path.clone())
+        .collect();
+    (parts.join("\n\n"), paths)
+}
+
+/// The one definition of a helper nearest the test: in its own file, else
+/// in the support file that shares the most directories with it, at least
+/// one, as `test/test_helper.rb` does with `test/routing_test.rb`. None when
+/// two definitions are equally near.
+pub(super) fn nearest<'a>(test: &Path, defined: &'a [SubjectSource]) -> Option<&'a SubjectSource> {
+    let folders = |path: &Path| -> Vec<String> {
+        path.parent()
+            .into_iter()
+            .flat_map(Path::components)
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect()
+    };
+    let own = folders(test);
+    let shared = |helper: &SubjectSource| {
+        if helper.path == test {
+            return usize::MAX;
+        }
+        own.iter()
+            .zip(folders(&helper.path))
+            .take_while(|(a, b)| **a == *b)
+            .count()
+    };
+    // A support file in another tree, sharing no directory with the test,
+    // serves other tests: `test/test_helper.rb` is not a spec's helper.
+    let callable = || {
+        defined
+            .iter()
+            .filter(|h| h.path == test || h.shared && shared(h) > 0)
+    };
+    let best = callable().map(shared).max()?;
+    let mut nearest = callable().filter(|h| shared(h) == best);
+    let first = nearest.next();
+    nearest.next().is_none().then_some(first).flatten()
+}
+
+/// One case's setup: the file's head, then the hooks its groups declare. A
+/// hook larger than its limit is left out rather than cut, and so are the
+/// hooks when together they are too long.
+fn case_setup(source: &str, head: Option<String>, hooks: &[Range<usize>]) -> String {
+    let kept = usize::from(head.is_some());
+    let mut parts: Vec<String> = head.into_iter().collect();
+    parts.extend(
+        hooks
+            .iter()
+            .map(|hook| source[hook.clone()].to_string())
+            .filter(|text| text.len() <= HOOK_BYTES),
+    );
+    let setup = parts.join("\n\n");
+    if setup.len() <= SETUP_BYTES + HOOK_BYTES {
+        setup
+    } else {
+        parts.truncate(kept);
+        parts.join("")
+    }
+}
+
+/// The hooks a case's groups declare, as sent beside a pair of tests.
+fn hook_text(source: &str, case: &TestCase) -> String {
+    case_setup(source, None, &case.hooks)
 }
 
 /// A test file's shared setup: the text of its test region before the first
@@ -193,7 +345,7 @@ pub(super) fn file_setup(source: &str, region_start: usize, first_case: usize) -
 /// The lines from `start` up to the first suite, test or test module, when
 /// they are short enough to send.
 fn setup_head(lines: &[&str], start: usize, first_case: usize) -> Option<String> {
-    const OPENERS: [&str; 12] = [
+    const OPENERS: [&str; 18] = [
         "describe(",
         "describe.",
         "suite(",
@@ -206,6 +358,13 @@ fn setup_head(lines: &[&str], start: usize, first_case: usize) -> Option<String>
         "class ",
         "mod tests",
         "#[test]",
+        // Ruby: RSpec groups and examples, and Rails `test "…" do`.
+        "describe ",
+        "RSpec.describe",
+        "context ",
+        "it ",
+        "test ",
+        "module ",
     ];
     let last = first_case.saturating_sub(1).min(lines.len());
     let end = (start..last)
@@ -292,8 +451,14 @@ fn value_request(
         let path = format!("tests[{index}].source");
         for (question, body) in [
             ("internal", questions::test_internal(&path)),
-            ("own_logic", questions::test_own_logic(&path, false)),
-            ("mock_only", questions::test_mock_only(&path, false)),
+            (
+                "own_logic",
+                questions::test_own_logic(&path, TestEvidence::First),
+            ),
+            (
+                "mock_only",
+                questions::test_mock_only(&path, TestEvidence::First),
+            ),
             ("several", questions::test_several(&path)),
         ] {
             questions.ask(
@@ -327,15 +492,20 @@ pub(super) fn plan_pairs(
 ) {
     let (pairs, omitted) = test_map::pairs(cases);
     out.rules.insert(TEST_REDUNDANCY, omitted);
+    let ruby = file.path.extension().is_some_and(|e| e == "rb");
     for pair in pairs {
         let (a, b) = (&cases[pair.a], &cases[pair.b]);
         let id = format!("test-pair:{}|{}", a.name, b.name);
         let mut questions = Questions::default();
+        let distinct = ruby.then(|| ("distinct", questions::test_pair_distinct()));
         for (question, body) in [
-            ("overlap", questions::test_pair_overlap()),
+            ("overlap", questions::test_pair_overlap(ruby)),
             ("same_input", questions::test_pair_same_input()),
             ("same_outcome", questions::test_pair_same_outcome()),
-        ] {
+        ]
+        .into_iter()
+        .chain(distinct)
+        {
             questions.ask(
                 question.into(),
                 body,
@@ -345,11 +515,25 @@ pub(super) fn plan_pairs(
                 Pass::First,
             );
         }
-        let state = json!({
+        let mut state = json!({
             "test_a": {"name": a.name, "source": a.source(file.source)},
             "test_b": {"name": b.name, "source": b.source(file.source)},
             "subject": subject_state(&[&pair.subject], subjects).remove(0),
         });
+        // Tests in different groups can run on different setup: two RSpec
+        // examples that read alike may build different records first.
+        if ruby && a.suite != b.suite {
+            for (key, case) in [("test_a", a), ("test_b", b)] {
+                if !case.suite.is_empty() {
+                    state[key]["suite"] = json!(case.suite.join(" > "));
+                }
+            }
+            let (setup_a, setup_b) = (hook_text(file.source, a), hook_text(file.source, b));
+            if setup_a != setup_b {
+                state["test_a"]["setup"] = json!(setup_a);
+                state["test_b"]["setup"] = json!(setup_b);
+            }
+        }
         let (request, asked) = file.request("test-pair", state, questions);
         let fits = file.budget.fits(&request);
         out.units.push(UnitPlan {
