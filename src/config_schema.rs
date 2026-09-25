@@ -91,9 +91,12 @@ mod tests {
         if std::env::var_os("JEVGATE_WRITE_SCHEMA").is_some() {
             std::fs::write(FILE, &text).unwrap();
         }
-        let file = std::fs::read_to_string(FILE).unwrap_or_default();
+        // Git may check the file out with CRLF line ends on Windows.
+        let file = std::fs::read_to_string(FILE)
+            .unwrap_or_default()
+            .replace('\r', "");
         assert!(
-            file == text,
+            file == text.replace('\r', ""),
             "jevgate.schema.json is out of date; run JEVGATE_WRITE_SCHEMA=1 cargo test"
         );
     }
