@@ -265,7 +265,8 @@ pub fn rule_version(key: &str) -> &'static str {
         INJECTION => "5",
         SENSITIVE_DATA => "4",
         UNSAFE_SETTINGS => "2",
-        HARDCODED_VALUES | ACCESS_CONTROL | DOC_STALENESS | DOC_DUPLICATION => "2",
+        HARDCODED_VALUES | ACCESS_CONTROL | LARGE_DOCS | AGENT_CONTEXT => "2",
+        DOC_STALENESS | DOC_DUPLICATION => "3",
         _ => "1",
     }
 }

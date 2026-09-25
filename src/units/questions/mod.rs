@@ -655,14 +655,19 @@ mod tests {
             instructions_generic("sections[0]"),
             instructions_history("sections[0]"),
             instructions_enforced("sections[0]"),
+            instructions_kind("sections[0]"),
             instructions_scope("sections[0]", &["src/".into(), "web/".into()]),
             document_split(),
             document_history(),
             document_part(&["P1".into(), "P2".into()]),
+            document_kind(),
             document_plan(),
             section_relies(),
             pair_covers("section_a", "section_b"),
             pair_conflict(),
+            pair_subject(),
+            pair_translation(),
+            pair_relation(),
         ];
         all.extend(checks.clone().map(|c| c.body("function.source")));
         for check in checks {

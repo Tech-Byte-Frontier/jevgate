@@ -324,28 +324,83 @@ signatures, or one candidate pair.
    values whose origin it does not show, not parameters. On DVWA the PHP
    Choices left 13 of 329 injection units undecided, from 46.
    Agent instruction files (`src/docs/`) are found by name even when hidden
-   or ignored. Each file's heading sections, or the top-level blocks of a long
-   section, are sent packed beside the nearest manifests, the configured
-   linters and the directories. Code decides which harness loads each file and
+   or ignored, including Kiro steering files, Junie guidelines and rules,
+   and Roo Code rules, each loaded by its harness's documented rules (a Kiro
+   `inclusion`, a Roo Code mode folder, Junie's precedence of its own
+   `AGENTS.md`). Each file's heading sections, or the top-level blocks of a
+   long section, are sent packed beside the nearest manifests (with the
+   runtime versions they require: `engines`, `packageManager`,
+   `requires-python`, `rust-version`), the configured linters and the
+   directories. A section whose signals stay undecided is asked, alone,
+   which kind of section it is (instructions, a description, a command
+   list, generic advice or a record): its own kind at 0.80 raises the
+   undecided signal, that kind at 0.20 or less clears it, and instructions
+   clear an undecided "restates the repository". On vercel/ai, API tables and
+   import maps stayed near the middle on "only describes", while naming the
+   kind was decisive. The linter question asks whether a section is only
+   style the listed tools check with their usual settings; asked whether it
+   asked for such style, a list of `Do Not` rules with one import rule, or
+   file naming no configured rule checks, stayed undecided.
+   Code decides which harness loads each file and
    when, from its documented discovery rules. It also records loading facts:
    copies, unresolved imports, and files a harness skips or truncates. These
-   are reported, never judged. Project Markdown of 300 or more lines is sent
-   as its headings only, with `#` marks for nesting. A split finding is then
-   located with one Choice among its top-level parts. Per-section questions on
+   are reported, never judged.
+   Project documentation is Markdown, MDX, reStructuredText or AsciiDoc,
+   read as Markdown with the file's own lines (`src/docs/format.rs`): MDX
+   drops imports, exports, comments and component markup but keeps the prose
+   components carry, reStructuredText titles become headings by the order of
+   their adornment styles, AsciiDoc titles by their `=` level, comments and
+   attribute entries are dropped, and code directives, literal and listing
+   blocks are fenced with their language. A document of 300 or more lines is
+   sent as its headings only, with `#` marks for nesting. A split finding is
+   then located with one Choice among its top-level parts; a split that stays
+   undecided is asked which kind of document it is (a guide, a reference, a
+   migration guide, an introduction, or a collection of unrelated subjects).
+   The kinds that serve one subject at 0.80 clear it and a collection at
+   0.80 raises a consider: a quickstart, a migration guide and a package
+   README each stayed near a third per level on the split.
+   Per-section questions on
    project docs were dropped: on a labeled sample they found almost nothing,
    and they cost about five times more than an outline.
    Staleness and duplication candidates come from code. Staleness candidates
    are paths and scripts a section names that the repository lacks, with what
-   Git shows about each. Duplication candidates are section pairs where 30%
+   Git shows about each. A span written with a code role (`:attr:`,
+   `:class:`) is not a path; a path the ignore files cover, or one the
+   section writes out for a code block (its `filename=`, or the one path
+   the paragraph before it names), is the reader's own; a script where no
+   command starts, such as "make sure", is not one, and dependencies count
+   as scripts, since `pnpm tsx` runs one. A missing name whose one tracked
+   namesake sits under the document's directory, such as `.tsx` for `.ts`,
+   is named beside it.
+   Duplication candidates are section pairs where 30%
    of the smaller section's three-word sequences recur in the other, at most
-   three per pair of documents. A document whose release is tagged, or whose
+   three per pair of documents. Sequences come from the prose; a section
+   with too little prose is compared on its prose, commands and settings,
+   and program code is never compared: pairing on code sent hundreds of
+   vercel/ai pages that shared a `streamText` call and nothing else. Project
+   documents of separate packages are not paired, since each package's
+   README is read alone. A section that pairs with two or more others heads
+   a family, and its members are asked against it alone. A document whose release is tagged, or whose
    named paths were deleted, is asked from its headings whether it is a plan;
    a plan with those facts is one finding, and its own candidates are not
-   asked. The section check and the pair Nouls (does A state everything B
-   states, and the reverse; do they disagree; is one a translation of the
-   other?) are follow-ups for the other documents. A translation clears the
-   repetition answers but not a disagreement. A Score on how two sections relate stayed on its middle level
-   for almost every pair, so it is not asked.
+   asked. The section check and the pair questions (does A state everything
+   B states, and the reverse, as Scores whose middle "mostly" is acceptable;
+   do they disagree, a Score whose middle "only in detail" is acceptable; are
+   they about one subject; is one a translation of the other?) are
+   follow-ups for the other documents, sent with each document's title. A
+   translation clears the repetition answers but not a disagreement.
+   Different subjects settle what stays undecided, never a decided answer.
+   A pair still undecided is asked, apart, how the two sections relate
+   (one repeats the other, they overlap, they are written alike for
+   different subjects, they contradict each other, or they describe
+   different things); a repetition or a contradiction at 0.20 or less
+   clears that check. Weighing coverage stayed near the middle for one step
+   of two quickstarts or one option of guide and reference, while naming
+   the relation was decisive: 18 of 654 pairs undecided on vercel/ai became
+   1. The repetition findings that share a section are one finding at the
+   section most of them name, listing the others. A Score on how much two
+   sections overlap, asked of every pair, stayed on its middle level for
+   almost every pair, so it is not asked.
    SQL files (`security/access-control`) are split into statements that honor
    comments, quotes and dollar quotes. Each project's files, grouped above
    their `supabase` or `migrations` directory, are read in path order, so a

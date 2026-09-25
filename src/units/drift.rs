@@ -35,6 +35,12 @@ struct Doc<'a> {
     sections: Vec<Section>,
     missing: Vec<Vec<Missing>>,
     facts: Vec<String>,
+    /// What the document is about, sent beside its sections: two sections
+    /// headed `Installing` differ when one installs Gunicorn and the other
+    /// Waitress.
+    title: String,
+    /// The directory of the package a project document belongs to.
+    package: Option<std::path::PathBuf>,
 }
 
 /// Candidates across every selected document.
@@ -59,8 +65,25 @@ impl<'a> Shared<'a> {
             let Some(repository) = &input.repository else {
                 continue;
             };
-            let source = input.source.as_deref().unwrap_or("");
-            let sections = markdown::parse(source).sections;
+            let source = crate::docs::format::view(
+                &input.result.path,
+                input.source.as_deref().unwrap_or(""),
+            );
+            let package = (input.result.role == crate::inventory::DOCS)
+                .then(|| crate::packages::package(&repository.root, &input.result.path))
+                .flatten()
+                .map(|p| p.dir);
+            let parsed = markdown::parse(&source);
+            let title = title(&source, &parsed);
+            let mut sections = parsed.sections;
+            // Markup dropped from other formats leaves runs of blank lines.
+            if crate::docs::format::Format::of(&input.result.path)
+                != crate::docs::format::Format::Markdown
+            {
+                for section in &mut sections {
+                    section.text = crate::docs::format::collapse_blank_lines(&section.text);
+                }
+            }
             let missing: Vec<Vec<Missing>> = sections
                 .iter()
                 .map(|s| {
@@ -78,7 +101,7 @@ impl<'a> Shared<'a> {
                 })
                 .collect();
             let facts = if staleness {
-                facts(repository, &input.result.path, source, &missing)
+                facts(repository, &input.result.path, &title, &missing)
             } else {
                 Vec::new()
             };
@@ -88,6 +111,8 @@ impl<'a> Shared<'a> {
                 sections,
                 missing,
                 facts,
+                title,
+                package,
             });
         }
         let (pairs, omitted) = if duplication {
@@ -141,8 +166,13 @@ impl<'a> Shared<'a> {
             .collect();
         let ids = unique_ids("stale", stale.iter().map(|&s| heading(&doc.sections[s])));
         for (&s, id) in stale.iter().zip(ids) {
-            out.units
-                .push(stale_section(file, &doc.sections[s], &doc.missing[s], id));
+            out.units.push(stale_section(
+                file,
+                &doc.title,
+                &doc.sections[s],
+                &doc.missing[s],
+                id,
+            ));
         }
     }
 
@@ -183,24 +213,30 @@ impl<'a> Shared<'a> {
                     super::questions::pair_covers("section_b", "section_a"),
                 ),
                 ("conflict", super::questions::pair_conflict()),
+                ("subject", super::questions::pair_subject()),
                 ("translation", super::questions::pair_translation()),
             ] {
                 questions.ask(key.into(), body, &id, DOC_DUPLICATION, key, Pass::Trace);
             }
             let state = json!({
-                "section_a": {"path": file.path, "heading": section.heading, "text": section.text},
-                "section_b": {"path": other_path, "heading": other_section.heading, "text": other_section.text},
+                "section_a": {"path": file.path, "document": self.docs[d].title, "heading": section.heading, "text": section.text},
+                "section_b": {"path": other_path, "document": other_doc.title, "heading": other_section.heading, "text": other_section.text},
             });
-            let (request, asked) = request(
-                file.model,
-                "doc-checks",
-                &[
-                    (file.path, file.source_hash),
-                    (other_path, &other_doc.input.result.source_hash),
-                ],
-                state,
-                questions,
+            let sources = [
+                (file.path, file.source_hash),
+                (other_path, other_doc.input.result.source_hash.as_str()),
+            ];
+            let mut relation = Questions::default();
+            relation.ask(
+                "relation".into(),
+                super::questions::pair_relation(),
+                &id,
+                DOC_DUPLICATION,
+                "relation",
+                Pass::Settle,
             );
+            let settle = request(file.model, "doc-checks", &sources, state.clone(), relation);
+            let (request, asked) = request(file.model, "doc-checks", &sources, state, questions);
             let fits = file.budget.fits(&request);
             let other = crate::schema::Location {
                 path: other_path.clone(),
@@ -227,6 +263,7 @@ impl<'a> Shared<'a> {
                 detail: Detail::DocPair {
                     other,
                     check: fits.then_some((request, asked)),
+                    settle: fits.then_some(settle),
                 },
                 recheck: None,
             });
@@ -243,6 +280,9 @@ impl<'a> Shared<'a> {
 
 /// Sections of different documents that share much of their wording, as
 /// (document, section) pairs, with the number of candidates over the caps.
+/// Project documents of separate packages are not paired: each package's
+/// README is read on its own, such as on a registry page, so repeating the
+/// setup it shares with its siblings is how it stays complete.
 fn section_pairs(docs: &[Doc<'_>]) -> (Vec<SectionPair>, usize) {
     let mut keys = Vec::new();
     let mut texts = Vec::new();
@@ -255,7 +295,11 @@ fn section_pairs(docs: &[Doc<'_>]) -> (Vec<SectionPair>, usize) {
             });
         }
     }
-    let (pairs, omitted) = overlap::pairs(&texts);
+    let comparable = |a: usize, b: usize| match (&docs[a].package, &docs[b].package) {
+        (Some(x), Some(y)) => x.starts_with(y) || y.starts_with(x),
+        _ => true,
+    };
+    let (pairs, omitted) = overlap::pairs(&texts, &comparable);
     (
         pairs.iter().map(|(a, b, _)| (keys[*a], keys[*b])).collect(),
         omitted,
@@ -315,6 +359,7 @@ fn plan_unit(
 /// finished plan.
 fn stale_section(
     file: &FileContext<'_>,
+    title: &str,
     section: &Section,
     missing: &[Missing],
     id: String,
@@ -340,7 +385,7 @@ fn stale_section(
         })
         .collect();
     let state = json!({
-        "file": {"path": file.path},
+        "file": {"path": file.path, "title": title},
         "section": {"heading": section.heading, "text": section.text},
         "missing": listed,
     });
@@ -391,7 +436,15 @@ fn describe(missing: &Missing) -> String {
             to.display()
         ),
         Fate::Absent => format!("`{}`, which is not in the repository", missing.name),
-        Fate::NoScript => format!("`{}`, which no manifest declares as a script", missing.name),
+        Fate::Nearby(path) => format!(
+            "`{}`, which is not in the repository, though `{}` is",
+            missing.name,
+            path.display()
+        ),
+        Fate::NoScript => format!(
+            "`{}`, which no manifest declares as a script or dependency",
+            missing.name
+        ),
     }
 }
 
@@ -401,15 +454,10 @@ fn describe(missing: &Missing) -> String {
 fn facts(
     repository: &Repository,
     path: &Path,
-    source: &str,
+    title: &str,
     missing: &[Vec<Missing>],
 ) -> Vec<String> {
     let mut facts = Vec::new();
-    let title = markdown::headings(source)
-        .into_iter()
-        .next()
-        .map(|h| h.text)
-        .unwrap_or_default();
     for version in versions(&format!("{} {title}", path.display())) {
         let tagged = [format!("v{version}"), version.clone()]
             .iter()
@@ -446,6 +494,23 @@ fn facts(
         ));
     }
     facts
+}
+
+/// A document's title: its frontmatter `title`, as MDX pages set it, else
+/// its first heading.
+fn title(source: &str, parsed: &markdown::Markdown) -> String {
+    parsed
+        .frontmatter
+        .get("title")
+        .filter(|t| !t.is_empty())
+        .cloned()
+        .or_else(|| {
+            markdown::headings(source)
+                .into_iter()
+                .next()
+                .map(|h| h.text)
+        })
+        .unwrap_or_default()
 }
 
 /// Version numbers such as `1.2.3` or `v0.20.4` in `text`.

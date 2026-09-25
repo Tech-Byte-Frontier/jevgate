@@ -21,6 +21,8 @@ pub enum Load {
     Files(String),
     /// When the agent decides the rule's description is relevant.
     Requested,
+    /// When the agent works in this mode, such as Roo Code's `code` mode.
+    Mode(String),
     /// Only when a person names it.
     Manual,
 }
@@ -32,6 +34,7 @@ impl Load {
             Self::Directory(dir) => format!("when the agent works in `{dir}/`"),
             Self::Files(globs) => format!("when the agent works on files matching `{globs}`"),
             Self::Requested => "when the agent decides its description is relevant".into(),
+            Self::Mode(mode) => format!("when the agent works in its `{mode}` mode"),
             Self::Manual => "only when a person names it".into(),
         }
     }
@@ -79,6 +82,9 @@ const COPILOT: &str = "GitHub Copilot";
 const CURSOR: &str = "Cursor";
 const WINDSURF: &str = "Windsurf";
 const CLINE: &str = "Cline";
+const KIRO: &str = "Kiro";
+const JUNIE: &str = "Junie";
+const ROO: &str = "Roo Code";
 
 /// Codex stops adding project instructions at this size (`project_doc_max_bytes`).
 const CODEX_MAX_BYTES: usize = 32 * 1024;
@@ -119,6 +125,63 @@ pub fn readers(path: &Path, markdown: &Markdown, present: &dyn Fn(&str) -> bool)
         _ if under(".cursor", "rules") => cursor_readers(name, markdown),
         _ if under(".windsurf", "rules") || under(".devin", "rules") => windsurf_readers(markdown),
         _ if parts.contains(&".clinerules") => read(&[CLINE], scoped(markdown, "paths")),
+        _ if under(".kiro", "steering") => kiro_readers(markdown),
+        _ if parts.first() == Some(&".junie") => junie_readers(&parts, present),
+        _ if parts.first() == Some(&".roo") || name.starts_with(".roorules") => {
+            roo_readers(&parts, name, present)
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Kiro steering files load by their `inclusion` frontmatter, always by default.
+fn kiro_readers(markdown: &Markdown) -> Vec<Reader> {
+    match front(markdown, "inclusion").map(String::as_str) {
+        Some("fileMatch") => read(&[KIRO], scoped(markdown, "fileMatchPattern")),
+        Some("manual") => read(&[KIRO], Load::Manual),
+        Some("auto") => read(&[KIRO], Load::Requested),
+        _ => read(&[KIRO], Load::Always),
+    }
+}
+
+/// Junie reads the first of `.junie/AGENTS.md`; the root `AGENTS.md` with
+/// `.junie/playbook.md` and `.junie/rules/*.md`; or its legacy
+/// `.junie/guidelines.md` or `.junie/guidelines/`.
+fn junie_readers(parts: &[&str], present: &dyn Fn(&str) -> bool) -> Vec<Reader> {
+    let own = present(".junie/AGENTS.md");
+    let chosen = match parts {
+        [_, "AGENTS.md"] => true,
+        [_, "playbook.md"] | [_, "rules", ..] => !own,
+        [_, "guidelines.md"] | [_, "guidelines", ..] => !own && !present("AGENTS.md"),
+        _ => false,
+    };
+    if chosen {
+        read(&[JUNIE], Load::Always)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Roo Code reads every file under `.roo/rules/`, and `.roo/rules-{mode}/`
+/// in that mode; a root `.roorules` or `.roorules-{mode}` file only when the
+/// matching folder is missing or empty.
+fn roo_readers(parts: &[&str], name: &str, present: &dyn Fn(&str) -> bool) -> Vec<Reader> {
+    let load = |folder: &str| match folder.strip_prefix("rules-") {
+        Some(mode) => Load::Mode(mode.to_string()),
+        None => Load::Always,
+    };
+    match parts {
+        [".roo", folder, _, ..] if *folder == "rules" || folder.starts_with("rules-") => {
+            read(&[ROO], load(folder))
+        }
+        [_] => {
+            let folder = name.trim_start_matches(".roo");
+            if present(&format!(".roo/{folder}/")) {
+                Vec::new()
+            } else {
+                read(&[ROO], load(folder))
+            }
+        }
         _ => Vec::new(),
     }
 }
@@ -202,7 +265,11 @@ pub fn files(
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     present.sort();
-    let exists = |p: &str| present.binary_search_by(|x| x.as_str().cmp(p)).is_ok();
+    // A path ending in `/` asks whether any file is inside that folder.
+    let exists = |p: &str| match p.ends_with('/') {
+        true => present.iter().any(|x| x.starts_with(p)),
+        false => present.binary_search_by(|x| x.as_str().cmp(p)).is_ok(),
+    };
     let mut files: Vec<File> = sources
         .iter()
         .map(|(path, source)| File {
@@ -488,7 +555,9 @@ mod tests {
 
     fn loads(path: &str, source: &str, present: &[&str]) -> Vec<(String, Load)> {
         readers(Path::new(path), &markdown::parse(source), &|p| {
-            present.contains(&p)
+            present
+                .iter()
+                .any(|x| *x == p || (p.ends_with('/') && x.starts_with(p)))
         })
         .into_iter()
         .map(|r| (r.harness, r.load))
@@ -536,6 +605,51 @@ mod tests {
                 &[]
             ),
             [(COPILOT.to_string(), Load::Files("**/*.ts".into()))]
+        );
+    }
+
+    #[test]
+    fn kiro_junie_and_roo_files_load_by_their_own_rules() {
+        let one = |harness: &str, load: Load| vec![(harness.to_string(), load)];
+        assert_eq!(
+            loads(".kiro/steering/tech.md", "", &[]),
+            one(KIRO, Load::Always)
+        );
+        assert_eq!(
+            loads(
+                ".kiro/steering/api.md",
+                "---\ninclusion: fileMatch\nfileMatchPattern: \"app/api/**/*\"\n---\n",
+                &[]
+            ),
+            one(KIRO, Load::Files("app/api/**/*".into()))
+        );
+        assert_eq!(
+            loads(".kiro/steering/x.md", "---\ninclusion: manual\n---\n", &[]),
+            one(KIRO, Load::Manual)
+        );
+        assert_eq!(
+            loads(".junie/guidelines.md", "", &[]),
+            one(JUNIE, Load::Always)
+        );
+        assert!(loads(".junie/guidelines.md", "", &["AGENTS.md"]).is_empty());
+        assert_eq!(
+            loads(".junie/rules/style.md", "", &["AGENTS.md"]),
+            one(JUNIE, Load::Always)
+        );
+        assert!(loads(".junie/rules/style.md", "", &[".junie/AGENTS.md"]).is_empty());
+        assert_eq!(
+            loads(".roo/rules/01-general.md", "", &[]),
+            one(ROO, Load::Always)
+        );
+        assert_eq!(
+            loads(".roo/rules-code/testing.txt", "", &[]),
+            one(ROO, Load::Mode("code".into()))
+        );
+        assert_eq!(loads(".roorules", "", &[]), one(ROO, Load::Always));
+        assert!(loads(".roorules", "", &[".roo/rules/a.md"]).is_empty());
+        assert_eq!(
+            loads(".roorules-architect", "", &[".roo/rules/a.md"]),
+            one(ROO, Load::Mode("architect".into()))
         );
     }
 

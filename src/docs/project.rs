@@ -103,12 +103,23 @@ fn cargo(table: &toml::Table, path: String, linters: &mut BTreeSet<String>) -> V
     if table.get("lints").is_some() || workspace_lints {
         linters.insert("cargo lints".into());
     }
-    json!({
+    let mut manifest = json!({
         "path": path,
         "name": table.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
         "dependencies": listed(keys("dependencies")),
         "dev_dependencies": listed(keys("dev-dependencies")),
-    })
+    });
+    let rust = table.get("package").and_then(|p| p.get("rust-version"));
+    required(&mut manifest, "rust_version", rust.and_then(|v| v.as_str()));
+    manifest
+}
+
+/// Record the tool or runtime version a manifest requires, when it names one:
+/// instructions that repeat it restate the manifest.
+fn required(manifest: &mut Value, key: &str, version: Option<&str>) {
+    if let Some(version) = version.filter(|v| !v.is_empty()) {
+        manifest[key] = json!(version);
+    }
 }
 
 fn package_json(package: &Value, path: String, linters: &mut BTreeSet<String>) -> Value {
@@ -134,13 +145,22 @@ fn package_json(package: &Value, path: String, linters: &mut BTreeSet<String>) -
             format!("{name}: {command}")
         })
         .collect();
-    json!({
+    let mut manifest = json!({
         "path": path,
         "name": package["name"],
         "scripts": listed(scripts),
         "dependencies": listed(keys("dependencies")),
         "dev_dependencies": listed(dev),
-    })
+    });
+    if let Some(engines) = package["engines"].as_object().filter(|e| !e.is_empty()) {
+        manifest["engines"] = json!(engines);
+    }
+    required(
+        &mut manifest,
+        "package_manager",
+        package["packageManager"].as_str(),
+    );
+    manifest
 }
 
 fn pyproject(table: &toml::Table, path: String, linters: &mut BTreeSet<String>) -> Value {
@@ -163,16 +183,31 @@ fn pyproject(table: &toml::Table, path: String, linters: &mut BTreeSet<String>) 
         .flatten()
         .filter_map(|v| v.as_str().map(str::to_string))
         .collect();
-    json!({
+    let mut manifest = json!({
         "path": path,
         "name": project.and_then(|p| p.get("name")).and_then(|n| n.as_str()),
         "dependencies": listed(dependencies),
         "tools": tools,
-    })
+    });
+    let python = project.and_then(|p| p.get("requires-python"));
+    required(
+        &mut manifest,
+        "requires_python",
+        python.and_then(|v| v.as_str()),
+    );
+    manifest
 }
 
-/// Scripts of every tracked `package.json` and targets of every tracked
-/// Makefile or justfile.
+/// The `package.json` fields whose packages a package manager can run.
+const DEPENDENCY_FIELDS: &[&str] = &[
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+    "optionalDependencies",
+];
+
+/// Scripts and dependencies of every tracked `package.json`, and targets of
+/// every tracked Makefile or justfile.
 pub fn scripts(root: &Path, history: &super::history::History) -> BTreeSet<String> {
     let mut scripts = BTreeSet::new();
     for path in &history.tracked {
@@ -182,10 +217,25 @@ pub fn scripts(root: &Path, history: &super::history::History) -> BTreeSet<Strin
         };
         match name {
             "package.json" => {
-                if let Ok(package) = serde_json::from_str::<Value>(&text)
-                    && let Some(declared) = package["scripts"].as_object()
-                {
+                let Ok(package) = serde_json::from_str::<Value>(&text) else {
+                    continue;
+                };
+                if let Some(declared) = package["scripts"].as_object() {
                     scripts.extend(declared.keys().cloned());
+                }
+                // `pnpm tsx` and `yarn eslint` run a dependency's binary,
+                // usually named after its package.
+                for field in DEPENDENCY_FIELDS {
+                    for name in package[field]
+                        .as_object()
+                        .into_iter()
+                        .flat_map(|d| d.keys())
+                    {
+                        scripts.insert(name.clone());
+                        if let Some((_, bare)) = name.rsplit_once('/') {
+                            scripts.insert(bare.to_string());
+                        }
+                    }
                 }
             }
             "Makefile" | "justfile" | "Justfile" => scripts.extend(targets(&text)),
@@ -292,5 +342,69 @@ mod tests {
         assert_eq!(read.manifests[0]["dependencies"], json!(["serde"]));
         assert_eq!(read.manifests[1]["targets"], json!(["build"]));
         assert_eq!(read.manifests[2]["scripts"], json!(["test: vitest"]));
+    }
+
+    #[test]
+    fn manifests_name_the_runtime_versions_they_require() {
+        let project = crate::tests::Project::new();
+        project.write(
+            "Cargo.toml",
+            "[package]\nname = \"demo\"\nrust-version = \"1.90\"\n",
+        );
+        project.write(
+            "web/package.json",
+            r#"{"name":"web","engines":{"node":">=22"},"packageManager":"pnpm@11.2.0"}"#,
+        );
+        project.write(
+            "api/pyproject.toml",
+            "[project]\nname = \"api\"\nrequires-python = \">=3.10\"\n",
+        );
+        project.write("plain/package.json", r#"{"name":"plain"}"#);
+        let visited: BTreeSet<PathBuf> = ["web", "api", "plain"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+        let read = read(&project.0, &visited);
+        let by_path = |path: &str| {
+            read.manifests
+                .iter()
+                .find(|m| m["path"] == path)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(by_path("Cargo.toml")["rust_version"], "1.90");
+        assert_eq!(
+            by_path("web/package.json")["engines"],
+            json!({"node": ">=22"})
+        );
+        assert_eq!(
+            by_path("web/package.json")["package_manager"],
+            "pnpm@11.2.0"
+        );
+        assert_eq!(by_path("api/pyproject.toml")["requires_python"], ">=3.10");
+        let plain = by_path("plain/package.json");
+        assert!(
+            plain.get("engines").is_none() && plain.get("package_manager").is_none(),
+            "a manifest that names no version keeps its shape: {plain}"
+        );
+    }
+
+    #[test]
+    fn scripts_include_the_binaries_dependencies_bring() {
+        let project = crate::tests::Project::new();
+        project.write(
+            "examples/app/package.json",
+            r#"{"scripts":{"dev":"vite"},"devDependencies":{"tsx":"4","@biomejs/biome":"1"}}"#,
+        );
+        project.write("justfile", "check:\n\tcargo check\n");
+        let history = crate::docs::history::History {
+            tracked: ["examples/app/package.json", "justfile"]
+                .into_iter()
+                .map(PathBuf::from)
+                .collect(),
+            ..Default::default()
+        };
+        let found: Vec<String> = scripts(&project.0, &history).into_iter().collect();
+        assert_eq!(found, ["@biomejs/biome", "biome", "check", "dev", "tsx"]);
     }
 }

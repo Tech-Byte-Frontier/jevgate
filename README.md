@@ -70,7 +70,7 @@ Consider (2):
 | Staleness | `docs/plans/v0.4-auth.md` is a plan whose work is finished: the repository has a release tag v0.4.0, and 6 paths it names were since removed. |
 | Duplication | Section `Release Workflow` of `CLAUDE.md` states everything section `Release` of `README.md` states. |
 
-The documentation rules read the instruction files that coding agents load (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and Claude, Cursor, Copilot, Windsurf and Cline rules), even when hidden or gitignored. Each section is asked whether it only restates the stack, the manifest's commands, generic advice or a configured linter's rules, and whether text loaded in every session applies to only one directory. Project Markdown of 300 or more lines is judged from its headings alone. Code finds staleness and duplication candidates: named paths or scripts that no longer exist, release tags, deleted files, and shared wording. Jev then judges each candidate. Documentation findings are at most `consider`. The run also estimates the tokens each harness loads at session start; these estimates are evidence and never fail the gate.
+The documentation rules read the instruction files that coding agents load (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and Claude, Cursor, Copilot, Windsurf, Cline, Kiro, Junie and Roo Code rules), even when hidden or gitignored. Each section is asked whether it only restates the stack, the manifest's commands, generic advice or a configured linter's rules, and whether text loaded in every session applies to only one directory. Project documentation in Markdown, MDX, reStructuredText or AsciiDoc of 300 or more lines is judged from its headings alone. Code finds staleness and duplication candidates: named paths or scripts that no longer exist, release tags, deleted files, and shared wording outside code examples. Jev then judges each candidate. Documentation findings are at most `consider`. The run also estimates the tokens each harness loads at session start; these estimates are evidence and never fail the gate.
 
 `jevgate rules` prints every rule with its question and default.
 
@@ -92,7 +92,8 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ➖ |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
 | GitHub Actions | `.github/workflows/*.yml` | ➖ | ➖ | ✅ workflows | ➖ |
-| Markdown | `README.md`, `docs/**`, agent instruction files | ➖ | ➖ | ➖ | ✅ |
+| Markdown, MDX | `.md` `.mdx` at the root, in `docs/` or `doc/`, READMEs and CONTRIBUTING files; agent instruction files | ➖ | ➖ | ➖ | ✅ |
+| reStructuredText, AsciiDoc | `.rst` `.adoc` `.asciidoc`, in the same places | ➖ | ➖ | ➖ | ✅ |
 
 | Framework or platform | What JevGate understands |
 |---|---|
@@ -103,6 +104,8 @@ The documentation rules read the instruction files that coding agents load (`AGE
 | Django, Django REST framework | Views and viewsets with the URL routes that reach them, the templates they render with `\|safe` or autoescaping off, and the module constants they use; settings modules, with secret literals redacted, the settings modules that import and override them, and the files that select them (`DJANGO_SETTINGS_MODULE`); management commands as run by hand; `handler500`-style error views, middleware `process_exception` and `EXCEPTION_HANDLER` as error handlers |
 | PHP pages, Slim, Laravel | A file's top-level code is judged like a function, since a page script reads the request and writes the response; route closures (`$app->get('/users', function …)`, `Route::post(…)`) and configuration closures (`return function (App $app) {…}`); error handlers (`set_exception_handler`, subclasses of Slim's `ErrorHandler` and Laravel's `ExceptionHandler`) |
 | axum, actix-web, Rocket | Error responses (`IntoResponse` or `ResponseError` for an error type, `#[catch]`) |
+| MDX sites (Next.js, Nextra, Docusaurus, Astro) | Imports, exports, comments and component markup are dropped, but the prose components carry (a `<Note>`'s text, a properties table's descriptions, with names and types as code) is read; frontmatter `title` names the page |
+| Sphinx, AsciiDoc | Section titles by their adornment or `=` level; comments, attribute entries and options dropped; code directives, literal and listing blocks read as code; `:file:` and `include::` targets checked as paths, `:attr:` and `:class:` read as code, and `_build/` skipped |
 | ASP.NET Core | Controller actions, minimal API route handlers (`app.MapGet("/orders", …)`) and inline middleware; exception handlers (`UseExceptionHandler` with a handler, `IExceptionFilter`, `IExceptionHandler`, middleware classes that catch what the pipeline throws); Entity Framework Core raw and interpolated SQL, CORS and cookie options, `UseDeveloperExceptionPage`, JWT validation options and the constants a setup names |
 | .NET projects | Test projects named like `Shop.Tests` or `Shop.UnitTests`, and classes of `[Fact]`, `[Theory]`, `[Test]` or `[TestMethod]` methods anywhere; designer and source-generated files (`.Designer.cs`, `.g.cs`) are skipped as generated |
 | Supabase and PostgreSQL | Row-level security policies, `SECURITY DEFINER` functions, grants, and the claims an access token hook sets |
@@ -288,7 +291,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 - **Languages and frameworks:** see [the support table](#supported-languages-and-frameworks). Astro, Vue and Svelte markup is not read, only their scripts. PHP's inline HTML is read only for its `<?= … ?>` echoes, and variables a page gets from the files it includes are not followed there: they are judged where those files set them.
 - **Security scope:** one function plus at most one hop of callers. This is not whole-program data-flow analysis. Access control reads the final state of policies, SECURITY DEFINER functions and grants across a project's SQL files in path order; with `--base`, unchanged migrations are read for that state but not judged. It does not judge application-level authorization or dynamic SQL inside database functions.
-- **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates; a translation is not a duplicate. Code comments are not judged yet. Token counts are estimates at four bytes per token.
+- **Documentation scope:** staleness works only from the paths, scripts, tags and deletions that Git and the manifests show; it does not compare prose with code behavior. Paraphrases that share little wording are not found as duplicates, nor are code examples that share only code; a translation is not a duplicate. Sphinx and AsciiDoc includes are not followed, and MDX expressions are not evaluated. Code comments are not judged yet. Token counts are estimates at four bytes per token.
 - **Probabilities:** these are model judgments, not measured accuracy. JevGate complements linters, type checkers, tests and dedicated security scanners; it does not replace them.
 
 ## Contributing

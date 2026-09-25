@@ -2,7 +2,8 @@
 //! never the text, so a long document costs a few hundred tokens. A Score on
 //! whether splitting it would make it easier to find and maintain, and a Noul
 //! on whether it mainly records past work; a split finding is then located
-//! with one Choice among its top-level parts.
+//! with one Choice among its top-level parts. A split that stays undecided is
+//! asked what kind of document the outline makes up.
 use super::{
     Block, Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, identity,
 };
@@ -38,6 +39,7 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
         detail: Detail::Document {
             parts: Vec::new(),
             locate: None,
+            kind: None,
         },
         recheck: None,
     };
@@ -57,7 +59,12 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
     let locate = (parts.len() >= 2)
         .then(|| locate_request(file, &shown, &parts))
         .filter(|(request, _)| file.budget.fits(request));
-    unit.detail = Detail::Document { parts, locate };
+    let kind = Some(kind_request(file, &shown)).filter(|(request, _)| file.budget.fits(request));
+    unit.detail = Detail::Document {
+        parts,
+        locate,
+        kind,
+    };
     out.units.push(unit);
     requests.push(Planned {
         owner: file.owner,
@@ -136,6 +143,22 @@ fn first_request(file: &FileContext<'_>, shown: &[&Heading]) -> (Value, super::A
     }
     let state = json!({"file": {"path": file.path}, "outline": outline(shown, false)});
     file.request("docs", state, questions)
+}
+
+/// The kind of document, asked apart from the first request so it never
+/// moves the split's own answer.
+fn kind_request(file: &FileContext<'_>, shown: &[&Heading]) -> (Value, super::Asked) {
+    let mut questions = Questions::default();
+    questions.ask(
+        "kind".into(),
+        super::questions::document_kind(),
+        UNIT,
+        LARGE_DOCS,
+        "kind",
+        Pass::Trace,
+    );
+    let state = json!({"file": {"path": file.path}, "outline": outline(shown, false)});
+    file.request("recheck", state, questions)
 }
 
 fn locate_request(

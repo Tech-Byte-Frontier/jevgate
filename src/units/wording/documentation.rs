@@ -126,7 +126,7 @@ pub(in crate::units) fn document_wording(
     part: Option<&Block>,
 ) -> Wording {
     let get = |q: &str| answers.get(q).copied();
-    let split = get("split").map(benefit);
+    let split = get("split").map(|a| document_split(a, get("kind")));
     let reached = |outcome: Option<Outcome>| {
         matches!(
             (strength, outcome),
@@ -199,31 +199,50 @@ pub(in crate::units) fn doc_pair_wording(
     answers: &Answers<'_>,
     p: f64,
 ) -> (Wording, bool) {
-    let decided = |q: &str| {
-        answers
-            .get(q)
-            .is_some_and(|a| matches!(noul(a), Outcome::Review(_)))
-    };
+    let conflict = answers.get("conflict").map(|a| disagreement(a));
     let there = format!(
         "section `{}` of `{}`",
         other.symbol.as_deref().unwrap_or(""),
         other.path.display()
     );
-    if decided("conflict") {
+    let covers = |q: &str| answers.get(q).map(|a| repeated(a));
+    // The note a repetition answer raises, when no repetition is decided.
+    let repeated_note = [covers("a_covers"), covers("b_covers")]
+        .into_iter()
+        .flatten()
+        .try_fold(0.0_f64, |most, c| match c {
+            Outcome::Review(_) => None,
+            Outcome::Note(q) => Some(most.max(q)),
+            _ => Some(most),
+        });
+    let verb = match (conflict, repeated_note) {
+        (Some(Outcome::Review(_)), _) => Some("give"),
+        // A leaning disagreement words the note it raised.
+        (Some(Outcome::Note(q)), Some(most)) if q >= most => Some("may give"),
+        _ => None,
+    };
+    if let Some(verb) = verb {
         return (
             (
                 format!(
-                    "Section `{name}` and {there} give different values or instructions for the same thing ({p:.2})."
+                    "Section `{name}` and {there} {verb} different values or instructions for the same thing ({p:.2})."
                 ),
                 "Reconcile the two sections and keep the fact in one place",
             ),
             true,
         );
     }
-    let message = if decided("a_covers") {
-        format!("Section `{name}` states everything {there} states ({p:.2}).")
-    } else {
-        format!("{there} states everything section `{name}` states ({p:.2}).")
+    let message = match (covers("a_covers"), covers("b_covers")) {
+        (Some(Outcome::Review(_)), _) => {
+            format!("Section `{name}` states everything {there} states ({p:.2}).")
+        }
+        (_, Some(Outcome::Review(_))) => {
+            format!("{there} states everything section `{name}` states ({p:.2}).")
+        }
+        (Some(Outcome::Note(_)), _) => {
+            format!("Section `{name}` states most or all of what {there} states ({p:.2}).")
+        }
+        _ => format!("{there} states most or all of what section `{name}` states ({p:.2})."),
     };
     (
         (
