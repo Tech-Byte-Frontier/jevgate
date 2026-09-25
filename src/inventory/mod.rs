@@ -1,9 +1,16 @@
+mod django;
+mod documents;
+mod spacetimedb;
+
 use super::{
     options::CheckArgs,
     schema::{FileResult, Status, hash},
 };
 use crate::{boundary::Boundary, config::ConfigContext, discovery};
 use anyhow::{Context, Result, ensure};
+use django::{select_settings, unescaped_templates};
+use documents::{add_documents, load_document};
+use spacetimedb::{keep_module_packages, spacetimedb_package};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -120,112 +127,6 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
     Ok(inputs)
 }
 
-/// Give each Python module that may be Django settings the lines of the
-/// repository that select it (`DJANGO_SETTINGS_MODULE=…`), read only from
-/// files the upload patterns permit. The repository is searched only when
-/// such a module was collected.
-fn select_settings(context: &ConfigContext, boundary: &Boundary, inputs: &mut [Input]) {
-    let candidate = |input: &Input| {
-        let path = &input.result.path;
-        path.extension().is_some_and(|e| e == "py")
-            && (path.iter().any(|part| {
-                part.to_str()
-                    .is_some_and(|p| p.trim_end_matches(".py").contains("settings"))
-            }) || input.source.as_deref().is_some_and(|source| {
-                source.contains("INSTALLED_APPS") || source.contains(" import *")
-            }))
-    };
-    if !inputs.iter().any(candidate) {
-        return;
-    }
-    let mut selections = Vec::new();
-    // `.github` is hidden, so the walker does not reach CI workflows.
-    let workflows = std::fs::read_dir(context.root.join(".github/workflows"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path());
-    let walked = walker(&context.root)
-        .flatten()
-        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-        .map(|e| e.path().to_path_buf());
-    for path in walked.chain(workflows) {
-        let Ok(relative) = path.strip_prefix(&context.root) else {
-            continue;
-        };
-        if !crate::analysis::django::selection_file(relative)
-            || !boundary.permits(relative)
-            || std::fs::metadata(&path)
-                .is_ok_and(|m| m.len() > crate::analysis::django::SELECTION_FILE_BYTES)
-        {
-            continue;
-        }
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            selections.extend(crate::analysis::django::selections_in(relative, &text));
-        }
-    }
-    selections.sort_by(|a, b| (&a.file, a.line).cmp(&(&b.file, b.line)));
-    for input in inputs.iter_mut().filter(|i| candidate(i)) {
-        input.settings_selected_by =
-            crate::analysis::django::selected_by(&input.result.path, &selections)
-                .into_iter()
-                .cloned()
-                .collect();
-    }
-}
-
-/// Give each Python file the Django templates it names that write values
-/// without escaping, read only from files the upload patterns permit. The
-/// repository is searched only when a Python file names a template.
-fn unescaped_templates(context: &ConfigContext, boundary: &Boundary, inputs: &mut [Input]) {
-    let candidate = |input: &Input| {
-        input.result.path.extension().is_some_and(|e| e == "py")
-            && input
-                .source
-                .as_deref()
-                .is_some_and(|source| source.contains(".html"))
-    };
-    if !inputs.iter().any(candidate) {
-        return;
-    }
-    let mut templates = Vec::new();
-    for entry in walker(&context.root).flatten() {
-        let path = entry.path();
-        let Ok(relative) = path.strip_prefix(&context.root) else {
-            continue;
-        };
-        let Some(name) = crate::analysis::django::template_name(relative) else {
-            continue;
-        };
-        if !entry.file_type().is_some_and(|t| t.is_file())
-            || !boundary.permits(relative)
-            || std::fs::metadata(path)
-                .is_ok_and(|m| m.len() > crate::analysis::django::SELECTION_FILE_BYTES)
-        {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let unescaped = crate::analysis::django::unescaped_lines(&text);
-        if !unescaped.is_empty() {
-            templates.push(crate::analysis::django::Template {
-                name,
-                path: relative.to_path_buf(),
-                unescaped,
-            });
-        }
-    }
-    templates.sort_by(|a, b| a.path.cmp(&b.path));
-    for input in inputs.iter_mut().filter(|i| candidate(i)) {
-        let source = input.source.as_deref().unwrap_or("");
-        input.templates = crate::analysis::django::rendered(source, &templates)
-            .into_iter()
-            .cloned()
-            .collect();
-    }
-}
-
 /// Application source and tests in scope, with their roles.
 fn source_paths(
     args: &CheckArgs,
@@ -317,75 +218,6 @@ fn bounded(
     Ok(bare_input(result))
 }
 
-/// Agent instruction files and project docs the selected rules judge.
-fn add_documents(
-    args: &CheckArgs,
-    context: &ConfigContext,
-    boundary: &Boundary,
-    selected: &dyn Fn(&Path) -> bool,
-    inputs: &mut Vec<Input>,
-) -> Result<()> {
-    let repository = std::sync::Arc::new(crate::docs::scan(&context.root)?);
-    let instructions = repository
-        .readers
-        .keys()
-        .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT) || cross_document(args))
-        .map(|p| (p, INSTRUCTIONS));
-    let docs = repository
-        .docs
-        .iter()
-        .filter(|_| args.enabled(crate::catalog::LARGE_DOCS) || cross_document(args))
-        .map(|p| (p, DOCS));
-    for (relative, role) in instructions.chain(docs) {
-        let wanted = selected(relative)
-            && (role == DOCS || repository.judged(relative))
-            && !inputs.iter().any(|i| i.result.path == *relative);
-        if wanted {
-            let mut input = bounded(relative, role, args, context, boundary)?;
-            if input.result.status != Status::Skipped {
-                input.repository = Some(repository.clone());
-            }
-            inputs.push(input);
-        }
-    }
-    Ok(())
-}
-
-/// A documentation file, read whole; hidden and ignored paths are allowed.
-fn load_document(
-    relative: &std::path::Path,
-    role: &str,
-    args: &CheckArgs,
-    path: &std::path::Path,
-) -> Result<Input> {
-    let mut result = pending_result(relative, role, args, &[]);
-    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
-        return over_read_cap(result, relative, path, args.max_file_bytes);
-    }
-    Ok(match read_source(path, args.max_file_bytes) {
-        Ok(source) => {
-            result.source_hash = hash(source.as_bytes());
-            result.content_identity = result.source_hash.clone();
-            Input {
-                result,
-                source: Some(source),
-                context: Vec::new(),
-                repository: None,
-                framework: None,
-                package: None,
-                settings_selected_by: Vec::new(),
-                templates: Vec::new(),
-            }
-        }
-        Err(error) => error_input(result, error),
-    })
-}
-
-/// Whether a rule that compares or checks every kind of document is selected.
-fn cross_document(args: &CheckArgs) -> bool {
-    args.enabled(crate::catalog::DOC_STALENESS) || args.enabled(crate::catalog::DOC_DUPLICATION)
-}
-
 /// The role of an agent instruction file.
 pub const INSTRUCTIONS: &str = "instructions";
 /// SQL judged by the access-control rule.
@@ -423,38 +255,11 @@ fn load(
             None => over_read_cap(result, relative, &path, args.max_file_bytes)?,
         });
     }
-    let source = read_source(&path, args.max_file_bytes);
-    match source {
-        Ok(source) => {
-            if let Some(kind) = not_written_here(&path, &role, &source) {
-                return Ok(recast(result, kind, relative));
-            }
-            result.source_hash = hash(source.as_bytes());
-            result.content_identity = super::locations::identity(&path, &source);
-            result.semantic_size = super::locations::semantic_size(&path, &source);
-            result.symbols = super::locations::collect(&path, &source, &context.root)
-                .ok()
-                .map(|(_, s)| s.into_iter().map(|(name, _)| name).collect())
-                .unwrap_or_default();
-            let framework = (args.enabled(crate::catalog::ACCESS_CONTROL)
-                && crate::units::spacetimedb_module(&source))
-            .then(|| spacetimedb_package(&context.root, relative));
-            Ok(Input {
-                result,
-                source: Some(source),
-
-                context: extra
-                    .iter()
-                    .filter(|i| i.file.path != relative)
-                    .cloned()
-                    .collect(),
-                repository: None,
-                framework,
-                package: crate::packages::package(&context.root, relative),
-                settings_selected_by: Vec::new(),
-                templates: Vec::new(),
-            })
-        }
+    match read_source(&path, args.max_file_bytes) {
+        Ok(source) => Ok(match not_written_here(&path, &role, &source) {
+            Some(kind) => recast(result, kind, relative),
+            None => source_input(result, source, (&path, relative), args, context, extra),
+        }),
         // Binary and non-UTF-8 files are reported and skipped; they never make a run incomplete.
         Err(error) if not_text(&error) => {
             result.status = Status::Skipped;
@@ -462,6 +267,43 @@ fn load(
             Ok(bare_input(result))
         }
         Err(error) => Ok(error_input(result, error)),
+    }
+}
+
+/// Application source or a test read whole, at `path` and `relative` to the
+/// root: its hashes and symbols, the explicit context besides itself, its
+/// package, and with access control its SpacetimeDB framework.
+fn source_input(
+    mut result: FileResult,
+    source: String,
+    (path, relative): (&Path, &Path),
+    args: &CheckArgs,
+    context: &ConfigContext,
+    extra: &[super::context::ContextInput],
+) -> Input {
+    result.source_hash = hash(source.as_bytes());
+    result.content_identity = super::locations::identity(path, &source);
+    result.semantic_size = super::locations::semantic_size(path, &source);
+    result.symbols = super::locations::collect(path, &source, &context.root)
+        .ok()
+        .map(|(_, s)| s.into_iter().map(|(name, _)| name).collect())
+        .unwrap_or_default();
+    let framework = (args.enabled(crate::catalog::ACCESS_CONTROL)
+        && crate::units::spacetimedb_module(&source))
+    .then(|| spacetimedb_package(&context.root, relative));
+    Input {
+        result,
+        source: Some(source),
+        context: extra
+            .iter()
+            .filter(|i| i.file.path != relative)
+            .cloned()
+            .collect(),
+        repository: None,
+        framework,
+        package: crate::packages::package(&context.root, relative),
+        settings_selected_by: Vec::new(),
+        templates: Vec::new(),
     }
 }
 
@@ -559,63 +401,6 @@ fn bare_input(result: FileResult) -> Input {
         package: None,
         settings_selected_by: Vec::new(),
         templates: Vec::new(),
-    }
-}
-
-/// Access control reads application source only for SpacetimeDB modules:
-/// alone among the code rules, it keeps just the files of their packages.
-fn keep_module_packages(args: &CheckArgs, inputs: &mut Vec<Input>) {
-    let only_access = args.rules.iter().all(|rule| {
-        rule == crate::catalog::ACCESS_CONTROL
-            || !crate::catalog::find(rule).is_some_and(|r| args.code_rules_include(r.key))
-    });
-    if !only_access {
-        return;
-    }
-    let roots: Vec<PathBuf> = inputs
-        .iter()
-        .filter_map(|i| Some(i.framework.as_ref()?.root.clone()))
-        .collect();
-    inputs.retain(|input| roots.iter().any(|root| input.result.path.starts_with(root)));
-}
-
-/// The package of a SpacetimeDB module file: the nearest `package.json` above
-/// it that declares `spacetimedb`. Only the version is read from it, never
-/// the manifest's other text.
-fn spacetimedb_package(root: &Path, relative: &Path) -> Framework {
-    for directory in relative.ancestors().skip(1) {
-        if let Ok(text) = read_source(&root.join(directory).join("Cargo.toml"), LOCAL_PARSE_MAX)
-            && let Ok(table) = text.parse::<toml::Table>()
-            && let Some(dependency) = table.get("dependencies").and_then(|d| d.get("spacetimedb"))
-        {
-            let version = dependency
-                .as_str()
-                .or_else(|| dependency.get("version")?.as_str())
-                .unwrap_or("");
-            return Framework {
-                root: directory.to_path_buf(),
-                version: version.trim_start_matches(['^', '~', '=', 'v', ' ']).into(),
-            };
-        }
-        let manifest = root.join(directory).join("package.json");
-        let Ok(text) = read_source(&manifest, LOCAL_PARSE_MAX) else {
-            continue;
-        };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
-        for section in ["dependencies", "devDependencies", "peerDependencies"] {
-            if let Some(version) = json[section]["spacetimedb"].as_str() {
-                return Framework {
-                    root: directory.to_path_buf(),
-                    version: version.trim_start_matches(['^', '~', '=', 'v', ' ']).into(),
-                };
-            }
-        }
-    }
-    Framework {
-        root: relative.parent().unwrap_or(Path::new("")).to_path_buf(),
-        version: String::new(),
     }
 }
 
