@@ -22,6 +22,7 @@ mod boundary;
 mod cancellation;
 mod catalog;
 mod changes;
+mod check;
 mod command;
 mod components;
 mod config;
