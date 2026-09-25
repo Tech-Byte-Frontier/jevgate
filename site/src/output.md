@@ -19,6 +19,15 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 | 1 | Gate failed |
 | 2 | Run incomplete, invalid configuration or invalid usage |
 
-`--fail-on review|consider|uncertain|none` sets what fails the gate; `--fail-on security=consider` sets it for one group or rule. Baselined findings and notes never fail it.
+`--fail-on review|consider|uncertain|none` sets what fails the gate; `--fail-on security=consider` sets it for one group or rule. Baselined findings, findings allowed by a comment, and notes never fail it.
+
+A single finding can also be accepted where it is, with a comment on its line or directly above it (doc comments and attributes may sit in between). The comment names a rule ID, key or group, and needs a reason; without one it is ignored and the finding says so:
+
+```python
+# jevgate: allow(hardcoded_values) the protocol fixes this port
+PORT = 4222
+```
+
+The report keeps the finding with its reason, it never fails the gate, and `jevgate baseline` leaves it out, so deleting the comment brings it back.
 
 `jevgate baseline` can record why each finding was accepted: `intended` (right, and meant to be so), `later` (right, to fix later) or `wrong` (mistaken), with `--reason` or `jevgate baseline mark`. Reasons survive later rewrites of the baseline, and `jevgate baseline stats` reports each rule's share of findings marked wrong: labels from daily use, not the model's own probabilities.
