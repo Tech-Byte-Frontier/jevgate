@@ -200,6 +200,8 @@ pub enum Detail {
         /// Whether the two tests read the same apart from their names, in
         /// the same group.
         identical: bool,
+        /// Whether their file's tests can be parameterized.
+        table: bool,
     },
 }
 

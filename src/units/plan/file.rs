@@ -74,7 +74,15 @@ pub(super) fn plan_file(
         );
     }
     if view.tests && args.include_tests {
-        plan_tests(shared, &context, cases, &lines, &mut file, requests);
+        let table = parameterizable(input);
+        plan_tests(
+            shared,
+            &context,
+            cases,
+            (&lines, table),
+            &mut file,
+            requests,
+        );
     }
     if shared.enabled(catalog::ACCESS_CONTROL)
         && view.application
@@ -249,12 +257,26 @@ pub(super) fn java(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "java")
 }
 
-/// Test value and redundancy, with each test linked to the functions it calls.
+/// Whether a file's tests can hold their cases in one parameterized test.
+/// Rust has no such test built in: without a crate such as rstest or
+/// test-case, suggesting one asks the project for a dependency, and just's
+/// one-case integration tests read as 160 considers to merge.
+fn parameterizable(input: &Input) -> bool {
+    const CRATES: [&str; 4] = ["rstest", "test-case", "test_case", "yare"];
+    input.result.path.extension().is_none_or(|e| e != "rs")
+        || input
+            .package
+            .as_ref()
+            .is_some_and(|p| CRATES.iter().any(|c| p.dependencies.contains(*c)))
+}
+
+/// Test value and redundancy, with each test linked to the functions it
+/// calls; `table` when its tests can be parameterized.
 fn plan_tests(
     shared: &Shared<'_>,
     context: &FileContext<'_>,
     mut cases: Vec<TestCase>,
-    test_lines: &[Range<usize>],
+    (test_lines, table): (&[Range<usize>], bool),
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -273,7 +295,7 @@ fn plan_tests(
     }
     if shared.enabled(catalog::TEST_REDUNDANCY) {
         file.rules.insert(catalog::TEST_REDUNDANCY, 0);
-        test_units::plan_pairs(context, &cases, &subjects, file, requests);
+        test_units::plan_pairs(context, (&cases, table), &subjects, file, requests);
     }
 }
 

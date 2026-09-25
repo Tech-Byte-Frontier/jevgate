@@ -7,6 +7,10 @@ const TESTS: &str = "fn total(values: &[i32]) -> i32 {\n    values.iter().sum()\
 fn test_rules_need_include_tests_and_summarize_over_tested_subjects() {
     let project = Project::new();
     project.write("lib.rs", TESTS);
+    project.write(
+        "Cargo.toml",
+        "[package]\nname = \"cases\"\n\n[dev-dependencies]\nrstest = \"0.26\"\n",
+    );
     let options = args();
     let (_, plan) = planned(&project, &options);
     assert!(!plan.files[&0].rules.contains_key(catalog::TEST_VALUE));
@@ -386,4 +390,10 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
     let (project, options) = tests_project(&[("lib.rs", &spaced)], catalog::TEST_REDUNDANCY);
     let report = run(&project, &options, &mut eval);
     assert_eq!(report.files[0].findings[0].strength, Strength::Consider);
+    // Without a crate for parameterized tests, merging them is only a note.
+    let (project, options) = project_with(&[("lib.rs", &spaced)], &[catalog::TEST_REDUNDANCY]);
+    let mut options = options;
+    options.include_tests = true;
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
 }

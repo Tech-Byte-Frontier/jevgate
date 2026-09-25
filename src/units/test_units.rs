@@ -567,7 +567,7 @@ fn words(source: &str) -> Vec<&str> {
 
 pub(super) fn plan_pairs(
     file: &FileContext<'_>,
-    cases: &[TestCase],
+    (cases, table): (&[TestCase], bool),
     subjects: &Subjects<'_>,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
@@ -643,6 +643,7 @@ pub(super) fn plan_pairs(
             detail: Detail::TestPair {
                 names: [a.name.clone(), b.name.clone()],
                 subject: pair.subject.clone(),
+                table,
                 identical: a.suite == b.suite
                     && words(&a.source(file.source).replace(a.name.as_str(), ""))
                         == words(&b.source(file.source).replace(b.name.as_str(), "")),

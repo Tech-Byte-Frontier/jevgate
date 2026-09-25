@@ -152,9 +152,14 @@ fn rule_project(source: &str, rule: &str) -> (Project, CheckArgs) {
 }
 
 /// A project of `files` whose tests are judged, checked for one test rule.
+/// Rust tests can be parameterized here: the crate depends on rstest.
 fn tests_project(files: &[(&str, &str)], rule: &str) -> (Project, CheckArgs) {
     let (project, mut options) = project_with(files, &[rule]);
     options.include_tests = true;
+    project.write(
+        "Cargo.toml",
+        "[package]\nname = \"cases\"\n\n[dev-dependencies]\nrstest = \"0.26\"\n",
+    );
     (project, options)
 }
 

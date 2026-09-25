@@ -203,7 +203,14 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
                     ..
                 }
             );
-            get("overlap").map(|overlap| redundancy_outcome(overlap, &get, identical))
+            let table = !matches!(unit.detail, Detail::TestPair { table: false, .. });
+            get("overlap").map(|overlap| {
+                // A suggestion to parameterize is only a note where tests cannot be.
+                match redundancy_outcome(overlap, &get, identical) {
+                    Outcome::Consider(p) if !table => Outcome::Note(p),
+                    outcome => outcome,
+                }
+            })
         }
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         catalog::COMMENTS => comment_outcome(
