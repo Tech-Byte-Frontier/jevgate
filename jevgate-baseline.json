@@ -1,5 +1,24 @@
 {
   "version": 1,
-  "created_at": 1790308474,
-  "findings": []
+  "created_at": 1790354335,
+  "findings": [
+    {
+      "fingerprint": "9a142118d2e3410e9f6c85cfb48ffb6f9ca83a6a7667b7a97bf02223aeddc1ca",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/test_map.rs",
+      "line": 205,
+      "strength": "consider",
+      "message": "`visit` likely mixes separate jobs; splitting it may make it easier to understand (0.85). Lines 205\u2013315 would be most useful as their own function.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "8d1c4794e0d3d8a8b55c0f4a9c6b06456c87ebbf5d88f6353be8ecabf13d1f4c",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/pipeline.rs",
+      "line": 6,
+      "strength": "consider",
+      "message": "Some tests of this file could move to a separate test file (0.83).",
+      "reason": "wrong"
+    }
+  ]
 }
