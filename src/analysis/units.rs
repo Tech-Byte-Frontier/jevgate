@@ -1,6 +1,6 @@
 //! Functions, methods and types of one file, with the local facts used for
 //! grouping, callee and subject lookup, and marking bodies too small to judge.
-use super::{callee_name, is_comment, line_of, macro_calls, summary, text};
+use super::{call_name, callee_name, is_comment, line_of, macro_calls, ruby, summary, text};
 use anyhow::Result;
 use std::{collections::BTreeSet, ops::Range, path::Path};
 use tree_sitter::Node;
@@ -245,6 +245,32 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
                 );
             }
         }
+        // Ruby: `module Billing` and `class Invoice < Base` own their methods.
+        "module" | "class"
+            if node
+                .child_by_field_name("name")
+                .is_some_and(|n| matches!(n.kind(), "constant" | "scope_resolution")) =>
+        {
+            let name = base_type(&name_of(node, source));
+            let before = file.units.len();
+            if let Some(body) = node.child_by_field_name("body") {
+                children(body, source, &name, file);
+            }
+            if file.units.len() == before && !name.is_empty() {
+                push(Definition::whole(node), &name, "", Kind::Type, source, file);
+            }
+        }
+        // `class << self` holds its owner's singleton methods.
+        "singleton_class" => {
+            if let Some(body) = node.child_by_field_name("body") {
+                children(body, source, owner, file);
+            }
+        }
+        "method" | "singleton_method" => function(node, node, source, owner, file),
+        "call" => ruby_call(node, source, owner, file),
+        "assignment" => ruby_assignment(node, source, owner, file),
+        // Definitions made under a condition, such as `unless method_defined?(:x)`.
+        "if" | "unless" | "then" | "else" | "begin" => children(node, source, owner, file),
         "source_file" | "program" | "module" | "declaration_list" | "class_body"
         | "export_statement" | "statement_block" | "compilation_unit" => {
             children(node, source, owner, file)
@@ -362,6 +388,130 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
             }
         }
         _ => {}
+    }
+}
+
+/// A Ruby call at the level of a file, class or module: a `require` names an
+/// import; `define_method(:name) do … end` defines a method; a block that
+/// holds definitions (`helpers do`, `included do`) is read for them; test
+/// declarations are read only for the definitions inside them; and another
+/// call with a block registers it, named by its call: `get('/')`.
+fn ruby_call(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    if let Some(path) = ruby::required(node, source) {
+        let stem = path.rsplit('/').next().unwrap_or(path);
+        let stem = stem.strip_suffix(".rb").unwrap_or(stem);
+        if !stem.is_empty() {
+            file.imports.insert(stem.to_string());
+        }
+        return;
+    }
+    let Some(body) = ruby::block_body(node) else {
+        // `private def total` and `memoize def rates` define a method.
+        if let Some(arguments) = node.child_by_field_name("arguments") {
+            let mut cursor = arguments.walk();
+            for argument in arguments.named_children(&mut cursor) {
+                if matches!(argument.kind(), "method" | "singleton_method") {
+                    walk(argument, source, owner, file);
+                }
+            }
+        }
+        return;
+    };
+    let method = ruby::method(node, source);
+    if method == "define_method"
+        && let Some(name) = ruby::first_argument(node).filter(|a| a.kind() == "simple_symbol")
+    {
+        let definition = Definition {
+            outer: node,
+            node,
+            body: Some(body),
+        };
+        let name = text(name, source).trim_start_matches(':');
+        let kind = if owner.is_empty() {
+            Kind::Function
+        } else {
+            Kind::Method
+        };
+        push(definition, name, owner, kind, source, file);
+        return;
+    }
+    if ruby::test_dsl(node, source) {
+        ruby_block_definitions(body, source, owner, file);
+        return;
+    }
+    if ruby::defines(body) {
+        children(body, source, owner, file);
+        return;
+    }
+    let receiver = node
+        .child_by_field_name("receiver")
+        .map(|r| format!("{}.", text(r, source)))
+        .unwrap_or_default();
+    let argument = match ruby::first_argument(node) {
+        Some(first)
+            if matches!(
+                first.kind(),
+                "string" | "simple_symbol" | "constant" | "scope_resolution"
+            ) =>
+        {
+            format!("({})", text(first, source))
+        }
+        Some(_) => "(…)".into(),
+        None => String::new(),
+    };
+    let definition = Definition {
+        outer: node,
+        node,
+        body: Some(body),
+    };
+    let name = format!("{receiver}{method}{argument}");
+    push(definition, &name, owner, Kind::Function, source, file);
+}
+
+/// Definitions inside the blocks of Ruby test declarations, such as a helper
+/// method in a `describe` block; the blocks themselves are left to the test rules.
+fn ruby_block_definitions(body: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let mut cursor = body.walk();
+    for child in body.named_children(&mut cursor) {
+        match child.kind() {
+            "method" | "singleton_method" | "class" | "module" | "singleton_class" => {
+                walk(child, source, owner, file);
+            }
+            "call" => {
+                if let Some(inner) = ruby::block_body(child) {
+                    ruby_block_definitions(inner, source, owner, file);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A Ruby constant bound to a lambda (`ROUND = ->(value) { … }`) is a
+/// function; one bound to a class built with a block (`Point = Struct.new(:x)
+/// do … end`) owns the methods of the block.
+fn ruby_assignment(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let (Some(left), Some(right)) = (
+        node.child_by_field_name("left"),
+        node.child_by_field_name("right"),
+    ) else {
+        return;
+    };
+    if !matches!(left.kind(), "constant" | "identifier") {
+        return;
+    }
+    let name = text(left, source);
+    if right.kind() == "lambda" {
+        let definition = Definition {
+            outer: node,
+            node: right,
+            body: right
+                .child_by_field_name("body")
+                .and_then(|b| b.child_by_field_name("body")),
+        };
+        push(definition, name, owner, Kind::Function, source, file);
+    } else if let Some(body) = ruby::block_body(right).filter(|b| ruby::defines(*b)) {
+        children(body, source, name, file);
     }
 }
 
@@ -699,6 +849,12 @@ fn push(
 fn leading_start(node: Node<'_>) -> usize {
     let mut start = node.start_byte();
     let mut previous = node.prev_named_sibling();
+    // Ruby: comments above a class's first statement precede its body.
+    if previous.is_none()
+        && let Some(parent) = node.parent().filter(|p| p.kind() == "body_statement")
+    {
+        previous = parent.prev_named_sibling();
+    }
     while let Some(sibling) = previous {
         if !(is_comment(sibling)
             || sibling.kind() == "attribute_item"
@@ -739,10 +895,7 @@ impl Facts {
         }
         match node.kind() {
             "call_expression" | "call" | "invocation_expression" => {
-                if let Some(name) = node
-                    .child_by_field_name("function")
-                    .and_then(|f| callee_name(f, source))
-                {
+                if let Some(name) = call_name(node, source) {
                     self.calls.insert(name);
                 }
             }
@@ -774,7 +927,12 @@ impl Facts {
             {
                 macro_calls(node, source, &mut self.calls);
             }
-            "type_identifier" | "field_identifier" | "property_identifier" => {
+            // Ruby constants name classes and modules; instance variables are fields.
+            "type_identifier"
+            | "field_identifier"
+            | "property_identifier"
+            | "constant"
+            | "instance_variable" => {
                 self.refs.insert(text(node, source).to_string());
             }
             "identifier" => {
@@ -968,6 +1126,72 @@ mod tests {
         assert!(find.literals.iter().any(|l| l.text == "\"root\""));
         assert_eq!(file.constants[0].name, "maxRows");
         assert!(crate::syntax::supported(Path::new("store.go")));
+    }
+
+    const BILLING: &str = "require 'json'\nrequire_relative 'billing/tax'\n\nmodule Billing\n  RETRIES = 3\n  ROUND = ->(value) { value.round(2) }\n\n  # Builds invoices.\n  class Invoice < Base\n    TAX = 0.21\n\n    def self.build(rows)\n      new(rows).tap(&:validate)\n    end\n\n    class << self\n      def empty\n        new([])\n      end\n    end\n\n    def total(discount = 0)\n      raise ArgumentError, \"negative discount\" if discount.negative?\n      sum = rows.sum { |row| row.price }\n      if sum > 1000\n        sum * (1 - TAX)\n      elsif sum > 100\n        sum\n      else\n        raise Billing::Error.new(\"too small\")\n      end\n    end\n\n    private def rows\n      @rows\n    end\n\n    define_method(:currency) do\n      Currency.new(\"EUR\").code\n    end\n  end\nend\n\nget '/invoices' do\n  Billing::Invoice.build(params).to_json\nend\n\nRSpec.configure do |config|\n  config.order = :random\nend\n";
+
+    #[test]
+    fn ruby_methods_follow_their_class_or_module_and_blocks_are_named_by_their_call() {
+        let file = parse(Path::new("billing.rb"), BILLING).unwrap();
+        let named: Vec<(&str, &str, usize)> = file
+            .units
+            .iter()
+            .map(|u| (u.name.as_str(), u.owner.as_str(), u.line))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("Billing::ROUND", "Billing", 6),
+                ("Invoice::build", "Invoice", 12),
+                ("Invoice::empty", "Invoice", 17),
+                ("Invoice::total", "Invoice", 22),
+                ("Invoice::rows", "Invoice", 34),
+                ("Invoice::currency", "Invoice", 38),
+                ("get('/invoices')", "", 44),
+            ],
+            "`RSpec.configure` sets up tests and is not a unit"
+        );
+        assert!(file.imports.contains("json") && file.imports.contains("tax"));
+        let total = &file.units[3];
+        assert_eq!(total.signature, "def total(discount = 0)");
+        assert_eq!((total.nesting, total.branch_chain), (1, 3));
+        let errors: Vec<(&str, &str)> = total
+            .errors
+            .iter()
+            .map(|e| (e.error.as_str(), e.message.as_str()))
+            .collect();
+        assert_eq!(
+            errors,
+            [
+                ("ArgumentError", "\"negative discount\""),
+                ("Billing::Error", "\"too small\"")
+            ]
+        );
+        assert!(total.calls.contains("sum") && total.refs.contains("TAX"));
+        assert!(
+            file.units[5].calls.contains("Currency"),
+            "`Currency.new` builds a Currency"
+        );
+        let constants: Vec<&str> = file.constants.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(constants, ["RETRIES", "TAX"]);
+        assert!(
+            file.units
+                .iter()
+                .all(|u| u.literals.iter().all(|l| !l.text.contains("tax"))),
+            "required paths are not values"
+        );
+    }
+
+    #[test]
+    fn ruby_test_blocks_are_left_to_the_test_rules_but_their_helpers_are_units() {
+        let source = "describe Invoice do\n  let(:invoice) { Invoice.new }\n\n  def build_rows(count)\n    Array.new(count) { Row.new }\n  end\n\n  it \"totals\" do\n    expect(invoice.total).to eq 0\n  end\nend\n";
+        let names: Vec<String> = parse(Path::new("invoice_spec.rb"), source)
+            .unwrap()
+            .units
+            .into_iter()
+            .map(|u| u.name)
+            .collect();
+        assert_eq!(names, ["build_rows"]);
     }
 
     #[test]

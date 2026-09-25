@@ -86,7 +86,8 @@ pub struct CheckArgs {
     /// Files or directories to review [default: discovered application source]
     ///
     /// Without paths, JevGate walks the repository (respecting .gitignore) and
-    /// selects application source in Rust, Python, JavaScript, TypeScript, Go and C#.
+    /// selects application source in Rust, Python, JavaScript, TypeScript, Go,
+    /// C# and Ruby.
     /// Tests, generated code and vendored files are classified and skipped with
     /// a reason. `upload_allow`/`upload_deny` in jevgate.toml still bound what
     /// is sent.

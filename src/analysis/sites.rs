@@ -81,6 +81,10 @@ const STATEMENTS: &[&str] = &[
     "defer_statement",
     "go_statement",
     "local_declaration_statement",
+    // Ruby statements stand alone in a body.
+    "assignment",
+    "operator_assignment",
+    "return",
 ];
 
 /// Rust's standard formatting macros build text from their arguments.
@@ -183,6 +187,9 @@ const SETUP_STATEMENTS: &[&str] = &[
     "if_statement",
     "with_statement",
     "local_declaration_statement",
+    // Ruby: `use Rack::Session::Cookie, secret: key` and `app = Builder.new`.
+    "call",
+    "assignment",
 ];
 
 /// The module's setup statements; `settings` for a Django settings module.
@@ -211,6 +218,7 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>], settings: boo
         let statement =
             SETUP_STATEMENTS.contains(&node.kind()) || settings && node.kind() == "try_statement";
         if !statement
+            || super::ruby::required(node, source).is_some()
             || units
                 .iter()
                 .any(|u| u.start < range.end && range.start < u.end)

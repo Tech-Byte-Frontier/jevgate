@@ -73,6 +73,7 @@ fn collect(node: Node<'_>, source: &str, found: &mut Vec<Literal>) {
         || is_comment(node)
         || SKIPPED_KINDS.contains(&node.kind())
         || docstring(node)
+        || super::ruby::required(node, source).is_some()
     {
         return;
     }
@@ -174,14 +175,20 @@ fn clip(value: &str) -> String {
 
 /// Top-level constants and bindings whose value holds an eligible literal:
 /// Rust `const`/`static`, JavaScript and TypeScript `const`/`let`/`var`
-/// (exported or not), and Python module assignments. Functions and classes
-/// bound to a name are not values.
+/// (exported or not), Python module assignments, Go `const`/`var`, and Ruby
+/// assignments at the top level or in the body of a module or class, where
+/// Ruby constants live. Functions and classes bound to a name are not values.
 pub fn constants(root: Node<'_>, source: &str) -> Vec<Constant> {
     let mut found = Vec::new();
     if root.kind() == "compilation_unit" {
         csharp_constants(root, source, "", &mut found);
         return found;
     }
+    constants_in(root, source, &mut found);
+    found
+}
+
+fn constants_in(root: Node<'_>, source: &str, found: &mut Vec<Constant>) {
     let mut cursor = root.walk();
     for node in root.named_children(&mut cursor) {
         let node = if node.kind() == "export_statement" {
@@ -192,9 +199,17 @@ pub fn constants(root: Node<'_>, source: &str) -> Vec<Constant> {
         } else {
             node
         };
+        if matches!(node.kind(), "module" | "class")
+            && let Some(body) = node
+                .child_by_field_name("body")
+                .filter(|b| b.kind() == "body_statement")
+        {
+            constants_in(body, source, found);
+            continue;
+        }
         for (name, value) in bindings(node) {
             if found.len() == MAX_LITERALS {
-                return found;
+                return;
             }
             let values = in_node(value, source);
             if values.is_empty() || !is_value(value) {
@@ -210,7 +225,6 @@ pub fn constants(root: Node<'_>, source: &str) -> Vec<Constant> {
             });
         }
     }
-    found
 }
 
 /// C# `const` and `static readonly` fields of every class, struct and
@@ -363,6 +377,13 @@ fn bindings(node: Node<'_>) -> Vec<(Node<'_>, Node<'_>)> {
                     .zip(a.child_by_field_name("right"))
             })
             .filter(|(left, _)| left.kind() == "identifier")
+            .into_iter()
+            .collect(),
+        // Ruby: `TIMEOUT = 30` or `DEFAULTS = { retries: 3 }.freeze`.
+        "assignment" => node
+            .child_by_field_name("left")
+            .zip(node.child_by_field_name("right"))
+            .filter(|(left, _)| matches!(left.kind(), "constant" | "identifier"))
             .into_iter()
             .collect(),
         _ => Vec::new(),

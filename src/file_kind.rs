@@ -545,7 +545,18 @@ fn has_implementation(path: &Path, source: &str) -> bool {
 /// A line that is neither blank, a comment nor an import; in C#, nor a
 /// namespace declaration or only the braces around one.
 fn code_line(line: &str, csharp: bool) -> bool {
-    const NOT_CODE: &[&str] = &["//", "#", "/*", "*", "use ", "pub use ", "import ", "from "];
+    const NOT_CODE: &[&str] = &[
+        "//",
+        "#",
+        "/*",
+        "*",
+        "use ",
+        "pub use ",
+        "import ",
+        "from ",
+        "require ",
+        "require_relative ",
+    ];
     const NOT_CSHARP_CODE: &[&str] = &["using ", "namespace "];
     let line = line.trim();
     !line.is_empty()

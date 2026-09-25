@@ -16,7 +16,7 @@ fn identifiers(node: Node<'_>, source: &str, result: &mut BTreeSet<String>) {
     }
     if matches!(
         node.kind(),
-        "identifier" | "type_identifier" | "field_identifier"
+        "identifier" | "type_identifier" | "field_identifier" | "constant"
     ) {
         result.insert(node.utf8_text(source.as_bytes()).unwrap_or("").into());
     }
@@ -95,6 +95,7 @@ fn collect(
             | "using_directive"
             | "file_scoped_namespace_declaration"
     ) || python_docstring(node, source)
+        || crate::analysis::ruby::required(node, source).is_some()
     {
         scaffolding.push(definition_start(node)..node.end_byte());
         return;
@@ -161,8 +162,9 @@ fn container(
     if !csharp
         && !matches!(
             node.kind(),
-            "impl_item" | "mod_item" | "class_declaration" | "class_definition"
+            "impl_item" | "mod_item" | "class_declaration" | "class_definition" | "singleton_class"
         )
+        && !ruby_namespace(node)
     {
         return false;
     }
@@ -185,6 +187,14 @@ fn container(
         collect(child, source, units, scaffolding);
     }
     true
+}
+
+/// A Ruby `module` or `class`, whose name is a constant.
+fn ruby_namespace(node: Node<'_>) -> bool {
+    matches!(node.kind(), "module" | "class")
+        && node
+            .child_by_field_name("name")
+            .is_some_and(|n| matches!(n.kind(), "constant" | "scope_resolution"))
 }
 
 /// Names a definition binds. Bindings and export wrappers may name the
@@ -229,7 +239,8 @@ fn enclosing_owner(node: Node<'_>, source: &str) -> String {
                 | "struct_declaration"
                 | "record_declaration"
                 | "interface_declaration"
-        ) {
+        ) || ruby_namespace(parent)
+        {
             return parent
                 .child_by_field_name("type")
                 .or_else(|| parent.child_by_field_name("name"))

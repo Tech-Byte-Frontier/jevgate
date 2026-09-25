@@ -10,7 +10,7 @@ const DOC_CHARS: usize = 160;
 /// the opening of its body. C# attribute lists are children of the
 /// declaration, so the header starts after them.
 pub(super) fn signature(outer: Node<'_>, body: Option<Node<'_>>, source: &str) -> String {
-    let end = body.map_or(outer.end_byte(), |b| b.start_byte());
+    let end = body.map_or_else(|| ruby_header_end(outer), |b| b.start_byte());
     let mut cursor = outer.walk();
     let start = outer
         .named_children(&mut cursor)
@@ -30,6 +30,27 @@ pub(super) fn signature(outer: Node<'_>, body: Option<Node<'_>>, source: &str) -
             .trim(),
         SIGNATURE_CHARS,
     )
+}
+
+/// Where a definition without a body ends its header: a Ruby `def` at its
+/// parameters or name, and a Ruby `class` or `module` at its superclass or
+/// name, before the statements and the closing `end`. Other definitions end
+/// where they end.
+fn ruby_header_end(node: Node<'_>) -> usize {
+    let constant = || {
+        node.child_by_field_name("name")
+            .is_some_and(|n| matches!(n.kind(), "constant" | "scope_resolution"))
+    };
+    let fields: &[&str] = match node.kind() {
+        "method" | "singleton_method" => &["parameters", "name"],
+        "class" if constant() => &["superclass", "name"],
+        "module" if constant() => &["name"],
+        _ => &[],
+    };
+    fields
+        .iter()
+        .find_map(|field| node.child_by_field_name(field))
+        .map_or(node.end_byte(), |n| n.end_byte())
 }
 
 pub(super) fn doc_line(leading: &str, node: Node<'_>, source: &str) -> String {
