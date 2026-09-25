@@ -147,7 +147,7 @@ pub fn discover(root: &Path) -> Result<Found> {
         .build();
     for entry in visible {
         let entry = entry.context("Failed while discovering documentation")?;
-        let relative = entry.path().strip_prefix(root)?.to_path_buf();
+        let relative = crate::discovery::relative(entry.path(), root)?;
         if entry.file_type().is_some_and(|t| t.is_dir()) {
             found.directories.insert(relative);
         } else if agent_file(&relative) {
@@ -202,7 +202,7 @@ fn walk_doc_dir(root: &Path, dir: &Path, found: &mut Found) -> Result<()> {
         .build();
     for entry in walk {
         let entry = entry.context("Failed while discovering documentation")?;
-        let relative = entry.path().strip_prefix(root)?.to_path_buf();
+        let relative = crate::discovery::relative(entry.path(), root)?;
         if entry.file_type().is_some_and(|t| t.is_file()) && project_doc(&relative) {
             found.project.insert(relative);
         }
@@ -221,7 +221,7 @@ fn walk_agent_dir(root: &Path, dir: &Path, found: &mut Found) -> Result<()> {
         .build()
     {
         let entry = entry.context("Failed while discovering agent instructions")?;
-        let relative = entry.path().strip_prefix(root)?.to_path_buf();
+        let relative = crate::discovery::relative(entry.path(), root)?;
         if !entry.file_type().is_some_and(|t| t.is_dir()) && agent_file(&relative) {
             add_agent(root, relative, found);
         }
@@ -241,7 +241,7 @@ fn add_agent(root: &Path, relative: PathBuf, found: &mut Found) {
         let target = path
             .canonicalize()
             .ok()
-            .and_then(|t| t.strip_prefix(root).ok().map(Path::to_path_buf));
+            .and_then(|t| crate::discovery::relative(&t, root).ok());
         found.links.push((relative, target));
     } else if metadata.is_file() {
         found.agent.insert(relative);

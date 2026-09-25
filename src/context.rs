@@ -43,8 +43,7 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext) -> Result<Vec<ContextI
     let mut bytes = 0;
     for name in &args.context {
         let path = context.input_path(name);
-        let relative = path
-            .strip_prefix(&context.root)
+        let relative = &crate::discovery::relative(&path, &context.root)
             .context("Context must be inside the repository root")?;
         ensure_visible_path(relative)?;
         ensure!(
@@ -58,7 +57,7 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext) -> Result<Vec<ContextI
         );
         if inputs
             .iter()
-            .any(|i: &ContextInput| i.file.path == relative)
+            .any(|i: &ContextInput| i.file.path == *relative)
         {
             continue;
         }

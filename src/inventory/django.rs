@@ -32,7 +32,7 @@ pub(super) fn select_settings(context: &ConfigContext, boundary: &Boundary, inpu
         .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
         .map(|e| e.path().to_path_buf());
     for path in walked.chain(workflows) {
-        let Ok(relative) = path.strip_prefix(&context.root) else {
+        let Ok(relative) = &crate::discovery::relative(&path, &context.root) else {
             continue;
         };
         if !crate::analysis::django::selection_file(relative)
@@ -77,7 +77,7 @@ pub(super) fn unescaped_templates(
     let mut templates = Vec::new();
     for entry in walker(&context.root).flatten() {
         let path = entry.path();
-        let Ok(relative) = path.strip_prefix(&context.root) else {
+        let Ok(relative) = &crate::discovery::relative(path, &context.root) else {
             continue;
         };
         let Some(name) = crate::analysis::django::template_name(relative) else {
