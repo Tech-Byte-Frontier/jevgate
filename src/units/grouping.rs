@@ -131,38 +131,11 @@ pub const REPEATED_SECTION: &str = "repeated section";
 /// and the others become notes pointing at it. Disagreements are left apart,
 /// since each names its own fix. Returns the files whose findings changed.
 fn group_repeated_sections(files: &mut [FileResult]) -> BTreeSet<usize> {
-    let rule = catalog::id(catalog::DOC_DUPLICATION);
-    // Each repetition finding with the two sections it names.
-    let repeats: Vec<(At, [Section; 2])> = files
-        .iter()
-        .enumerate()
-        .flat_map(|(f, file)| {
-            file.findings.iter().enumerate().filter_map(move |(i, x)| {
-                let named = (x.rule == rule
-                    && x.strength != Strength::Note
-                    && x.category.is_none()
-                    && x.locations.len() >= 2)
-                    .then(|| [section(&x.locations[0]), section(&x.locations[1])])?;
-                Some(((f, i), named))
-            })
-        })
-        .collect();
+    let repeats = repetitions(files);
     let mut changed = BTreeSet::new();
     for members in linked_by_sections(&repeats) {
         let members: Vec<&(At, [Section; 2])> = members.into_iter().map(|n| &repeats[n]).collect();
-        // The head: the section most findings name, first by path and line.
-        let mut named = BTreeMap::<&Section, usize>::new();
-        for (_, sections) in &members {
-            for s in sections {
-                *named.entry(s).or_default() += 1;
-            }
-        }
-        let most = named.values().copied().max().unwrap_or(0);
-        let Some(head) = named
-            .iter()
-            .find(|(_, n)| **n == most)
-            .map(|(s, _)| (*s).clone())
-        else {
+        let Some(head) = head_section(&members) else {
             continue;
         };
         let Some((primary, shown)) = members
@@ -173,33 +146,7 @@ fn group_repeated_sections(files: &mut [FileResult]) -> BTreeSet<usize> {
         else {
             continue;
         };
-        // The other sections, by document; a document already shown, or
-        // named twice, is named with the section's heading.
-        let others: BTreeSet<&Section> = members
-            .iter()
-            .flat_map(|(_, sections)| sections.iter())
-            .filter(|s| !shown.contains(s))
-            .collect();
-        let heading_of = |s: &Section| {
-            members
-                .iter()
-                .flat_map(|((f, i), _)| files[*f].findings[*i].locations.iter())
-                .find(|l| section(l) == *s)
-                .and_then(|l| l.symbol.clone())
-                .unwrap_or_default()
-        };
-        let names: Vec<String> = others
-            .iter()
-            .map(|s| {
-                let named_elsewhere = shown.iter().any(|x| x.0 == s.0)
-                    || others.iter().filter(|o| o.0 == s.0).count() > 1;
-                if named_elsewhere {
-                    format!("section `{}` of `{}`", heading_of(s), s.0.display())
-                } else {
-                    format!("`{}`", s.0.display())
-                }
-            })
-            .collect();
+        let names = other_sections(files, &members, &shown);
         let pointer = format!(
             " Grouped with the other copies of this section at {}.",
             site(files, primary)
@@ -217,37 +164,118 @@ fn group_repeated_sections(files: &mut [FileResult]) -> BTreeSet<usize> {
             .flat_map(|((g, j), _)| files[*g].findings[*j].locations[..2].to_vec())
             .collect();
         lower_members(files, &pointed, catalog::DOC_DUPLICATION);
-        let finding = &mut files[primary.0].findings[primary.1];
-        if !names.is_empty() {
-            let one = names.len() == 1;
-            finding.message = format!(
-                "{} The same text recurs in {} more section{}: {}.",
-                finding.message,
-                names.len(),
-                if one { "" } else { "s" },
-                listed(&names)
-            );
-        }
-        finding.action = "Keep one copy, such as a shared partial, and include or link it from the other documents".into();
-        for location in locations {
-            if !finding
-                .locations
-                .iter()
-                .any(|l| section(l) == section(&location))
-            {
-                finding.locations.push(location);
-            }
-        }
-        let heading = finding
-            .locations
-            .iter()
-            .find(|l| section(l) == head)
-            .and_then(|l| l.symbol.clone())
-            .unwrap_or_default();
-        finding.category = Some(REPEATED_SECTION.into());
-        finding.fingerprint = section_fingerprint(finding, &head.0, &heading);
+        head_finding(
+            &mut files[primary.0].findings[primary.1],
+            &head,
+            &names,
+            locations,
+        );
     }
     changed
+}
+
+/// Each repetition finding with the two sections it names.
+fn repetitions(files: &[FileResult]) -> Vec<(At, [Section; 2])> {
+    let rule = catalog::id(catalog::DOC_DUPLICATION);
+    files
+        .iter()
+        .enumerate()
+        .flat_map(|(f, file)| {
+            file.findings.iter().enumerate().filter_map(move |(i, x)| {
+                let named = (x.rule == rule
+                    && x.strength != Strength::Note
+                    && x.category.is_none()
+                    && x.locations.len() >= 2)
+                    .then(|| [section(&x.locations[0]), section(&x.locations[1])])?;
+                Some(((f, i), named))
+            })
+        })
+        .collect()
+}
+
+/// The head of a group: the section most findings name, first by path and line.
+fn head_section(members: &[&(At, [Section; 2])]) -> Option<Section> {
+    let mut named = BTreeMap::<&Section, usize>::new();
+    for (_, sections) in members {
+        for s in sections {
+            *named.entry(s).or_default() += 1;
+        }
+    }
+    let most = named.values().copied().max().unwrap_or(0);
+    named
+        .iter()
+        .find(|(_, n)| **n == most)
+        .map(|(s, _)| (*s).clone())
+}
+
+/// The group's sections the head finding does not show, by document; a
+/// document already shown, or named twice, is named with the section's
+/// heading.
+fn other_sections(
+    files: &[FileResult],
+    members: &[&(At, [Section; 2])],
+    shown: &[Section; 2],
+) -> Vec<String> {
+    let others: BTreeSet<&Section> = members
+        .iter()
+        .flat_map(|(_, sections)| sections.iter())
+        .filter(|s| !shown.contains(s))
+        .collect();
+    let heading_of = |s: &Section| {
+        members
+            .iter()
+            .flat_map(|((f, i), _)| files[*f].findings[*i].locations.iter())
+            .find(|l| section(l) == *s)
+            .and_then(|l| l.symbol.clone())
+            .unwrap_or_default()
+    };
+    others
+        .iter()
+        .map(|s| {
+            let named_elsewhere = shown.iter().any(|x| x.0 == s.0)
+                || others.iter().filter(|o| o.0 == s.0).count() > 1;
+            if named_elsewhere {
+                format!("section `{}` of `{}`", heading_of(s), s.0.display())
+            } else {
+                format!("`{}`", s.0.display())
+            }
+        })
+        .collect()
+}
+
+/// The finding a group keeps: it names the other sections, gains their
+/// locations and is identified by the head section.
+fn head_finding(finding: &mut Finding, head: &Section, names: &[String], locations: Vec<Location>) {
+    if !names.is_empty() {
+        let one = names.len() == 1;
+        finding.message = format!(
+            "{} The same text recurs in {} more section{}: {}.",
+            finding.message,
+            names.len(),
+            if one { "" } else { "s" },
+            listed(names)
+        );
+    }
+    finding.action =
+        "Keep one copy, such as a shared partial, and include or link it from the other documents"
+            .into();
+    for location in locations {
+        if !finding
+            .locations
+            .iter()
+            .any(|l| section(l) == section(&location))
+        {
+            finding.locations.push(location);
+        }
+    }
+    let heading = finding
+        .locations
+        .iter()
+        .find(|l| section(l) == *head)
+        .and_then(|l| l.symbol.clone())
+        .unwrap_or_default();
+    finding.category = Some(REPEATED_SECTION.into());
+    finding.fingerprint = section_fingerprint(finding, &head.0, &heading);
 }
 
 /// A section a finding names: its path and first line.
