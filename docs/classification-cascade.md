@@ -93,8 +93,15 @@ signatures, or one candidate pair.
    hashes to one of four values, so a function added, removed or resized
    re-asks only its run: packed in file order, one added function re-sent
    every later pack of the file (5 of 5 simplification requests of
-   `compose.rs`, against 1 now). Runs add requests (25% to 106%) but barely
-   any tokens (0.4% to 1.6%), since every question is asked per function.
+   `compose.rs`, against 1 now). Runs add requests (25% to 106%, and 33% to
+   300% for instruction files), and every request is billed about 280 input
+   tokens beyond its size, so a full first pass bills 4% to 7% more input
+   (functions 6% to 13%, values 4% to 7%, security 3% to 5%). A function
+   removed re-asks 24% to 47% fewer tokens, so the runs pay back after 19 to
+   30 edits. One in eight names ending runs cost under half as much extra on
+   a full pass but saved a half to two thirds as much per edit, and left
+   whole files in one run (`clones.rs`, `literals.rs`); one in four
+   overtakes it after 31 to 40 edits.
    Tests are sent one per request, because unrelated
    tests in the same state left more answers undecided. State uses literal paths
    such as `functions[2].source`; group IDs are Choice options. Stage and freshness
@@ -337,7 +344,9 @@ signatures, or one candidate pair.
    `AGENTS.md`). Each file's heading sections, or the top-level blocks of a
    long section, are sent packed, within runs of sections that end after a
    heading hashing to one of four values (a long section's blocks share its
-   heading and stay together), beside the nearest manifests (with the
+   heading and stay together; brstocks `CLAUDE.md` went from 1 request to
+   4, billing 18% more input on a full run and 57% less when one section
+   is removed), beside the nearest manifests (with the
    runtime versions they require: `engines`, `packageManager`,
    `requires-python`, `rust-version`), the configured linters and the
    directories. A section whose signals stay undecided is asked, alone,
