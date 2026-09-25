@@ -2,7 +2,7 @@
 //! setting is chosen: text built from values, calls and field assignments.
 //! They are syntax only, never API names, and serve only as options for
 //! locating a security finding; Jev judges what each one does.
-use super::{is_comment, line_of, text};
+use super::{django, is_comment, line_of, text};
 use std::{collections::BTreeMap, ops::Range};
 use tree_sitter::Node;
 
@@ -24,6 +24,8 @@ pub struct Site {
 /// How directly a node shows a value reaching another program; lower first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Priority {
+    /// A Django setting that decides security, such as `DEBUG = True`.
+    SecuritySetting,
     /// Text built from values: a template, f-string, concatenation or
     /// formatting macro.
     BuiltText,
@@ -31,8 +33,10 @@ enum Priority {
     CallWithValue,
     /// Another call, such as one that chooses a setting with literals.
     Call,
-    /// An assignment to a field or property.
+    /// An assignment to a field, property or subscript.
     FieldAssignment,
+    /// Another Django setting, such as `LANGUAGE_CODE = 'en-us'`.
+    Setting,
 }
 
 const LITERALS: &[&str] = &[
@@ -99,13 +103,32 @@ const CSHARP_FORMAT_CALLS: &[&str] = &[
 ];
 
 /// Sites of the body, one per statement, in source order with ids `S1…`.
-pub fn in_node(body: Node<'_>, source: &str) -> Vec<Site> {
+/// In Django code (`django`), assignments to a subscript such as
+/// `response['Location'] = url` are sites too.
+pub fn in_node(body: Node<'_>, source: &str, django: bool) -> Vec<Site> {
     let mut best = BTreeMap::<usize, (Priority, Node<'_>)>::new();
-    collect(body, body, source, &mut best);
-    numbered(best, source)
+    let mode = Mode {
+        django,
+        settings: false,
+    };
+    collect(body, body, source, mode, &mut best);
+    numbered(best, source, &[])
 }
 
-fn numbered(best: BTreeMap<usize, (Priority, Node<'_>)>, source: &str) -> Vec<Site> {
+/// What a file's sites include beyond the common ones.
+#[derive(Clone, Copy)]
+struct Mode {
+    /// Django code: subscript assignments are sites.
+    django: bool,
+    /// A Django settings module: its setting assignments are sites.
+    settings: bool,
+}
+
+fn numbered(
+    best: BTreeMap<usize, (Priority, Node<'_>)>,
+    source: &str,
+    redactions: &[Range<usize>],
+) -> Vec<Site> {
     let mut chosen: Vec<(Priority, Node<'_>)> = best.into_values().collect();
     chosen.sort_by_key(|(priority, node)| (*priority, node.start_byte()));
     chosen.truncate(MAX_SITES);
@@ -115,7 +138,7 @@ fn numbered(best: BTreeMap<usize, (Priority, Node<'_>)>, source: &str) -> Vec<Si
         .enumerate()
         .map(|(index, (_, node))| Site {
             id: format!("S{}", index + 1),
-            text: clip(text(node, source)),
+            text: clip(&django::redacted(source, node.byte_range(), redactions)),
             line: line_of(source, node.start_byte()),
             end_line: line_of(source, node.end_byte().saturating_sub(1)),
         })
@@ -124,12 +147,28 @@ fn numbered(best: BTreeMap<usize, (Priority, Node<'_>)>, source: &str) -> Vec<Si
 
 /// Top-level statements that run when the module loads and call something,
 /// such as `app.use(cors(options))`; definitions, imports and anything inside
-/// a function unit are left out.
+/// a function unit are left out. In a Django settings module, statements
+/// that assign settings (`DEBUG = True`) are setup too.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Setup {
     /// Byte range, first and last line of each statement.
     pub statements: Vec<(Range<usize>, usize, usize)>,
     pub sites: Vec<Site>,
+    /// Whether the module is a Django settings module.
+    pub settings: bool,
+    /// Contents of string literals assigned to secret names in a settings
+    /// module, shown redacted.
+    pub redactions: Vec<Range<usize>>,
+    /// The settings a settings module assigns, in order, each with its
+    /// assignment as shown (secret literals redacted).
+    pub assigned: Vec<(String, String)>,
+}
+
+impl Setup {
+    /// The text of one statement, with secret literals redacted.
+    pub fn text(&self, source: &str, range: Range<usize>) -> String {
+        django::redacted(source, range, &self.redactions)
+    }
 }
 
 const SETUP_STATEMENTS: &[&str] = &[
@@ -141,8 +180,11 @@ const SETUP_STATEMENTS: &[&str] = &[
     "local_declaration_statement",
 ];
 
-pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
+/// The module's setup statements; `settings` for a Django settings module.
+pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>], settings: bool) -> Setup {
     let mut statements = Vec::new();
+    let mut redactions = Vec::new();
+    let mut assigned = Vec::new();
     let mut best = BTreeMap::<usize, (Priority, Node<'_>)>::new();
     let mut cursor = root.walk();
     for node in root.named_children(&mut cursor) {
@@ -159,11 +201,15 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
             _ => node,
         };
         let range = node.byte_range();
-        if !SETUP_STATEMENTS.contains(&node.kind())
+        // Settings modules also choose values in `try` blocks, such as a
+        // local override imported when present.
+        let statement =
+            SETUP_STATEMENTS.contains(&node.kind()) || settings && node.kind() == "try_statement";
+        if !statement
             || units
                 .iter()
                 .any(|u| u.start < range.end && range.start < u.end)
-            || !calls_something(node)
+            || !(calls_something(node) || settings && assigns_setting(node, source))
         {
             continue;
         }
@@ -172,11 +218,42 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
             line_of(source, node.start_byte()),
             line_of(source, node.end_byte().saturating_sub(1)),
         ));
-        collect(node, root, source, &mut best);
+        let mode = Mode {
+            django: settings,
+            settings,
+        };
+        collect(node, root, source, mode, &mut best);
+        if settings {
+            django::secret_literals(node, source, &mut redactions);
+            let mut found = Vec::new();
+            django::collect_settings(node, source, &mut found);
+            assigned.extend(
+                found.into_iter().map(|(name, range)| {
+                    (name, clip(&django::redacted(source, range, &redactions)))
+                }),
+            );
+        }
     }
     Setup {
+        sites: numbered(best, source, &redactions),
         statements,
-        sites: numbered(best, source),
+        settings,
+        redactions,
+        assigned,
+    }
+}
+
+/// Whether a statement assigns a setting, directly or inside its blocks.
+fn assigns_setting(node: Node<'_>, source: &str) -> bool {
+    match node.kind() {
+        "expression_statement" => django::setting_assigned(node, source).is_some(),
+        "if_statement" | "try_statement" | "with_statement" | "block" | "else_clause"
+        | "elif_clause" | "except_clause" | "finally_clause" => {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .any(|c| assigns_setting(c, source))
+        }
+        _ => false,
     }
 }
 
@@ -210,7 +287,8 @@ pub fn config_setup(root: Node<'_>, source: &str) -> Setup {
     }
     Setup {
         statements,
-        sites: numbered(best, source),
+        sites: numbered(best, source, &[]),
+        ..Setup::default()
     }
 }
 
@@ -279,24 +357,37 @@ fn collect<'t>(
     node: Node<'t>,
     body: Node<'t>,
     source: &str,
+    mode: Mode,
     best: &mut BTreeMap<usize, (Priority, Node<'t>)>,
 ) {
     if is_comment(node) {
         return;
     }
-    if let Some(priority) = priority(node, source) {
+    if let Some(priority) = priority(node, source, mode) {
         let shown = statement(node, body, source);
         let entry = best.entry(shown.start_byte()).or_insert((priority, shown));
         entry.0 = entry.0.min(priority);
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect(child, body, source, best);
+        collect(child, body, source, mode, best);
     }
 }
 
-fn priority(node: Node<'_>, source: &str) -> Option<Priority> {
+fn priority(node: Node<'_>, source: &str, mode: Mode) -> Option<Priority> {
     match node.kind() {
+        "assignment" if mode.settings => {
+            let left = node.child_by_field_name("left")?;
+            let name = text(left, source);
+            if left.kind() != "identifier" || !django::setting_name(name) {
+                return field_assignment(node, mode);
+            }
+            Some(if django::security_setting(name) {
+                Priority::SecuritySetting
+            } else {
+                Priority::Setting
+            })
+        }
         "template_string" if has_child(node, "template_substitution") => Some(Priority::BuiltText),
         // React's raw-markup property: `dangerouslySetInnerHTML={{ __html: value }}`.
         "jsx_attribute"
@@ -347,25 +438,33 @@ fn priority(node: Node<'_>, source: &str) -> Option<Priority> {
                 Priority::Call
             },
         ),
-        "assignment_expression" | "assignment" | "augmented_assignment_expression"
-            if node.child_by_field_name("left").is_some_and(|left| {
-                matches!(
-                    left.kind(),
-                    "member_expression"
-                        | "attribute"
-                        | "field_expression"
-                        | "subscript_expression"
-                        | "member_access_expression"
-                        | "element_access_expression"
-                ) || node
-                    .parent()
-                    .is_some_and(|p| p.kind() == "initializer_expression")
-            }) =>
-        {
-            Some(Priority::FieldAssignment)
+        "assignment_expression" | "assignment" | "augmented_assignment_expression" => {
+            field_assignment(node, mode)
         }
         _ => None,
     }
+}
+
+/// An assignment to a field or property, or in Django code to a Python
+/// subscript, such as `response['Location'] = url` or
+/// `options["ssl_cert_reqs"] = None`.
+fn field_assignment(node: Node<'_>, mode: Mode) -> Option<Priority> {
+    let field = node
+        .child_by_field_name("left")
+        .is_some_and(|left| match left.kind() {
+            "member_expression"
+            | "attribute"
+            | "field_expression"
+            | "subscript_expression"
+            | "member_access_expression"
+            | "element_access_expression" => true,
+            "subscript" => mode.django,
+            _ => false,
+        })
+        || node
+            .parent()
+            .is_some_and(|p| p.kind() == "initializer_expression");
+    field.then_some(Priority::FieldAssignment)
 }
 
 fn has_child(node: Node<'_>, kind: &str) -> bool {
@@ -438,7 +537,7 @@ fn statement<'t>(node: Node<'t>, body: Node<'t>, source: &str) -> Node<'t> {
     node
 }
 
-pub(super) fn clip(value: &str) -> String {
+pub(crate) fn clip(value: &str) -> String {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() <= MAX_TEXT {
         return collapsed;
@@ -488,6 +587,63 @@ mod tests {
         );
         assert_eq!(rust.len(), 3, "{rust:?}");
         assert!(rust[0].0.starts_with("let sql = format!"));
+    }
+
+    #[test]
+    fn subscript_assignments_are_sites_only_in_django_code() {
+        let body = "def download(request):\n    response = HttpResponse()\n    response['Location'] = request.GET['next']\n    return response\n";
+        let plain = sites("a.py", body);
+        assert!(!plain.iter().any(|(_, line)| *line == 3), "{plain:?}");
+        let django = sites(
+            "a.py",
+            &format!("from django.http import HttpResponse\n\n{body}"),
+        );
+        assert!(
+            django
+                .iter()
+                .any(|(text, _)| text == "response['Location'] = request.GET['next']"),
+            "{django:?}"
+        );
+    }
+
+    #[test]
+    fn a_settings_module_is_setup_with_its_security_settings_first_and_secrets_redacted() {
+        let source = "import os\n\nLANGUAGE_CODE = 'en-us'\nSECRET_KEY = 'abc123'\nDEBUG = True\nINSTALLED_APPS = ['shop']\n\ntry:\n    from .local import *\nexcept ImportError:\n    pass\n";
+        let file = parse(Path::new("shop/settings.py"), source).unwrap();
+        assert!(file.setup.settings && file.django);
+        let texts: Vec<&str> = file.setup.sites.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            texts[..3],
+            [
+                "LANGUAGE_CODE = 'en-us'",
+                "SECRET_KEY = '<redacted 6-character literal>'",
+                "DEBUG = True"
+            ]
+        );
+        assert!(!texts.iter().any(|t| t.contains("abc123")));
+        // Past the site limit, security settings are the ones kept.
+        let many: String = (0..super::MAX_SITES)
+            .map(|i| format!("OPTION_{i} = {i}\n"))
+            .chain(["DEBUG = True\n".to_string()])
+            .collect();
+        let crowded = parse(Path::new("shop/settings.py"), &many).unwrap();
+        assert_eq!(crowded.setup.sites.len(), super::MAX_SITES);
+        assert_eq!(crowded.setup.sites.last().unwrap().text, "DEBUG = True");
+        assert_eq!(
+            file.setup.statements.len(),
+            4,
+            "every setting, but not the try block"
+        );
+        assert_eq!(
+            file.setup
+                .assigned
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
+            ["LANGUAGE_CODE", "SECRET_KEY", "DEBUG", "INSTALLED_APPS"]
+        );
+        let plain = parse(Path::new("shop/constants.py"), "DEBUG = True\nLIMIT = 3\n").unwrap();
+        assert!(!plain.setup.settings && plain.setup.statements.is_empty());
     }
 
     #[test]

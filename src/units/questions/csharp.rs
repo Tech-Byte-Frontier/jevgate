@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn csharp_files_get_framework_examples_and_other_languages_keep_their_wording() {
-        let general = questions::security_weakened("functions[0].source");
+        let general = questions::security_weakened("functions[0].source", false);
         let mut python = general.clone();
         reword("Python", "weakened", &mut python);
         assert_eq!(python, general);
@@ -316,7 +316,7 @@ mod tests {
         );
         assert!(question.ends_with("from data others can know?"));
 
-        let mut origin = questions::security_origin("function.source", true);
+        let mut origin = questions::security_origin("function.source", true, false);
         reword(CSHARP, "origin", &mut origin);
         assert!(
             origin["criteria"][2]
@@ -326,7 +326,7 @@ mod tests {
         );
         assert_eq!(
             origin["criteria"][0],
-            questions::security_origin("function.source", true)["criteria"][0]
+            questions::security_origin("function.source", true, false)["criteria"][0]
         );
         assert!(
             origin["instructions"]["question"]

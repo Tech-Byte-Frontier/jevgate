@@ -143,6 +143,37 @@ signatures, or one candidate pair.
    browser code (`NEXT_PUBLIC_`). A `next.config` file's setup is every
    top-level statement that holds an object, with its innermost objects as
    sites, since `headers()` settings call nothing.
+   Django code (Python that imports Django or Django REST framework, and
+   settings modules) is asked Django's names in the checks that have them
+   and three more; other code keeps the common ones, so its cached answers
+   stay valid. They name raw SQL (`raw`, `extra`, `RawSQL`), `mark_safe` and
+   templates that write values with `|safe`, `redirect()` to route names or
+   the program's own paths, the storage API, Django's password hashers and
+   validation errors, and add deserializers of request data (`pickle`,
+   `yaml.load`), debug mode, `csrf_exempt` and literal secret keys, and
+   `request.META` or the settings sent to a client. A view is sent with the
+   URL routes that reach it (a `\d+` parameter holds digits), the templates
+   it renders that write values unescaped, and the module constants it
+   names; a management command is marked as run by hand, since its options
+   came back as another party's. A settings module is one unit whose
+   statements are its settings, with secret literals redacted to their
+   length (a dotted path such as a secret-key getter is not a secret). It is
+   sent with the lines that select it (`DJANGO_SETTINGS_MODULE` in a
+   Dockerfile, CI or `manage.py`) and with the settings modules that import
+   it, directly or through others, each with its own selections and its
+   assignments of the settings it sets again. Presence alone found a
+   development `DEBUG = True` or a signed webhook's `csrf_exempt` weak as
+   surely as a deployed one, so a Django weak setting must be named by a
+   specific check at the review threshold to be a consider or review;
+   otherwise it is a note, and settings only development or tests run with
+   are two levels lower. The secret, cookie and CORS checks ask about the
+   deployed site, since asked about the module alone they flagged base
+   settings that production sets again. The markup Choice asks a Django view
+   what it sends back, since views that only redirect or render an escaping
+   template split on the markup check. Django error views
+   (`handler500 = …`), middleware `process_exception` and Django REST
+   framework's `EXCEPTION_HANDLER` are error handlers, asked with the
+   framework's errors written for the user named as acceptable.
    A security unit still uncertain after its trace and recheck is asked, per
    undecided check and in a request of its own, one literal Choice that can
    only clear that check: where its URLs come from (a host of the program's

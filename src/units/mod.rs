@@ -129,6 +129,9 @@ pub enum Detail {
         /// trace and recheck, such as where its URLs come from or its output
         /// goes; each is asked only while its checks are undecided.
         settles: Vec<Settle>,
+        /// Django code, asked the Django checks: a weak setting must be
+        /// named by one of them.
+        django: bool,
     },
     /// A large document judged by its outline, with its top-level parts
     /// and the follow-up that locates a split.

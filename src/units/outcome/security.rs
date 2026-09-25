@@ -298,3 +298,26 @@ fn exposure_signal(
         _ => (outcome, lean),
     }
 }
+
+/// Weak settings of Django code, whose checks name its settings and
+/// decorators: a settings module assigns dozens of settings, and the
+/// presence question found development settings weak (`DEBUG = True`, any
+/// host) as surely as deployed ones, and a signed webhook exempt from CSRF
+/// as surely as a form. Only a specific check that names what is weak raises
+/// a consider or review; presence alone is at most a note.
+pub(in crate::units) fn django_settings_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Option<Outcome> {
+    let outcome = exposure_outcome(catalog::UNSAFE_SETTINGS, get, &["weakened"])?;
+    let named = crate::units::security::checks(catalog::UNSAFE_SETTINGS)
+        .iter()
+        .any(|check| {
+            get(check.id)
+                .map(noul)
+                .is_some_and(|o| matches!(o, Outcome::Review(_)))
+        });
+    Some(match outcome {
+        Outcome::Review(p) | Outcome::Consider(p) if !named => Outcome::Note(p),
+        other => other,
+    })
+}
