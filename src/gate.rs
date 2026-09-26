@@ -77,10 +77,10 @@ fn failures(report: &Report, new: &[(&Path, &Finding)], args: &CheckArgs) -> Vec
         .count();
     let consider = failing.len() - review;
     if review > 0 {
-        reasons.push(format!("{review} new review finding(s)"));
+        reasons.push(crate::output::count(review, "new review finding"));
     }
     if consider > 0 {
-        reasons.push(format!("{consider} new consider finding(s)"));
+        reasons.push(crate::output::count(consider, "new consider finding"));
     }
     let uncertain =
         |rule: &str, path: &Path| args.levels_at(rule, path).contains(&FailOn::Uncertain);
@@ -99,7 +99,8 @@ fn failures(report: &Report, new: &[(&Path, &Finding)], args: &CheckArgs) -> Vec
         .count();
     if undecided > 0 {
         reasons.push(format!(
-            "{undecided} file(s) with uncertain or needs-context results"
+            "{} with uncertain or needs-context results",
+            crate::output::count(undecided, "file")
         ));
     }
     reasons

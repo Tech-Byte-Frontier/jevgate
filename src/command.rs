@@ -92,12 +92,15 @@ fn accept(
     let path = written.path.display();
     if merge {
         say!(
-            "Accepted {} finding(s) from the last check in {path}; kept {} earlier finding(s) for files it did not cover",
-            written.accepted,
-            written.kept
+            "Accepted {} from the last check in {path}; kept {} for files it did not cover",
+            output::count(written.accepted, "finding"),
+            output::count(written.kept, "earlier finding")
         );
     } else {
-        say!("Accepted {} finding(s) in {path}", written.accepted);
+        say!(
+            "Accepted {} in {path}",
+            output::count(written.accepted, "finding")
+        );
     }
     Ok(0)
 }
@@ -119,7 +122,8 @@ fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> 
             }
             let marked = baseline::mark(&context.root, reason, &targets, &keys)?;
             say!(
-                "Marked {marked} accepted finding(s) as {}",
+                "Marked {} as {}",
+                output::count(marked, "accepted finding"),
                 output::label(&reason)
             );
         }

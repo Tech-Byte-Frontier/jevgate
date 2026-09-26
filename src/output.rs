@@ -17,6 +17,11 @@ const TOP_CONSIDER: usize = 10;
 pub const INPUT_USD_PER_MILLION: f64 = 0.042;
 pub const PRICE_CHECKED: &str = "2026-09-18";
 
+/// `n` and a noun, plural unless `n` is one: "1 finding", "2 findings".
+pub fn count(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
 /// Estimated dollars for this invocation's paid input tokens, for a priced model.
 pub fn estimated_usd(report: &Report) -> Option<f64> {
     usd(&report.requested_model, report.paid_input_tokens)
@@ -250,8 +255,8 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: St
     if !verbose {
         writeln!(
             out,
-            "\n{} optional note(s) on code that reads well as it is; --verbose shows them.",
-            notes.len()
+            "\n{} on code that reads well as it is; --verbose shows them.",
+            count(notes.len(), "optional note")
         )?;
         return Ok(());
     }

@@ -82,11 +82,7 @@ fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
     options.path_fail_on = vec![scripts(vec![options::FailOn::None])];
     let report = run(&project, &options, &mut mock);
     let gate = report.gate.as_ref().unwrap();
-    assert_eq!(
-        gate.reasons,
-        ["1 new consider finding(s)"],
-        "only src/lib.rs"
-    );
+    assert_eq!(gate.reasons, ["1 new consider finding"], "only src/lib.rs");
     options.paths = vec!["scripts".into()];
     let report = run(&project, &options, &mut mock);
     assert_eq!(gate::exit_code(&report), 0, "tooling findings only report");
