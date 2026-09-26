@@ -55,11 +55,12 @@ pub fn definer_search_path() -> Value {
 /// The note says who may call a function nothing revokes: chatbot-ui's
 /// `delete_storage_object`, which deletes any stored file with the service
 /// role key and is callable by anyone, stayed at 0.68 with an empty
-/// `function.privileges`.
+/// `function.privileges`, and at 0.75 with the note while the question
+/// named only rows.
 pub fn definer_unchecked() -> Value {
     sql_noul(
-        "Does the SECURITY DEFINER function in `function.source` read or change rows of other users without checking who the caller is?",
-        "It runs with its owner's privileges and returns or changes rows chosen by its arguments, without comparing them to `auth.uid()` or checking a role, and clients can call it.",
+        "Does the SECURITY DEFINER function in `function.source` read or change other users' rows or stored files without checking who the caller is?",
+        "It runs with its owner's privileges and returns or changes rows or stored files chosen by its arguments, without comparing them to `auth.uid()` or checking a role, and clients can call it.",
         "It checks the caller, touches only the caller's rows, acts only for whoever holds a secret token it looks up by value, such as an invitation or reset token, only returns data meant for everyone, is a trigger function that runs on table events, or `function.privileges` revokes EXECUTE from public, anon and authenticated so only roles clients do not use, such as `supabase_auth_admin` or `service_role`, may call it.",
         "`function.privileges` lists the grants and revokes of EXECUTE on it, when found. PostgreSQL lets every role execute a new function, so unless a revoke there takes EXECUTE from public, clients can call it, anon included.",
     )
