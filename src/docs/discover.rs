@@ -172,26 +172,7 @@ pub fn discover(root: &Path) -> Result<Found> {
     // Ignored instruction files next to visible ones still load, so probe for
     // them by name and walk the agent directories without ignore files.
     for directory in found.directories.clone() {
-        // Only an entry of exactly that name: on a case-insensitive file
-        // system, `AGENTS.md` also opens refined-github's `agents.md`, whose
-        // read then failed and left the whole run incomplete.
-        let names: BTreeSet<std::ffi::OsString> = std::fs::read_dir(root.join(&directory))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.file_name())
-            .collect();
-        for name in AGENT_NAMES {
-            let path = directory.join(name);
-            if names.contains(std::ffi::OsStr::new(name))
-                && root
-                    .join(&path)
-                    .symlink_metadata()
-                    .is_ok_and(|m| !m.is_dir())
-            {
-                add_agent(root, path, &mut found);
-            }
-        }
+        probe_agents(root, &directory, &mut found);
         for name in AGENT_DIRS {
             let path = root.join(&directory).join(name);
             if path.is_dir() {
@@ -207,6 +188,30 @@ pub fn discover(root: &Path) -> Result<Found> {
         }
     }
     Ok(found)
+}
+
+/// The instruction files of one directory, found by name even when ignore
+/// files hide them. Only an entry of exactly that name counts: on a
+/// case-insensitive file system, `AGENTS.md` also opens refined-github's
+/// `agents.md`, whose read then failed and left the whole run incomplete.
+fn probe_agents(root: &Path, directory: &Path, found: &mut Found) {
+    let names: BTreeSet<std::ffi::OsString> = std::fs::read_dir(root.join(directory))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect();
+    for name in AGENT_NAMES {
+        let path = directory.join(name);
+        if names.contains(std::ffi::OsStr::new(name))
+            && root
+                .join(&path)
+                .symlink_metadata()
+                .is_ok_and(|m| !m.is_dir())
+        {
+            add_agent(root, path, found);
+        }
+    }
 }
 
 /// Documentation folders read even when ignored.
