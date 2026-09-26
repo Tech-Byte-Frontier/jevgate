@@ -163,6 +163,7 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         })
         .filter_map(|window| pair(files, &parsed, &blocks, window))
         .filter(|p| !deprecated(files, &p.a) && !deprecated(files, &p.b))
+        .filter(|p| !retired(&p.a.path) && !retired(&p.b.path))
         .collect();
     drop_nested(&mut pairs);
     pairs.sort_by(by_rank);
@@ -196,6 +197,36 @@ fn deprecated(files: &[SourceFile<'_>], site: &Site) -> bool {
         node = current.parent();
     }
     false
+}
+
+/// Whether a file lies in a directory of retired code, such as
+/// `deprecated`, `archive` or a proof of concept: like code marked
+/// deprecated, it is not worth sharing code with. A Unity project's
+/// `Assets/ProofOfConcept` builders, kept as a reference with no menu entry,
+/// were paired with the live scene builders in six wrong reviews. `legacy`
+/// is left out, since legacy code is often still served.
+fn retired(path: &Path) -> bool {
+    path.parent().is_some_and(|dir| {
+        dir.iter().any(|part| {
+            let part = part
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .replace(['-', '_'], "");
+            [
+                "deprecated",
+                "archive",
+                "archived",
+                "attic",
+                "graveyard",
+                "retired",
+                "obsolete",
+                "proofofconcept",
+                "poc",
+                "pocs",
+            ]
+            .contains(&part.as_str())
+        })
+    })
 }
 
 /// A directory of example code: `examples`, `demo`, `tutorial`, or a name
@@ -1305,6 +1336,25 @@ mod tests {
         assert_eq!(pairs(&python("    @deprecated_lifespan\n")).len(), 1);
         assert!(pairs(&python("    @deprecated(\"use load\")\n")).is_empty());
         assert!(pairs(&python("    @typing_extensions.deprecated(\"x\")\n")).is_empty());
+    }
+
+    #[test]
+    fn copies_in_retired_directories_are_not_candidates() {
+        let pairs = |b: &str| run(&[("src/a.rs", LOAD, true), (b, LOAD, true)]).pairs;
+        assert_eq!(pairs("src/b.rs").len(), 1);
+        for retired in [
+            "Assets/ProofOfConcept/Builder.rs",
+            "deprecated/b.rs",
+            "scripts/archive/b.rs",
+            "src/proof-of-concept/b.rs",
+        ] {
+            assert!(pairs(retired).is_empty(), "{retired}");
+        }
+        assert_eq!(
+            pairs("src/legacy/b.rs").len(),
+            1,
+            "legacy code is often live"
+        );
     }
 
     #[test]
