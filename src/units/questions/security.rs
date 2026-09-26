@@ -10,35 +10,55 @@ use serde_json::{Value, json};
 /// `mark_safe`, `|safe` templates and `pickle.loads` of request data were
 /// the injections its views held. Other code whose source names a
 /// deserializer that can build any object is asked about it too, naming
-/// `deserializers` (see [`deserializers_named`]).
-pub fn security_interpreted(code: &str, django: bool, deserializers: Option<&str>) -> Value {
-    if let (false, Some(names)) = (django, deserializers) {
-        return noul(
-            format!(
-                "Does `{code}` place a variable into the text of a database query, shell command, code to evaluate, or HTML markup, or load it with a deserializer that can build any object?"
-            ),
-            &format!(
-                "A variable is joined, formatted or interpolated into the text of a query, command, code or markup that is then run or rendered, or loaded with a deserializer that can build any object or run code, such as {names}."
-            ),
-            "Variables are passed only as bound parameters, separate arguments, or through a template or component that escapes them; the text is built only from fixed values; data is parsed only as JSON or another data-only format; or the function builds no such text.",
-        );
-    }
+/// `deserializers` (see [`deserializers_named`]), and code that names an XML
+/// parser able to resolve external entities (`xml`, see
+/// [`xml_parser_named`]) about parsing with it.
+pub fn security_interpreted(
+    code: &str,
+    django: bool,
+    deserializers: Option<&str>,
+    xml: bool,
+) -> Value {
+    let mut question = format!(
+        "Does `{code}` place a variable into the text of a database query, shell command, code to evaluate, or HTML markup"
+    );
+    let mut yes = String::from(
+        "A variable is joined, formatted or interpolated into the text of a query, command, code or markup that is then run or rendered",
+    );
+    let mut no = String::from(
+        "Variables are passed only as bound parameters, separate arguments, or through a template or component that escapes them; the text is built only from fixed values;",
+    );
     if django {
-        return noul(
+        question.push_str(", or load it with a deserializer that can build any object");
+        yes.push_str(", marked as safe markup or passed to a template that writes it unescaped, or loaded with pickle or a similar deserializer");
+        no.push_str(" data is parsed only as JSON or another data-only format;");
+    } else if let Some(names) = deserializers {
+        question.push_str(", or load it with a deserializer that can build any object");
+        yes.push_str(&format!(
+            ", or loaded with a deserializer that can build any object or run code, such as {names}"
+        ));
+        no.push_str(" data is parsed only as JSON or another data-only format;");
+    }
+    if xml {
+        // Both clauses would make the question too long to read as one.
+        question = if django || deserializers.is_some() {
             format!(
-                "Does `{code}` place a variable into the text of a database query, shell command, code to evaluate, or HTML markup, or load it with a deserializer that can build any object?"
-            ),
-            "A variable is joined, formatted or interpolated into the text of a query, command, code or markup that is then run or rendered, marked as safe markup or passed to a template that writes it unescaped, or loaded with pickle or a similar deserializer.",
-            "Variables are passed only as bound parameters, separate arguments, or through a template or component that escapes them; the text is built only from fixed values; data is parsed only as JSON or another data-only format; or the function builds no such text.",
+                "Does `{code}` pass a variable into query, command, code or markup text, a deserializer that can build any object, or an XML parser that resolves external entities"
+            )
+        } else {
+            question + ", or parse it as XML with a parser that resolves external entities"
+        };
+        yes.push_str(
+            ", or parsed as XML with external entities or document type definitions enabled",
+        );
+        no.push_str(
+            " XML is parsed with document type definitions and external entities turned off;",
         );
     }
-    noul(
-        format!(
-            "Does `{code}` place a variable into the text of a database query, shell command, code to evaluate, or HTML markup?"
-        ),
-        "A variable is joined, formatted or interpolated into the text of a query, command, code or markup that is then run or rendered.",
-        "Variables are passed only as bound parameters, separate arguments, or through a template or component that escapes them; the text is built only from fixed values; or the function builds no such text.",
-    )
+    question.push('?');
+    yes.push('.');
+    no.push_str(" or the function builds no such text.");
+    noul(question, &yes, &no)
 }
 
 /// In Django code, redirects count too: a view that redirects to a URL from
@@ -728,6 +748,68 @@ pub fn deserializers_named(language: &str, source: &str) -> Option<&'static str>
 pub fn deserializer_check(language: &str, source: &str) -> Option<&'static Check> {
     deserializer_entry(language, source).map(|(.., check)| check)
 }
+
+/// XML parsers that can resolve external entities or load document type
+/// definitions, as source names them in any case: lxml, Python's pulldom
+/// and SAX, Java's DocumentBuilderFactory, SAXParserFactory,
+/// XMLInputFactory, TransformerFactory, dom4j and JDOM, .NET's XmlDocument
+/// and XmlTextReader, PHP's SimpleXML and DOMDocument, libxmljs and
+/// Nokogiri. A pygoat lab parsing a request with lxml and a Spring
+/// controller parsing its body with a default DocumentBuilderFactory were
+/// never asked about entities.
+const XML_PARSERS: [&str; 18] = [
+    "lxml",
+    "resolve_entities",
+    "pulldom",
+    "xml.sax",
+    "documentbuilderfactory",
+    "saxparserfactory",
+    "xmlinputfactory",
+    "transformerfactory",
+    "saxreader",
+    "saxbuilder",
+    "xmldocument",
+    "xmltextreader",
+    "dtdprocessing",
+    "simplexml_load",
+    "domdocument",
+    "libxml_noent",
+    "libxmljs",
+    "nokogiri",
+];
+
+/// Whether `source` names an XML parser that can resolve external entities.
+fn xml_parser_named(source: &str) -> bool {
+    let source = source.to_ascii_lowercase();
+    XML_PARSERS.iter().any(|name| source.contains(name))
+}
+
+/// Calls that parse XML with a parser created or imported elsewhere in the
+/// file: `make_parser()`, `parseString(…)`, `etree.fromstring(…)`.
+const XML_CALLS: [&str; 5] = ["parse", "fromstring", "iterparse", "expandnode", "xml("];
+
+/// Whether `code`, in a file whose whole source is `file`, parses XML with a
+/// parser that can resolve external entities: it names one itself, or its
+/// file imports one and it calls a parse method. Python modules import
+/// lxml or `xml.sax` at the top, so pygoat's lab calling `make_parser()` and
+/// `parseString(…)` named no parser in its own source.
+pub fn parses_xml(file: &str, code: &str) -> bool {
+    xml_parser_named(code)
+        || (xml_parser_named(file) && {
+            let code = code.to_ascii_lowercase();
+            XML_CALLS.iter().any(|call| code.contains(call))
+        })
+}
+
+/// Whether XML from another party is parsed with external entities enabled,
+/// asked only of source that names such a parser.
+pub const XXE: Check = Check {
+    id: "xxe",
+    question: "Does `{code}` parse XML that another party can send with a parser that resolves external entities or loads document type definitions?",
+    yes: "Request data, an upload or a message is parsed as XML with external entities, DTD loading or entity substitution enabled, or with a parser whose defaults allow them, such as Java's DocumentBuilderFactory, SAXParserFactory or XMLInputFactory without disallowing DOCTYPE declarations, lxml with resolve_entities or load_dtd, .NET's XmlDocument with an XmlResolver or DtdProcessing.Parse, PHP's LIBXML_NOENT, or libxmljs with noent.",
+    no: "It turns DOCTYPE declarations and external entities off (disallow-doctype-decl, resolve_entities=False, DtdProcessing.Prohibit, a null XmlResolver), uses a parser that never resolves them such as Python's xml.etree or defusedxml, or parses only XML the program wrote itself.",
+    no_examples: &[],
+};
 
 /// Specific weak settings, asked when the broad presence question is not clear.
 pub const WEAK_SETTINGS: [Check; 6] = [

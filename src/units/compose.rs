@@ -610,6 +610,7 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "type",
             "redirect",
             "deserialize",
+            "xxe",
         ],
         catalog::SENSITIVE_DATA => &[
             "logs_secret",

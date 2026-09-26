@@ -362,11 +362,12 @@ fn presence_request(
         };
         let source = items[index].1["source"].as_str().unwrap_or_default();
         let deserializers = questions::deserializers_named(file.language, source);
+        let xml = questions::parses_xml(file.source, source);
         for (rule, _, id) in units {
             for question in presence_questions(rule) {
                 questions.ask(
                     format!("{}{index}_{question}", &key[..1]),
-                    presence_body(question, &code, django, deserializers),
+                    presence_body(question, &code, django, (deserializers, xml)),
                     id,
                     rule,
                     question,
@@ -393,9 +394,16 @@ pub(super) fn presence_questions(rule: &str) -> &'static [&'static str] {
         .map_or(&[], |(_, questions)| questions)
 }
 
-fn presence_body(question: &str, code: &str, django: bool, deserializers: Option<&str>) -> Value {
+/// `named` holds the deserializers and whether an XML parser that can
+/// resolve entities appear in the source.
+fn presence_body(
+    question: &str,
+    code: &str,
+    django: bool,
+    (deserializers, xml): (Option<&str>, bool),
+) -> Value {
     match question {
-        "interpreted" => questions::security_interpreted(code, django, deserializers),
+        "interpreted" => questions::security_interpreted(code, django, deserializers, xml),
         "resource" => questions::security_resource(code, django),
         "logs_secret" => questions::security_logs_secret(code),
         "error_details" => questions::security_error_details(code, django),
@@ -408,9 +416,15 @@ fn presence_body(question: &str, code: &str, django: bool, deserializers: Option
 /// answered only in its files.
 pub(super) fn checks(rule: &str) -> Vec<&'static questions::Check> {
     let (.., php) = rule_checks(rule);
-    let mut all = asked_checks(rule, questions::CSHARP, false, "");
+    let mut all = asked_checks(rule, questions::CSHARP, false, "", false);
     // Django and PHP each ask a `deserialize` check of their own: one kind.
-    for check in asked_checks(rule, "", true, "").into_iter().chain(php) {
+    // The XML check is asked only of source that names an XML parser.
+    let xml = (rule == INJECTION).then_some(&questions::XXE);
+    for check in asked_checks(rule, "", true, "", false)
+        .into_iter()
+        .chain(php)
+        .chain(xml)
+    {
         if !all.iter().any(|c| c.id == check.id) {
             all.push(check);
         }
@@ -454,12 +468,14 @@ fn rule_checks(
 /// exists, and the Django checks besides; PHP files are asked PHP's own
 /// checks only of source that names what they ask about, and other code
 /// the deserialize check of its language when its source names one of the
-/// language's deserializers.
+/// language's deserializers. Code that parses XML with a parser able to
+/// resolve external entities (`xml`) is asked the XML check.
 fn asked_checks(
     rule: &str,
     language: &str,
     django: bool,
     source: &str,
+    xml: bool,
 ) -> Vec<&'static questions::Check> {
     let (general, csharp, framework, php) = rule_checks(rule);
     let csharp = if language == questions::CSHARP {
@@ -487,6 +503,7 @@ fn asked_checks(
                 .then(|| questions::deserializer_check(language, source))
                 .flatten(),
         )
+        .chain((rule == INJECTION && xml).then_some(&questions::XXE))
         .collect()
 }
 
@@ -546,7 +563,8 @@ fn trace(
     // whose text a response carries, not who raised it.
     let from_callees =
         rule == SENSITIVE_DATA && !subject.django && !subject.callee_errors.is_empty();
-    for check in asked_checks(rule, file.language, subject.django, &subject.source) {
+    let xml = questions::parses_xml(file.source, &subject.source);
+    for check in asked_checks(rule, file.language, subject.django, &subject.source, xml) {
         let check = if from_callees && check.id == "exception_to_client" {
             &questions::EXCEPTION_TO_CLIENT_FROM_CALLEES
         } else {
@@ -593,7 +611,14 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
         "origin",
         Pass::Recheck,
     );
-    for check in asked_checks(INJECTION, file.language, subject.django, &subject.source) {
+    let xml = questions::parses_xml(file.source, &subject.source);
+    for check in asked_checks(
+        INJECTION,
+        file.language,
+        subject.django,
+        &subject.source,
+        xml,
+    ) {
         questions.ask(
             check.id.into(),
             check.with_callers(&code),

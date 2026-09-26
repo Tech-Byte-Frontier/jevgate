@@ -170,7 +170,8 @@ mod tests {
                     ("JavaScript", "require('node-serialize')"),
                 ]
                 .map(|(language, source)| deserializer_check(language, source).unwrap()),
-            );
+            )
+            .chain([&XXE]);
         let mut all = vec![
             security_logs_secret("function.source"),
             security_url_parts("function.source", false),
@@ -203,8 +204,9 @@ mod tests {
         }
         for django in [false, true] {
             all.extend([
-                security_interpreted("function.source", django, None),
-                security_interpreted("function.source", django, Some("pickle")),
+                security_interpreted("function.source", django, None, false),
+                security_interpreted("function.source", django, Some("pickle"), false),
+                security_interpreted("function.source", django, Some("pickle"), true),
                 security_resource("function.source", django),
                 security_error_details("function.source", django),
                 security_weakened("function.source", django),
@@ -216,7 +218,7 @@ mod tests {
         for (id, mut body) in [
             (
                 "interpreted",
-                security_interpreted("function.source", false, None),
+                security_interpreted("function.source", false, None, false),
             ),
             ("resource", security_resource("function.source", false)),
             (
