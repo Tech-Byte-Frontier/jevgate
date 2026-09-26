@@ -3,8 +3,9 @@
 use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, at_most_note, benefit, checks, choice, document_split, lowered, noul,
-        open, origin_outcome, score, settled_checks, several_kind, unit_outcome, value_signals,
+        Answers, Outcome, at_most_note, benefit, checks, choice, choice_mass, document_split,
+        lowered, noul, open, origin_outcome, score, settled_checks, several_kind, unit_outcome,
+        value_signals,
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
@@ -1088,7 +1089,11 @@ fn capped(
     if unnamed_value(unit, judgments) {
         return lowered(lowered(outcome));
     }
-    if single_use_value(unit, judgments) || short_outline(unit) || small_section(unit) {
+    if single_use_value(unit, judgments)
+        || readable_value(unit, judgments)
+        || short_outline(unit)
+        || small_section(unit)
+    {
         return at_most_note(outcome);
     }
     if named_value_only(unit, judgments) {
@@ -1099,6 +1104,59 @@ fn capped(
         || unnamed_outline(unit, judgments)
         || few.contains(unit.id.as_str());
     if lower { lowered(outcome) } else { outcome }
+}
+
+/// The follow-up of each hardcoded-value consider that rests on a value's
+/// name, whose value the locate named and its file writes again, not yet
+/// asked what that value is.
+pub fn unkinded_values(
+    plan: &FilePlan,
+    judgments: &[Judgment],
+) -> Vec<(serde_json::Value, super::Asked)> {
+    plan.units
+        .iter()
+        .filter(|u| u.presence == Presence::Judged)
+        .filter_map(|u| {
+            let Detail::Values {
+                locate: Some(locate),
+                repeated,
+                ..
+            } = &u.detail
+            else {
+                return None;
+            };
+            if answers(judgments, &u.id, Pass::Locate).contains_key("value_kind")
+                || !named_value_only(u, judgments)
+            {
+                return None;
+            }
+            let option = located_option(u, judgments, ("value", 'v'))?;
+            if repeated.get(option) != Some(&true) {
+                return None;
+            }
+            super::hardcoded::value_kind(locate, option, &u.id)
+        })
+        .collect()
+}
+
+/// Such a consider whose value, asked what it is, clearly reads for itself
+/// where it is used: the field or argument it fills or a comment beside it
+/// says what it is, or it is an idiom or a hand-tuned number, together at
+/// the threshold of a clear located part. Its finding is a note; a value
+/// with copies that must change together, or that nothing explains, stays
+/// a consider. Leaning toward those kinds was not enough: at 0.50 they took
+/// 30 of 46 right considers with 47 of 64 wrong ones.
+fn readable_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    named_value_only(unit, judgments)
+        && choice_mass(
+            answers(judgments, &unit.id, Pass::Locate)
+                .get("value_kind")
+                .copied(),
+            &super::questions::READABLE_VALUES,
+        )
+        .is_some_and(|p| {
+            crate::policy::probability_at_least(p, crate::policy::LOCATION_PROBABILITY)
+        })
 }
 
 /// A function's hardcoded-value review or consider whose value was not
@@ -1231,6 +1289,8 @@ fn lowered_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<(Strength, &
         "No single value stood out, so it is a note."
     } else if single_use_value(unit, judgments) {
         "It is written once in its file, so it is a note."
+    } else if readable_value(unit, judgments) {
+        "It reads for itself where it is used, so it is a note."
     } else if named_value_only(unit, judgments)
         && matches!(resolved(unit, judgments).0, Outcome::Review(_))
     {

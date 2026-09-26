@@ -24,6 +24,27 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     })
 }
 
+/// One question per hardcoded-value consider resting on a value's name
+/// whose value its file writes again: what that value is. It needs the
+/// value the locate named, so it follows the locates.
+pub fn value_kinds(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
+    let mut planned = Vec::new();
+    for (&owner, file_plan) in &plan.files {
+        let file = &files[owner];
+        if file.status == Status::Error {
+            continue;
+        }
+        for (request, asked) in compose::unkinded_values(file_plan, &file.judgments) {
+            planned.push(Planned {
+                owner,
+                request,
+                asked,
+            });
+        }
+    }
+    planned
+}
+
 /// The section and pair checks of documents that are not finished plans.
 pub fn doc_checks(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     let finished = compose::finished_plans(plan, files);

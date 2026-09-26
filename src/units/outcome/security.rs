@@ -55,7 +55,7 @@ pub(super) fn settled<'a>(
 }
 
 /// The share of a Choice's probability on `options`, when it was answered.
-pub(super) fn choice_mass(answer: Option<&Answer>, options: &[&str]) -> Option<f64> {
+pub(in crate::units) fn choice_mass(answer: Option<&Answer>, options: &[&str]) -> Option<f64> {
     let Answer::Choice { probabilities, .. } = answer? else {
         return None;
     };

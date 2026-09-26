@@ -34,7 +34,7 @@ pub(super) use maintainability::{
 };
 use pairs::doc_pair_outcome;
 pub(super) use pairs::{disagreement, pair_signals, repeated};
-pub(super) use security::{checks, settled_checks};
+pub(super) use security::{checks, choice_mass, settled_checks};
 pub(super) use test_rules::{redundancy_outcome, test_value_outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -208,7 +208,14 @@ signatures, or one candidate pair.
    again with the body of the function both call: whether it throws before
    the rest of a test runs is in that body.
    Then one locate Choice per split finding picks the body block to extract,
-   and one per hardcoded-value review or consider names the value it is about.
+   and one per hardcoded-value review or consider names the value it is about,
+   each value listed with the other lines of its file that write it. A
+   consider that rests only on a value's name, whose file writes that value
+   again, is then asked what the value is: copies that must change together,
+   or a value nothing near it explains, keep it; a value that the field or
+   argument it fills or a comment beside it explains, an idiom such as a
+   tolerance near zero or a unit conversion, or a hand-tuned number make it a
+   note.
    Special-case findings in different files that name the same identity
    become one finding at the strongest site; the others are notes pointing at
    it. Numbers and paths are not grouped: `1000` meant metres per kilometre in

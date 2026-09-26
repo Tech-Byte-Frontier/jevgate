@@ -32,7 +32,7 @@ mod workflows;
 use answers::Questions;
 pub use answers::{Asked, record};
 use evidence::{FileContext, compact, identity, pack, pack_runs, request, unique_ids};
-pub use follow_ups::{doc_checks, kinds, locates, rechecks, settles, traces};
+pub use follow_ups::{doc_checks, kinds, locates, rechecks, settles, traces, value_kinds};
 use plan::Scope;
 pub use plan::plan;
 pub use spacetimedb::spacetimedb_module;
