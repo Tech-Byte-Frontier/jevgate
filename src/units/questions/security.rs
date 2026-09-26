@@ -647,7 +647,9 @@ const DJANGO_MARKUP: Check = Check {
 };
 
 /// Specific weak settings, asked when the broad presence question is not clear.
-pub const WEAK_SETTINGS: [Check; 6] = [
+/// Turning off output escaping had no check: NodeGoat's `autoescape: false`
+/// and RailsGoat's `escape_html_entities_in_json = false` were at most notes.
+pub const WEAK_SETTINGS: [Check; 7] = [
     Check {
         id: "tls",
         question: "Does `{code}` turn off certificate or host name verification?",
@@ -657,9 +659,9 @@ pub const WEAK_SETTINGS: [Check; 6] = [
     },
     Check {
         id: "hash",
-        question: "Does `{code}` hash passwords or derive keys from them with a fast or broken hash, or with few iterations?",
-        yes: "It hashes passwords or derives keys from them with MD5, SHA-1, a single round of SHA-256, or a key derivation function with few iterations.",
-        no: "It uses bcrypt, scrypt, Argon2 or a key derivation function with many iterations, or it does not handle passwords.",
+        question: "Does `{code}` keep passwords as plain text, or hash them or derive keys from them with a fast or broken hash, or with few iterations?",
+        yes: "It saves passwords, or checks a login against saved passwords, as plain text, or hashes passwords or derives keys from them with MD5, SHA-1, a single round of SHA-256, or a key derivation function with few iterations.",
+        no: "It uses bcrypt, scrypt, Argon2 or a key derivation function with many iterations; it hands passwords to a library, framework or model hook that hashes them before saving; or it does not handle passwords.",
         no_examples: &[],
     },
     Check {
@@ -681,7 +683,10 @@ pub const WEAK_SETTINGS: [Check; 6] = [
         question: "Does `{code}` set or configure a session or authentication cookie without the Secure or HttpOnly flag?",
         yes: "A cookie that holds a session or token is set or configured without Secure or without HttpOnly.",
         no: "Such cookies have both flags, the cookie holds no session or token, or the code sets no cookie.",
-        no_examples: &[],
+        no_examples: &[
+            "A cookie added to a request, such as Go's `r.AddCookie`, rather than set on a response",
+            "A cookie set empty and already expired, which deletes it",
+        ],
     },
     Check {
         id: "public_secret",
@@ -690,7 +695,37 @@ pub const WEAK_SETTINGS: [Check; 6] = [
         no: "Such variables hold only values meant for browsers, such as publishable or anonymous keys, public URLs and site ids; secrets come from variables without such a prefix; or it reads no such variable.",
         no_examples: &[],
     },
+    Check {
+        id: "escape",
+        question: "Does `{code}` turn off the automatic escaping of values written into HTML?",
+        yes: "It turns off a template engine's or serializer's escaping of HTML for output that browsers render, such as autoescape set to false or escape_html_entities_in_json set to false.",
+        no: "Escaping stays on; the output is not HTML that browsers render, such as Markdown, plain-text email or source code; or it configures no escaping.",
+        no_examples: &[],
+    },
 ];
+
+/// The token and key checks of code outside C# and Django, which ask their
+/// own: a JWT decoded without verifying its signature found the broad
+/// question at 0.93 to 0.98 in DVGA and JavaVulnerableLab, and with no check
+/// to name the setting it was only a note; DVNA's session secret
+/// `'keyboard cat'` and RailsGoat's encryption key were missed.
+pub const TOKEN_AND_KEY: [Check; 2] = [TOKEN, KEY];
+
+const KEY: Check = Check {
+    id: "key",
+    question: "Does `{code}` sign or encrypt with a key or secret written in the code?",
+    yes: "A signing or encryption key, such as the secret that signs session cookies or JSON Web Tokens, or a key that encrypts stored data, is a string or bytes written in the code or a constant of the program.",
+    no: "Keys are read from configuration, the environment or a secret store; the literal is only a placeholder, or is used only in tests or local development; or it uses no key.",
+    no_examples: &[],
+};
+
+const TOKEN: Check = Check {
+    id: "token",
+    question: "Does `{code}` accept security tokens without verifying their signature or expiry?",
+    yes: "It trusts a JSON Web Token or other signed token without verifying its signature, such as a decode call with signature verification turned off, a decode used where a verify is needed, or an algorithm list that allows none, or it turns off the expiry check.",
+    no: "Signatures and expiry are checked where tokens are accepted, or it accepts none: it only creates, stores or sends a token, reads the claims of a token already verified before it, or checks that one is present while a server verifies it.",
+    no_examples: &[],
+};
 
 const DJANGO_HASH: Check = Check {
     id: "hash",

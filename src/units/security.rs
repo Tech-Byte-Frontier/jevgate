@@ -469,7 +469,8 @@ fn rule_checks(
 /// checks only of source that names what they ask about, and other code
 /// the deserialize check of its language when its source names one of the
 /// language's deserializers. Code that parses XML with a parser able to
-/// resolve external entities (`xml`) is asked the XML check.
+/// resolve external entities (`xml`) is asked the XML check. The token and
+/// key checks are asked of code outside C# and Django, which ask their own.
 fn asked_checks(
     rule: &str,
     language: &str,
@@ -504,6 +505,12 @@ fn asked_checks(
                 .flatten(),
         )
         .chain((rule == INJECTION && xml).then_some(&questions::XXE))
+        .chain(
+            (rule == UNSAFE_SETTINGS && language != questions::CSHARP && !django)
+                .then_some(&questions::TOKEN_AND_KEY)
+                .into_iter()
+                .flatten(),
+        )
         .collect()
 }
 

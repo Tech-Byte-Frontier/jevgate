@@ -1111,6 +1111,59 @@ fn a_csharp_setup_trace_shows_the_constants_it_names_and_finds_a_key_written_in_
 }
 
 #[test]
+fn code_outside_csharp_and_django_is_asked_about_tokens_keys_and_escaping() {
+    let project = Project::new();
+    project.write(
+        "server.js",
+        "const session = require('express-session');\nconst app = require('express')();\napp.use(session({ secret: 'keyboard cat', resave: true, saveUninitialized: true }));\napp.listen(9090);\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
+    let mut eval = recording(&[("weakened", 0.95), ("key", 0.95)]);
+    let report = run(&project, &options, &mut eval);
+    let trace = eval
+        .requests
+        .iter()
+        .find(|r| r["jevgate"]["stage"] == "trace")
+        .unwrap();
+    for check in ["token", "key", "escape", "hash", "cookie"] {
+        assert!(trace["questions"][check].is_object(), "{check}");
+    }
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-321 hard-coded cryptographic key")
+    );
+    // C# asks its own wording of the token check, once.
+    let csharp = security_checks_of_csharp_setup();
+    assert!(
+        csharp["token"]
+            .to_string()
+            .contains("ValidateIssuerSigningKey")
+    );
+}
+
+/// The unsafe-settings trace questions of a C# setup statement.
+fn security_checks_of_csharp_setup() -> serde_json::Map<String, Value> {
+    let project = Project::new();
+    project.write(
+        "Program.cs",
+        "var builder = WebApplication.CreateBuilder(args);\nbuilder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin()));\nvar app = builder.Build();\napp.Run();\n",
+    );
+    let mut options = args();
+    options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
+    let mut eval = recording(&[("weakened", 0.95)]);
+    run(&project, &options, &mut eval);
+    let trace = eval
+        .requests
+        .iter()
+        .find(|r| r["jevgate"]["stage"] == "trace")
+        .unwrap();
+    trace["questions"].as_object().unwrap().clone()
+}
+
+#[test]
 fn a_csharp_type_named_by_input_is_an_injection_named_by_its_own_check() {
     let project = Project::new();
     project.write(
