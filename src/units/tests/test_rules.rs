@@ -362,6 +362,7 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
             ("overlap", spread(0.0, 0.05, 0.95)),
             ("same_input", noul_at(same_input)),
             ("same_outcome", noul_at(same_outcome)),
+            ("distinct", noul_at(0.05)),
         ];
         let report = run(&project, options, &mut eval);
         report.files[0]
@@ -373,6 +374,23 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
     };
     assert_eq!(strengths(&options, 0.95, 0.95), Some(Strength::Review));
     options.refresh = true;
+    // A review is asked whether each test checks something the other does
+    // not; if so, as for tests of two overloads, it is a consider.
+    let mut eval = scripted(2);
+    eval.overrides = vec![
+        ("overlap", spread(0.0, 0.05, 0.95)),
+        ("same_input", noul_at(0.95)),
+        ("same_outcome", noul_at(0.95)),
+        ("distinct", noul_at(0.9)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    assert!(
+        report.files[0]
+            .findings
+            .iter()
+            .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
+            .all(|f| f.strength != Strength::Review)
+    );
     assert_eq!(strengths(&options, 0.69, 0.95), Some(Strength::Consider));
     assert_eq!(strengths(&options, 0.95, 0.05), Some(Strength::Consider));
     // Different inputs whose outcomes clearly differ are a note.

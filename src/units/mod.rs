@@ -210,6 +210,9 @@ pub enum Detail {
         /// Tests in different groups whose setup is not sent (outside Ruby):
         /// each group's `before` hook may build a different case.
         unseen_setup: bool,
+        /// Outside Ruby, whether each test checks something the other does
+        /// not, asked only of a pair that reached a review.
+        confirm: Option<(Value, Asked)>,
     },
 }
 
