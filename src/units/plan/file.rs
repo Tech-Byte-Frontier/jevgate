@@ -125,20 +125,26 @@ fn file_context<'a>(
         source_hash: &input.result.source_hash,
         model: args.model(),
         budget,
-        framework: crate::units::nextjs::describe(
-            &input.result.path,
-            input.source.as_deref().unwrap_or(""),
-            input.package.as_ref(),
-        )
-        .or_else(|| crate::units::sveltekit::describe(&input.result.path, input.package.as_ref()))
-        .or_else(|| {
-            crate::units::graphql::describe(
-                &input.result.path,
-                input.source.as_deref().unwrap_or(""),
-            )
-            .or_else(|| crate::units::client_app::describe(input.package.as_ref()))
-            .map(str::to_string)
-        }),
+        framework: crate::components::server_template(&input.result.path)
+            .then(|| crate::components::TEMPLATE_SCRIPT.to_string())
+            .or_else(|| {
+                crate::units::nextjs::describe(
+                    &input.result.path,
+                    input.source.as_deref().unwrap_or(""),
+                    input.package.as_ref(),
+                )
+            })
+            .or_else(|| {
+                crate::units::sveltekit::describe(&input.result.path, input.package.as_ref())
+            })
+            .or_else(|| {
+                crate::units::graphql::describe(
+                    &input.result.path,
+                    input.source.as_deref().unwrap_or(""),
+                )
+                .or_else(|| crate::units::client_app::describe(input.package.as_ref()))
+                .map(str::to_string)
+            }),
     }
 }
 

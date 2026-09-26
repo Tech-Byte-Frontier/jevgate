@@ -304,6 +304,32 @@ fn assigns_setting(node: Node<'_>, source: &str) -> bool {
 pub fn script(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
     let mut nodes = Vec::new();
     super::php::script_statements(root, &mut nodes);
+    page(nodes, root, source, units)
+}
+
+/// Top-level declarations of JavaScript that define rather than run.
+const SCRIPT_DEFINITIONS: [&str; 5] = [
+    "function_declaration",
+    "generator_function_declaration",
+    "class_declaration",
+    "import_statement",
+    "export_statement",
+];
+
+/// The top-level statements of a server template's inline scripts, which run
+/// in the visitor's browser as the page loads: judged like a function by
+/// every security rule, as a PHP page script is.
+pub fn inline_script(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Setup {
+    let mut cursor = root.walk();
+    let nodes: Vec<Node<'_>> = root
+        .named_children(&mut cursor)
+        .filter(|node| !is_comment(*node) && !SCRIPT_DEFINITIONS.contains(&node.kind()))
+        .collect();
+    page(nodes, root, source, units)
+}
+
+/// A page's statements outside every unit, judged like a function.
+fn page<'t>(nodes: Vec<Node<'t>>, root: Node<'t>, source: &str, units: &[Range<usize>]) -> Setup {
     let mut statements = Vec::new();
     let mut best = BTreeMap::<usize, (Priority, Node<'_>)>::new();
     let mode = Mode {

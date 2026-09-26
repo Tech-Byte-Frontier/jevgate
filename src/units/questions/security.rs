@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 pub fn security_interpreted(
     code: &str,
     django: bool,
+    rendered: bool,
     deserializers: Option<&str>,
     xml: bool,
 ) -> Value {
@@ -33,11 +34,16 @@ pub fn security_interpreted(
         yes.push_str(", marked as safe markup or passed to a template that writes it unescaped, or loaded with pickle or a similar deserializer");
         no.push_str(" data is parsed only as JSON or another data-only format;");
     } else if let Some(names) = deserializers {
+        if rendered {
+            yes.push_str(", or passed to a template that writes it unescaped");
+        }
         question.push_str(", or load it with a deserializer that can build any object");
         yes.push_str(&format!(
             ", or loaded with a deserializer that can build any object or run code, such as {names}"
         ));
         no.push_str(" data is parsed only as JSON or another data-only format;");
+    } else if rendered {
+        yes.push_str(", or passed to a template that writes it unescaped");
     }
     if xml {
         // Both clauses would make the question too long to read as one.
@@ -412,6 +418,20 @@ const DJANGO_MARKUP: Check = Check {
     no_examples: &[
         "A template rendered with the variable in its context, when the template writes that value without a safe filter, which Django escapes",
         "format_html or format_html_join with the variables passed as its arguments, which escapes them",
+    ],
+};
+
+/// The markup check of a function outside Django that renders a template
+/// writing values without escaping: DVNA's product search hands the
+/// request's search term to `views/app/products.ejs`, which writes it with
+/// `<%- … %>`, and the function alone read as building no markup.
+pub const VIEW_MARKUP: Check = Check {
+    id: "markup",
+    question: "Does `{code}` put a variable into HTML or SVG markup without escaping it, itself or through a template it renders?",
+    yes: "A variable is joined into HTML or SVG text, or passed to a template that writes it without escaping, such as with EJS `<%- … %>`, Handlebars `{{{ … }}}` or a `|safe` filter, without an escaping function.",
+    no: "Values go through an escaping function or a template that escapes them, or it builds no markup.",
+    no_examples: &[
+        "A template rendered with the variable, when the template writes that value with an escaping tag, such as EJS `<%= … %>` or Handlebars `{{ … }}`",
     ],
 };
 

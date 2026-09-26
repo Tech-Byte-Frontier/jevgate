@@ -112,6 +112,9 @@ pub struct FileUnits {
     /// In Django code, its upper-case module constants with their
     /// assignments as shown.
     pub module_constants: Vec<(String, String)>,
+    /// In a server template, the code it runs while rendering that reads
+    /// client data (`template_code`).
+    pub template_code: super::sites::Setup,
 }
 
 /// Units of a supported language. Unsupported languages return an unparsed,
@@ -135,16 +138,39 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     }
     file.constants = super::literals::constants(tree.root_node(), source);
     let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
-    file.setup = if framework_config(path) {
-        super::sites::config_setup(tree.root_node(), source)
+    file.setup = setup_of(path, tree.root_node(), source, &spans, settings);
+    if crate::components::server_template(path) {
+        file.template_code = super::template_code::template_code(path, source);
+    }
+    calls_by_name(&mut file.units);
+    Ok(file)
+}
+
+/// The statements that run outside every unit: a framework configuration's
+/// objects, a PHP page script, a server template's inline scripts, or a
+/// module's setup (a Django settings module's with `settings`).
+fn setup_of(
+    path: &Path,
+    root: Node<'_>,
+    source: &str,
+    spans: &[Range<usize>],
+    settings: bool,
+) -> super::sites::Setup {
+    if framework_config(path) {
+        super::sites::config_setup(root, source)
     } else if super::php::file(path) {
-        super::sites::script(tree.root_node(), source, &spans)
+        super::sites::script(root, source, spans)
+    } else if crate::components::server_template(path) {
+        super::sites::inline_script(root, source, spans)
     } else {
-        super::sites::setup(tree.root_node(), source, &spans, settings)
-    };
-    // A function passed by name, such as `map(parse)`, is used like a call.
-    let names: BTreeSet<String> = file.units.iter().map(|u| u.short_name.clone()).collect();
-    for unit in &mut file.units {
+        super::sites::setup(root, source, spans, settings)
+    }
+}
+
+/// A function passed by name, such as `map(parse)`, is used like a call.
+fn calls_by_name(units: &mut [Unit]) {
+    let names: BTreeSet<String> = units.iter().map(|u| u.short_name.clone()).collect();
+    for unit in units {
         let used: Vec<String> = unit
             .mentions
             .intersection(&names)
@@ -154,7 +180,6 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         unit.calls.extend(used);
         unit.mentions.clear();
     }
-    Ok(file)
 }
 
 /// A framework configuration file whose settings are plain objects, such

@@ -64,12 +64,15 @@ pub(super) fn unescaped_templates(
     boundary: &Boundary,
     inputs: &mut [Input],
 ) {
+    // Python views name templates as `blog/post.html`; a Node handler
+    // renders a view by name, as in `res.render('app/products', …)`.
     let candidate = |input: &Input| {
-        input.result.path.extension().is_some_and(|e| e == "py")
-            && input
-                .source
-                .as_deref()
-                .is_some_and(|source| source.contains(".html"))
+        let source = input.source.as_deref().unwrap_or("");
+        match input.result.path.extension().and_then(|e| e.to_str()) {
+            Some("py") => source.contains(".html"),
+            Some("js" | "mjs" | "cjs" | "ts" | "mts" | "cts") => source.contains(".render("),
+            _ => false,
+        }
     };
     if !inputs.iter().any(candidate) {
         return;
@@ -80,9 +83,10 @@ pub(super) fn unescaped_templates(
         let Ok(relative) = &crate::discovery::relative(path, &context.root) else {
             continue;
         };
-        let Some(name) = crate::analysis::django::template_name(relative) else {
+        let django = crate::analysis::django::template_name(relative);
+        if django.is_none() && crate::analysis::views::view_name(relative).is_none() {
             continue;
-        };
+        }
         if !entry.file_type().is_some_and(|t| t.is_file())
             || !boundary.permits(relative)
             || std::fs::metadata(path)
@@ -93,13 +97,18 @@ pub(super) fn unescaped_templates(
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
         };
-        let unescaped = crate::analysis::django::unescaped_lines(&text);
-        if !unescaped.is_empty() {
-            templates.push(crate::analysis::django::Template {
-                name,
-                path: relative.to_path_buf(),
-                unescaped,
-            });
+        match django {
+            Some(name) => {
+                let unescaped = crate::analysis::django::unescaped_lines(&text);
+                if !unescaped.is_empty() {
+                    templates.push(crate::analysis::django::Template {
+                        name,
+                        path: relative.to_path_buf(),
+                        unescaped,
+                    });
+                }
+            }
+            None => templates.extend(crate::analysis::views::view(relative, &text)),
         }
     }
     templates.sort_by(|a, b| a.path.cmp(&b.path));

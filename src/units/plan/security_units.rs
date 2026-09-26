@@ -38,29 +38,7 @@ pub(super) fn plan_security(
         .units
         .iter()
         .filter(|u| u.callable() && outside_tests(u.line))
-        .map(|unit| {
-            let callers = if rules.contains(&catalog::INJECTION) {
-                callers_of(scope, &shared.links, context.owner, unit)
-            } else {
-                Vec::new()
-            };
-            let mut subject = security::function_subject(
-                context,
-                unit,
-                callers,
-                &shared.enums,
-                &shared.constants,
-            );
-            if rules.contains(&catalog::SENSITIVE_DATA) {
-                subject.callee_errors = callee_errors(scope, &shared.links, context.owner, unit);
-            }
-            subject.django = parsed.django;
-            subject.test_path = test_path;
-            if parsed.django {
-                django_evidence(scope, context, parsed, unit, rules, &mut subject);
-            }
-            subject
-        })
+        .map(|unit| function_subject(scope, shared, context, unit, rules))
         .collect();
     let mut setup = security::setup_subject(context, &parsed.setup, &shared.constants)
         .filter(|_| parsed.setup.statements.iter().all(|s| outside_tests(s.1)));
@@ -96,6 +74,56 @@ pub(super) fn plan_security(
         file,
         requests,
     );
+    // A server template's code that reads client data: a JSP page's
+    // scriptlets are judged like a PHP page script, by every rule; other
+    // templates' code is tags that write a value unescaped, which injection
+    // judges by where the value comes from. Asked whether they turn off
+    // escaping, each `raw` or `html_safe` tag of RailsGoat's views said yes,
+    // even around a user's numeric id.
+    if let Some(code) = security::template_subject(context, &parsed.template_code) {
+        let jsp = matches!(
+            context.path.extension().and_then(|e| e.to_str()),
+            Some("jsp" | "jspf")
+        );
+        let judged: Vec<&'static str> = rules
+            .iter()
+            .copied()
+            .filter(|rule| jsp || *rule == catalog::INJECTION)
+            .collect();
+        security::plan(context, &[code], None, &judged, false, file, requests);
+    }
+}
+
+/// A function with the evidence its enabled rules need: callers for
+/// injection, the errors its callees create for sensitive data, Django's
+/// facts, and the templates it renders.
+fn function_subject<'a>(
+    scope: &'a Scope<'_>,
+    shared: &'a Shared<'_>,
+    context: &FileContext<'_>,
+    unit: &'a Unit,
+    rules: &[&'static str],
+) -> security::Subject<'a> {
+    let parsed = &scope.units[&context.owner];
+    let callers = if rules.contains(&catalog::INJECTION) {
+        callers_of(scope, &shared.links, context.owner, unit)
+    } else {
+        Vec::new()
+    };
+    let mut subject =
+        security::function_subject(context, unit, callers, &shared.enums, &shared.constants);
+    if rules.contains(&catalog::SENSITIVE_DATA) {
+        subject.callee_errors = callee_errors(scope, &shared.links, context.owner, unit);
+    }
+    subject.django = parsed.django;
+    subject.test_path = scope.inputs[context.owner].result.role == "test";
+    if parsed.django {
+        django_evidence(scope, context, parsed, unit, &mut subject);
+    }
+    if rules.contains(&catalog::INJECTION) {
+        rendered_templates(scope, context, &mut subject);
+    }
+    subject
 }
 
 /// Module constants shown with one function, at most.
@@ -111,7 +139,6 @@ fn django_evidence(
     context: &FileContext<'_>,
     parsed: &FileUnits,
     unit: &Unit,
-    rules: &[&'static str],
     subject: &mut security::Subject<'_>,
 ) {
     if let Some(command) = crate::analysis::django::management_command(context.path) {
@@ -136,6 +163,16 @@ fn django_evidence(
             serde_json::json!(routes),
         );
     }
+}
+
+/// The templates a function renders by name that write values without
+/// escaping, with those lines: the markup a Django view's or a Node
+/// handler's values reach is written there, not in the function.
+fn rendered_templates(
+    scope: &Scope<'_>,
+    context: &FileContext<'_>,
+    subject: &mut security::Subject<'_>,
+) {
     let templates: Vec<serde_json::Value> = crate::analysis::django::rendered(
         subject.source.as_str(),
         &scope.inputs[context.owner].templates,
@@ -149,11 +186,10 @@ fn django_evidence(
         })
     })
     .collect();
-    if rules.contains(&catalog::INJECTION) && !templates.is_empty() {
-        subject.evidence.insert(
-            "templates_it_renders_that_write_values_without_escaping".into(),
-            serde_json::json!(templates),
-        );
+    if !templates.is_empty() {
+        subject
+            .evidence
+            .insert(security::RENDERED.into(), serde_json::json!(templates));
     }
 }
 

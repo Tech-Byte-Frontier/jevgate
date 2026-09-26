@@ -2,11 +2,70 @@
 //! Astro's frontmatter and `<script>` contents becomes a space and newlines
 //! are kept, so byte offsets and lines in the parsed tree are the file's.
 //! Markup and styles are left out.
-use std::ops::Range;
+use std::{ops::Range, path::Path};
 
 /// Single-file component formats whose scripts are parsed as TypeScript or
 /// JavaScript.
 pub const FORMATS: [&str; 3] = ["astro", "vue", "svelte"];
+
+/// Extensions of server-rendered templates: ERB, EJS, JSP, Handlebars and
+/// Mustache, Nunjucks, Twig, Jinja and Go templates.
+const TEMPLATE_EXTENSIONS: [&str; 14] = [
+    "erb",
+    "ejs",
+    "jsp",
+    "jspf",
+    "hbs",
+    "handlebars",
+    "mustache",
+    "njk",
+    "twig",
+    "jinja",
+    "jinja2",
+    "j2",
+    "tmpl",
+    "gohtml",
+];
+
+/// Directories whose HTML files a server renders as templates.
+const TEMPLATE_DIRECTORIES: [&str; 5] = ["templates", "views", "layouts", "partials", "includes"];
+
+/// What a server template's code is, sent beside its path and language.
+pub const TEMPLATE_SCRIPT: &str = "A server-rendered template. Its functions and `top-level code` are its inline <script> code, which runs in the visitor's browser; `template code` is the code the server runs while rendering it that reads the request, a cookie, the session or the signed-in user: tags that write a value into the page without escaping it, and JSP scriptlets. The server fills the template's tags, such as `<%= … %>` or `{{ … }}`, before it sends the page, and the rest of its markup is left out.";
+
+/// A server-rendered template, whose `<script>` elements are parsed as the
+/// page's JavaScript: its markup is left out and its template tags blanked.
+/// The documented DOM XSS of RailsGoat, DVNA and DVGA sat in such scripts
+/// (`document.write` of `location.hash`, `innerHTML` of fetched user
+/// fields), which no rule read.
+pub fn server_template(path: &Path) -> bool {
+    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    TEMPLATE_EXTENSIONS.contains(&extension)
+        || matches!(extension, "html" | "htm")
+            && path.parent().is_some_and(|directory| {
+                directory.iter().any(|part| {
+                    part.to_str()
+                        .is_some_and(|p| TEMPLATE_DIRECTORIES.contains(&p))
+                })
+            })
+}
+
+/// Whether a template holds code that is judged: a `<script>` element with
+/// code of its own, or template code that reads client data.
+pub fn judged(path: &Path, source: &str) -> bool {
+    inline_scripts(source)
+        || !crate::analysis::template_code::template_code(path, source)
+            .statements
+            .is_empty()
+}
+
+/// Whether a template holds a `<script>` element with code of its own.
+pub fn inline_scripts(source: &str) -> bool {
+    script_elements(source, 0)
+        .ranges
+        .iter()
+        .any(|range| !source[range.clone()].trim().is_empty())
+}
 
 /// Script types that hold JavaScript or TypeScript.
 const SCRIPT_TYPES: [&str; 4] = [
@@ -113,4 +172,45 @@ fn masked(source: &str, keep: &[Range<usize>]) -> String {
         }
     }
     masked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_templates_are_known_by_extension_or_by_their_directory() {
+        for path in [
+            "app/views/layouts/application.html.erb",
+            "views/app/products.ejs",
+            "src/main/webapp/WEB-INF/views/list.jsp",
+            "templates/email.hbs",
+            "core/templates/paste.html",
+            "app/views/profile.html",
+        ] {
+            assert!(server_template(Path::new(path)), "{path}");
+        }
+        for path in [
+            "public/index.html",
+            "docs/page.html",
+            "src/app.js",
+            "templates/base.py",
+        ] {
+            assert!(!server_template(Path::new(path)), "{path}");
+        }
+    }
+
+    #[test]
+    fn only_a_script_with_code_of_its_own_counts() {
+        assert!(inline_scripts(
+            "<p>Hi</p>\n<script>\n  load();\n</script>\n"
+        ));
+        assert!(!inline_scripts(
+            "<p>Hi</p>\n<script src=\"/app.js\"></script>\n"
+        ));
+        assert!(!inline_scripts(
+            "<script type=\"text/template\"><b>{{ name }}</b></script>"
+        ));
+        assert!(!inline_scripts("<p>{{ name }}</p>"));
+    }
 }

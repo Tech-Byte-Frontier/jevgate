@@ -23,11 +23,18 @@ pub const TEMPLATES: usize = 3;
 /// The name a template under a `templates` directory is rendered by: the
 /// path after the last `templates` part.
 pub fn template_name(relative: &Path) -> Option<String> {
-    let parts: Vec<&str> = relative.iter().filter_map(|p| p.to_str()).collect();
-    let at = parts.iter().rposition(|p| *p == "templates")?;
     let extension = relative.extension().and_then(|e| e.to_str())?;
-    (at + 1 < parts.len() && matches!(extension, "html" | "htm" | "txt" | "xml" | "jinja" | "j2"))
-        .then(|| parts[at + 1..].join("/"))
+    matches!(extension, "html" | "htm" | "txt" | "xml" | "jinja" | "j2")
+        .then(|| name_under(relative, "templates"))
+        .flatten()
+}
+
+/// The path after the last part named `directory`, joined with `/`: the
+/// name a framework renders a template by.
+pub fn name_under(relative: &Path, directory: &str) -> Option<String> {
+    let parts: Vec<&str> = relative.iter().filter_map(|p| p.to_str()).collect();
+    let at = parts.iter().rposition(|p| *p == directory)?;
+    (at + 1 < parts.len()).then(|| parts[at + 1..].join("/"))
 }
 
 /// The lines of a template that output values without escaping.
@@ -50,12 +57,17 @@ pub fn unescaped_lines(text: &str) -> Vec<String> {
 }
 
 /// The templates a function names in a string literal, such as
-/// `render(request, 'blog/post.html', …)` or `template_name = "blog/post.html"`.
+/// `render(request, 'blog/post.html', …)`, `template_name = "blog/post.html"`
+/// or a Node view's `res.render('app/products')`, with or without its
+/// extension.
 pub fn rendered<'t>(source: &str, templates: &'t [Template]) -> Vec<&'t Template> {
     templates
         .iter()
         .filter(|t| {
-            source.contains(&format!("'{}'", t.name)) || source.contains(&format!("\"{}\"", t.name))
+            ['\'', '"'].iter().any(|quote| {
+                source.contains(&format!("{quote}{}{quote}", t.name))
+                    || source.contains(&format!("{quote}{}.", t.name))
+            })
         })
         .collect()
 }
