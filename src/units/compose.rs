@@ -137,7 +137,13 @@ fn beside(rule: &str) -> Option<Pass> {
     .contains(&rule)
     {
         Some(Pass::Trace)
-    } else if [catalog::HARDCODED_VALUES, catalog::AGENT_CONTEXT].contains(&rule) {
+    } else if [
+        catalog::HARDCODED_VALUES,
+        catalog::AGENT_CONTEXT,
+        catalog::WORKFLOWS,
+    ]
+    .contains(&rule)
+    {
         Some(Pass::Recheck)
     } else {
         None

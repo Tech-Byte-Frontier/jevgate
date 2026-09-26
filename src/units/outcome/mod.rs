@@ -265,9 +265,25 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
         catalog::ACCESS_CONTROL => access_outcome(&get, &unit.detail),
         catalog::WORKFLOWS => {
-            let asked: Vec<Outcome> = ["outside", "untrusted"]
+            // An undecided concern is clear when its recheck Choice rules it
+            // out: no expression holds outside text, or the job runs only the
+            // base branch's code or none.
+            let settles = [
+                ("outside", "outside_source", &["none"][..]),
+                ("untrusted", "pull_request_code", &["base", "none"][..]),
+            ];
+            let asked: Vec<Outcome> = settles
                 .iter()
-                .filter_map(|q| get(q).map(noul))
+                .filter_map(|(question, choice, clears)| {
+                    Some(match get(question).map(noul)? {
+                        Outcome::Uncertain(_)
+                            if security::choice_mass(get(choice), clears).is_some_and(at_least) =>
+                        {
+                            Outcome::Clear
+                        }
+                        other => other,
+                    })
+                })
                 .collect();
             (!asked.is_empty()).then(|| strongest(&asked))
         }
