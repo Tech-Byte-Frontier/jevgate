@@ -6,7 +6,7 @@ use super::{
         Answers, Outcome, at_most_note, benefit, checks, choice, lowered, noul, open,
         origin_outcome, score, several_kind, unit_outcome, value_signals,
     },
-    wording::{comment_reason, comment_wording},
+    wording::{Wording, comment_reason, comment_wording},
     wording::{
         doc_pair_wording, document_wording, function_wording, handler_wording, module_wording,
         outline_wording, pair_wording, plan_wording, privilege_wording, question_label,
@@ -17,7 +17,8 @@ use super::{
 use crate::{
     catalog,
     schema::{
-        Answer, Dimension, Finding, Judgment, Pass, Status, Strength, Undecided, UnitCounts, hash,
+        Answer, Dimension, Finding, Judgment, Location, Pass, Status, Strength, Undecided,
+        UnitCounts, hash,
     },
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -947,41 +948,21 @@ fn finding(
             p,
         ),
         Detail::Values { .. } | Detail::Constants { .. } => {
-            let unnamed = unnamed_value(unit, judgments)
-                .then(|| strength_of(resolved(unit, judgments).0).map(|(s, _)| s))
-                .flatten();
-            let (message, action) =
-                values_wording(name, &unit.detail, (strength, unnamed), p, answers);
-            if let Some(index) = located_constant(unit, judgments) {
-                // The finding points at the constant the Choice named.
-                locations = vec![unit.locations[index].clone()];
-                symbol = unit.locations[index].symbol.clone();
-                let constant = symbol.as_deref().unwrap_or("");
-                (format!("{message} The constant is `{constant}`."), action)
-            } else {
-                match located_value(unit, judgments) {
-                    Some(value) => (format!("{message} The value is {value}."), action),
-                    None => (message, action),
-                }
+            let (wording, constant) = values_finding(unit, strength, p, answers, judgments);
+            if let Some(location) = constant {
+                symbol = location.symbol.clone();
+                locations = vec![location];
             }
+            wording
         }
         Detail::Security {
             sites, messages, ..
         } => {
-            let site = choice(answers.get("site").copied())
-                .and_then(|(id, _)| sites.iter().find(|s| s.id == id));
+            let (wording, site, named) =
+                security_finding(unit, (sites, messages), strength, p, answers);
             block = site;
-            let ((message, action), named) =
-                security_wording(unit.rule, name, strength, p, answers);
-            // The error message the Choice found carrying another error's text.
-            let carried = choice(answers.get("messages").copied())
-                .and_then(|(id, _)| messages.get(id.strip_prefix('m')?.parse::<usize>().ok()?))
-                .filter(|_| named.starts_with("CWE-209") && strength != Strength::Note);
             category = Some(named);
-            match carried {
-                Some(text) => (format!("{message} The message is {text}."), action),
-                None => (message, action),
-            }
+            wording
         }
         Detail::Section { .. } => section_wording(name, &unit.detail, strength, p, answers),
         Detail::Plan { facts } => {
@@ -1022,26 +1003,9 @@ fn finding(
             wording
         }
         Detail::Job { expressions } => {
-            let ((message, action), named) =
-                privilege_wording(&format!("Job `{name}`"), strength, p, answers);
+            let (wording, named) = job_wording(name, expressions, strength, p, answers);
             category = Some(named);
-            let outside = matches!(
-                answers.get("outside").map(|a| noul(a)),
-                Some(Outcome::Review(_))
-            );
-            let listed = expressions
-                .iter()
-                .map(|e| format!("`${{{{ {e} }}}}`"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            if outside {
-                (
-                    format!("{message} Expressions in its scripts: {listed}."),
-                    action,
-                )
-            } else {
-                (message, action)
-            }
+            wording
         }
         Detail::Comment { .. } => {
             let reason = comment_reason(answers, documented(unit));
@@ -1180,6 +1144,85 @@ fn chosen_groups<'g>(
         }
         _ => Vec::new(),
     }
+}
+
+/// A hardcoded-value finding's wording, naming the value or constant the
+/// locate Choice named, and the location of that constant.
+fn values_finding(
+    unit: &UnitPlan,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+    judgments: &[Judgment],
+) -> (Wording, Option<Location>) {
+    let unnamed = unnamed_value(unit, judgments)
+        .then(|| strength_of(resolved(unit, judgments).0).map(|(s, _)| s))
+        .flatten();
+    let (message, action) =
+        values_wording(&unit.name, &unit.detail, (strength, unnamed), p, answers);
+    if let Some(index) = located_constant(unit, judgments) {
+        // The finding points at the constant the Choice named.
+        let location = unit.locations[index].clone();
+        let constant = location.symbol.as_deref().unwrap_or("");
+        let message = format!("{message} The constant is `{constant}`.");
+        return ((message, action), Some(location));
+    }
+    let wording = match located_value(unit, judgments) {
+        Some(value) => (format!("{message} The value is {value}."), action),
+        None => (message, action),
+    };
+    (wording, None)
+}
+
+/// A security finding's wording, the site the Choice named and its
+/// category; error details quote the message that carries another error's
+/// text.
+fn security_finding<'a>(
+    unit: &UnitPlan,
+    (sites, messages): (&'a [Block], &[String]),
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> (Wording, Option<&'a Block>, String) {
+    let site =
+        choice(answers.get("site").copied()).and_then(|(id, _)| sites.iter().find(|s| s.id == id));
+    let ((message, action), named) = security_wording(unit.rule, &unit.name, strength, p, answers);
+    // The error message the Choice found carrying another error's text.
+    let carried = choice(answers.get("messages").copied())
+        .and_then(|(id, _)| messages.get(id.strip_prefix('m')?.parse::<usize>().ok()?))
+        .filter(|_| named.starts_with("CWE-209") && strength != Strength::Note);
+    let wording = match carried {
+        Some(text) => (format!("{message} The message is {text}."), action),
+        None => (message, action),
+    };
+    (wording, site, named)
+}
+
+/// A workflow job's wording and category, listing the expressions of its
+/// scripts when outsiders can write them.
+fn job_wording(
+    name: &str,
+    expressions: &[String],
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> (Wording, String) {
+    let ((message, action), named) =
+        privilege_wording(&format!("Job `{name}`"), strength, p, answers);
+    let outside = matches!(
+        answers.get("outside").map(|a| noul(a)),
+        Some(Outcome::Review(_))
+    );
+    if !outside {
+        return ((message, action), named);
+    }
+    let listed = expressions
+        .iter()
+        .map(|e| format!("`${{{{ {e} }}}}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let message = format!("{message} Expressions in its scripts: {listed}.");
+    ((message, action), named)
 }
 
 /// The position of the constant the locate Choice names, when it is clear.
