@@ -163,6 +163,78 @@ fn a_value_that_needs_a_name_but_is_written_once_is_a_note() {
 }
 
 #[test]
+fn a_named_value_that_reads_for_itself_is_a_note() {
+    let source = format!(
+        "{HARDCODED}\nfn backup() -> Client {{\n    Client::new(\"db.backup:5432\", 30_000)\n}}\n"
+    );
+    let (project, mut options) = rule_project(&source, catalog::HARDCODED_VALUES);
+    let kinds = ["copies", "idiom", "named", "tuning", "unexplained"];
+    let mut connect = |kind: &str| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("magic", spread(0.1, 0.35, 0.55)),
+            ("value", choice_of("v1", &["v0", "v1", "none"])),
+            ("value_kind", choice_of(kind, &kinds)),
+        ];
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        let asked = report
+            .stages
+            .get("locate")
+            .map_or(0, |stage| stage.successful_requests);
+        let finding = report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.symbol.as_deref() == Some("connect"))
+            .cloned()
+            .unwrap();
+        (finding, asked)
+    };
+    // Copies that must change together keep the consider.
+    let (kept, asked) = connect("copies");
+    assert_eq!(kept.strength, Strength::Consider, "{}", kept.message);
+    // Both functions' values are located, then both are asked their kind.
+    assert_eq!(asked, 4);
+    let (named, _) = connect("named");
+    assert_eq!(named.strength, Strength::Note);
+    assert!(
+        named
+            .message
+            .ends_with("It reads for itself where it is used, so it is a note."),
+        "{}",
+        named.message
+    );
+}
+
+#[test]
+fn the_value_locate_lists_the_other_lines_that_write_each_value() {
+    let source = format!(
+        "{HARDCODED}\nfn backup() -> Client {{\n    Client::new(\"db.backup:5432\", 30_000)\n}}\n\nconst CAP: u64 = 300_000;\n"
+    );
+    let (project, options) = rule_project(&source, catalog::HARDCODED_VALUES);
+    let (_, plan) = planned(&project, &options);
+    let locate = plan.files[&0]
+        .units
+        .iter()
+        .find_map(|u| match &u.detail {
+            Detail::Values {
+                locate: Some(locate),
+                ..
+            } if u.name == "connect" => Some(locate.request()),
+            _ => None,
+        })
+        .expect("a locate for connect");
+    let values = &locate["state"]["function"]["values"];
+    assert_eq!(values[0]["value"], "\"db.internal:5432\"");
+    assert!(values[0].get("elsewhere").is_none(), "written once");
+    // `300_000` holds `30_000` only as part of a longer number.
+    assert_eq!(
+        values[1]["elsewhere"],
+        json!(["12: Client::new(\"db.backup:5432\", 30_000)"])
+    );
+}
+
+#[test]
 fn undecided_units_are_listed_with_the_questions_left_undecided() {
     let (project, mut options) = function_rule_project(&function("borderline"));
     let report = run(&project, &options, &mut scripted(3));

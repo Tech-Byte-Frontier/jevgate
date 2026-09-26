@@ -279,7 +279,7 @@ pub fn rule_version(key: &str) -> &'static str {
         TEST_REDUNDANCY => "4",
         INJECTION => "9",
         SENSITIVE_DATA => "7",
-        HARDCODED_VALUES | UNSAFE_SETTINGS => "5",
+        HARDCODED_VALUES | UNSAFE_SETTINGS => "6",
         AGENT_CONTEXT => "3",
         COMMENTS => "3",
         LARGE_DOCS => "3",

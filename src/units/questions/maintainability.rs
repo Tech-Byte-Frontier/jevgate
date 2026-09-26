@@ -191,11 +191,42 @@ pub fn hardcoded_constant(ids: &[String]) -> Value {
 pub fn hardcoded_value(ids: &[String]) -> Value {
     choose_id(
         "Which value in `function.values` most needs to come from configuration, get a descriptive name, or be read from data instead of being written in `function.source`?",
-        format!("Options are the `id` values in `function.values`. {EVIDENCE}"),
+        format!(
+            "Options are the `id` values in `function.values`; a value's `elsewhere` lists other lines of the file that write it. {EVIDENCE}"
+        ),
         ids,
         "No single value stands out.",
     )
 }
+
+/// Asked only about the value a consider resting on a value's name names,
+/// when its file writes that value again: what a reader needs to understand
+/// it. Labeled by hand, 77 of 130 such considers were wrong, their values
+/// explained by the field or argument they fill, a comment beside them, or
+/// an idiom such as a zero-length guard, while right ones had copies that
+/// must change together. Offered as the locate's `none`, those kinds also
+/// took values with such copies: 6 right considers became notes for 17
+/// wrong ones. Told that copies win over the other kinds, it chose them for
+/// wrong considers too: 22 became notes instead of 42.
+pub fn hardcoded_value_kind() -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": "What best describes `value` where `function.source` uses it?",
+            "note": format!("`elsewhere` lists other lines of the file that write the same value. {EVIDENCE}"),
+        },
+        "criteria": {
+            "copies": "It stands for the same quantity as a copy in `elsewhere` or in this function, and the copies must change together while nothing ties them.",
+            "unexplained": "Nothing near it says what it stands for or why it has this value.",
+            "named": "The parameter, field, variable or function it goes into, or a comment beside it, says what it is.",
+            "idiom": "A common constant or idiom that reads for itself, such as a tolerance near zero, a half, a unit conversion such as 60, 1000 or 100 for percent, or a size a format fixes.",
+            "tuning": "One of many hand-tuned numbers for look, sound, motion or layout, whose exact value is a matter of taste.",
+        },
+    })
+}
+
+/// The options of `hardcoded_value_kind` under which a value reads for itself.
+pub const READABLE_VALUES: [&str; 3] = ["named", "idiom", "tuning"];
 
 /// Whether a value fixed in code changes between environments. `values` names
 /// the list of candidate values; `code` describes the code that uses them.

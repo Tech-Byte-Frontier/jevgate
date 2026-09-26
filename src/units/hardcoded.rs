@@ -4,15 +4,16 @@
 //! a Noul on whether the function special-cases one identity. A unit left
 //! undecided is asked, alone, whether every value is of an acceptable kind.
 use super::{
-    Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, compact, identity,
-    pack_runs, questions, unique_ids,
+    Asked, Detail, FileContext, FilePlan, FollowUp, Planned, Presence, Questions, UnitPlan,
+    compact, identity, pack_runs, questions, unique_ids,
 };
 use crate::{
-    analysis::{literals::Constant, units::Unit},
+    analysis::{literals::Constant, sites::clip, units::Unit},
     catalog::HARDCODED_VALUES,
     schema::Pass,
 };
 use serde_json::{Value, json};
+use std::path::Path;
 
 pub(super) fn plan(
     file: &FileContext<'_>,
@@ -49,7 +50,7 @@ pub(super) fn plan(
                     }
                 }
                 let locate = (choices.len() <= LOCATE_CHOICES)
-                    .then(|| locate(file, &unit.name, source, &id, &choices));
+                    .then(|| locate(file, (unit, source), &id, &choices));
                 Detail::Values {
                     values: unit.literals.iter().map(|l| l.text.clone()).collect(),
                     repeated: choices
@@ -82,44 +83,130 @@ pub(super) fn plan(
 /// Most distinct values a locate Choice offers; a unit with more is not located.
 const LOCATE_CHOICES: usize = 24;
 
-/// How often a literal is written in `source`: a number as a whole token (not
+/// How often a literal is written in `source`.
+fn occurrences(source: &str, literal: &str) -> usize {
+    written_at(source, literal).count()
+}
+
+/// Where a literal is written in `source`: a number as a whole token (not
 /// part of `100` or `10.5` for `10`), other text wherever it appears without
 /// its quotes.
-fn occurrences(source: &str, literal: &str) -> usize {
+fn written_at<'a>(source: &'a str, literal: &'a str) -> impl Iterator<Item = usize> + 'a {
     let text = literal.trim_matches(['"', '\'', '`']);
-    if text.is_empty() {
-        return 0;
-    }
     let number = text.starts_with(|c: char| c.is_ascii_digit() || c == '-' || c == '.');
     let word = |c: char| c.is_alphanumeric() || c == '_' || c == '.';
-    source
-        .match_indices(text)
-        .filter(|(at, _)| {
+    (!text.is_empty())
+        .then_some(text)
+        .into_iter()
+        .flat_map(move |text| source.match_indices(text))
+        .filter(move |(at, _)| {
             !number
                 || !(source[..*at].chars().next_back().is_some_and(word)
                     || source[at + text.len()..].chars().next().is_some_and(word))
         })
-        .count()
+        .map(|(at, _)| at)
 }
 
-/// Which value a finding is about: the function's source and its distinct values.
+/// Lines of the file outside a function shown with each of its values, at most.
+const ELSEWHERE_LINES: usize = 3;
+
+/// The lines of `source` outside `lines` that write `literal`, numbered.
+fn elsewhere(source: &str, literal: &str, lines: (usize, usize)) -> Vec<String> {
+    let mut found: Vec<(usize, String)> = Vec::new();
+    let (mut line, mut counted) = (1, 0);
+    for at in written_at(source, literal) {
+        line += source.as_bytes()[counted..at]
+            .iter()
+            .filter(|b| **b == b'\n')
+            .count();
+        counted = at;
+        if (lines.0..=lines.1).contains(&line) || found.last().is_some_and(|(l, _)| *l == line) {
+            continue;
+        }
+        let start = source[..at].rfind('\n').map_or(0, |i| i + 1);
+        let end = source[at..].find('\n').map_or(source.len(), |i| at + i);
+        found.push((line, format!("{line}: {}", clip(source[start..end].trim()))));
+        if found.len() == ELSEWHERE_LINES {
+            break;
+        }
+    }
+    found.into_iter().map(|(_, text)| text).collect()
+}
+
+/// Which value a finding is about: the function's source and its distinct
+/// values, each with the other lines of the file that write it. Without
+/// them, a value that must stay equal to a copy in another function read as
+/// clear where it was used, and a value that merely recurs, such as the 4
+/// of quarters in a year, read as a value to share.
 fn locate(
     file: &FileContext<'_>,
-    name: &str,
-    source: &str,
+    (unit, source): (&Unit, &str),
     id: &str,
     choices: &[String],
-) -> (Value, super::Asked) {
+) -> (Value, Asked) {
     let ids = option_ids('v', choices.len());
+    let values: Vec<Value> = ids
+        .iter()
+        .zip(choices)
+        .map(|(id, value)| {
+            let mut entry = json!({"id": id, "value": value});
+            let lines = elsewhere(file.source, value, (unit.line, unit.end_line));
+            if !lines.is_empty() {
+                entry["elsewhere"] = json!(lines);
+            }
+            entry
+        })
+        .collect();
     let state = json!({
         "file": file.file_state(),
         "function": {
-            "name": name,
+            "name": unit.name,
             "source": source,
-            "values": ids.iter().zip(choices).map(|(id, value)| json!({"id": id, "value": value})).collect::<Vec<_>>(),
+            "values": values,
         },
     });
     locate_request(file, id, ("value", questions::hardcoded_value(&ids)), state)
+}
+
+/// What a consider's value is, asked about the value its locate named: the
+/// function, the value and the other lines of its file that write it, taken
+/// from the locate request.
+pub(super) fn value_kind(locate: &FollowUp, option: usize, id: &str) -> Option<(Value, Asked)> {
+    let located = locate.request();
+    let function = &located["state"]["function"];
+    let entry = function["values"].get(option)?;
+    let mut state = json!({
+        "file": located["state"]["file"],
+        "function": {"name": function["name"], "source": function["source"]},
+        "value": entry["value"],
+    });
+    if let Some(lines) = entry.get("elsewhere") {
+        state["elsewhere"] = lines.clone();
+    }
+    let mut questions = Questions::default();
+    questions.ask(
+        "value_kind".into(),
+        questions::hardcoded_value_kind(),
+        id,
+        HARDCODED_VALUES,
+        "value_kind",
+        Pass::Locate,
+    );
+    let language = located["state"]["file"]["language"]
+        .as_str()
+        .unwrap_or_default();
+    let sources: Vec<(&Path, &str)> = located["jevgate"]["sources"]
+        .as_array()?
+        .iter()
+        .filter_map(|s| Some((Path::new(s["path"].as_str()?), s["source_hash"].as_str()?)))
+        .collect();
+    Some(super::evidence::request(
+        located["model"].as_str()?,
+        "locate",
+        &sources,
+        state,
+        questions.reworded(language),
+    ))
 }
 
 /// Option ids `{prefix}0`, `{prefix}1`, … for a locate Choice over `count` entries.
@@ -133,7 +220,7 @@ fn locate_request(
     id: &str,
     (question, body): (&'static str, Value),
     state: Value,
-) -> (Value, super::Asked) {
+) -> (Value, Asked) {
     let mut questions = Questions::default();
     questions.ask(
         question.into(),
@@ -177,10 +264,7 @@ fn send_or_split(
     }
 }
 
-fn functions_request(
-    file: &FileContext<'_>,
-    items: &[(usize, String, Value)],
-) -> (Value, super::Asked) {
+fn functions_request(file: &FileContext<'_>, items: &[(usize, String, Value)]) -> (Value, Asked) {
     let mut questions = Questions::default();
     for (index, (_, id, _)) in items.iter().enumerate() {
         let values = format!("functions[{index}].values");
@@ -302,7 +386,7 @@ fn benign_request(
     id: &str,
     evidence: Value,
     function: bool,
-) -> Option<(Value, super::Asked)> {
+) -> Option<(Value, Asked)> {
     let (values, code, asked): (&str, &str, &[&'static str]) = if function {
         (
             "functions[0].values",
