@@ -83,7 +83,7 @@ fn pug_unescaped(line: &str) -> bool {
     line.contains("!{")
         || line.match_indices("!=").any(|(at, _)| {
             let before = line[..at].chars().next_back();
-            line[at + 2..].chars().next() != Some('=') && before.is_none_or(|c| !c.is_whitespace())
+            !line[at + 2..].starts_with('=') && before.is_none_or(|c| !c.is_whitespace())
         })
 }
 
