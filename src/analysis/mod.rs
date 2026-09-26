@@ -22,10 +22,12 @@ pub mod workflow;
 
 use tree_sitter::Node;
 
+/// The line holding `byte`, which may fall inside a character: a block's last
+/// byte is inside a comment's closing `线` in vnpy's scripts.
 pub(crate) fn line_of(source: &str, byte: usize) -> usize {
-    source[..byte.min(source.len())]
-        .bytes()
-        .filter(|b| *b == b'\n')
+    source.as_bytes()[..byte.min(source.len())]
+        .iter()
+        .filter(|b| **b == b'\n')
         .count()
         + 1
 }

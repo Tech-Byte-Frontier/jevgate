@@ -17,6 +17,19 @@ fn a_review_function_carries_a_located_finding() {
     assert_eq!(crate::gate::exit_code(&report), 1);
 }
 
+#[test]
+fn a_block_ending_inside_a_character_is_located_by_its_line() {
+    // vnpy: a Python block holds its trailing comment, and the block's last
+    // byte fell inside the `线` that closes it.
+    let source = "def record(contract, engine):\n    total = 0\n    if contract.ready:\n        total += 1\n        engine.add(contract)  # 录制分钟K线\n    engine.flush()\n    total *= 2\n    return total\n";
+    let (project, options) = project_with(
+        &[("record.py", source)],
+        &[catalog::FUNCTION_SIMPLIFICATION],
+    );
+    let report = run(&project, &options, &mut scripted(2));
+    assert_eq!(report.files[0].status, Status::Review);
+}
+
 const NESTED: &str = "fn nested(rows: &[Vec<i32>]) -> i32 {\n    let mut total = 0;\n    for row in rows {\n        if !row.is_empty() {\n            for value in row {\n                if *value > 0 {\n                    total += value;\n                }\n            }\n        }\n    }\n    total\n}\n";
 
 #[test]

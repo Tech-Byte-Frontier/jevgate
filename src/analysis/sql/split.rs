@@ -36,8 +36,8 @@ pub fn statements(text: &str) -> Vec<Statement> {
             let offset = span.start + leading_comments(&text[span.clone()]);
             let source = text[offset..span.end].trim();
             (!source.is_empty() && source != ";").then(|| Statement {
-                start_line: line_at(text, offset),
-                end_line: line_at(text, span.end.saturating_sub(1).max(offset)),
+                start_line: crate::analysis::line_of(text, offset),
+                end_line: crate::analysis::line_of(text, span.end.saturating_sub(1).max(offset)),
                 source: source.to_string(),
             })
         })
@@ -86,8 +86,4 @@ fn leading_comments(text: &str) -> usize {
             return i;
         }
     }
-}
-
-fn line_at(text: &str, offset: usize) -> usize {
-    text[..offset].matches('\n').count() + 1
 }

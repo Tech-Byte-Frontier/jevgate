@@ -304,5 +304,7 @@ mod tests {
         let found = statements("insert into books values (1, \u{fffd}Dune\u{fffd});\nselect 1;\n");
         assert_eq!(found.len(), 2);
         assert_eq!(found[1].source, "select 1;");
+        let last = statements("select 1;\nselect 2 as caf\u{e9}");
+        assert_eq!((last[1].start_line, last[1].end_line), (2, 2));
     }
 }
