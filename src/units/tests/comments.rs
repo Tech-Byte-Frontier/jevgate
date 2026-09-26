@@ -170,6 +170,26 @@ fn an_undecided_comment_is_rechecked_then_settled_by_its_kind() {
         "{}",
         finding.message
     );
+    // A kind that only leans decides as well: toward restating, a note.
+    let leaning = |restates: f64| {
+        let mut probabilities: serde_json::Map<String, Value> =
+            kinds.iter().map(|k| (k.to_string(), json!(0.0))).collect();
+        probabilities.insert("restates".into(), json!(restates));
+        probabilities.insert("summary".into(), json!(1.0 - restates));
+        let choice = if restates > 0.5 {
+            "restates"
+        } else {
+            "summary"
+        };
+        json!({"type":"choice","choice":choice,"confidence":0.5,"probabilities":probabilities})
+    };
+    eval.overrides = vec![("kind", leaning(0.6))];
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    eval.overrides = vec![("kind", leaning(0.4))];
+    let report = run(&project, &options, &mut eval);
+    let dimension = &report.files[0].dimensions[catalog::COMMENTS];
+    assert_eq!((dimension.units.clear, dimension.units.uncertain), (1, 0));
 }
 
 #[test]
