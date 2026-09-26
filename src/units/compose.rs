@@ -511,10 +511,11 @@ impl<'p> Tally<'p> {
         let (outcome, answers) = resolved(unit, judgments);
         let outcome = if unnamed_value(unit, judgments) {
             lowered(lowered(outcome))
-        } else if single_use_value(unit, judgments)
-            || test_path_security(unit)
-            || unverified_token(unit, judgments)
-        {
+        } else if single_use_value(unit, judgments) {
+            at_most_note(outcome)
+        } else if named_value_only(unit, judgments) {
+            at_most_consider(outcome)
+        } else if test_path_security(unit) || unverified_token(unit, judgments) {
             lowered(outcome)
         } else if short_outline(unit) || small_section(unit) {
             at_most_note(outcome)
@@ -1074,27 +1075,37 @@ fn unnamed_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         )
 }
 
-/// A hardcoded-value consider that rests only on whether a value needs a
-/// name, about a value its file writes once: labeled by hand on 35
-/// projects, such considers were right 19 times in 52, against 34 in 49 for
-/// a value its file repeats. A delay given to `setTimeout`, a size given to
-/// an attribute or a CSS class reads where it is used; a value written twice
-/// can drift apart. Its finding is a note; reviews stay.
+/// A hardcoded-value review or consider that rests only on whether a value
+/// needs a name. Naming a value is a cleanup, so it is at most a consider:
+/// labeled by hand, 17 such reviews were right and 18 wrong, most of the
+/// wrong ones tuning in game, audio and animation code (a scheduler's
+/// 500 ms, a hash seed, a mix gain, a float epsilon).
+fn named_value_only(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    if !matches!(unit.detail, Detail::Values { .. }) {
+        return false;
+    }
+    let (outcome, answers) = resolved(unit, judgments);
+    if !matches!(outcome, Outcome::Review(_) | Outcome::Consider(_)) {
+        return false;
+    }
+    let get = |q: &str| answers.get(q).copied();
+    crate::units::outcome::value_signals(&get, &unit.detail, true)
+        .unwrap_or_default()
+        .iter()
+        .filter(|(_, o, _)| matches!(o, Outcome::Review(_) | Outcome::Consider(_)))
+        .all(|(question, ..)| *question == "magic")
+}
+
+/// Such a finding about a value its file writes once is a note: labeled by
+/// hand on 35 projects, those considers were right 19 times in 52, against
+/// 34 in 49 for a value its file repeats. A delay given to `setTimeout`, a
+/// size given to an attribute or a CSS class reads where it is used; a value
+/// written twice can drift apart.
 fn single_use_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     let Detail::Values { repeated, .. } = &unit.detail else {
         return false;
     };
-    let (outcome, answers) = resolved(unit, judgments);
-    if !matches!(outcome, Outcome::Consider(_)) {
-        return false;
-    }
-    let get = |q: &str| answers.get(q).copied();
-    let only_named = crate::units::outcome::value_signals(&get, &unit.detail, true)
-        .unwrap_or_default()
-        .iter()
-        .filter(|(_, o, _)| matches!(o, Outcome::Review(_) | Outcome::Consider(_)))
-        .all(|(question, ..)| *question == "magic");
-    only_named
+    named_value_only(unit, judgments)
         && located_option(unit, judgments, ("value", 'v'))
             .is_some_and(|i| repeated.get(i) == Some(&false))
 }
@@ -1164,10 +1175,22 @@ fn lowered_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<(Strength, &
         "No single value stood out, so it is a note."
     } else if single_use_value(unit, judgments) {
         "It is written once in its file, so it is a note."
+    } else if named_value_only(unit, judgments)
+        && matches!(resolved(unit, judgments).0, Outcome::Review(_))
+    {
+        ""
     } else {
         return None;
     };
     strength_of(resolved(unit, judgments).0).map(|(s, _)| (s, why))
+}
+
+/// A review lowered to a consider; other outcomes as they are.
+fn at_most_consider(outcome: Outcome) -> Outcome {
+    match outcome {
+        Outcome::Review(p) => Outcome::Consider(p),
+        other => other,
+    }
 }
 
 /// A file-organization consider that says only that some members could
@@ -1264,7 +1287,9 @@ fn values_finding(
         p,
         answers,
     );
-    let why = lowered.map_or(String::new(), |(_, why)| format!(" {why}"));
+    let why = lowered
+        .filter(|(_, why)| !why.is_empty())
+        .map_or(String::new(), |(_, why)| format!(" {why}"));
     if let Some(index) = located_constant(unit, judgments) {
         // The finding points at the constant the Choice named.
         let location = unit.locations[index].clone();

@@ -136,6 +136,30 @@ fn a_value_that_needs_a_name_but_is_written_once_is_a_note() {
         .find(|f| f.symbol.as_deref() == Some("connect"))
         .unwrap();
     assert_eq!(connect.strength, Strength::Consider, "{}", connect.message);
+    // Naming a value is a cleanup: a review-level answer is at most a consider.
+    let (project, options) = rule_project(
+        &format!(
+            "{HARDCODED}\nfn backup() -> Client {{\n    Client::new(\"db.backup:5432\", 30_000)\n}}\n"
+        ),
+        catalog::HARDCODED_VALUES,
+    );
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("magic", spread(0.0, 0.05, 0.95)),
+        ("value", choice_of("v1", &["v0", "v1", "none"])),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let connect = report.files[0]
+        .findings
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("connect"))
+        .unwrap();
+    assert_eq!(connect.strength, Strength::Consider, "{}", connect.message);
+    assert!(
+        connect.message.contains("a reader must guess"),
+        "{}",
+        connect.message
+    );
 }
 
 #[test]
