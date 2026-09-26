@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- Tests: Deno tests are test cases, in each of their forms: `Deno.test("name", fn)`, `Deno.test({ name: "name", fn() {…} })` and `Deno.test(function name() {…})`, with `.only` and `.ignore`. oak writes its 266 tests in the object form, and none of them was judged: its test files got a file-purpose request each and the test rules found nothing to ask. Only Deno projects' requests change.
+
 ## [0.20.0] - 2026-09-26
 
 - Injection: code that names a deserializer that can build any object is asked whether it loads data another party sends, in Python, Ruby, Java, JavaScript and TypeScript: Python's `pickle`, `marshal`, `shelve`, `jsonpickle` and `yaml.load`, Ruby's `Marshal.load` and `YAML.load`, Java's `ObjectInputStream`, `XMLDecoder`, XStream and SnakeYAML, and node-serialize. Only Django views and PHP `unserialize` were asked before, so a Flask route passing `pickle.loads(request.get_data())` was clear; it is now a review (CWE-502). Other requests are unchanged, so cached answers stay valid.

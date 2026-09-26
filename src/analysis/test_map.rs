@@ -485,7 +485,10 @@ fn identifiers(node: Node<'_>, source: &str, names: &mut Vec<String>) {
     }
 }
 
-/// `it("name", fn)`, `test.only("name", fn)` or `it.each(table)("name", fn)`.
+/// `it("name", fn)`, `test.only("name", fn)` or `it.each(table)("name", fn)`,
+/// and Deno's `Deno.test("name", fn)`, `Deno.test({ name: "name", fn() {…} })`
+/// and `Deno.test(function name() {…})`: oak writes its 266 tests in the
+/// object form, and none of them was judged.
 fn javascript_case(node: Node<'_>, source: &str) -> Option<String> {
     let callee = node.child_by_field_name("function")?;
     let base = if callee.kind() == "call_expression" {
@@ -495,17 +498,46 @@ fn javascript_case(node: Node<'_>, source: &str) -> Option<String> {
     } else {
         text(callee, source)
     };
+    let first = node.child_by_field_name("arguments")?.named_child(0)?;
+    if base == "Deno.test" || base.starts_with("Deno.test.") {
+        return deno_title(first, source);
+    }
     let head = base.split('.').next().unwrap_or("");
     if !matches!(head, "it" | "test" | "xit" | "fit" | "xtest") {
         return None;
     }
-    let arguments = node.child_by_field_name("arguments")?;
-    let first = arguments.named_child(0)?;
-    matches!(first.kind(), "string" | "template_string").then(|| {
-        text(first, source)
+    title(first, source)
+}
+
+/// The text of a string title.
+fn title(node: Node<'_>, source: &str) -> Option<String> {
+    matches!(node.kind(), "string" | "template_string").then(|| {
+        text(node, source)
             .trim_matches(['"', '\'', '`'])
             .to_string()
     })
+}
+
+/// A Deno test's name: its first argument, the `name` of its options, or
+/// the name of the function it is given.
+fn deno_title(first: Node<'_>, source: &str) -> Option<String> {
+    match first.kind() {
+        "object" => {
+            let mut cursor = first.walk();
+            first
+                .named_children(&mut cursor)
+                .filter(|pair| pair.kind() == "pair")
+                .find(|pair| {
+                    pair.child_by_field_name("key")
+                        .is_some_and(|key| text(key, source) == "name")
+                })
+                .and_then(|pair| title(pair.child_by_field_name("value")?, source))
+        }
+        "function_expression" | "function" => first
+            .child_by_field_name("name")
+            .map(|name| text(name, source).to_string()),
+        _ => title(first, source),
+    }
 }
 
 fn statement(node: Node<'_>) -> Node<'_> {
@@ -757,6 +789,9 @@ mod tests {
             names("total.test.ts", script),
             ["adds", "keeps %i", "empty"]
         );
+        let deno = "import { total } from './total.ts';\nDeno.test({\n  name: \"adds\",\n  fn() {\n    assertEquals(total([1, 2]), 3);\n  },\n});\nDeno.test(\"empty\", () => assertEquals(total([]), 0));\nDeno.test.ignore(function negative() {\n  assertEquals(total([-1]), -1);\n});\n";
+        assert_eq!(names("total.test.ts", deno), ["adds", "empty", "negative"]);
+        assert_eq!(located("total.test.ts", deno).len(), 3);
         let python = "from app import total\n\ndef test_adds():\n    assert total([1, 2]) == 3\n\ndef helper():\n    return [1]\n\nclass TestTotal:\n    def test_empty(self):\n        assert total([]) == 0\n\nclass Other:\n    def test_like(self):\n        pass\n";
         assert_eq!(names("test_total.py", python), ["test_adds", "test_empty"]);
         let suites = |path: &str, source: &str| -> Vec<Vec<String>> {
