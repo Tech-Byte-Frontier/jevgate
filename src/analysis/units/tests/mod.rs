@@ -74,3 +74,31 @@ fn unsupported_languages_are_unparsed() {
 fn syntax_errors_fail_instead_of_returning_no_units() {
     assert!(parse(Path::new("broken.rs"), "fn broken( {").is_err());
 }
+
+/// Valid TypeScript that tree-sitter-typescript misreads: a call signature
+/// starting with `<T>` on the line after another reads as its continuation.
+const SIGNATURES: &str = "type CreateStore = {\n  <T>(initializer: Init<T>): Store<T>\n\n  <T>(): (initializer: Init<T>) => Store<T>\n}\n\nexport const createStore = (initializer: unknown) => {\n  const listeners = new Set<() => void>()\n  const subscribe = (listener: () => void) => {\n    listeners.add(listener)\n    return () => listeners.delete(listener)\n  }\n  return { subscribe, initializer }\n}\n";
+
+#[test]
+fn a_grammar_gap_leaves_the_rest_of_a_file_to_judge() {
+    let units = parse(Path::new("vanilla.ts"), SIGNATURES).unwrap();
+    let names: Vec<&str> = units.units.iter().map(|u| u.name.as_str()).collect();
+    assert!(names.contains(&"createStore"), "{names:?}");
+    assert!(
+        !names.contains(&"CreateStore"),
+        "the misread type is left out"
+    );
+    // A function holding the error is left out too.
+    let inside = "export function create() {\n  type Api = {\n    <T>(a: T): T\n\n    <T>(): () => T\n  }\n  return 1\n}\n\nexport function other(values: number[]) {\n  let total = 0\n  for (const value of values) {\n    total += value\n  }\n  return total\n}\n";
+    let names: Vec<String> = parse(Path::new("api.ts"), inside)
+        .unwrap()
+        .units
+        .into_iter()
+        .map(|u| u.name)
+        .collect();
+    assert_eq!(names, ["other"]);
+    // A generator template's placeholders keep it unjudged.
+    assert!(parse(Path::new("lib/templates/store.ts"), SIGNATURES).is_err());
+    let erb = format!("// <%= banner %>\n{SIGNATURES}");
+    assert!(parse(Path::new("store.ts"), &erb).is_err());
+}

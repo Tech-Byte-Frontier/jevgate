@@ -56,6 +56,14 @@ signatures, or one candidate pair.
    Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
    contents, with every other byte a space, so lines stay the file's.
+   A file whose parse holds syntax errors is not judged, unless they are few
+   and small (at most three regions, an eighth of the source in all), since
+   grammars miss some valid code: tree-sitter-typescript reads a call
+   signature starting with `<T>` on the line after another as its
+   continuation, which left four of zustand's source files unjudged. The
+   definitions that hold an error are then left out. Generator templates
+   (under `templates/`, or holding ERB tags or `//#if` conditions) keep the
+   strict rule, since their placeholders are not the language's syntax.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
    and control-flow nesting; callbacks registered through calls, including
    module-level route handlers named by their registration
