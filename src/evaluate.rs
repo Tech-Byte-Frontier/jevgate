@@ -123,9 +123,10 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
 }
 
 /// Planned first-pass requests, without credentials, network or writes; the
-/// cache is read so answered requests are not counted as cost. Requests that
-/// depend on answers (after file purpose, rechecks, locating blocks) are not
-/// known yet.
+/// cache is read so answered requests are not counted as cost. A file whose
+/// purpose the cache answers is planned as a run plans it; requests that
+/// depend on new answers (an unanswered file purpose, rechecks, locating
+/// blocks) are not known yet.
 fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &mut Report) {
     let budget = &TokenBudget::load(root);
     let mut planned = Vec::new();
@@ -136,7 +137,21 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
         }
         match schedule(input, args, budget, &mut report.files[owner]) {
             Ok(Scheduled::None) => {}
-            Ok(Scheduled::Purpose(request)) => planned.push(request),
+            Ok(Scheduled::Purpose(request)) => {
+                if let Some(body) = crate::requests::answered(root, args, &request) {
+                    let file = &mut report.files[owner];
+                    let view = crate::file_kind::record_purpose(file, &request, &body)
+                        .and_then(|()| crate::file_kind::decide_after_purpose(input, args, file));
+                    match view {
+                        Ok(Some(view)) => {
+                            views.insert(owner, view);
+                        }
+                        Ok(None) => {}
+                        Err(error) => report.errors.push(error.to_string()),
+                    }
+                }
+                planned.push(request);
+            }
             Ok(Scheduled::Ready(view)) => {
                 views.insert(owner, *view);
             }
@@ -155,7 +170,7 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
             .or_default();
         stage.planned_requests += 1;
         stage.planned_evidence_bytes += crate::requests::evidence_bytes(&request);
-        if crate::requests::answered(root, args, &request) {
+        if crate::requests::answered(root, args, &request).is_some() {
             stage.planned_cached += 1;
         } else {
             stage.planned_tokens += budget.request_tokens(&request) as u64;

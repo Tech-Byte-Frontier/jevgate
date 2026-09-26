@@ -167,7 +167,10 @@ pub(super) fn session<'a>(
 }
 
 /// The selected inputs and the first snapshot of a check, before evaluation.
-fn snapshot(project: &Project, options: &CheckArgs) -> (Vec<inventory::Input>, schema::Report) {
+pub(super) fn snapshot(
+    project: &Project,
+    options: &CheckArgs,
+) -> (Vec<inventory::Input>, schema::Report) {
     let context = project.context();
     let scope = inventory::scope(options, &context).unwrap();
     let inputs = inventory::collect(options, &context, &scope).unwrap();
