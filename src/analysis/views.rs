@@ -45,10 +45,14 @@ pub fn view(relative: &Path, text: &str) -> Option<Template> {
     let name = view_name(relative)?;
     let extension = relative.extension().and_then(|e| e.to_str())?;
     let marks = unescaped_marks(extension);
+    let pug = matches!(extension, "pug" | "jade");
     let unescaped: Vec<String> = text
         .lines()
         .enumerate()
         .filter(|(_, line)| {
+            if pug {
+                return pug_unescaped(line);
+            }
             let compact: String = line.chars().filter(|c| !c.is_whitespace()).collect();
             let spaced = line.to_ascii_lowercase();
             marks.iter().any(|mark| {
@@ -71,6 +75,18 @@ pub fn view(relative: &Path, text: &str) -> Option<Template> {
     })
 }
 
+/// Pug's unescaped output: `!=` right after a tag or at the start of a line
+/// (`td!= link`, `!= html`) or `!{…}`, not a comparison such as
+/// `err.name !== 'AbortError'` in a script.
+fn pug_unescaped(line: &str) -> bool {
+    let line = line.trim_start();
+    line.contains("!{")
+        || line.match_indices("!=").any(|(at, _)| {
+            let before = line[..at].chars().next_back();
+            line[at + 2..].chars().next() != Some('=') && before.is_none_or(|c| !c.is_whitespace())
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +106,13 @@ mod tests {
             Some("email/reset")
         );
         assert!(view_name(Path::new("views/style.css")).is_none());
+        let pug = "table\n  td!= link\n  p= title\nscript.\n  if (err.name !== 'AbortError') {}\n  var dates = !{ dates };\n";
+        assert_eq!(
+            view(Path::new("views/api/scraping.pug"), pug)
+                .unwrap()
+                .unescaped,
+            ["2: td!= link", "6: var dates = !{ dates };"]
+        );
         let swig = "{% autoescape false %}\n<p>{{ user.firstName }}</p>\n{% endautoescape %}\n";
         assert_eq!(
             view(Path::new("app/views/profile.html"), swig)
