@@ -247,7 +247,8 @@ fn nearby(base: &Path, name: &str, history: &History) -> Option<PathBuf> {
 }
 
 /// A token naming a repository path: a file extension, or a first directory
-/// the repository has. Routes, URLs, globs and placeholders are not.
+/// the repository has. Routes, URLs, globs and placeholders are not, such as
+/// a Claude command's `.kiro/specs/$1/spec.json`, whose `$1` is its argument.
 fn path_like(token: &str, top: &BTreeSet<&str>) -> Option<String> {
     let mut t = token
         .trim()
@@ -261,7 +262,7 @@ fn path_like(token: &str, top: &BTreeSet<&str>) -> Option<String> {
     let excluded = ["http", "mailto:", "#", "$", "-", "@", "~", "/"]
         .iter()
         .any(|p| t.starts_with(p))
-        || t.chars().any(|c| "*<>{}|=()[] ,'\"".contains(c))
+        || t.chars().any(|c| "*<>{}|=()[] ,'\"$".contains(c))
         || t.is_empty();
     if excluded {
         return None;
@@ -585,7 +586,7 @@ mod tests {
     fn routes_branches_urls_and_globs_are_not_paths() {
         assert!(
             found(
-                "Open `/login`, merge `origin/main`, fetch `https://x.io/a.ts`, match `src/*.ts`."
+                "Open `/login`, merge `origin/main`, fetch `https://x.io/a.ts`, match `src/*.ts`, read `specs/$1/spec.json`."
             )
             .is_empty()
         );
