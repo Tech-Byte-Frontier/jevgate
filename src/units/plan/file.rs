@@ -3,7 +3,7 @@
 use super::{Scope, Shared, plan_security};
 use crate::{
     analysis::{
-        imports::Imports,
+        imports::Links,
         test_map::{self, TestCase},
         units::{FileUnits, Unit},
     },
@@ -152,7 +152,7 @@ fn plan_outline(
             .collect();
         file.rules.insert(catalog::FILE_ORGANIZATION, 0);
         if members.len() >= 2 {
-            let callers = callers(scope, &shared.imports, owner);
+            let callers = callers(scope, &shared.links, owner);
             let parsed = &scope.units[&owner];
             outline::plan(context, parsed, &members, &callers, file, requests);
         }
@@ -328,17 +328,9 @@ fn plan_tests(
 }
 
 /// Short callee name to the other selected files that import `target` and call it.
-fn callers(
-    scope: &Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
-    target: usize,
-) -> BTreeMap<String, BTreeSet<PathBuf>> {
-    let path = &scope.inputs[target].result.path;
+fn callers(scope: &Scope<'_>, links: &Links, target: usize) -> BTreeMap<String, BTreeSet<PathBuf>> {
     let mut callers = BTreeMap::<String, BTreeSet<PathBuf>>::new();
-    for &owner in &scope.owners {
-        if owner == target || !imports[&owner].reach(path) {
-            continue;
-        }
+    for &owner in links.importers(target).iter() {
         // Tests exercise a group; only application code makes it a dependency.
         let tests = scope.test_lines(owner);
         let units = scope.units[&owner].units.iter();

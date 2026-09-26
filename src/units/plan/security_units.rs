@@ -9,13 +9,13 @@ use super::{
 };
 use crate::{
     analysis::{
-        imports::Imports,
+        imports::Links,
         units::{FileUnits, Unit},
     },
     catalog,
     units::{FileContext, FilePlan, Planned, security},
 };
-use std::{collections::BTreeMap, ops::Range};
+use std::ops::Range;
 
 /// Application functions outside tests and the file's setup statements; the
 /// injection recheck shows up to three callers of each function.
@@ -39,7 +39,7 @@ pub(super) fn plan_security(
         .filter(|u| u.callable() && outside_tests(u.line))
         .map(|unit| {
             let callers = if rules.contains(&catalog::INJECTION) {
-                callers_of(scope, &shared.imports, context.owner, unit)
+                callers_of(scope, &shared.links, context.owner, unit)
             } else {
                 Vec::new()
             };
@@ -51,7 +51,7 @@ pub(super) fn plan_security(
                 &shared.constants,
             );
             if rules.contains(&catalog::SENSITIVE_DATA) {
-                subject.callee_errors = callee_errors(scope, &shared.imports, context.owner, unit);
+                subject.callee_errors = callee_errors(scope, &shared.links, context.owner, unit);
             }
             subject.django = parsed.django;
             if parsed.django {
@@ -219,7 +219,7 @@ const CALLEE_ERRORS: usize = 8;
 /// library's: twelve such handlers of one FastAPI project were reviews.
 fn callee_errors(
     scope: &Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
+    links: &Links,
     owner: usize,
     unit: &Unit,
 ) -> Vec<serde_json::Value> {
@@ -229,7 +229,7 @@ fn callee_errors(
     for _ in 0..2 {
         let mut next = Vec::new();
         for (file, caller) in callers {
-            for (other, callee) in callees(scope, imports, file, caller) {
+            for (other, callee) in callees(scope, links, file, caller) {
                 if visited.contains(&callee.name) {
                     continue;
                 }
@@ -254,16 +254,12 @@ fn callee_errors(
 /// imports, with the file each is in.
 fn callees<'s>(
     scope: &'s Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
+    links: &Links,
     file: usize,
     caller: &Unit,
 ) -> Vec<(usize, &'s Unit)> {
-    let reached =
-        scope.owners.iter().copied().filter(|&other| {
-            other == file || imports[&file].reach(&scope.inputs[other].result.path)
-        });
     let mut found = Vec::new();
-    for other in reached {
+    for &other in links.reachable_from(file).iter() {
         let lines = scope.test_lines(other);
         found.extend(
             scope.units[&other]
@@ -282,17 +278,13 @@ fn callees<'s>(
 
 fn callers_of(
     scope: &Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
+    links: &Links,
     owner: usize,
     unit: &Unit,
 ) -> Vec<(String, String)> {
-    let path = &scope.inputs[owner].result.path;
-    let others = scope.owners.iter().filter(|&&o| o != owner);
+    let importers = links.importers(owner);
     let mut found = Vec::new();
-    for &other in std::iter::once(&owner).chain(others) {
-        if other != owner && !imports[&other].reach(path) {
-            continue;
-        }
+    for &other in std::iter::once(&owner).chain(importers.iter()) {
         let source = scope.inputs[other].source.as_deref().unwrap_or("");
         let lines = scope.test_lines(other);
         for caller in &scope.units[&other].units {

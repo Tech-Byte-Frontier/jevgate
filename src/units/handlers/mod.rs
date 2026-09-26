@@ -16,7 +16,7 @@ use super::{
     plan::Scope, questions,
 };
 use crate::{
-    analysis::{imports::Imports, units::Unit},
+    analysis::{imports::Links, units::Unit},
     catalog::SENSITIVE_DATA,
     options::CheckArgs,
     schema::Pass,
@@ -30,7 +30,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 /// What handler lookups need from the whole scope.
 pub(super) struct Evidence<'a> {
-    pub imports: &'a BTreeMap<usize, Imports>,
+    pub links: &'a Links,
     pub hashes: &'a BTreeMap<PathBuf, String>,
 }
 
@@ -42,7 +42,7 @@ pub(super) fn plan(
     budget: &TokenBudget,
     result: &mut Plan,
 ) {
-    let handlers = error_handlers(scope, evidence.imports);
+    let handlers = error_handlers(scope, evidence.links);
     let classes = error_classes(scope, evidence.hashes);
     for handler in &handlers {
         let input = &scope.inputs[handler.owner];
@@ -75,16 +75,16 @@ pub(super) fn plan(
 }
 
 /// Error handlers registered in application code outside tests, once each.
-fn error_handlers(scope: &Scope<'_>, imports: &BTreeMap<usize, Imports>) -> Vec<Handler> {
+fn error_handlers(scope: &Scope<'_>, links: &Links) -> Vec<Handler> {
     let mut found: Vec<Handler> = Vec::new();
     for &owner in &scope.owners {
         if !scope.views[&owner].application {
             continue;
         }
-        let file = registered(scope, imports, owner)
+        let file = registered(scope, links, owner)
             .into_iter()
             .chain(decorated(scope, owner))
-            .chain(django_views(scope, imports, owner))
+            .chain(django_views(scope, links, owner))
             .chain(implemented(scope, owner));
         for handler in file {
             if !found
@@ -143,7 +143,7 @@ fn handler_helpers(scope: &Scope<'_>, handler: &Handler) -> Vec<String> {
 /// module, so a unique name is enough.
 fn named_handler(
     scope: &Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
+    links: &Links,
     owner: usize,
     name: &str,
 ) -> Option<(usize, String, String, (usize, usize))> {
@@ -165,11 +165,7 @@ fn named_handler(
         .iter()
         .find(|(o, _)| *o == owner)
         .or_else(|| (definitions.len() == 1).then(|| &definitions[0]))
-        .or_else(|| {
-            definitions
-                .iter()
-                .find(|(o, _)| imports[&owner].reach(&scope.inputs[*o].result.path))
-        })?;
+        .or_else(|| definitions.iter().find(|(o, _)| links.reach(owner, *o)))?;
     let source = scope.inputs[*found].source.as_deref().unwrap_or("");
     Some((
         *found,

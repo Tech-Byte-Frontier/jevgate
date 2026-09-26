@@ -7,8 +7,10 @@
 //! a directory: a Go file reaches every file of its own directory and of the
 //! directories its import paths name.
 use std::{
-    collections::BTreeSet,
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::{Path, PathBuf},
+    rc::Rc,
 };
 
 /// Lines that import, load or declare another module, and for Go the import
@@ -55,6 +57,9 @@ fn java_package(path: &Path, source: &str) -> (PathBuf, BTreeSet<String>) {
 pub struct Imports {
     family: &'static str,
     lines: Vec<String>,
+    /// The segments `names_segment` can match in `lines`, so a name is looked
+    /// up instead of searched for: C# keeps every line of code.
+    segments: HashSet<String>,
     /// For Java: the file's directory and the capitalized names its code
     /// mentions, the classes of its package it can use without an import.
     package: Option<(PathBuf, BTreeSet<String>)>,
@@ -66,16 +71,20 @@ impl Imports {
     pub fn new(path: &Path, source: &str) -> Self {
         let family = family(path);
         if family == "csharp" {
+            let lines = csharp_lines(source);
             return Self {
                 family,
-                lines: csharp_lines(source),
+                segments: segments(&lines),
+                lines,
                 package: None,
                 directory: None,
             };
         }
+        let lines = import_lines(source, family);
         Self {
             family,
-            lines: import_lines(source, family),
+            segments: segments(&lines),
+            lines,
             package: (family == "java").then(|| java_package(path, source)),
             directory: (family == "go")
                 .then(|| path.parent().unwrap_or(Path::new("")).to_path_buf()),
@@ -104,16 +113,84 @@ impl Imports {
             return false;
         }
         if self.family == "csharp" {
-            let interface = format!("I{name}");
-            return self
-                .lines
-                .iter()
-                .any(|line| names_segment(line, &name) || names_segment(line, &interface));
+            return self.names(&name) || self.names(&format!("I{name}"));
         }
         let same_package = self.package.as_ref().is_some_and(|(directory, names)| {
             target.parent().unwrap_or(Path::new("")) == directory && names.contains(&name)
         });
-        same_package || self.lines.iter().any(|line| names_segment(line, &name))
+        same_package || self.names(&name)
+    }
+
+    /// Whether a line names `name` as a whole segment.
+    fn names(&self, name: &str) -> bool {
+        if name.chars().all(in_segment) {
+            return self.segments.contains(name);
+        }
+        self.lines.iter().any(|line| names_segment(line, name))
+    }
+}
+
+/// Which selected files import which, each file's worked out once, when
+/// first asked: every function's callers and callees are looked up, and
+/// testing every file's imports again for each function kept jellyfin's
+/// dry run busy for over half an hour.
+pub struct Links {
+    /// Each file's path and imports, by its index.
+    files: BTreeMap<usize, (PathBuf, Imports)>,
+    reachable: RefCell<BTreeMap<usize, Rc<[usize]>>>,
+    importers: RefCell<BTreeMap<usize, Rc<[usize]>>>,
+}
+
+impl Links {
+    /// The links among `files`, each its index, path and source.
+    pub fn new<'a>(files: impl IntoIterator<Item = (usize, &'a Path, &'a str)>) -> Self {
+        Self {
+            files: files
+                .into_iter()
+                .map(|(file, path, source)| {
+                    (file, (path.to_path_buf(), Imports::new(path, source)))
+                })
+                .collect(),
+            reachable: RefCell::default(),
+            importers: RefCell::default(),
+        }
+    }
+
+    /// Whether `file` imports the module that `target` defines.
+    pub fn reach(&self, file: usize, target: usize) -> bool {
+        self.files[&file].1.reach(&self.files[&target].0)
+    }
+
+    /// `file` and the files it imports, in index order.
+    pub fn reachable_from(&self, file: usize) -> Rc<[usize]> {
+        let imports = &self.files[&file].1;
+        self.reachable
+            .borrow_mut()
+            .entry(file)
+            .or_insert_with(|| {
+                self.files
+                    .iter()
+                    .filter(|(other, (path, _))| **other == file || imports.reach(path))
+                    .map(|(other, _)| *other)
+                    .collect()
+            })
+            .clone()
+    }
+
+    /// The other files that import `target`, in index order.
+    pub fn importers(&self, target: usize) -> Rc<[usize]> {
+        let path = &self.files[&target].0;
+        self.importers
+            .borrow_mut()
+            .entry(target)
+            .or_insert_with(|| {
+                self.files
+                    .iter()
+                    .filter(|(other, (_, imports))| **other != target && imports.reach(path))
+                    .map(|(other, _)| *other)
+                    .collect()
+            })
+            .clone()
     }
 }
 
@@ -179,20 +256,96 @@ fn imports_package(line: &str, package: &Path) -> bool {
     segments.len() >= package.len() && segments[segments.len() - package.len()..] == package[..]
 }
 
+/// A character of a path segment; every other character separates segments.
+fn in_segment(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '-'
+}
+
 /// `name` appears as a whole path segment, as in `./name'`, `crate::name::x`,
 /// `from .name import` or `import name`.
 fn names_segment(line: &str, name: &str) -> bool {
-    let separator = |c: char| !(c.is_alphanumeric() || c == '_' || c == '-');
     line.match_indices(name).any(|(start, _)| {
         let before = line[..start].chars().next_back();
         let after = line[start + name.len()..].chars().next();
-        before.is_some_and(separator) && after.is_none_or(separator)
+        before.is_some_and(|c| !in_segment(c)) && after.is_none_or(|c| !in_segment(c))
     })
+}
+
+/// Every segment `names_segment` finds in `lines`: a run of segment
+/// characters after the first character of its line.
+fn segments(lines: &[String]) -> HashSet<String> {
+    let mut found = HashSet::new();
+    for line in lines {
+        let mut start = None;
+        for (at, c) in line.char_indices() {
+            match (in_segment(c), start) {
+                (true, None) => start = Some(at),
+                (false, Some(from)) => {
+                    if from > 0 {
+                        found.insert(line[from..at].to_string());
+                    }
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(from) = start.filter(|&from| from > 0) {
+            found.insert(line[from..].to_string());
+        }
+    }
+    found
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn looked_up_segments_match_the_line_search() {
+        let lines: Vec<String> = [
+            "Orders.Add(order);",
+            "var basket = new BasketService(uris);",
+            "import { x } from './travel-presentation'",
+            "from café.orders import total",
+            "use crate::units::{self, compose};",
+            "path = 'a/b.service'",
+        ]
+        .map(String::from)
+        .into();
+        let imports = Imports {
+            family: "csharp",
+            segments: segments(&lines),
+            lines: lines.clone(),
+            package: None,
+            directory: None,
+        };
+        let names = [
+            "Orders",
+            "Add",
+            "order",
+            "BasketService",
+            "Basket",
+            "uris",
+            "travel-presentation",
+            "travel",
+            "café",
+            "orders",
+            "units",
+            "self",
+            "compose",
+            "b.service",
+            "a",
+            "total",
+        ];
+        for name in names {
+            let searched = lines.iter().any(|line| names_segment(line, name));
+            assert_eq!(imports.names(name), searched, "{name}");
+        }
+        assert!(
+            !imports.names("Orders"),
+            "a segment opening its line is not a name"
+        );
+    }
 
     #[test]
     fn callers_need_an_import_of_the_module_in_the_same_language() {

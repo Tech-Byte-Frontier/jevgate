@@ -99,7 +99,7 @@ pub fn plan(
     }
     if shared.enabled(catalog::SENSITIVE_DATA) {
         let evidence = handlers::Evidence {
-            imports: &shared.imports,
+            links: &shared.links,
             hashes: &shared.hashes,
         };
         handlers::plan(&scope, &evidence, args, budget, &mut result);
