@@ -104,6 +104,41 @@ fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
 }
 
 #[test]
+fn a_value_that_needs_a_name_but_is_written_once_is_a_note() {
+    let findings = |source: &str| {
+        let (project, options) = rule_project(source, catalog::HARDCODED_VALUES);
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("magic", spread(0.1, 0.35, 0.55)),
+            ("value", choice_of("v1", &["v0", "v1", "none"])),
+        ];
+        run(&project, &options, &mut eval).files[0].findings.clone()
+    };
+    // `300_000` holds `30_000` only as part of a longer number.
+    let once = findings(&format!("{HARDCODED}\nconst CAP: u64 = 300_000;\n"));
+    let connect = once
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("connect"))
+        .unwrap();
+    assert_eq!(connect.strength, Strength::Note);
+    assert!(
+        connect
+            .message
+            .ends_with("It is written once in its file, so it is a note."),
+        "{}",
+        connect.message
+    );
+    let twice = findings(&format!(
+        "{HARDCODED}\nfn backup() -> Client {{\n    Client::new(\"db.backup:5432\", 30_000)\n}}\n"
+    ));
+    let connect = twice
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some("connect"))
+        .unwrap();
+    assert_eq!(connect.strength, Strength::Consider, "{}", connect.message);
+}
+
+#[test]
 fn undecided_units_are_listed_with_the_questions_left_undecided() {
     let (project, mut options) = function_rule_project(&function("borderline"));
     let report = run(&project, &options, &mut scripted(3));

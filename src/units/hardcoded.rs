@@ -52,6 +52,10 @@ pub(super) fn plan(
                     .then(|| locate(file, &unit.name, source, &id, &choices));
                 Detail::Values {
                     values: unit.literals.iter().map(|l| l.text.clone()).collect(),
+                    repeated: choices
+                        .iter()
+                        .map(|c| occurrences(file.source, c) != 1)
+                        .collect(),
                     choices,
                     locate,
                 }
@@ -76,6 +80,26 @@ pub(super) fn plan(
 
 /// Most distinct values a locate Choice offers; a unit with more is not located.
 const LOCATE_CHOICES: usize = 24;
+
+/// How often a literal is written in `source`: a number as a whole token (not
+/// part of `100` or `10.5` for `10`), other text wherever it appears without
+/// its quotes.
+fn occurrences(source: &str, literal: &str) -> usize {
+    let text = literal.trim_matches(['"', '\'', '`']);
+    if text.is_empty() {
+        return 0;
+    }
+    let number = text.starts_with(|c: char| c.is_ascii_digit() || c == '-' || c == '.');
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '.';
+    source
+        .match_indices(text)
+        .filter(|(at, _)| {
+            !number
+                || !(source[..*at].chars().next_back().is_some_and(word)
+                    || source[at + text.len()..].chars().next().is_some_and(word))
+        })
+        .count()
+}
 
 /// Which value a finding is about: the function's source and its distinct values.
 fn locate(
