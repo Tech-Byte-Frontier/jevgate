@@ -133,6 +133,8 @@ fn ruby_raise(arguments: Node<'_>, source: &str) -> Option<CreatedError> {
 }
 
 /// The first argument, or a `detail`, `message` or `msg` keyword argument.
+/// A leading status code is not the message: `HTTPException(500, f"Engine
+/// error: {e}")` quoted `500` as the message of a leak.
 fn message_argument(arguments: Node<'_>, source: &str) -> Option<String> {
     let mut cursor = arguments.walk();
     let all: Vec<Node<'_>> = arguments
@@ -144,9 +146,21 @@ fn message_argument(arguments: Node<'_>, source: &str) -> Option<String> {
             && a.child_by_field_name("name")
                 .is_some_and(|n| matches!(text(n, source), "detail" | "message" | "msg"))
     });
+    let positional = || all.iter().filter(|a| a.kind() != "keyword_argument");
     keyword
-        .or_else(|| all.iter().find(|a| a.kind() != "keyword_argument"))
+        .or_else(|| positional().find(|a| !status_code(text(**a, source))))
+        .or_else(|| positional().next())
         .map(|a| clip(text(*a, source)))
+}
+
+/// An HTTP status given as a number or a named constant (`404`,
+/// `status.HTTP_404_NOT_FOUND`, `HTTPStatus.NOT_FOUND`, `http.StatusNotFound`).
+fn status_code(argument: &str) -> bool {
+    argument.chars().all(|c| c.is_ascii_digit())
+        || argument.contains("HTTP_")
+        || ["HTTPStatus.", "StatusCodes.", "http.Status", "HttpStatus."]
+            .iter()
+            .any(|prefix| argument.starts_with(prefix))
 }
 
 #[cfg(test)]
@@ -180,12 +194,13 @@ mod tests {
         );
         let python = errors(
             "a.py",
-            "def load(id):\n    if not id:\n        raise HTTPException(status_code=400, detail=f'bad {id}')\n    raise ValueError('missing')\n",
+            "def load(id):\n    if not id:\n        raise HTTPException(status_code=400, detail=f'bad {id}')\n    try:\n        return engine(id)\n    except OSError as e:\n        raise HTTPException(500, f'Engine error: {e}')\n    raise ValueError('missing')\n",
         );
         assert_eq!(
             python,
             [
                 ("HTTPException".into(), "detail=f'bad {id}'".into()),
+                ("HTTPException".into(), "f'Engine error: {e}'".into()),
                 ("ValueError".into(), "'missing'".into()),
             ]
         );
