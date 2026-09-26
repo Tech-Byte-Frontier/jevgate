@@ -107,14 +107,35 @@ fn written_at<'a>(source: &'a str, literal: &'a str) -> impl Iterator<Item = usi
         .map(|(at, _)| at)
 }
 
-/// Lines of the file outside a function shown with each of its values, at most.
+/// Lines of the file outside a unit shown with each of its values or
+/// constants, at most.
 const ELSEWHERE_LINES: usize = 3;
 
 /// The lines of `source` outside `lines` that write `literal`, numbered.
 fn elsewhere(source: &str, literal: &str, lines: (usize, usize)) -> Vec<String> {
+    numbered_lines(source, written_at(source, literal), lines)
+}
+
+/// The lines of `source` outside a constant's own `lines` that name it.
+fn used_at(source: &str, name: &str, lines: (usize, usize)) -> Vec<String> {
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    let named = source.match_indices(name).map(|(at, _)| at).filter(|&at| {
+        !(source[..at].chars().next_back().is_some_and(word)
+            || source[at + name.len()..].chars().next().is_some_and(word))
+    });
+    numbered_lines(source, named, lines)
+}
+
+/// The lines holding the ascending byte offsets `at`, outside `lines`,
+/// numbered and at most `ELSEWHERE_LINES`.
+fn numbered_lines(
+    source: &str,
+    at: impl Iterator<Item = usize>,
+    lines: (usize, usize),
+) -> Vec<String> {
     let mut found: Vec<(usize, String)> = Vec::new();
     let (mut line, mut counted) = (1, 0);
-    for at in written_at(source, literal) {
+    for at in at {
         line += source.as_bytes()[counted..at]
             .iter()
             .filter(|b| **b == b'\n')
@@ -192,21 +213,81 @@ pub(super) fn value_kind(locate: &FollowUp, option: usize, id: &str) -> Option<(
         "value_kind",
         Pass::Locate,
     );
+    Some(located_request(&located, state, questions))
+}
+
+/// Where an environment finding's value or constant would differ, asked
+/// about the one its locate named: the function and the value with the
+/// other lines that write it, or the constant with the lines that use it,
+/// taken from the locate request.
+pub(super) fn environment_kind(
+    locate: &FollowUp,
+    option: usize,
+    id: &str,
+) -> Option<(Value, Asked)> {
+    let located = locate.request();
+    let file = &located["state"]["file"];
+    let (state, subject, note) = if let Some(constants) = located["state"]["constants"].as_array() {
+        let mut constant = constants.get(option)?.clone();
+        let used = constant.as_object_mut()?.remove("used_at");
+        constant.as_object_mut()?.remove("id");
+        let mut state = json!({"file": file, "constant": constant});
+        if let Some(lines) = used {
+            state["used_at"] = lines;
+        }
+        (
+            state,
+            "constant",
+            "`used_at` lists lines of the file that use the constant.",
+        )
+    } else {
+        let function = &located["state"]["function"];
+        let entry = function["values"].get(option)?;
+        let mut state = json!({
+            "file": file,
+            "function": {"name": function["name"], "source": function["source"]},
+            "value": entry["value"],
+        });
+        if let Some(lines) = entry.get("elsewhere") {
+            state["elsewhere"] = lines.clone();
+        }
+        (
+            state,
+            "value",
+            "`elsewhere` lists other lines of the file that write the same value.",
+        )
+    };
+    let mut questions = Questions::default();
+    questions.ask(
+        "environment_kind".into(),
+        questions::hardcoded_environment_kind(subject, note),
+        id,
+        HARDCODED_VALUES,
+        "environment_kind",
+        Pass::Locate,
+    );
+    Some(located_request(&located, state, questions))
+}
+
+/// A follow-up of the file a locate request was made for: its model, its
+/// sources and `state`, asking `questions`.
+fn located_request(located: &Value, state: Value, questions: Questions) -> (Value, Asked) {
     let language = located["state"]["file"]["language"]
         .as_str()
         .unwrap_or_default();
     let sources: Vec<(&Path, &str)> = located["jevgate"]["sources"]
-        .as_array()?
-        .iter()
+        .as_array()
+        .into_iter()
+        .flatten()
         .filter_map(|s| Some((Path::new(s["path"].as_str()?), s["source_hash"].as_str()?)))
         .collect();
-    Some(super::evidence::request(
-        located["model"].as_str()?,
+    super::evidence::request(
+        located["model"].as_str().unwrap_or_default(),
         "locate",
         &sources,
         state,
         questions.reworded(language),
-    ))
+    )
 }
 
 /// Option ids `{prefix}0`, `{prefix}1`, … for a locate Choice over `count` entries.
@@ -331,10 +412,19 @@ fn plan_constants(
         let with_ids: Vec<Value> = ids
             .iter()
             .zip(&listed)
-            .map(|(id, constant)| {
-                let mut constant = constant.clone();
-                constant["id"] = json!(id);
-                constant
+            .zip(constants)
+            .map(|((id, listed), constant)| {
+                let mut listed = listed.clone();
+                listed["id"] = json!(id);
+                let lines = used_at(
+                    file.source,
+                    &constant.name,
+                    (constant.line, constant.end_line),
+                );
+                if !lines.is_empty() {
+                    listed["used_at"] = json!(lines);
+                }
+                listed
             })
             .collect();
         locate_request(

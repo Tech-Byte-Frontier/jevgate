@@ -197,7 +197,13 @@ signatures, or one candidate pair.
    or a value nothing near it explains, keep it; a value that the field or
    argument it fills or a comment beside it explains, an idiom such as a
    tolerance near zero or a unit conversion, or a hand-tuned number make it a
-   note.
+   note. A finding that rests only on a value changing between environments
+   is asked, with the value's function or the lines that use the constant,
+   where it would differ: each installation or the author's own account
+   keeps it; the same in every copy on purpose (the program's own service, a
+   provider's fixed address, a path the platform fixes), a fallback used only
+   when configuration gives none, or code no deployment runs, at 0.80, make it
+   a note.
    Special-case findings in different files that name the same identity
    become one finding at the strongest site; the others are notes pointing at
    it. Numbers and paths are not grouped: `1000` meant metres per kilometre in

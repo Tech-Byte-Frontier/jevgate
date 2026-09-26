@@ -181,7 +181,9 @@ pub fn outline_kind(tests: bool) -> Value {
 pub fn hardcoded_constant(ids: &[String]) -> Value {
     choose_id(
         "Which constant in `constants` most needs to come from configuration because it would change in another environment?",
-        format!("Options are the `id` values in `constants`. {EVIDENCE}"),
+        format!(
+            "Options are the `id` values in `constants`; a constant's `used_at` lists lines of the file that use it. {EVIDENCE}"
+        ),
         ids,
         "No single constant stands out.",
     )
@@ -227,6 +229,35 @@ pub fn hardcoded_value_kind() -> Value {
 
 /// The options of `hardcoded_value_kind` under which a value reads for itself.
 pub const READABLE_VALUES: [&str; 3] = ["named", "idiom", "tuning"];
+
+/// Asked only about the value or constant an environment finding names,
+/// with the code around it: where it would differ. Labeled by hand, 39 of
+/// 57 such reviews and considers were wrong: a desktop app's own license
+/// server and OIDC client id, a redirect registered with a provider, a
+/// fallback used only when configuration gives none, a path the platform
+/// fixes, and fixtures, generator templates and scripts no deployment runs;
+/// right ones named a server, path or secret each installation must set, or
+/// the author's own account or domain. `subject` names the state key.
+pub fn hardcoded_environment_kind(subject: &str, note: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Where would `{subject}` differ between the places this program runs?"),
+            "note": format!("{note} {EVIDENCE}"),
+        },
+        "criteria": {
+            "each": "Each installation, server, account or machine that runs the program needs its own value, and the code does not read it from configuration or the environment.",
+            "author": "It names the author's own account, domain, machine, path or credentials, which anyone else running the program would have to change.",
+            "fallback": "It is only the default used when configuration or the environment gives none.",
+            "same": "Every copy of the program uses it on purpose: the program's own public service or registered client id, a provider's fixed address, a path the platform fixes, or text shown to users.",
+            "not_run": "The code does not run where the program is deployed: a test fixture or mock, an example, a template a generator copies, or a script run by hand.",
+        },
+    })
+}
+
+/// The options of `hardcoded_environment_kind` under which the value needs
+/// no configuration.
+pub const SAME_EVERYWHERE: [&str; 3] = ["fallback", "same", "not_run"];
 
 /// Whether a value fixed in code changes between environments. `values` names
 /// the list of candidate values; `code` describes the code that uses them.
