@@ -461,6 +461,29 @@ fn copies_inside_tests_a_redundancy_finding_names_are_reported_once() {
 }
 
 #[test]
+fn a_test_still_undecided_after_its_recheck_leans_clear_below_half() {
+    let (project, mut options) = tests_project(&[("lib.rs", TESTS)], catalog::TEST_VALUE);
+    let mut status = |mock_only: f64| {
+        let mut eval = scripted(0);
+        eval.overrides.push(("mock_only", noul_at(mock_only)));
+        eval.recheck_overrides
+            .push(("mock_only", noul_at(mock_only)));
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        (
+            report.files[0].dimensions["test_value"].status.clone(),
+            report
+                .stages
+                .get("recheck")
+                .map_or(0, |stage| stage.successful_requests),
+        )
+    };
+    // Asked again first: the lean follows the recheck.
+    assert_eq!(status(0.4), (Status::Clear, 3));
+    assert_eq!(status(0.6), (Status::Uncertain, 3));
+}
+
+#[test]
 fn an_internal_details_consider_is_confirmed_by_what_its_assertions_read() {
     let (project, mut options) = tests_project(&[("lib.rs", TESTS)], catalog::TEST_VALUE);
     let reads = ["effects", "own_calls", "result", "state", "stored"];

@@ -275,7 +275,7 @@ pub fn rule_version(key: &str) -> &'static str {
         FILE_ORGANIZATION => "19",
         FUNCTION_SIMPLIFICATION => "14",
         SHARED_LOGIC => "20",
-        TEST_VALUE => "6",
+        TEST_VALUE => "7",
         TEST_REDUNDANCY => "4",
         INJECTION => "10",
         SENSITIVE_DATA => "7",
