@@ -172,12 +172,22 @@ pub fn discover(root: &Path) -> Result<Found> {
     // Ignored instruction files next to visible ones still load, so probe for
     // them by name and walk the agent directories without ignore files.
     for directory in found.directories.clone() {
+        // Only an entry of exactly that name: on a case-insensitive file
+        // system, `AGENTS.md` also opens refined-github's `agents.md`, whose
+        // read then failed and left the whole run incomplete.
+        let names: BTreeSet<std::ffi::OsString> = std::fs::read_dir(root.join(&directory))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.file_name())
+            .collect();
         for name in AGENT_NAMES {
             let path = directory.join(name);
-            if root
-                .join(&path)
-                .symlink_metadata()
-                .is_ok_and(|m| !m.is_dir())
+            if names.contains(std::ffi::OsStr::new(name))
+                && root
+                    .join(&path)
+                    .symlink_metadata()
+                    .is_ok_and(|m| !m.is_dir())
             {
                 add_agent(root, path, &mut found);
             }
@@ -319,6 +329,20 @@ mod tests {
         ] {
             assert_eq!(project_doc(Path::new(path)), expected, "{path}");
         }
+    }
+
+    #[test]
+    fn an_instruction_file_is_found_by_its_exact_name() {
+        let project = crate::tests::Project::new();
+        project.write("agents.md", "# Agents\n");
+        project.write("docs/CLAUDE.md", "# C\n");
+        let found = discover(&project.0).unwrap();
+        let agent: Vec<_> = found.agent.iter().map(|p| p.to_str().unwrap()).collect();
+        assert_eq!(
+            agent,
+            ["docs/CLAUDE.md"],
+            "a lowercase agents.md is not AGENTS.md"
+        );
     }
 
     #[test]
