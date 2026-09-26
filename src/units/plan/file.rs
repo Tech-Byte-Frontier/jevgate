@@ -130,7 +130,14 @@ fn file_context<'a>(
             input.source.as_deref().unwrap_or(""),
             input.package.as_ref(),
         )
-        .or_else(|| crate::units::sveltekit::describe(&input.result.path, input.package.as_ref())),
+        .or_else(|| crate::units::sveltekit::describe(&input.result.path, input.package.as_ref()))
+        .or_else(|| {
+            crate::units::graphql::describe(
+                &input.result.path,
+                input.source.as_deref().unwrap_or(""),
+            )
+            .map(str::to_string)
+        }),
     }
 }
 
