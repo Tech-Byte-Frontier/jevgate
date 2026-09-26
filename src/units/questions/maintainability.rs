@@ -108,8 +108,11 @@ pub fn outline_module(tests: bool, groups: &[String]) -> Value {
 /// Kinds of files whose members serve several features; every other kind
 /// serves one. Asked with the recheck: when the split Score stays undecided,
 /// the kind decides, since naming what a file holds was decisive where
-/// weighing a split was not.
-pub const SEVERAL_KINDS: [&str; 2] = ["per_feature", "several"];
+/// weighing a split was not. The same kind of code written out per feature
+/// is one job: the three such files a consider named, a mailer's function
+/// per template, a game's admin reducers per kind of map content and
+/// JevGate's own follow-up questions per security check, read well whole.
+pub const SEVERAL_KINDS: [&str; 1] = ["several"];
 
 /// What the members of a file hold, as a Choice among kinds of files.
 pub fn outline_kind(tests: bool) -> Value {

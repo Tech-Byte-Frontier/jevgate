@@ -360,29 +360,34 @@ type Window = ((usize, usize), (usize, usize), usize);
 fn matching_windows(blocks: &[Block]) -> Vec<Window> {
     let mut covered = BTreeSet::new();
     let mut found = Vec::new();
-    for occurrences in seeds(blocks).values() {
-        let occurrences = &occurrences[..occurrences.len().min(SEED_OCCURRENCES)];
-        for (x, &(bx, kx)) in occurrences.iter().enumerate() {
-            for &(by, ky) in &occurrences[x + 1..] {
-                if bx == by && ky < kx + MIN_STATEMENTS {
-                    continue;
-                }
-                let diagonal = (bx, by, kx as isize - ky as isize);
-                if covered.contains(&(diagonal, kx)) {
-                    continue;
-                }
-                let n = extend(blocks, (bx, kx), (by, ky));
-                for t in 0..n {
-                    covered.insert((diagonal, kx + t));
-                }
-                if bx == by && one_run(&blocks[bx].statements[kx.min(ky)..kx.max(ky) + n]) {
-                    continue;
-                }
-                found.push(((bx, kx), (by, ky), n));
-            }
+    for ((bx, kx), (by, ky)) in seed_pairs(blocks) {
+        let diagonal = (bx, by, kx as isize - ky as isize);
+        if covered.contains(&(diagonal, kx)) {
+            continue;
         }
+        let n = extend(blocks, (bx, kx), (by, ky));
+        covered.extend((0..n).map(|t| (diagonal, kx + t)));
+        if bx == by && one_run(&blocks[bx].statements[kx.min(ky)..kx.max(ky) + n]) {
+            continue;
+        }
+        found.push(((bx, kx), (by, ky), n));
     }
     found
+}
+
+/// Every two places one seed occurs, among its first `SEED_OCCURRENCES`;
+/// two places in one block must be far enough apart not to overlap.
+fn seed_pairs(blocks: &[Block]) -> impl Iterator<Item = ((usize, usize), (usize, usize))> {
+    seeds(blocks).into_values().flat_map(|mut places| {
+        places.truncate(SEED_OCCURRENCES);
+        let pairs: Vec<_> = places
+            .iter()
+            .enumerate()
+            .flat_map(|(x, &a)| places[x + 1..].iter().map(move |&b| (a, b)))
+            .filter(|&((bx, kx), (by, ky))| bx != by || ky >= kx + MIN_STATEMENTS)
+            .collect();
+        pairs
+    })
 }
 
 /// Statements that all read alike, such as sqlite-utils' nine

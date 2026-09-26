@@ -147,10 +147,11 @@ signatures, or one candidate pair.
    stay under 0.50 gets the same recheck, and a decisive answer replaces it.
    An outline whose recheck stays undecided is asked, in a request of its
    own, what kind of file it is: one algorithm, type, resource, component,
-   set of definitions, helpers or coordination serves one feature; the same
-   kind of code written out per feature, or several unrelated features,
-   serves several. Kinds that serve one feature at 0.80 clear it, and the
-   others at 0.80 raise a consider. Weighing a split stayed near a third per
+   set of definitions, helpers or coordination serves one feature, as does
+   the same kind of code written out per feature (a mailer's function per
+   template); several unrelated features serve several. Kinds that serve
+   one feature at 0.80 clear it, and several features at 0.80 raise a
+   consider. Weighing a split stayed near a third per
    level on such files, while naming the kind was decisive; asked beside the
    recheck, the kind moved the recheck's own answers. A file too long to send
    whole gets no recheck, so its undecided first answer is asked the kind

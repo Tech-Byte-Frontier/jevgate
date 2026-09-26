@@ -124,9 +124,6 @@ pub(in crate::units) fn outline_wording(
         ),
         Strength::Consider => (
             match several {
-                Some("per_feature") => format!(
-                    "This file writes out the same kind of code for several features ({p:.2}); each feature's part would be easier to find in its own {kind}.{detail}"
-                ),
                 Some(_) => format!("This file holds several unrelated features ({p:.2}).{detail}"),
                 None => format!(
                     "Some {parts} of this file could move to a separate {kind} ({p:.2}).{detail}"
