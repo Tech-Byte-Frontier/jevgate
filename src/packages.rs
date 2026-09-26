@@ -19,7 +19,7 @@ pub struct Package {
 const MANIFEST_BYTES: u64 = 1_048_576;
 
 /// The package of a file: the nearest directory at or above it, up to the
-/// root, with a `package.json`, `Cargo.toml` or `pyproject.toml`.
+/// root, with a `package.json`, `Cargo.toml`, `pyproject.toml` or `go.mod`.
 pub fn package(root: &Path, relative: &Path) -> Option<Package> {
     relative.ancestors().skip(1).find_map(|dir| {
         let read = |name: &str| {
@@ -32,6 +32,7 @@ pub fn package(root: &Path, relative: &Path) -> Option<Package> {
             read("package.json").map(|t| node_manifest(&t)),
             read("Cargo.toml").map(|t| cargo_manifest(&t)),
             read("pyproject.toml").map(|t| python_manifest(&t)),
+            read("go.mod").map(|t| go_manifest(&t)),
         ];
         let mut package = Package {
             dir: dir.to_path_buf(),
@@ -76,6 +77,35 @@ fn cargo_manifest(text: &str) -> Manifest {
         .filter_map(|section| table.get(*section).and_then(toml::Value::as_table))
         .flat_map(|names| names.keys().cloned())
         .collect();
+    (name, dependencies)
+}
+
+/// A Go module's path and the modules it requires, on `require` lines and
+/// in `require ( … )` blocks. Without it, Online Boutique's Go services,
+/// each its own module, read as one package, and 9 of 10 copies found
+/// between them were wrong: each service is built on its own.
+fn go_manifest(text: &str) -> Manifest {
+    let mut name = None;
+    let mut dependencies = Vec::new();
+    let mut block = false;
+    for line in text.lines() {
+        let line = line.split("//").next().unwrap_or("").trim();
+        if let Some(path) = line.strip_prefix("module ") {
+            name = Some(path.trim().trim_matches('"').to_string());
+        } else if line.starts_with("require (") {
+            block = true;
+        } else if block && line == ")" {
+            block = false;
+        } else if let Some(path) = if block {
+            Some(line)
+        } else {
+            line.strip_prefix("require ")
+        }
+        .and_then(|rest| rest.split_whitespace().next())
+        {
+            dependencies.push(path.to_string());
+        }
+    }
     (name, dependencies)
 }
 
@@ -173,6 +203,34 @@ mod tests {
         assert!(linked(web.as_ref(), shared.as_ref(), &local));
         assert!(!linked(web.as_ref(), template.as_ref(), &local));
         assert!(!linked(template.as_ref(), rust.as_ref(), &local));
+        // Go modules: separate services, and two that share a local module.
+        project.write(
+            "src/frontend/go.mod",
+            "module example.com/shop/frontend // the web tier\n\ngo 1.22\n\nrequire (\n\tgithub.com/gorilla/mux v1.8.1\n\texample.com/shop/common v0.0.0\n)\n",
+        );
+        project.write(
+            "src/checkout/go.mod",
+            "module example.com/shop/checkout\n\nrequire example.com/shop/common v0.0.0\n",
+        );
+        project.write(
+            "src/shipping/go.mod",
+            "module example.com/shop/shipping\n\nrequire github.com/gorilla/mux v1.8.1\n",
+        );
+        project.write("src/common/go.mod", "module example.com/shop/common\n");
+        let frontend = at("src/frontend/main.go");
+        let checkout = at("src/checkout/main.go");
+        let shipping = at("src/shipping/main.go");
+        let common = at("src/common/log.go");
+        let local: BTreeSet<String> = [&frontend, &checkout, &shipping, &common]
+            .iter()
+            .filter_map(|p| p.as_ref()?.name.clone())
+            .collect();
+        assert_eq!(
+            frontend.as_ref().unwrap().name.as_deref(),
+            Some("example.com/shop/frontend")
+        );
+        assert!(linked(frontend.as_ref(), checkout.as_ref(), &local));
+        assert!(!linked(frontend.as_ref(), shipping.as_ref(), &local));
         assert!(linked(
             at("scripts/x.ts").as_ref(),
             template.as_ref(),
