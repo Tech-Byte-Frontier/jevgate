@@ -3,18 +3,26 @@
 //! target's module. Matching calls by bare name alone linked unrelated files,
 //! such as a Python `update` to a JavaScript `decipher.update`. Java code
 //! uses the classes of its own package without importing them, so a Java file
-//! also reaches a file of its directory whose class it names.
+//! also reaches a file of its directory whose class it names. A Go package is
+//! a directory: a Go file reaches every file of its own directory and of the
+//! directories its import paths name.
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
 };
 
-/// Lines that import, load or declare another module.
+/// Lines that import, load or declare another module, and for Go the import
+/// paths of an `import ( … )` block.
 fn import_lines(source: &str, family: &str) -> Vec<String> {
+    let mut block = false;
     source
         .lines()
         .map(str::trim)
         .filter(|line| {
+            if family == "go" && (block || line.starts_with("import (")) {
+                block = *line != ")";
+                return true;
+            }
             [
                 "import ", "from ", "use ", "pub use ", "mod ", "pub mod ", "export ",
             ]
@@ -50,6 +58,8 @@ pub struct Imports {
     /// For Java: the file's directory and the capitalized names its code
     /// mentions, the classes of its package it can use without an import.
     package: Option<(PathBuf, BTreeSet<String>)>,
+    /// For Go: the file's directory, its package.
+    directory: Option<PathBuf>,
 }
 
 impl Imports {
@@ -60,12 +70,15 @@ impl Imports {
                 family,
                 lines: csharp_lines(source),
                 package: None,
+                directory: None,
             };
         }
         Self {
             family,
             lines: import_lines(source, family),
             package: (family == "java").then(|| java_package(path, source)),
+            directory: (family == "go")
+                .then(|| path.parent().unwrap_or(Path::new("")).to_path_buf()),
         }
     }
 
@@ -76,6 +89,11 @@ impl Imports {
     pub fn reach(&self, target: &Path) -> bool {
         if self.family.is_empty() || self.family != family(target) {
             return false;
+        }
+        if let Some(directory) = &self.directory {
+            let package = target.parent().unwrap_or(Path::new(""));
+            return package == directory
+                || self.lines.iter().any(|line| imports_package(line, package));
         }
         let mut name = module_name(target);
         if self.family == "csharp" {
@@ -144,6 +162,23 @@ fn module_name(path: &Path) -> String {
     }
 }
 
+/// A Go import line whose quoted path ends with the directory `package`
+/// (`"example.com/shop/internal/orders"` for `internal/orders`).
+fn imports_package(line: &str, package: &Path) -> bool {
+    let package: Vec<String> = package
+        .iter()
+        .map(|part| part.to_string_lossy().into_owned())
+        .collect();
+    if package.is_empty() {
+        return false;
+    }
+    let Some(path) = line.split('"').nth(1) else {
+        return false;
+    };
+    let segments: Vec<&str> = path.split('/').collect();
+    segments.len() >= package.len() && segments[segments.len() - package.len()..] == package[..]
+}
+
 /// `name` appears as a whole path segment, as in `./name'`, `crate::name::x`,
 /// `from .name import` or `import name`.
 fn names_segment(line: &str, name: &str) -> bool {
@@ -161,7 +196,7 @@ mod tests {
 
     #[test]
     fn callers_need_an_import_of_the_module_in_the_same_language() {
-        let cases: [(&str, &str, &[&str], &[&str]); 6] = [
+        let cases: [(&str, &str, &[&str], &[&str]); 7] = [
             (
                 "app/routes.php",
                 "<?php\nuse App\\Application\\Actions\\User\\ListUsersAction;\nrequire_once __DIR__ . '/helpers.php';\n",
@@ -217,6 +252,19 @@ mod tests {
                     "src/main/java/app/owner/PetValidator.java",
                     "src/main/java/app/vet/OwnerRepository.java",
                     "src/main/java/app/owner/owner_repository.py",
+                ],
+            ),
+            (
+                "vulnerability/sqli/sqli.go",
+                "package sqli\n\nimport (\n\t\"net/http\"\n\n\t\"github.com/0c34/govwa/util/database\"\n)\n",
+                &[
+                    "vulnerability/sqli/function.go",
+                    "util/database/database.go",
+                ],
+                &[
+                    "vulnerability/xss/xss.go",
+                    "util/db/database.go",
+                    "vulnerability/sqli/function.py",
                 ],
             ),
         ];
