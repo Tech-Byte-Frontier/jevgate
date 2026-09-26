@@ -61,7 +61,11 @@ signatures, or one candidate pair.
    grammars miss some valid code: tree-sitter-typescript reads a call
    signature starting with `<T>` on the line after another as its
    continuation, which left four of zustand's source files unjudged. The
-   definitions that hold an error are then left out. Generator templates
+   definitions that hold an error are then left out. A file under a
+   directory named with a `{{ … }}` placeholder, as in a cookiecutter
+   template, is parsed without its Jinja tags (statements and comments
+   blanked, placeholders read as names of the same length): 31 of
+   cookiecutter-django's files had been skipped. Generator templates
    (under `templates/`, or holding ERB tags or `//#if` conditions) keep the
    strict rule, since their placeholders are not the language's syntax.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references

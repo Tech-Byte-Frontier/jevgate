@@ -107,11 +107,21 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         let (scripts, language) = crate::components::scripts(extension, source);
         (language, Some(scripts))
     } else if let Some(language) = grammar(path) {
-        (language, None)
+        (
+            language,
+            project_template(path).then(|| without_jinja(source)),
+        )
     } else {
         return Ok(None);
     };
-    let key = (extension.to_owned(), crate::schema::hash(source.as_bytes()));
+    // A template's tree is of its code without the Jinja tags, apart from
+    // the same text's tree elsewhere.
+    let kind = if scripts.is_some() && grammar(path).is_some() {
+        format!("{extension}+jinja")
+    } else {
+        extension.to_owned()
+    };
+    let key = (kind, crate::schema::hash(source.as_bytes()));
     let tree = match PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
         Some(tree) => tree,
         None => {
@@ -149,6 +159,50 @@ fn template(path: &Path, source: &str) -> bool {
         .any(|part| matches!(part.to_str(), Some("templates" | "template")))
         || source.contains("<%")
         || source.contains("//#if")
+}
+
+/// A file of a project template such as a cookiecutter's, under a directory
+/// whose name holds a `{{ … }}` placeholder: its Jinja tags are no syntax of
+/// its language, and 31 of cookiecutter-django's Python and JavaScript
+/// files, the generated application's settings, models, views and tests,
+/// were skipped for syntax errors.
+fn project_template(path: &Path) -> bool {
+    path.iter().any(|part| {
+        part.to_str()
+            .is_some_and(|p| p.contains("{{") && p.contains("}}"))
+    })
+}
+
+/// The source with its Jinja statements and comments blanked and each
+/// `{{ … }}` placeholder turned into an identifier of the same length, so
+/// that byte offsets and lines stay the file's: `from {{ slug }}.users
+/// import User` reads as an import, and both branches of an `{% if %}` stay.
+fn without_jinja(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut out = bytes.to_vec();
+    let mut at = 0;
+    while at + 1 < bytes.len() {
+        let (close, fill) = match (bytes[at], bytes[at + 1]) {
+            (b'{', b'%') => ("%}", b' '),
+            (b'{', b'#') => ("#}", b' '),
+            (b'{', b'{') => ("}}", b'_'),
+            _ => {
+                at += 1;
+                continue;
+            }
+        };
+        let Some(length) = source[at + 2..].find(close) else {
+            break;
+        };
+        let end = at + 2 + length + 2;
+        for byte in &mut out[at..end] {
+            if *byte != b'\n' {
+                *byte = fill;
+            }
+        }
+        at = end;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| source.to_string())
 }
 
 /// Whether a tree's syntax errors are few and small enough to judge the
@@ -192,6 +246,27 @@ mod tests {
     use super::*;
     use crate::locations::collect;
     use tree_sitter::{InputEdit, Point};
+
+    #[test]
+    fn jinja_tags_of_a_project_template_are_not_its_syntax() {
+        let source = "{% if cookiecutter.use_celery == 'y' %}\nfrom celery import shared_task\n{% endif %}\nfrom {{ cookiecutter.project_slug }}.users.models import User\n\n\ndef total(values):\n    {# the café's sum #}\n    return sum(values)\n";
+        let blanked = without_jinja(source);
+        assert_eq!(blanked.len(), source.len());
+        assert_eq!(blanked.lines().count(), source.lines().count());
+        let placeholder = "_".repeat("{{ cookiecutter.project_slug }}".len());
+        assert!(blanked.contains(&format!("from {placeholder}.users.models import User")));
+        let tree = parse(
+            Path::new("{{cookiecutter.project_slug}}/app/tasks.py"),
+            source,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!tree.root_node().has_error());
+        assert!(
+            parse(Path::new("app/tasks.py"), source).is_err(),
+            "outside a template its tags are syntax errors"
+        );
+    }
 
     #[test]
     fn identical_source_reuses_a_tree_across_paths() {
