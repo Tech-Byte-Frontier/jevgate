@@ -896,6 +896,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_dry_run_plans_the_units_of_a_file_whose_purpose_the_cache_answers() {
+        let project = Project::new();
+        project.write("tests/support.rs", SUPPORT);
+        let mut options = args();
+        options.rules = vec![crate::catalog::FUNCTION_SIMPLIFICATION.into()];
+        run(&project, &options, &mut PurposeEval::new("mixed"));
+        options.dry_run = true;
+        let stages = crate::tests::snapshot(&project, &options).1.stages;
+        let planned = |stage: &str| (stages[stage].planned_requests, stages[stage].planned_cached);
+        assert_eq!(planned("file-purpose"), (1, 1));
+        assert_eq!(
+            planned("functions"),
+            (1, 1),
+            "the units a run sends are planned"
+        );
+    }
+
     struct PurposeEval {
         mode: &'static str,
         calls: usize,

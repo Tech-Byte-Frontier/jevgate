@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- `--dry-run` plans the files whose purpose the cache already answers, as a run does, so a warm cache's estimate matches the run: on a Rails project it counted 106 of 1,532 requests as new while the run sent none.
+
 ## [0.19.0] - 2026-09-25
 
 - Inline suppressions: a comment `jevgate: allow(RULE) reason` on a finding's line, or in the comments and attributes directly above it, accepts that finding as the baseline does. RULE is a rule ID, key or group, and the reason is required; the report keeps the finding with its reason (`suppressed`, and `gate.suppressed_findings`), and `jevgate baseline` leaves it out.

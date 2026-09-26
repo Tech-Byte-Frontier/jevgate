@@ -92,17 +92,17 @@ fn cached_answer(
     .filter(|(b, _)| response::validate(b, request).is_ok())
 }
 
-/// Whether a dry run's planned request already has a cached answer, read
-/// without opening the store.
+/// A dry run's cached answer to a planned request, read without opening the
+/// store.
 pub(super) fn answered(
     root: &std::path::Path,
     args: &crate::options::CheckArgs,
     request: &Value,
-) -> bool {
+) -> Option<Value> {
     cached_answer(args, request, |key, ttl| {
         crate::storage::peek(root, key, ttl)
     })
-    .is_some()
+    .map(|(body, _)| body)
 }
 
 impl Session<'_> {
