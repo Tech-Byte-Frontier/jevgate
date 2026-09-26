@@ -1,6 +1,6 @@
 //! Inline suppressions: a comment `jevgate: allow(RULE, …) reason` on a
 //! finding's line, or in the comments and attributes directly above it,
-//! accepts that finding as the baseline does. RULE is a rule ID, key or group,
+//! accepts that finding as the baseline does. RULE is a rule ID, name, key or group,
 //! and the reason is required: without one the comment is ignored and the
 //! finding says so.
 use crate::{catalog, schema::Report};
@@ -64,7 +64,7 @@ fn annotation(line: &str) -> bool {
         .any(|start| line.starts_with(start))
 }
 
-/// Whether `name` (an ID, key or group) selects the rule with ID `rule`.
+/// Whether `name` (an ID, name, key or group) selects the rule with ID `rule`.
 fn names(name: &str, rule: &str) -> bool {
     let key = catalog::find(rule).map(|r| r.key);
     catalog::select(name).is_some_and(|keys| key.is_some_and(|key| keys.contains(&key)))

@@ -115,10 +115,11 @@ fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> 
         } => {
             let mut keys = Vec::new();
             for name in &rules {
-                keys.extend(
-                    catalog::select(name)
-                        .ok_or_else(|| anyhow::anyhow!("Unknown rule or group: {name}"))?,
-                );
+                keys.extend(catalog::select(name).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Unknown rule or group: {name}; `jevgate rules` lists the rules"
+                    )
+                })?);
             }
             let marked = baseline::mark(&context.root, reason, &targets, &keys)?;
             say!(

@@ -21,7 +21,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 `--fail-on review|consider|uncertain|none` sets what fails the gate; `--fail-on security=consider` sets it for one group or rule. Baselined findings, findings allowed by a comment, and notes never fail it.
 
-A single finding can also be accepted where it is, with a comment on its line or directly above it (doc comments and attributes may sit in between). The comment names a rule ID, key or group, and needs a reason; without one it is ignored and the finding says so:
+A single finding can also be accepted where it is, with a comment on its line or directly above it (doc comments and attributes may sit in between). The comment names a rule ID (`security/injection`), its name (`injection`), its key or a group, and needs a reason; without one it is ignored and the finding says so:
 
 ```python
 # jevgate: allow(hardcoded_values) the protocol fixes this port
