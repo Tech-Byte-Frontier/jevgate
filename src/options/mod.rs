@@ -100,7 +100,7 @@ pub struct CheckArgs {
     ///
     /// Without paths, JevGate walks the repository (respecting .gitignore) and
     /// selects application source in Rust, Python, JavaScript, TypeScript, Go,
-    /// C#, Ruby, PHP and Java, the scripts of Astro, Vue and Svelte files, and
+    /// C#, Ruby, PHP, Java and Bend 2, the scripts of Astro, Vue and Svelte files, and
     /// server templates (ERB, EJS, JSP, Handlebars, Jinja and others) that
     /// hold inline scripts or code reading the request. Tests, generated code
     /// and vendored files are classified and skipped with a reason.

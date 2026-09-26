@@ -55,6 +55,10 @@ pub fn comments(path: &Path, source: &str, units: &[Unit]) -> Result<Vec<Comment
     };
     let mut raw = Vec::new();
     collect(tree.root_node(), source, &mut raw);
+    if super::bend::file(path) {
+        // A Bend 2 test's `#|` lines are the output its run must print.
+        raw.retain(|r| !super::bend::output_line(&source[r.span.clone()]));
+    }
     raw.sort_by_key(|r: &Raw| r.span.start);
     let lines: Vec<&str> = source.split('\n').collect();
     let blocks = merge(raw, source);

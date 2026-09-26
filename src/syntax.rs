@@ -1,11 +1,39 @@
 //! Tree-sitter parsing for the supported languages, with a bounded cache of
 //! trees keyed by grammar and exact source.
-use anyhow::{Result, ensure};
-use std::{cell::RefCell, collections::BTreeMap, path::Path};
-use tree_sitter::{Node, Parser, Tree};
+use anyhow::{Result, bail, ensure};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+    ops::ControlFlow,
+    path::Path,
+    time::{Duration, Instant},
+};
+use tree_sitter::{Node, ParseOptions, Parser, Tree};
 
 const CACHE_ENTRIES: usize = 256;
 const CACHE_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+
+/// A parse that runs longer is stopped and the file skipped. Recovering
+/// from errors can take a grammar far longer than reading valid code: Bend
+/// 2's grammar took over ten minutes on a 1 MB Bend 1 test of nested
+/// parentheses, which it parses in no time once it knows the file is Bend 1.
+const PARSE_TIME: Duration = Duration::from_secs(10);
+
+/// Why a file of a supported language was not judged, as its skip reason.
+pub(crate) const SYNTAX_ERRORS: &str = "Syntax errors; this file was not judged.";
+pub(crate) const BEND1: &str = "Bend 1 syntax: JevGate reads Bend 2 (bendlang/bend 2.0.x), a different language that shares the .bend extension; this file was not judged.";
+pub(crate) const SLOW_PARSE: &str =
+    "The parser did not finish within 10 seconds; this file was not judged.";
+
+/// The skip reason of a parse error: its message when it is one of the
+/// reasons above, and syntax errors otherwise.
+pub(crate) fn skip_reason(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string();
+    [BEND1, SLOW_PARSE]
+        .into_iter()
+        .find(|reason| message == *reason)
+        .unwrap_or(SYNTAX_ERRORS)
+}
 
 struct Parsed {
     source: String,
@@ -18,6 +46,8 @@ struct ParseCache {
     entries: BTreeMap<(String, String), Parsed>,
     bytes: usize,
     clock: u64,
+    /// Sources whose parse was stopped, so later callers skip them at once.
+    stopped: BTreeSet<(String, String)>,
 }
 
 impl ParseCache {
@@ -87,6 +117,7 @@ fn grammar(path: &Path) -> Option<tree_sitter::Language> {
         "rb" => tree_sitter_ruby::LANGUAGE,
         "php" | "phtml" => tree_sitter_php::LANGUAGE_PHP,
         "java" => tree_sitter_java::LANGUAGE,
+        "bend" => tree_sitter_bend2::LANGUAGE,
         _ => return None,
     };
     Some(language.into())
@@ -136,15 +167,23 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     } else {
         extension.to_owned()
     };
+    if crate::analysis::bend::file(path) && crate::analysis::bend::bend1(source) {
+        bail!(BEND1);
+    }
     let key = (kind, crate::schema::hash(source.as_bytes()));
+    if PARSES.with(|cache| cache.borrow().stopped.contains(&key)) {
+        bail!(SLOW_PARSE);
+    }
     let tree = match PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
         Some(tree) => tree,
         None => {
             let mut parser = Parser::new();
             parser.set_language(&language)?;
-            let tree = parser
-                .parse(scripts.as_deref().unwrap_or(source), None)
-                .ok_or_else(|| anyhow::anyhow!("Parser did not produce a tree"))?;
+            let Some(tree) = parse_in_time(&mut parser, scripts.as_deref().unwrap_or(source))
+            else {
+                PARSES.with(|cache| cache.borrow_mut().stopped.insert(key));
+                bail!(SLOW_PARSE);
+            };
             PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
             tree
         }
@@ -159,6 +198,22 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         "Syntax errors: semantic evaluation was not attempted"
     );
     Ok(Some(tree))
+}
+
+/// The tree of `text`, or none when parsing takes longer than `PARSE_TIME`.
+fn parse_in_time(parser: &mut Parser, text: &str) -> Option<Tree> {
+    let deadline = Instant::now() + PARSE_TIME;
+    let bytes = text.as_bytes();
+    let mut read = |offset: usize, _| bytes.get(offset..).unwrap_or_default();
+    let mut progress = |_: &tree_sitter::ParseState| {
+        if Instant::now() < deadline {
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        }
+    };
+    let options = ParseOptions::new().progress_callback(&mut progress);
+    parser.parse_with_options(&mut read, None, Some(options))
 }
 
 /// Error regions a file may hold and still be judged, and the part of its

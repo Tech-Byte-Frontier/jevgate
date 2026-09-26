@@ -34,10 +34,11 @@ pub(super) fn plan_security(
     let parsed = &scope.units[&context.owner];
     let test_path = scope.inputs[context.owner].result.role == "test";
     let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
+    let bend = crate::analysis::bend::file(context.path);
     let subjects: Vec<security::Subject<'_>> = parsed
         .units
         .iter()
-        .filter(|u| u.callable() && outside_tests(u.line))
+        .filter(|u| u.reaches_out(bend) && outside_tests(u.line))
         .map(|unit| function_subject(scope, shared, context, unit, rules))
         .collect();
     let mut setup = security::setup_subject(context, &parsed.setup, &shared.constants)

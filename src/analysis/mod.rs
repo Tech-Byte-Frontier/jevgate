@@ -1,6 +1,7 @@
 //! Free local analysis over the selected scope: units, member groups, Type-2
 //! clone candidates and a test map. Parsers supply evidence and locations;
 //! every judgment about meaning is left to Jev.
+pub mod bend;
 pub mod blocks;
 pub mod clones;
 pub mod comments;
@@ -49,7 +50,12 @@ pub(crate) fn callee_name(node: Node<'_>, source: &str) -> Option<String> {
             "scoped_type_identifier" => {
                 node.named_child(node.named_child_count().checked_sub(1)? as u32)?
             }
-            "scoped_identifier" => node.child_by_field_name("name")?,
+            // Bend 2 spells one name with dots, `List.map`, where Rust's
+            // `std::fs::read` names `read`.
+            "scoped_identifier" => match node.child_by_field_name("name") {
+                Some(name) => name,
+                None => return Some(text(node, source).to_string()),
+            },
             "field_expression" => node.child_by_field_name("field")?,
             "member_expression" => node.child_by_field_name("property")?,
             "selector_expression" => node.child_by_field_name("field")?,

@@ -9,12 +9,13 @@
 | Shared logic | `createInvoice` and `createReceipt` perform the same steps; one shared implementation would serve both. |
 | Hardcoded values | Module constants fix a value that differs between deployments; `apply_discount` special-cases one specific customer. |
 
-**Tests** (with `--include-tests`; file organization judges test files without it)
+**Tests** (with `--include-tests`; file organization judges test files without it, and the laws of Bend 2 code are judged where they are)
 
 | Rule | Example finding |
 |---|---|
 | Test value | `test_total` computes its expected value with the logic it tests. |
 | Test redundancy | Three tests of `parse_date` check the same behavior; one parameterized test could hold them. |
+| Laws (Bend 2) | The comment above law `nfa_sound` promises more than the law states: it says the NFA is sound and complete, and the law states only that it is sound, so a definition could break that promise while every proof passes. |
 
 **Security** (opt-in with `--rule security`; each finding names a CWE)
 

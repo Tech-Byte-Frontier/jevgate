@@ -1,5 +1,6 @@
 //! Units of each supported language, one file per language; what every
 //! language measures the same way is here.
+mod bend;
 mod csharp;
 mod go;
 mod java;

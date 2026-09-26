@@ -165,6 +165,30 @@ pub fn test_reads(path: &str, evidence: TestEvidence) -> Value {
     })
 }
 
+/// Whether a Bend 2 law's comment claims more than the law states. The law
+/// is what the compiler checks and its comment what a person reads: a
+/// behavior the comment promises and the law leaves out can break while
+/// every proof still passes. The law is compared in words: asked of its
+/// notation alone, answers did not tell a comment that restates its law
+/// from one that claims more, either as "promises more than" or as whether
+/// the definitions could change so the comment turns false.
+pub fn law_states(index: usize) -> Value {
+    let law = format!("laws[{index}]");
+    super::score(
+        format!(
+            "Does the comment in `{law}.comment` claim anything about behavior that the law, read in `{law}.reading`, does not state?"
+        ),
+        &format!(
+            "`{law}.source` is the law as written and `{law}.defs` the definitions it names; `file.comment`, when present, says what the file's laws pin. The compiler checks the law, not its comment."
+        ),
+        [
+            "No. The comment says what the law states in other words: informally, with an example, or with its intuition.",
+            "Barely. One loose word reads wider than the law, such as `any` where the law's clauses bound the input, and a reader would take the law's meaning.",
+            "Yes. The comment claims a property the law does not state (such as `sound and complete` above a law that states only soundness), for more inputs than the law covers, or a consequence that needs a condition the law does not state.",
+        ],
+    )
+}
+
 pub fn test_several(path: &str) -> Value {
     noul(
         format!("Does the test in `{path}` check several unrelated behaviors?"),

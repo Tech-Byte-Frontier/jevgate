@@ -179,7 +179,7 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
     [
         "rs", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "kt",
         "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "phtml", "swift",
-        "dart", "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "astro", "sql",
+        "dart", "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "astro", "sql", "bend",
     ]
     .contains(&extension.as_str())
         || extra.contains(&extension)

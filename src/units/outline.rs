@@ -143,7 +143,7 @@ fn plan_outline(
         ids: ids.clone(),
     };
     let (request, asked) = outline.request(file, Ask::First);
-    let fits = file.budget.fits(&request);
+    let fits = file.budget.fits_structured(&request);
     // A short file is read in one pass; splitting it is not a maintainability gain.
     let small = member_code_lines(file.source, &listed) < MIN_FILE_LINES;
     let judged = fits && !small;
@@ -324,6 +324,7 @@ fn unit_member(unit: &Unit, names: &BTreeSet<&str>, used_by: &BTreeSet<&PathBuf>
             Kind::Function => "function",
             Kind::Method => "method",
             Kind::Type => "type",
+            Kind::Law => "law",
         },
         "lines": unit.lines(),
         "signature": unit.signature,

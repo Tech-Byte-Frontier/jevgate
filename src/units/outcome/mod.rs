@@ -231,6 +231,8 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             })
         }
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
+        // "Slightly" says the comment adds only detail: a note, as a benefit.
+        catalog::LAWS => get("states").map(benefit),
         catalog::COMMENTS => comment_outcome(
             &get,
             matches!(
@@ -308,7 +310,9 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     // SECRET_KEY, sqlmodel's tutorials run each step in one function, and
     // express's examples keep session cookies simple. Its findings are at
     // most notes; a place it passes outside input to a query or command is
-    // still a consider, since examples are copied.
+    // still a consider, since examples are copied, and so is a Bend 2 law
+    // that states less than its comment: a demo's laws show how to state
+    // one.
     let example = unit
         .locations
         .iter()
@@ -316,7 +320,11 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         && !unit.locations.is_empty();
     match outcome {
         Outcome::Review(p) | Outcome::Consider(p)
-            if example && matches!(unit.rule, catalog::INJECTION | catalog::SENSITIVE_DATA) =>
+            if example
+                && matches!(
+                    unit.rule,
+                    catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::LAWS
+                ) =>
         {
             Outcome::Consider(p)
         }

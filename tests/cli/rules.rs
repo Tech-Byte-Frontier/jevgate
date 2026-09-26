@@ -31,6 +31,7 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "workflows",
             "test_value",
             "test_redundancy",
+            "laws",
             "agent_context",
             "large_docs",
             "doc_staleness",

@@ -9,10 +9,10 @@ use super::{
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
-        doc_pair_wording, document_wording, function_wording, handler_wording, module_wording,
-        outline_wording, pair_wording, plan_wording, privilege_wording, question_label,
-        section_wording, security_wording, stale_wording, test_pair_wording, test_wording,
-        values_wording,
+        doc_pair_wording, document_wording, function_wording, handler_wording, law_wording,
+        module_wording, outline_wording, pair_wording, plan_wording, privilege_wording,
+        question_label, section_wording, security_wording, stale_wording, test_pair_wording,
+        test_wording, values_wording,
     },
 };
 use crate::{
@@ -708,6 +708,7 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
             "operator_only",
         ],
         catalog::WORKFLOWS => &["outside", "untrusted"],
+        catalog::LAWS => &["states"],
         catalog::LARGE_DOCS => &["split", "history"],
         catalog::DOC_STALENESS => &["plan", "relies"],
         catalog::DOC_DUPLICATION => &["a_covers", "b_covers", "conflict"],
@@ -863,6 +864,7 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::INJECTION | catalog::SENSITIVE_DATA | catalog::UNSAFE_SETTINGS => "security unit",
         catalog::ACCESS_CONTROL => "access statement",
         catalog::WORKFLOWS => "workflow job",
+        catalog::LAWS => "law",
         catalog::AGENT_CONTEXT => "section",
         catalog::LARGE_DOCS => "document",
         catalog::DOC_STALENESS => "document check",
@@ -1053,6 +1055,7 @@ fn finding(
             comment_wording(name, &[(&unit.locations[0], reason)], strength, p)
         }
         Detail::Test { .. } => test_wording(name, strength, p, answers),
+        Detail::Law => law_wording(name, strength, p),
         Detail::TestPair { .. } => {
             symbol = None;
             test_pair_wording(name, strength == Strength::Review, p)

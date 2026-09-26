@@ -143,6 +143,7 @@ pub fn language(path: &Path) -> &'static str {
         "ts" | "tsx" | "mts" | "cts" => "TypeScript",
         "go" => "Go",
         "java" => "Java",
+        "bend" => crate::analysis::bend::LANGUAGE,
         "kt" | "kts" => "Kotlin",
         "scala" => "Scala",
         "c" | "h" => "C",

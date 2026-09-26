@@ -238,8 +238,8 @@ fn parsed_scope<'a>(
                 );
                 skipped.insert(owner, reason);
             }
-            Err(_) => {
-                skipped.insert(owner, "Syntax errors; this file was not judged.".into());
+            Err(error) => {
+                skipped.insert(owner, crate::syntax::skip_reason(&error).into());
             }
         }
     }

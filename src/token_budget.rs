@@ -16,6 +16,12 @@ const BUDGET_READ_BYTES: u64 = 4096;
 const DEFAULT_BYTES_PER_TOKEN: f64 = 3.0;
 const MIN_BYTES_PER_TOKEN: f64 = 2.0;
 const MAX_BYTES_PER_TOKEN: f64 = 6.0;
+/// Bytes per token of evidence that is mostly JSON structure, such as an
+/// outline's member list, at most: TypeScript and Bend 2 outlines measured
+/// 2.29 and 2.19 bytes per token against 3.37 and 2.98 for their functions,
+/// so a project's calibrated average let a 328-member outline of 77 KB
+/// through that the provider refused as beyond its context.
+const STRUCTURED_BYTES_PER_TOKEN: f64 = 2.0;
 
 /// The bytes-per-token ratio, calibrated from observed `usage.input_tokens` and
 /// saved in `.jevgate/`.
@@ -73,6 +79,14 @@ impl TokenBudget {
     /// Estimated uploaded tokens of a request.
     pub fn request_tokens(&self, request: &Value) -> usize {
         self.tokens_of(&provider_request(request))
+    }
+
+    /// `fits` for a request whose evidence is mostly JSON structure.
+    pub fn fits_structured(&self, request: &Value) -> bool {
+        Self {
+            bytes_per_token: self.bytes_per_token.min(STRUCTURED_BYTES_PER_TOKEN),
+        }
+        .fits(request)
     }
 
     pub fn fits(&self, request: &Value) -> bool {

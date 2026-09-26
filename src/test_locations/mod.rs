@@ -45,7 +45,10 @@ pub(crate) fn locate_tests(path: &Path, source: &str) -> Result<Located> {
         });
     };
     let root = tree.root_node();
-    if whole_file_cfg_test(root, source) {
+    // A Bend 2 test is a program ending in the output its run must print.
+    let golden = crate::analysis::bend::file(path)
+        && crate::analysis::bend::expected_output(source).is_some();
+    if golden || whole_file_cfg_test(root, source) {
         return Ok(Located {
             ranges: Vec::new(),
             unresolved: Vec::new(),

@@ -5,7 +5,9 @@
 //! uses the classes of its own package without importing them, so a Java file
 //! also reaches a file of its directory whose class it names. A Go package is
 //! a directory: a Go file reaches every file of its own directory and of the
-//! directories its import paths name.
+//! directories its import paths name. A Bend 2 import names a file by its
+//! path from the importer (`import ./main.bend as Sort`), and `import Base`
+//! the prelude, which the Bend repository keeps at `bend2/base.bend`.
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -65,11 +67,29 @@ pub struct Imports {
     package: Option<(PathBuf, BTreeSet<String>)>,
     /// For Go: the file's directory, its package.
     directory: Option<PathBuf>,
+    /// For Bend 2: the files its imports name, and whether it imports Base.
+    files: Vec<PathBuf>,
+    base: bool,
 }
 
 impl Imports {
     pub fn new(path: &Path, source: &str) -> Self {
         let family = family(path);
+        if family == "bend" {
+            let paths: Vec<&str> = crate::analysis::bend::import_paths(source).collect();
+            return Self {
+                family,
+                lines: Vec::new(),
+                segments: HashSet::new(),
+                package: None,
+                directory: None,
+                files: paths
+                    .iter()
+                    .filter_map(|p| crate::analysis::bend::imported_file(path, p))
+                    .collect(),
+                base: paths.contains(&"Base"),
+            };
+        }
         if family == "csharp" {
             let lines = csharp_lines(source);
             return Self {
@@ -78,6 +98,8 @@ impl Imports {
                 lines,
                 package: None,
                 directory: None,
+                files: Vec::new(),
+                base: false,
             };
         }
         let lines = import_lines(source, family);
@@ -88,6 +110,8 @@ impl Imports {
             package: (family == "java").then(|| java_package(path, source)),
             directory: (family == "go")
                 .then(|| path.parent().unwrap_or(Path::new("")).to_path_buf()),
+            files: Vec::new(),
+            base: false,
         }
     }
 
@@ -98,6 +122,10 @@ impl Imports {
     pub fn reach(&self, target: &Path) -> bool {
         if self.family.is_empty() || self.family != family(target) {
             return false;
+        }
+        if self.family == "bend" {
+            return self.files.iter().any(|file| file == target)
+                || self.base && target.ends_with("bend2/base.bend");
         }
         if let Some(directory) = &self.directory {
             let package = target.parent().unwrap_or(Path::new(""));
@@ -219,6 +247,7 @@ fn family(path: &Path) -> &'static str {
         "rb" => "ruby",
         "php" | "phtml" => "php",
         "java" => "java",
+        "bend" => "bend",
         "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte"
         | "astro" => "javascript",
         _ => "",
@@ -318,6 +347,8 @@ mod tests {
             lines: lines.clone(),
             package: None,
             directory: None,
+            files: Vec::new(),
+            base: false,
         };
         let names = [
             "Orders",

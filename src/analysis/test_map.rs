@@ -65,6 +65,16 @@ pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
         return Ok(Vec::new());
     };
     let mut found = Vec::new();
+    if super::bend::file(path) {
+        // A Bend 2 test is one program: its defs, its `main` and the output
+        // its run must print, which ends the file.
+        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
+        let root = tree.root_node();
+        if super::bend::expected_output(source).is_some() || defines_main(root, source) {
+            push(root, 0, name.to_string(), source, &mut found);
+        }
+        return Ok(found);
+    }
     let pytest = crate::test_locations::pytest_file(path);
     visit(tree.root_node(), source, pytest, false, &mut found);
     let mut suites = Vec::new();
@@ -78,6 +88,17 @@ pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
     }
     qualify_repeated_names(&mut found);
     Ok(found)
+}
+
+/// Whether a Bend 2 file defines `main`, the program its test runs.
+fn defines_main(root: Node<'_>, source: &str) -> bool {
+    let mut cursor = root.walk();
+    root.named_children(&mut cursor).any(|node| {
+        node.kind() == "function_definition"
+            && node
+                .child_by_field_name("name")
+                .is_some_and(|n| text(n, source) == "main")
+    })
 }
 
 /// Cases titled alike in different suites, as RSpec examples often are

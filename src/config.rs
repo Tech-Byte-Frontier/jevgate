@@ -565,7 +565,10 @@ mod tests {
     #[test]
     fn rule_lists_and_cli_rules_accept_groups_and_reject_unknown_names() {
         let args = configured("rules = [\"tests\"]", &[], &[]).unwrap();
-        assert_eq!(args.rules, [catalog::TEST_VALUE, catalog::TEST_REDUNDANCY]);
+        assert_eq!(
+            args.rules,
+            [catalog::TEST_VALUE, catalog::TEST_REDUNDANCY, catalog::LAWS]
+        );
         let args = configured("rules = [\"tests\"]", &["shared_logic"], &[]).unwrap();
         assert_eq!(args.rules, [catalog::SHARED_LOGIC]);
         assert!(configured("", &["securty"], &[]).is_err());

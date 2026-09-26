@@ -95,6 +95,10 @@ const STATEMENTS: &[&str] = &[
     "echo_statement",
     "local_variable_declaration",
     "throw_statement",
+    // Bend 2: `x = v`, `a b = f(x) g(y)` and `x : T <- m` in a `do` block.
+    "let_statement",
+    "parallel_let_statement",
+    "bind_statement",
 ];
 
 /// Rust's standard formatting macros build text from their arguments.
@@ -632,8 +636,8 @@ fn concatenates(node: Node<'_>, source: &str) -> bool {
                 | "heredoc"
         )
     };
-    // PHP joins strings with `.`.
-    matches!(operator, "+" | "%" | ".")
+    // PHP joins strings with `.`, Bend 2 with `++`.
+    matches!(operator, "+" | "%" | "." | "++")
         && (string(left) || string(right))
         && !(literal(left) && literal(right))
 }

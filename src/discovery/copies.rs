@@ -26,6 +26,17 @@ pub fn vendored(path: &Path, source: Option<&str>) -> bool {
         || shadcn(path)
         || source.is_some_and(license_banner)
         || script && asset(path) && source.is_some_and(license_text)
+        || name == "base.bend" && source.is_some_and(|s| bend_base(path, s))
+}
+
+/// A copy of Bend 2's Base library, the prelude `import Base` loads: a
+/// `base.bend` that declares its core types, away from the compiler that
+/// ships it (`bend2/bend.ts` beside `bend2/base.bend` in bendlang/bend).
+/// bend-json keeps one at its root, 2,827 lines judged as its own code.
+fn bend_base(path: &Path, source: &str) -> bool {
+    source.contains("type Nat is Data:")
+        && source.contains("type List<")
+        && !path.with_file_name("bend.ts").is_file()
 }
 
 /// A component the shadcn CLI copied in: under a `shadcn` directory, or

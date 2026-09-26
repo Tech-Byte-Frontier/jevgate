@@ -7,6 +7,7 @@ mod duplicates;
 mod functions;
 mod handlers;
 mod hardcoded;
+mod laws;
 mod nextjs;
 mod organization;
 mod pipeline;

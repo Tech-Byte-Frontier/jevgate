@@ -13,6 +13,7 @@
 | Ruby | `.rb` | ✅ | ✅ RSpec, Minitest, Rails `test "…" do` | ✅ no Ruby framework handlers yet | ✅ comments |
 | PHP | `.php` `.phtml` | ✅ | ✅ PHPUnit `…TestCase` classes, Pest `test`/`it` | ✅ | ✅ comments |
 | Java | `.java` | ✅ | ✅ JUnit 4 and 5, TestNG: `@Test`, `@ParameterizedTest`, `@Nested`, JUnit 3 `TestCase` | ✅ | ✅ comments |
+| Bend 2 ([bendlang/bend](https://github.com/bendlang/bend) 2.0.x) | `.bend` | ✅ | ✅ programs ending in the `#\|` lines their run must print; laws (`tests/laws`) | ✅ defs that perform effects or build text | ✅ comments |
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ✅ script comments |
 | Server templates: ERB, EJS, JSP, Handlebars, Mustache, Nunjucks, Twig, Jinja, Go | `.erb` `.ejs` `.jsp` `.hbs` `.mustache` `.njk` `.twig` `.jinja` `.j2` `.tmpl` `.gohtml`, and `.html` under `templates/`, `views/`, `layouts/`, `partials/` or `includes/` | ✅ inline scripts only | ➖ | ✅ inline scripts, as the page's code in the visitor's browser; and the code that reads the request, a cookie, the session or the signed-in user: tags that write it unescaped (`<%= raw … %>`, `.html_safe`, `<%== … %>`, `<%- … %>`, `{{{ … }}}`, `\|safe`, `\|raw`) and a JSP page's scriptlets | ✅ script comments |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
@@ -48,6 +49,7 @@
 | Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
 | Copied libraries | A library copied into the repository (a versioned file name such as `jquery-3.6.0.js`, the readable build beside a `.min.js`, a license banner naming a version, or a script under `assets`, `static` or `vendor` that opens with a whole license and copyright) is skipped as vendored, whatever its size |
 | Project templates (cookiecutter, copier) | Files under a directory named with a `{{ … }}` placeholder are parsed without their Jinja tags, so the generated project's code is judged instead of skipped for syntax errors |
+| Bend 2 | Defs, types and laws are units, named with their dots (`List.map`), and a call through an import alias (`Sort.sort` with `import ./main.bend as Sort`) reaches the def it names. A law is a claim when it states an equality, asks for a witness or applies a def that computes a type, and the def of its name is its proof; proofs and type-level defs are not asked about hardcoded values, and only defs that perform effects (`IO`) or join text with `++` are asked the security questions, since the rest are pure. `LAWS.bend` and `PROOF.bend` are not asked to be split, a zero-argument def returning a number names it, a `base.bend` copied from Bend's Base library is vendored, and Jev is told Bend 2's notation beside each file. Bend 1 files, a different language with the same `.bend` extension, are skipped with that reason |
 | Migrations | Directories named `migrations`, Rails' `db/migrate` and timestamped scripts under `db/`, and Alembic's `alembic/versions` are skipped as migrations; SQL migrations are still read for access control |
 
 Other files, such as Kotlin, are listed as skipped with the reason and never fail the gate.

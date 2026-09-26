@@ -53,6 +53,9 @@ pub(super) struct Shared<'a> {
     /// A Laravel application (an `artisan` script at its root), whose
     /// `config/*.php` files the framework and its packages publish.
     pub(super) laravel: bool,
+    /// The Bend 2 defs that compute a type, by name: a law applying one
+    /// states a proposition, a claim.
+    pub(super) propositions: BTreeSet<String>,
 }
 
 impl<'a> Shared<'a> {
@@ -116,6 +119,7 @@ impl<'a> Shared<'a> {
             hashes: source_hashes(scope),
             teaching: false,
             laravel: false,
+            propositions: propositions(scope),
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
             shared.pairs = duplicate_candidates(scope);
@@ -318,4 +322,24 @@ fn links(scope: &Scope<'_>) -> Links {
         let source = input.source.as_deref().unwrap_or("");
         (owner, input.result.path.as_path(), source)
     }))
+}
+
+/// The Bend 2 defs of the scope that compute a type, by name.
+fn propositions(scope: &Scope<'_>) -> BTreeSet<String> {
+    let bend = scope
+        .owners
+        .iter()
+        .filter(|o| crate::analysis::bend::file(&scope.inputs[**o].result.path))
+        .map(|o| &scope.units[o])
+        .chain(
+            scope
+                .context
+                .iter()
+                .filter(|(path, ..)| crate::analysis::bend::file(path))
+                .map(|(_, _, units)| units),
+        );
+    bend.flat_map(|file| &file.units)
+        .filter(|u| u.role == crate::analysis::units::Role::TypeLevel)
+        .map(|u| u.name.clone())
+        .collect()
 }

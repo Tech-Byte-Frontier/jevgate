@@ -22,7 +22,7 @@ pub(super) use documentation::{
 };
 pub(super) use maintainability::{function_wording, outline_wording, pair_wording, values_wording};
 pub(super) use security::{handler_wording, module_wording, privilege_wording, security_wording};
-pub(super) use test_rules::{test_pair_wording, test_wording};
+pub(super) use test_rules::{law_wording, test_pair_wording, test_wording};
 
 /// A finding's message and the action it recommends.
 pub(super) type Wording = (String, &'static str);
@@ -65,6 +65,7 @@ pub(super) fn question_label(question: &str) -> &str {
         "own_logic" => "recomputed expected value",
         "mock_only" => "checks only its mocks",
         "overlap" => "overlapping tests",
+        "states" => "comment promises more than the law",
         "inferable" => "restates the repository",
         "describes" => "description only",
         "commands" => "commands the manifests show",
