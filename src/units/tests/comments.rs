@@ -14,6 +14,28 @@ fn top() -> Value {
 }
 
 #[test]
+fn comments_of_a_laravel_apps_published_configuration_are_left_out() {
+    let config = "<?php\n\nreturn [\n    /*\n     * The default guard used to authenticate requests; change it to\n     * the guard your application uses most.\n     */\n    'guard' => env('AUTH_GUARD', 'web'),\n];\n";
+    let planned_comments = |laravel: bool| {
+        let project = Project::new();
+        project.write("config/auth.php", config);
+        if laravel {
+            project.write("artisan", "#!/usr/bin/env php\n<?php\n");
+        }
+        let mut options = args();
+        options.rules = vec![catalog::COMMENTS.into()];
+        let (_, plan) = planned(&project, &options);
+        plan.files
+            .values()
+            .flat_map(|f| &f.units)
+            .filter(|u| u.rule == catalog::COMMENTS)
+            .count()
+    };
+    assert_eq!(planned_comments(false), 1);
+    assert_eq!(planned_comments(true), 0);
+}
+
+#[test]
 fn each_comment_is_asked_about_with_the_code_it_is_about() {
     let (project, options) = comments_project();
     let (_, plan) = planned(&project, &options);

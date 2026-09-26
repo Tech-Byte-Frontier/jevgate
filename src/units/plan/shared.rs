@@ -50,6 +50,9 @@ pub(super) struct Shared<'a> {
     pub(super) hashes: BTreeMap<PathBuf, String>,
     /// The project says its comments are written for learners.
     pub(super) teaching: bool,
+    /// A Laravel application (an `artisan` script at its root), whose
+    /// `config/*.php` files the framework and its packages publish.
+    pub(super) laravel: bool,
 }
 
 impl<'a> Shared<'a> {
@@ -112,6 +115,7 @@ impl<'a> Shared<'a> {
             constants: BTreeMap::new(),
             hashes: source_hashes(scope),
             teaching: false,
+            laravel: false,
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
             shared.pairs = duplicate_candidates(scope);
