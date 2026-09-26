@@ -515,7 +515,7 @@ impl<'p> Tally<'p> {
             at_most_note(outcome)
         } else if named_value_only(unit, judgments) {
             at_most_consider(outcome)
-        } else if test_path_security(unit) || unverified_token(unit, judgments) {
+        } else if test_path_security(unit) || outside_function(unit, judgments) {
             lowered(outcome)
         } else if short_outline(unit) || small_section(unit) {
             at_most_note(outcome)
@@ -1110,16 +1110,25 @@ fn single_use_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
             .is_some_and(|i| repeated.get(i) == Some(&false))
 }
 
-/// An unsafe-settings review that only the token check names, on code that
-/// does not turn a library's verification off: whether a token was verified
-/// before the function reads it, by middleware, the platform or the server
-/// that issued it, lies outside the function. Labeled by hand, the reviews
-/// that decoded a token and decided access with it were right in
+/// Weak-setting checks whose review needs its settle Choice to name what
+/// the function itself does, and the option that does: whether a token was
+/// verified before the function reads it, or whether a callee or model hook
+/// hashes the password it saves, lies outside the function.
+const SHOWN_IN_FUNCTION: [(&str, &str, &str); 2] = [
+    ("token", "token_use", "turned_off"),
+    ("hash", "password_handling", "fast_hash"),
+];
+
+/// An unsafe-settings review named only by checks of `SHOWN_IN_FUNCTION`
+/// whose Choice does not name what the function itself does. Labeled by
+/// hand, reviews that decoded a token to decide access were right in
 /// intentionally vulnerable apps and wrong in three others (a SpacetimeDB
 /// module whose host verifies tokens, a SvelteKit hook whose API verifies
-/// them, an identity provider's token read over TLS), while the one that
-/// turned `verify_signature` off was right. It is one level lower.
-fn unverified_token(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+/// them, an identity provider's token read over TLS), and reviews for
+/// passwords saved as plain text were wrong where a service or an entity's
+/// `@BeforeInsert` hook hashed them; turning `verify_signature` off and
+/// hashing with MD5 in the function were right. It is one level lower.
+fn outside_function(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     if unit.rule != catalog::UNSAFE_SETTINGS {
         return false;
     }
@@ -1133,11 +1142,19 @@ fn unverified_token(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         .filter(|(_, o)| matches!(o, Outcome::Review(_)))
         .map(|(id, _)| id)
         .collect();
-    let turned_off = matches!(
-        choice(get("token_use")),
-        Some(("turned_off", p)) if crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY)
-    );
-    named == ["token"] && !turned_off
+    let shown = |check: &str| {
+        SHOWN_IN_FUNCTION
+            .iter()
+            .find(|(id, ..)| *id == check)
+            .is_none_or(|(_, question, option)| {
+                matches!(
+                    choice(get(question)),
+                    Some((chosen, p)) if chosen == *option
+                        && crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY)
+                )
+            })
+    };
+    !named.is_empty() && !named.iter().any(|check| shown(check))
 }
 
 /// Instruction sections of fewer tokens than this cost a session too little

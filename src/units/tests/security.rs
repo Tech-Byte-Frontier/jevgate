@@ -1190,6 +1190,32 @@ fn a_token_the_code_only_passes_on_is_no_review() {
     );
 }
 
+#[test]
+fn a_password_saved_as_plain_text_is_a_consider_and_one_hashed_fast_a_review() {
+    const HANDLING: [&str; 4] = ["slow_hash", "plain", "fast_hash", "none"];
+    let strength = |choice: &str| {
+        let project = Project::new();
+        project.write(
+            "src/users.ts",
+            "export async function register(repo, name, password) {\n  const user = repo.create({ name, password });\n  await repo.save(user);\n  return user;\n}\n",
+        );
+        let mut options = args();
+        options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
+        let mut eval = recording(&[("weakened", 0.95), ("hash", 0.9)]);
+        eval.inner
+            .overrides
+            .push(("password_handling", choice_of(choice, &HANDLING)));
+        let report = run(&project, &options, &mut eval);
+        report.files[0].findings.first().map(|f| f.strength)
+    };
+    assert_eq!(strength("fast_hash"), Some(Strength::Review));
+    assert_eq!(
+        strength("plain"),
+        Some(Strength::Consider),
+        "a callee or model hook may hash what the function saves"
+    );
+}
+
 /// The unsafe-settings trace questions of a C# setup statement.
 fn security_checks_of_csharp_setup() -> serde_json::Map<String, Value> {
     let project = Project::new();
