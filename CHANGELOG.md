@@ -4,7 +4,7 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
-Measured on 103 pinned projects (24 new open-source ones of kinds not tried before, among them intentionally vulnerable Rails, Node, GraphQL, C# and Java apps, a Deno framework, a WordPress plugin, a cookiecutter template and projects in Kotlin, Swift, Elixir and C, and 8 more of the maintainer's own), with findings labeled by hand: on the 67 labeled projects JevGate was tuned on, 73% of reviews were right against 68% with 0.20.0, and 71% of considers against 68%; on 11 held-out projects, 61% of reviews against 57%, and considers unchanged at 54%.
+Measured on 103 pinned projects (24 new open-source ones of kinds not tried before, among them intentionally vulnerable Rails, Node, GraphQL, C# and Java apps, a Deno framework, a WordPress plugin, a cookiecutter template and projects in Kotlin, Swift, Elixir and C, and 8 more of the maintainer's own), with findings labeled by hand: on the 67 labeled projects JevGate was tuned on, 75% of reviews were right against 68% with 0.20.0 (136 wrong reviews against 192), and 71% of considers against 68%; on 11 held-out projects, 61% of reviews against 57%, and considers unchanged at 54%. Undecided units stayed at 2.2%.
 
 - A check no longer panics on text of several bytes: splitting SQL stepped into a character (pgweb's `booktown.sql` holds U+FFFD outside quotes), and locating a Python block that ends in a comment ending in `线` (vnpy) sliced inside it; both aborted the run with exit 101.
 - A document that is not text (NUL bytes, or not UTF-8) is skipped with a reason, as a source file is, instead of making the run incomplete: one Markdown file in dvja's docs failed the whole check with exit 2.
