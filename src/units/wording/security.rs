@@ -458,7 +458,7 @@ fn exposure_wording(
     let foreign = category.starts_with("CWE-209")
         && matches!(
             crate::units::outcome::messages(&get),
-            Some(crate::units::outcome::Messages::Foreign(_))
+            Some(crate::units::outcome::Messages::Foreign)
         );
     let decided = crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY);
     let message = match strength {
@@ -472,6 +472,9 @@ fn exposure_wording(
         Strength::Note if decided && category == "CWE-1188 insecure setting" => format!(
             "{subject} may {}; no specific check named the setting.",
             base_form(what)
+        ),
+        Strength::Note if foreign => format!(
+            "{subject} puts the text of a library or database error into an error message, which may reach a remote client.{where_}"
         ),
         Strength::Note => format!(
             "{subject} may {}; the answer was split.{where_}",

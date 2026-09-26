@@ -560,9 +560,12 @@ signatures, or one candidate pair.
    undecided after its follow-up is a note when it leans toward the concern
    (0.50, the leading probability) and stays uncertain otherwise: undecided
    answers leaning away were almost all acceptable code, and leaning toward
-   held both real positives of the labeled set. When the own-messages check
-   finds another error's text in an error message, an error-detail answer
-   leaning toward a client is a consider. Instruction sections are
+   held both real positives of the labeled set. So is an error-detail
+   answer leaning toward a client when the own-messages check finds another
+   error's text in an error message: as a consider, 1 of 28 such findings
+   outside example code was right, since a central handler replaced the
+   text with a generic message, the error was one written for users, or no
+   remote client read it. Instruction sections are
    cleanups, so their findings are at most a consider. Comments are cleanups
    too: at most a consider, and documentation that only repeats the
    declaration it documents is at most a note, since documentation tools and docstring

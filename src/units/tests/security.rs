@@ -788,7 +788,7 @@ fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
 }
 
 #[test]
-fn a_foreign_error_message_confirms_an_error_detail_lean_as_a_consider() {
+fn a_foreign_error_message_names_the_error_text_in_an_error_detail_note() {
     let (project, options) = security_project(QUERY);
     let report = run_with_nouls(
         &project,
@@ -800,7 +800,11 @@ fn a_foreign_error_message_confirms_an_error_detail_lean_as_a_consider() {
         ],
     );
     let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Consider);
+    assert_eq!(
+        finding.strength,
+        Strength::Note,
+        "where the text goes is still undecided"
+    );
     assert!(
         finding
             .message
@@ -947,12 +951,15 @@ fn each_created_error_message_is_asked_about_and_names_the_foreign_one() {
     options.refresh = true;
     let report = run_with(&options, "m0");
     let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Consider);
+    assert_eq!(
+        finding.strength,
+        Strength::Note,
+        "where the text goes is still undecided"
+    );
     assert!(
-        finding.message.contains("into an error message (0.90)")
-            && finding
-                .message
-                .ends_with("The message is `Query failed: ${error.message}`."),
+        finding
+            .message
+            .ends_with("into an error message, which may reach a remote client."),
         "{}",
         finding.message
     );

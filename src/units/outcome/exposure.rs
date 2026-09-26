@@ -16,8 +16,8 @@ const ERROR_SIGNALS: [&str; 2] = ["error_details", "exception_to_client"];
 pub(in crate::units) enum Messages {
     /// Every message is the program's own text.
     Own,
-    /// A message carries another error's text, at this probability.
-    Foreign(f64),
+    /// A message carries another error's text.
+    Foreign,
     Undecided,
 }
 
@@ -30,7 +30,7 @@ pub(in crate::units) fn messages<'a>(
     let Some(answer) = get("messages") else {
         return get("own_messages").map(|a| match noul(a) {
             Outcome::Review(_) => Messages::Own,
-            Outcome::Clear => Messages::Foreign(1.0 - lean(a)),
+            Outcome::Clear => Messages::Foreign,
             _ => Messages::Undecided,
         });
     };
@@ -46,7 +46,7 @@ pub(in crate::units) fn messages<'a>(
     let p = probabilities.get(choice).copied().unwrap_or(0.0) / mass;
     Some(match (choice.as_str(), at_least(p)) {
         ("none", true) => Messages::Own,
-        (_, true) => Messages::Foreign(p),
+        (_, true) => Messages::Foreign,
         _ => Messages::Undecided,
     })
 }
@@ -58,11 +58,9 @@ type Signal = (Outcome, f64);
 /// question or a specific check at review raises it, one level lower for
 /// code that runs only in development; clear when presence or every check
 /// rules it out. Error-detail signals are clear when every error message is
-/// the program's own. When the own-messages check instead finds an
-/// exception's, library's or database's text in an error message, an
-/// error-detail signal that leans toward a client is a consider: the check
-/// states the detail, and the lean where it goes. Otherwise a signal that
-/// leans toward the concern is a note, and the rest stay undecided.
+/// the program's own. A signal that leans toward the concern is a note,
+/// also when the own-messages check finds an exception's, library's or
+/// database's text in an error message, and the rest stay undecided.
 pub(in crate::units) fn exposure_outcome<'a>(
     rule: &str,
     get: &impl Fn(&str) -> Option<&'a Answer>,
@@ -154,11 +152,14 @@ fn exposure_level(rule: &str, presence: &[Signal], specific: &[Signal]) -> Outco
 }
 
 /// One exposure answer with its lean. The own-messages check (`own`) settles
-/// error-detail signals: all messages the program's own clears them; a
-/// message carrying another's error text makes a lean toward a client a
-/// consider, at the probability that the message carries it. A signal still
-/// undecided is clear when the settle Choice sends the text `away` from
-/// remote clients, before a foreign message can raise it.
+/// error-detail signals: all messages the program's own clears them. A
+/// message carrying another error's text raised a lean toward a client to
+/// a consider, and 1 of 28 such findings outside example code was right on
+/// labeled projects: a central handler replaced the text with a generic
+/// message, the error was one written for users, or no remote client read
+/// it. The lean is now a note, like any other, worded with the carried
+/// text. A signal still undecided is clear when the settle Choice sends the
+/// text `away` from remote clients.
 fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>, away: bool) -> Signal {
     let outcome = noul(answer);
     let lean = lean(answer);
@@ -170,11 +171,6 @@ fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>, away:
         // Text that never reaches a remote client is no error-detail leak,
         // whatever error text it carries.
         (_, Outcome::Uncertain(_)) if away => (Outcome::Clear, 0.0),
-        (Some(Messages::Foreign(p)), Outcome::Uncertain(_))
-            if probability_at_least(lean, LEADING_PROBABILITY) =>
-        {
-            (Outcome::Consider(p), lean)
-        }
         _ => (outcome, lean),
     }
 }
