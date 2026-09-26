@@ -282,7 +282,7 @@ pub fn rule_version(key: &str) -> &'static str {
         HARDCODED_VALUES | UNSAFE_SETTINGS => "5",
         AGENT_CONTEXT => "3",
         COMMENTS => "3",
-        LARGE_DOCS => "2",
+        LARGE_DOCS => "3",
         ACCESS_CONTROL => "4",
         DOC_STALENESS | DOC_DUPLICATION => "3",
         WORKFLOWS => "2",

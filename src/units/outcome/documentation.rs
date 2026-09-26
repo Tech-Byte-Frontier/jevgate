@@ -48,12 +48,16 @@ pub(in crate::units) fn document_outcome<'a>(
     Some(strongest(&[split, past]))
 }
 
-/// The split Score, or when it stays undecided, the kind of document: the
-/// kinds that serve one subject reaching the threshold clear it, a
-/// collection of unrelated subjects reaching it raises a consider.
+/// The split Score, weighed with the kind of document once it is asked: the
+/// kinds that serve one subject reaching the threshold clear an undecided
+/// split or a finding, and a collection of unrelated subjects reaching it
+/// raises an undecided split to a consider.
 pub(in crate::units) fn document_split(split: &Answer, kind: Option<&Answer>) -> Outcome {
     let outcome = benefit(split);
-    let (Outcome::Uncertain(_), Some(Answer::Choice { probabilities, .. })) = (outcome, kind)
+    let (
+        Outcome::Uncertain(_) | Outcome::Consider(_) | Outcome::Review(_),
+        Some(Answer::Choice { probabilities, .. }),
+    ) = (outcome, kind)
     else {
         return outcome;
     };
@@ -70,7 +74,7 @@ pub(in crate::units) fn document_split(split: &Answer, kind: Option<&Answer>) ->
         .sum();
     if at_least(1.0 - several) {
         Outcome::Clear
-    } else if at_least(several) {
+    } else if at_least(several) && matches!(outcome, Outcome::Uncertain(_)) {
         Outcome::Consider(several)
     } else {
         outcome

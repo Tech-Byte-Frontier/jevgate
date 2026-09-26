@@ -463,13 +463,17 @@ signatures, or one candidate pair.
    their adornment styles, AsciiDoc titles by their `=` level, comments and
    attribute entries are dropped, and code directives, literal and listing
    blocks are fenced with their language. A document of 300 or more lines is
-   sent as its headings only, with `#` marks for nesting. A split finding is
-   then located with one Choice among its top-level parts; a split that stays
-   undecided is asked which kind of document it is (a guide, a reference, a
-   migration guide, an introduction, or a collection of unrelated subjects).
-   The kinds that serve one subject at 0.80 clear it and a collection at
-   0.80 raises a consider: a quickstart, a migration guide and a package
-   README each stayed near a third per level on the split.
+   sent as its headings only, with `#` marks for nesting. A split that stays
+   undecided, or raises a finding, is asked which kind of document it is (a
+   guide, a reference, a migration guide, an introduction, a plan for one
+   change, requirements, or a collection of unrelated subjects). The kinds
+   that serve one subject at 0.80 clear it, and a collection at 0.80 raises
+   an undecided split to a consider: a quickstart, a migration guide and a
+   package README each stayed near a third per level on the split, and from
+   headings alone, plans for one release, READMEs and a list of business
+   rules read as several unrelated subjects in every labeled split finding.
+   A split finding that stands is then located with one Choice among its
+   top-level parts.
    Per-section questions on
    project docs were dropped: on a labeled sample they found almost nothing,
    and they cost about five times more than an outline.

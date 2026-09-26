@@ -3,8 +3,8 @@
 use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, at_most_note, benefit, checks, choice, lowered, noul, open,
-        origin_outcome, score, settled_checks, several_kind, unit_outcome, value_signals,
+        Answers, Outcome, at_most_note, benefit, checks, choice, document_split, lowered, noul,
+        open, origin_outcome, score, settled_checks, several_kind, unit_outcome, value_signals,
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
@@ -246,10 +246,14 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                 } => matches!(outcome, Outcome::Review(_)),
                 Detail::Function {
                     locate: Some(_), ..
-                }
-                | Detail::Document {
-                    locate: Some(_), ..
                 } => raised(resolved.get("split").map(|a| benefit(a))),
+                Detail::Document {
+                    locate: Some(_), ..
+                } => raised(
+                    resolved
+                        .get("split")
+                        .map(|a| document_split(a, resolved.get("kind").copied())),
+                ),
                 _ => false,
             }
         })
@@ -324,7 +328,8 @@ pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Strin
 
 /// An outline or large document not yet asked its kind whose split Score
 /// stayed undecided: the recheck's for an outline that has one, else the
-/// first.
+/// first. A large document's split finding is asked its kind as well, since
+/// its Score reads headings alone.
 fn unkinded_split(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     if ![catalog::FILE_ORGANIZATION, catalog::LARGE_DOCS].contains(&unit.rule)
         || !answers(judgments, &unit.id, Pass::Trace).is_empty()
@@ -336,9 +341,14 @@ fn unkinded_split(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     } else {
         Pass::First
     };
+    let document = unit.rule == catalog::LARGE_DOCS;
     answers(judgments, &unit.id, pass)
         .get("split")
-        .is_some_and(|a| matches!(benefit(a), Outcome::Uncertain(_)))
+        .is_some_and(|a| match benefit(a) {
+            Outcome::Uncertain(_) => true,
+            Outcome::Consider(_) | Outcome::Review(_) => document,
+            _ => false,
+        })
 }
 
 /// A section pair or stale section whose checks were asked, stayed

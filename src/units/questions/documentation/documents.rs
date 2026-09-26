@@ -37,11 +37,14 @@ pub fn document_history() -> Value {
 /// Kinds of documents that hold several subjects; the others serve one.
 pub const SEVERAL_DOCUMENT_KINDS: [&str; 1] = ["collection"];
 
-/// What a large document is, asked when its split Score stays undecided:
-/// on long guides, references and migration guides the split stayed near a
-/// third per level, while naming the kind of document is decisive.
+/// What a large document is, asked when its split Score stays undecided or
+/// raises a finding: on long guides, references and migration guides the
+/// split stayed near a third per level, while naming the kind of document
+/// is decisive. Read from headings alone, a plan for one release, a README
+/// and a list of business rules held "several unrelated subjects" in every
+/// labeled split finding.
 pub fn document_kind() -> Value {
-    let kinds: [(&str, &str); 5] = [
+    let kinds: [(&str, &str); 7] = [
         (
             "guide",
             "One guide, tutorial or quickstart that walks a reader through one product, tool or task, even across many steps or topics.",
@@ -57,6 +60,14 @@ pub fn document_kind() -> Value {
         (
             "introduction",
             "An introduction to one project, package or example: what it is, how to install, configure and use it, and where to learn more.",
+        ),
+        (
+            "plan",
+            "A plan, design or proposal for one change, feature or release, with a section for each part of the work, even when the parts touch different areas.",
+        ),
+        (
+            "requirements",
+            "Requirements, rules or a specification of one product or feature, with a section for each requirement or rule.",
         ),
         (
             "collection",

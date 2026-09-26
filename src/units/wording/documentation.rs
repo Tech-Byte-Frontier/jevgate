@@ -155,14 +155,14 @@ pub(in crate::units) fn document_wording(
             )
         };
     }
-    let likely = if strength == Strength::Note {
-        " may"
+    let records = if strength == Strength::Note {
+        "may mainly record"
     } else {
-        ""
+        "mainly records"
     };
     (
         format!(
-            "`{name}`{likely} mainly records past work, such as dated plans, completed tasks or logs{}.",
+            "`{name}` {records} past work, such as dated plans, completed tasks or logs{}.",
             shown(strength, p)
         ),
         "Remove finished plans and logs, or move them out of the living documentation",
