@@ -425,6 +425,67 @@ fn php_checks_name_php_functions_and_its_own_kinds_only_where_the_source_names_t
     }
 }
 
+const PICKLED: &str = "import pickle\n\nfrom flask import jsonify, request\n\n\ndef restore_cart():\n    cart = pickle.loads(request.get_data())\n    return jsonify(items=len(cart))\n";
+
+#[test]
+fn a_deserializer_is_asked_about_only_where_the_source_names_one() {
+    let first = |path: &str, source: &str| {
+        let project = Project::new();
+        project.write(path, source);
+        let mut options = args();
+        options.rules = vec![catalog::INJECTION.into()];
+        let (_, plan) = planned(&project, &options);
+        plan.requests[0].request["questions"]["f0_interpreted"].clone()
+    };
+    let named = first("shop/cart.py", PICKLED);
+    assert!(named.to_string().contains("pickle, marshal"), "{named}");
+    let parsed = PICKLED
+        .replace("import pickle", "import json")
+        .replace("pickle.loads", "json.loads");
+    assert_eq!(
+        first("shop/cart.py", &parsed),
+        questions::security_interpreted("functions[0].source", false, None),
+        "code that names no deserializer keeps its question and cached answer"
+    );
+    assert!(traced_checks("shop/cart.py", PICKLED).contains_key("deserialize"));
+    assert!(!traced_checks("shop/cart.py", &parsed).contains_key("deserialize"));
+    let ruby = traced_checks(
+        "app/models/cart.rb",
+        "class Cart\n  def self.restore(params)\n    Marshal.load(Base64.decode64(params[:cart]))\n  end\nend\n",
+    );
+    assert!(ruby["deserialize"].to_string().contains("Marshal.load"));
+    let java = traced_checks(
+        "src/main/java/shop/Cart.java",
+        "class Cart {\n  Object restore(InputStream body) throws Exception {\n    return new ObjectInputStream(body).readObject();\n  }\n}\n",
+    );
+    assert!(
+        java["deserialize"]
+            .to_string()
+            .contains("ObjectInputStream")
+    );
+}
+
+#[test]
+fn request_data_given_to_pickle_is_a_deserialization_review() {
+    let project = Project::new();
+    project.write("shop/cart.py", PICKLED);
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("interpreted", noul_at(0.95)),
+        ("deserialize", noul_at(0.95)),
+        ("origin", spread(0.0, 0.05, 0.95)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-502 deserialization of untrusted data")
+    );
+    assert_eq!(finding.strength, Strength::Review);
+}
+
 const MARKUP_PARTS: [&str; 8] = [
     "request",
     "stored",

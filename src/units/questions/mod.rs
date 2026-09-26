@@ -162,7 +162,15 @@ mod tests {
             .chain(&DJANGO_UNHANDLED)
             .chain(&DJANGO_SETTINGS)
             .chain(&DJANGO_EXPOSURES)
-            .chain(&PHP_UNHANDLED);
+            .chain(&PHP_UNHANDLED)
+            .chain(
+                [
+                    ("Ruby", "Marshal.load"),
+                    ("Java", "new ObjectInputStream(body)"),
+                    ("JavaScript", "require('node-serialize')"),
+                ]
+                .map(|(language, source)| deserializer_check(language, source).unwrap()),
+            );
         let mut all = vec![
             security_logs_secret("function.source"),
             security_url_parts("function.source", false),
@@ -195,7 +203,8 @@ mod tests {
         }
         for django in [false, true] {
             all.extend([
-                security_interpreted("function.source", django),
+                security_interpreted("function.source", django, None),
+                security_interpreted("function.source", django, Some("pickle")),
                 security_resource("function.source", django),
                 security_error_details("function.source", django),
                 security_weakened("function.source", django),
@@ -207,7 +216,7 @@ mod tests {
         for (id, mut body) in [
             (
                 "interpreted",
-                security_interpreted("function.source", false),
+                security_interpreted("function.source", false, None),
             ),
             ("resource", security_resource("function.source", false)),
             (

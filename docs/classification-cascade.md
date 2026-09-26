@@ -300,7 +300,16 @@ signatures, or one candidate pair.
    identifiers quoted by doubling embedded quotes as handled (identifiers
    cannot be bound), and the URL check excludes requests a web page sends from
    the user's browser; on fresh repositories both had flagged such code, while
-   the SQL and SSRF advisory functions kept their answers.
+   the SQL and SSRF advisory functions kept their answers. Code whose source
+   names a deserializer that can build any object (Python's `pickle`,
+   `marshal`, `shelve`, `jsonpickle` or `yaml.load`; Ruby's `Marshal.load`
+   or `YAML.load`; Java's `ObjectInputStream`, `XMLDecoder`, XStream or
+   SnakeYAML; node-serialize) is asked about loading data with it in the
+   presence question, and its trace asks that language's deserialize check,
+   as Django views and PHP pages naming `unserialize` are: a Flask route
+   passing `pickle.loads(request.get_data())` was asked only about query,
+   command, code and markup text, and was clear. Only the requests of such
+   functions change.
    PHP units read the presence questions and checks in PHP's own terms
    (`src/units/questions/php.rs`), naming its functions (`echo`,
    `shell_exec` and backticks, `mysqli_real_escape_string`, `password_hash`,

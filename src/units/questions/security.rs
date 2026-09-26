@@ -8,8 +8,21 @@ use serde_json::{Value, json};
 /// renders. Presence only: the trace questions decide whether it is a concern.
 /// In Django code it also names markup marked safe and deserializers, since
 /// `mark_safe`, `|safe` templates and `pickle.loads` of request data were
-/// the injections its views held.
-pub fn security_interpreted(code: &str, django: bool) -> Value {
+/// the injections its views held. Other code whose source names a
+/// deserializer that can build any object is asked about it too, naming
+/// `deserializers` (see [`deserializers_named`]).
+pub fn security_interpreted(code: &str, django: bool, deserializers: Option<&str>) -> Value {
+    if let (false, Some(names)) = (django, deserializers) {
+        return noul(
+            format!(
+                "Does `{code}` place a variable into the text of a database query, shell command, code to evaluate, or HTML markup, or load it with a deserializer that can build any object?"
+            ),
+            &format!(
+                "A variable is joined, formatted or interpolated into the text of a query, command, code or markup that is then run or rendered, or loaded with a deserializer that can build any object or run code, such as {names}."
+            ),
+            "Variables are passed only as bound parameters, separate arguments, or through a template or component that escapes them; the text is built only from fixed values; data is parsed only as JSON or another data-only format; or the function builds no such text.",
+        );
+    }
     if django {
         return noul(
             format!(
@@ -606,6 +619,115 @@ const DESERIALIZE: Check = Check {
     no: "It parses JSON, uses yaml.safe_load or another data-only format, or loads only data the program wrote and signed itself.",
     no_examples: &[],
 };
+
+/// The deserialize check in the terms of a language other than Python.
+const fn deserialize(yes: &'static str, no: &'static str) -> Check {
+    Check {
+        id: "deserialize",
+        question: DESERIALIZE.question,
+        yes,
+        no,
+        no_examples: &[],
+    }
+}
+
+/// Deserializers that can build any object or run code, per language, as
+/// (language, what its source must name in any case, how the presence
+/// question names them, the trace check). Django asks its own check of
+/// every view and PHP of source that names `unserialize`; other code was
+/// never asked, so a Flask route passing `pickle.loads(request.get_data())`
+/// was clear. The question and check are added only to source that names
+/// one, so every other request, and its cached answer, stays as it was.
+const DESERIALIZERS: [(&str, &[&str], &str, Check); 5] = [
+    (
+        "Python",
+        &[
+            "pickle.load",
+            "pickle.unpickler",
+            "marshal.load",
+            "shelve.open",
+            "jsonpickle.decode",
+            "dill.load",
+            "yaml.load(",
+            "yaml.unsafe_load",
+            "yaml.full_load",
+            "yaml.load_all(",
+        ],
+        "pickle, marshal, shelve, jsonpickle or yaml.load without a safe loader",
+        DESERIALIZE,
+    ),
+    (
+        "Ruby",
+        &[
+            "marshal.load",
+            "yaml.load",
+            "yaml.unsafe_load",
+            "psych.load",
+            "oj.load",
+        ],
+        "Marshal.load, YAML.unsafe_load or Oj.load in object mode",
+        deserialize(
+            "Request data, an uploaded file, a cookie, a message or a stored value users can set is passed to Marshal.load, YAML.unsafe_load, YAML.load with unsafe options, Oj.load in object mode or a similar deserializer.",
+            "It parses JSON, uses YAML.safe_load or another data-only format, or loads only data the program wrote and signed itself.",
+        ),
+    ),
+    (
+        "Java",
+        &[
+            "objectinputstream",
+            "xmldecoder",
+            "fromxml(",
+            "enabledefaulttyping",
+            "activatedefaulttyping",
+            "new yaml(",
+        ],
+        "ObjectInputStream, XMLDecoder, XStream or SnakeYAML's Yaml.load",
+        deserialize(
+            "Request data, an uploaded file, a cookie, a message or a stored value users can set is read with ObjectInputStream.readObject, XMLDecoder, XStream.fromXML, SnakeYAML's Yaml.load, Jackson with default typing enabled or a similar deserializer.",
+            "It parses JSON into types fixed in the code, uses a safe constructor or an allowed list of classes, or loads only data the program wrote and signed itself.",
+        ),
+    ),
+    (
+        "JavaScript",
+        &["node-serialize", "unserialize(", "funcster", "cryo.parse"],
+        "node-serialize's unserialize, funcster or cryo",
+        NODE_DESERIALIZE,
+    ),
+    (
+        "TypeScript",
+        &["node-serialize", "unserialize(", "funcster", "cryo.parse"],
+        "node-serialize's unserialize, funcster or cryo",
+        NODE_DESERIALIZE,
+    ),
+];
+
+const NODE_DESERIALIZE: Check = deserialize(
+    "Request data, a cookie, a message or a stored value users can set is passed to node-serialize's unserialize, funcster, cryo or a similar deserializer that can restore functions.",
+    "It parses JSON with JSON.parse or another data-only format, or loads only data the program wrote and signed itself.",
+);
+
+/// The deserializer entry of `language` whose names `source` holds.
+fn deserializer_entry(
+    language: &str,
+    source: &str,
+) -> Option<&'static (&'static str, &'static [&'static str], &'static str, Check)> {
+    let source = source.to_ascii_lowercase();
+    DESERIALIZERS.iter().find(|(lang, names, ..)| {
+        *lang == language && names.iter().any(|name| source.contains(name))
+    })
+}
+
+/// How the presence question names `language`'s deserializers, when
+/// `source` names one of them.
+pub fn deserializers_named(language: &str, source: &str) -> Option<&'static str> {
+    deserializer_entry(language, source).map(|(_, _, names, _)| *names)
+}
+
+/// The deserialize check asked of `source` in `language`, when it names one
+/// of the language's deserializers.
+pub fn deserializer_check(language: &str, source: &str) -> Option<&'static Check> {
+    deserializer_entry(language, source).map(|(.., check)| check)
+}
 
 /// Specific weak settings, asked when the broad presence question is not clear.
 pub const WEAK_SETTINGS: [Check; 6] = [
