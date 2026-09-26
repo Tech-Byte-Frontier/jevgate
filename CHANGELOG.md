@@ -4,13 +4,16 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
-- `--format gitlab` writes a GitLab Code Quality report, so merge requests show the findings: the ones `--format github` annotates, `major` when they fail the gate and `minor` otherwise, with JevGate's fingerprints.
-- `jevgate.schema.json` is a JSON Schema of `jevgate.toml`, generated from the configuration types with every rule name and level, and `jevgate init` writes a `#:schema` line so editors with TOML schema support complete and check the file.
-- pre-commit hooks: `jevgate-system` runs the installed `jevgate` on the staged changes, and `jevgate` builds it from source with Rust first.
-- `--format sarif` writes a SARIF 2.1.0 log for GitHub code scanning, GitLab and editors: the findings `--format github` annotates, as `error` when they fail the gate and `warning` otherwise, with every rule's question, related locations, the finding's fingerprint and probability. Run errors and files that could not be judged are tool notifications.
-- Agent output is colored on a terminal: the headline by the gate's outcome, review and consider headings, and each finding's location. `--color auto|always|never` chooses, and `NO_COLOR` and `CLICOLOR_FORCE` are honored; JSON and GitHub annotations are never colored.
-- `jevgate completions SHELL` prints a completion script for bash, zsh, fish, elvish or PowerShell, and `jevgate man [COMMAND]` a man page, both generated from the same definitions as `--help`. The Homebrew formula installs them.
+## [0.18.0] - 2026-09-25
+
+- Documentation site: https://tech-byte-frontier.github.io/jevgate/, with guides, troubleshooting, a page on coding agents, and rules, configuration and command-line references generated from the binary. It is published with each release.
 - Homebrew: `brew install tech-byte-frontier/tap/jevgate` installs the release binaries on macOS and Linux, and each release updates the formula.
+- `--format sarif` writes a SARIF 2.1.0 log for GitHub code scanning, GitLab and editors: the findings `--format github` annotates, as `error` when they fail the gate and `warning` otherwise, with every rule's question, related locations, the finding's fingerprint and probability. Run errors and files that could not be judged are tool notifications.
+- `--format gitlab` writes a GitLab Code Quality report, so merge requests show the findings: the ones `--format github` annotates, `major` when they fail the gate and `minor` otherwise, with JevGate's fingerprints.
+- `jevgate completions SHELL` prints a completion script for bash, zsh, fish, elvish or PowerShell, and `jevgate man [COMMAND]` a man page, both generated from the same definitions as `--help`. The Homebrew formula installs them.
+- Agent output is colored on a terminal: the headline by the gate's outcome, review and consider headings, and each finding's location. `--color auto|always|never` chooses, and `NO_COLOR` and `CLICOLOR_FORCE` are honored; JSON and GitHub annotations are never colored.
+- pre-commit hooks: `jevgate-system` runs the installed `jevgate` on the staged changes, and `jevgate` builds it from source with Rust first.
+- `jevgate.schema.json` is a JSON Schema of `jevgate.toml`, generated from the configuration types with every rule name and level, and `jevgate init` writes a `#:schema` line so editors with TOML schema support complete and check the file.
 
 ## [0.17.0] - 2026-09-25
 
@@ -150,7 +153,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.14.1...v0.15.0

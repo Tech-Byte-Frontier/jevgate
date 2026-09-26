@@ -17,7 +17,7 @@ jobs:
       - uses: Tech-Byte-Frontier/jevgate-action@v1
         with:
           api-key: ${{ secrets.TYPESAFE_API_KEY }}
-          version: 0.17.0
+          version: 0.18.0
 ```
 
 The action installs a checked release binary, keeps `.jevgate/cache` in the Actions cache and runs `jevgate check --base <pull request base> --format github`; `args` passes more flags, such as `--rule security`. It runs on Linux, macOS and Windows runners.
