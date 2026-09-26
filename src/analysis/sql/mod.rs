@@ -297,4 +297,12 @@ mod tests {
         assert!(found[2].source.starts_with("create policy"));
         assert_eq!((found[3].start_line, found[3].end_line), (8, 14));
     }
+
+    #[test]
+    fn statements_step_over_characters_of_several_bytes() {
+        // pgweb's booktown.sql holds U+FFFD outside quotes; a byte step panicked.
+        let found = statements("insert into books values (1, \u{fffd}Dune\u{fffd});\nselect 1;\n");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[1].source, "select 1;");
+    }
 }

@@ -26,7 +26,7 @@ pub fn statements(text: &str) -> Vec<Statement> {
             i += 1;
             start = i;
         } else {
-            i += 1;
+            i += text[i..].chars().next().map_or(1, char::len_utf8);
         }
     }
     spans.push(start..bytes.len());
