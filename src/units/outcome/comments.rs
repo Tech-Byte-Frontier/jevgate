@@ -34,8 +34,12 @@ pub(in crate::units) fn comment_signals<'a>(
 /// The strongest of a comment's signals, or when they stay undecided, the
 /// kind of comment: the kinds a reader could do without reaching the
 /// threshold raise a consider (a note for documentation that repeats its
-/// declaration), the others reaching it clear it. Comments are cleanups,
-/// never defects: at most a consider.
+/// declaration), the others reaching it clear it. The kind is the last ask,
+/// so a kind that only leans decides too: toward a kind a reader could do
+/// without, a note, else clear. Step headings such as `// update any single
+/// tag` above `this.addTag()` stayed between the thresholds on every ask:
+/// 1,153 comments on the corpus, each leaving its file uncertain. Comments
+/// are cleanups, never defects: at most a consider.
 pub(in crate::units) fn comment_outcome<'a>(
     get: &impl Fn(&str) -> Option<&'a Answer>,
     documentation: bool,
@@ -48,7 +52,10 @@ pub(in crate::units) fn comment_outcome<'a>(
             Outcome::Note(p)
         }
         (Outcome::Uncertain(_), Some((_, p))) if at_least(p) => Outcome::Consider(p),
-        (Outcome::Uncertain(_), Some((_, p))) if at_least(1.0 - p) => Outcome::Clear,
+        (Outcome::Uncertain(_), Some((_, p))) if probability_at_least(p, LEADING_PROBABILITY) => {
+            Outcome::Note(p)
+        }
+        (Outcome::Uncertain(_), Some(_)) => Outcome::Clear,
         _ => outcome,
     }))
 }
