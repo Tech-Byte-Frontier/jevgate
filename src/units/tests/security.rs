@@ -1144,6 +1144,44 @@ fn code_outside_csharp_and_django_is_asked_about_tokens_keys_and_escaping() {
     );
 }
 
+#[test]
+fn a_token_the_code_only_passes_on_is_no_review() {
+    const USES: [&str; 5] = [
+        "verifies",
+        "passes",
+        "verified_before",
+        "unverified",
+        "none",
+    ];
+    let strength = |choice: &str| {
+        let project = Project::new();
+        project.write(
+            "src/useAuth.ts",
+            "export function useAuth() {\n  const token = localStorage.getItem('access_token');\n  return fetch('/api/me', { headers: { Authorization: `Bearer ${token}` } });\n}\n",
+        );
+        let mut options = args();
+        options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
+        let mut eval = recording(&[("weakened", 0.95), ("token", 0.9)]);
+        eval.inner
+            .overrides
+            .push(("token_use", choice_of(choice, &USES)));
+        let report = run(&project, &options, &mut eval);
+        assert!(
+            eval.requests
+                .iter()
+                .any(|r| r["questions"]["token_use"].is_object()),
+            "asked although the check found a concern"
+        );
+        report.files[0].findings.first().map(|f| f.strength)
+    };
+    assert_eq!(strength("unverified"), Some(Strength::Review));
+    assert_eq!(
+        strength("passes"),
+        Some(Strength::Note),
+        "the broad answer alone names no setting"
+    );
+}
+
 /// The unsafe-settings trace questions of a C# setup statement.
 fn security_checks_of_csharp_setup() -> serde_json::Map<String, Value> {
     let project = Project::new();
@@ -1277,7 +1315,9 @@ fn undecided_markup_cors_cookies_and_logged_objects_are_settled_by_their_choices
             "{chosen}"
         );
     }
-    let logs = ["plain", "secret", "personal", "none"];
+    let logs = [
+        "plain", "identity", "operator", "secret", "personal", "none",
+    ];
     let undecided_logs = [("logs_secret", 0.4), ("logs_object_secret", 0.4)];
     for (chosen, status) in [("plain", Status::Clear), ("secret", Status::Uncertain)] {
         options.refresh = true;
@@ -1294,6 +1334,26 @@ fn undecided_markup_cors_cookies_and_logged_objects_are_settled_by_their_choices
             status,
             "{chosen}"
         );
+    }
+}
+
+#[test]
+fn an_audit_line_naming_who_signed_in_is_no_logged_personal_data() {
+    let (project, mut options) = security_project(QUERY);
+    let logs = [
+        "plain", "identity", "operator", "secret", "personal", "none",
+    ];
+    let found = [("logs_secret", 0.92)];
+    for (chosen, status) in [("identity", Status::Clear), ("secret", Status::Review)] {
+        options.refresh = true;
+        let settle = ("logged", choice_of(chosen, &logs));
+        let (outcome, settles) =
+            settled_status(&project, &options, catalog::SENSITIVE_DATA, &found, settle);
+        assert_eq!(
+            settles, 1,
+            "asked although the presence question found a concern"
+        );
+        assert_eq!(outcome, status, "{chosen}");
     }
 }
 

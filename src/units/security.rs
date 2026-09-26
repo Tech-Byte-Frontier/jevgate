@@ -710,8 +710,9 @@ pub(in crate::units) enum SettleWhen {
 /// may send credentials settle theirs, which split on client components that
 /// navigate to fixed paths or render values as attributes, and on route
 /// handlers that answer preflights for any origin without credentials. What
-/// its logs write settles a logged object, which split on errors caught from
-/// a payment or database call. Where a function's text goes settles error
+/// its logs write settles its logging signals whenever they are not clear:
+/// a logged object split on errors caught from a payment or database call,
+/// and audit lines naming who signed in were logged personal data. Where a function's text goes settles error
 /// details (see `exposure_signal`), also under a finding that claims the text
 /// likely reaches a client.
 ///
@@ -724,8 +725,11 @@ pub(in crate::units) enum SettleWhen {
 /// its undecided path Choice was never asked, and once the markup Choice
 /// cleared the markup it was left uncertain. What their command lines hold
 /// settles the shell check the same way: a page that checks each octet of
-/// an address with is_numeric was a command injection at 0.88.
-pub(in crate::units) const SETTLES: [SettleKind; 11] = [
+/// an address with is_numeric was a command injection at 0.88. What code
+/// does with tokens and how it handles passwords settle those checks
+/// whenever they are not clear: front ends that send their own token and
+/// HMAC signing split on them or were reviews.
+pub(in crate::units) const SETTLES: [SettleKind; 13] = [
     SettleKind {
         rule: INJECTION,
         question: "url_parts",
@@ -801,10 +805,10 @@ pub(in crate::units) const SETTLES: [SettleKind; 11] = [
     SettleKind {
         rule: SENSITIVE_DATA,
         question: "logged",
-        checks: &["logs_object_secret"],
+        checks: &["logs_object_secret", "logs_secret"],
         clears: &questions::PLAIN_LOGS,
         callers: false,
-        when: SettleWhen::Undecided,
+        when: SettleWhen::NotClear,
         files: SettleFiles::All,
     },
     SettleKind {
@@ -823,6 +827,24 @@ pub(in crate::units) const SETTLES: [SettleKind; 11] = [
         clears: &questions::FLAGGED_COOKIES,
         callers: false,
         when: SettleWhen::Undecided,
+        files: SettleFiles::All,
+    },
+    SettleKind {
+        rule: UNSAFE_SETTINGS,
+        question: "token_use",
+        checks: &["token"],
+        clears: &questions::VERIFIED_TOKENS,
+        callers: false,
+        when: SettleWhen::NotClear,
+        files: SettleFiles::All,
+    },
+    SettleKind {
+        rule: UNSAFE_SETTINGS,
+        question: "password_handling",
+        checks: &["hash"],
+        clears: &questions::HASHED_PASSWORDS,
+        callers: false,
+        when: SettleWhen::NotClear,
         files: SettleFiles::All,
     },
 ];
@@ -867,6 +889,8 @@ fn settle(
         "destination" => questions::security_destination(&code),
         "logged" => questions::security_logged(&code),
         "cookie_flags" => questions::security_cookie_flags(&code),
+        "token_use" => questions::security_token_use(&code),
+        "password_handling" => questions::security_password_handling(&code),
         _ => questions::security_cors_origins(&code),
     };
     let mut questions = Questions::default();

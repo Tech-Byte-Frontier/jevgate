@@ -79,7 +79,9 @@ pub(in crate::units) fn exposure_outcome<'a>(
 
 /// The presence answers of `questions` and the rule's specific checks, each
 /// judged with its lean; an undecided check its settle Choice clears is
-/// clear. None until every presence question is answered.
+/// clear, and so is one that found a concern a Choice asked whenever the
+/// check is not clear rules out. None until every presence question is
+/// answered.
 fn exposure_signals<'a>(
     rule: &str,
     get: &impl Fn(&str) -> Option<&'a Answer>,
@@ -90,9 +92,18 @@ fn exposure_signals<'a>(
         .flatten();
     let away = rule == catalog::SENSITIVE_DATA && away_from_clients(get);
     let judge = |question: &str, answer: &Answer| exposure_signal(question, answer, own, away);
+    // A Choice asked whenever a presence signal is not clear rules it out
+    // too: what a function's logs write clears an audit line that names who
+    // signed in, which the presence question found as personal data.
     let presence: Vec<Signal> = questions
         .iter()
-        .map(|q| get(q).map(|a| judge(q, a)))
+        .map(|q| {
+            get(q).map(|a| match judge(q, a) {
+                (Outcome::Clear, lean) => (Outcome::Clear, lean),
+                _ if settled(rule, q, get, true) => (Outcome::Clear, 0.0),
+                signal => signal,
+            })
+        })
         .collect::<Option<_>>()?;
     let specific: Vec<Signal> = crate::units::security::checks(rule)
         .iter()
@@ -100,6 +111,12 @@ fn exposure_signals<'a>(
             let (outcome, lean) = judge(check.id, get(check.id)?);
             Some(match outcome {
                 Outcome::Uncertain(_) if settled(rule, check.id, get, false) => {
+                    (Outcome::Clear, 0.0)
+                }
+                // A Choice asked whenever its check is not clear clears a
+                // concern it rules out, such as HMAC signing read as a
+                // password hash.
+                Outcome::Review(_) | Outcome::Consider(_) if settled(rule, check.id, get, true) => {
                     (Outcome::Clear, 0.0)
                 }
                 _ => (outcome, lean),

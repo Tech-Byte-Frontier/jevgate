@@ -315,7 +315,16 @@ fn run_with_nouls(project: &Project, options: &CheckArgs, nouls: &[(&'static str
     let mut eval = scripted(0);
     eval.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
     eval.overrides.push(to_client());
+    eval.overrides.push(logs_a_secret());
     run(project, options, &mut eval)
+}
+
+/// The settle Choice naming a secret among what a unit logs.
+fn logs_a_secret() -> (&'static str, Value) {
+    let options = [
+        "plain", "identity", "operator", "secret", "personal", "none",
+    ];
+    ("logged", choice_of("secret", &options))
 }
 
 /// The settle Choice sending a unit's text to a remote client.
