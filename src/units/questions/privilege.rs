@@ -46,11 +46,14 @@ pub fn definer_search_path() -> Value {
     )
 }
 
+/// A secret token the function looks up is the caller's capability:
+/// basejump's `accept_invitation` and `lookup_invitation`, which find an
+/// invitation by its token, were reviews for checking no `auth.uid()`.
 pub fn definer_unchecked() -> Value {
     sql_noul(
         "Does the SECURITY DEFINER function in `function.source` read or change rows of other users without checking who the caller is?",
         "It runs with its owner's privileges and returns or changes rows chosen by its arguments, without comparing them to `auth.uid()` or checking a role, and clients can call it.",
-        "It checks the caller, touches only the caller's rows, only returns data meant for everyone, is a trigger function that runs on table events, or `function.privileges` revokes EXECUTE from public, anon and authenticated so only roles clients do not use, such as `supabase_auth_admin` or `service_role`, may call it.",
+        "It checks the caller, touches only the caller's rows, acts only for whoever holds a secret token it looks up by value, such as an invitation or reset token, only returns data meant for everyone, is a trigger function that runs on table events, or `function.privileges` revokes EXECUTE from public, anon and authenticated so only roles clients do not use, such as `supabase_auth_admin` or `service_role`, may call it.",
         "`function.privileges` lists the grants and revokes of EXECUTE on it, when found.",
     )
 }
