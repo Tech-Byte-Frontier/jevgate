@@ -71,26 +71,32 @@ fn an_undecided_recheck_is_decided_by_the_kind_of_file() {
         "the kind is its own request"
     );
     options.refresh = true;
-    let mut eval = scripted(3);
-    let mut probabilities: serde_json::Map<String, Value> =
-        questions::outline_kind(false)["criteria"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|k| (k.clone(), json!(0.0)))
-            .collect();
-    probabilities.insert("per_feature".into(), json!(0.85));
-    probabilities.insert("algorithm".into(), json!(0.15));
-    eval.recheck_overrides = vec![(
-        "kind",
-        json!({"type":"choice","choice":"per_feature","confidence":0.8,"probabilities":probabilities}),
-    )];
-    let finding = &first_finding(&project, &options, &mut eval);
+    let kind = |choice: &str| {
+        let mut probabilities: serde_json::Map<String, Value> =
+            questions::outline_kind(false)["criteria"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(|k| (k.clone(), json!(0.0)))
+                .collect();
+        probabilities.insert(choice.into(), json!(0.85));
+        probabilities.insert("algorithm".into(), json!(0.15));
+        let mut eval = scripted(3);
+        eval.recheck_overrides = vec![(
+            "kind",
+            json!({"type":"choice","choice":choice,"confidence":0.8,"probabilities":probabilities}),
+        )];
+        run(&project, &options, &mut eval)
+    };
+    assert_eq!(
+        kind("per_feature").files[0].dimensions["file_organization"].status,
+        Status::Clear,
+        "the same kind of code written out per feature is one job"
+    );
+    let finding = &kind("several").files[0].findings[0];
     assert_eq!(finding.strength, Strength::Consider);
     assert!(
-        finding
-            .message
-            .contains("same kind of code for several features"),
+        finding.message.contains("several unrelated features"),
         "{}",
         finding.message
     );
