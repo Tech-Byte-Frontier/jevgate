@@ -50,6 +50,9 @@ pub(super) fn plan_security(
                 &shared.enums,
                 &shared.constants,
             );
+            if rules.contains(&catalog::SENSITIVE_DATA) {
+                subject.callee_errors = callee_errors(scope, &shared.imports, context.owner, unit);
+            }
             subject.django = parsed.django;
             if parsed.django {
                 django_evidence(scope, context, parsed, unit, rules, &mut subject);
@@ -205,6 +208,60 @@ fn routes_to(
 
 /// Functions outside tests, in this file and in selected files that import
 /// it, that call `unit`, as (name, source).
+/// Errors listed with one function, at most.
+const CALLEE_ERRORS: usize = 8;
+
+/// The errors that the functions a function calls create, two calls deep,
+/// with their messages: functions of its own file or of files it imports.
+/// A handler that returns `str(exc)` for the `LookupError` its service
+/// raises with the program's own text ("Imóvel não encontrado") sends no
+/// internal detail, but without the service's raise the text read as a
+/// library's: twelve such handlers of one FastAPI project were reviews.
+fn callee_errors(
+    scope: &Scope<'_>,
+    imports: &BTreeMap<usize, Imports>,
+    owner: usize,
+    unit: &Unit,
+) -> Vec<serde_json::Value> {
+    let mut found = Vec::new();
+    let mut visited = vec![unit.name.clone()];
+    let mut callers = vec![(owner, unit)];
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for (file, caller) in callers {
+            let reached = scope.owners.iter().filter(|&&other| {
+                other == file || imports[&file].reach(&scope.inputs[other].result.path)
+            });
+            for &other in reached {
+                let lines = scope.test_lines(other);
+                for callee in &scope.units[&other].units {
+                    if !callee.callable()
+                        || visited.contains(&callee.name)
+                        || !caller.calls.contains(&callee.short_name)
+                        || lines.iter().any(|l| callee.overlaps(l))
+                    {
+                        continue;
+                    }
+                    visited.push(callee.name.clone());
+                    for error in &callee.errors {
+                        if found.len() == CALLEE_ERRORS {
+                            return found;
+                        }
+                        found.push(serde_json::json!({
+                            "function": callee.name,
+                            "error": error.error,
+                            "message": error.message,
+                        }));
+                    }
+                    next.push((other, callee));
+                }
+            }
+        }
+        callers = next;
+    }
+    found
+}
+
 fn callers_of(
     scope: &Scope<'_>,
     imports: &BTreeMap<usize, Imports>,

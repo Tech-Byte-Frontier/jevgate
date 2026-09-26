@@ -858,6 +858,18 @@ const EXCEPTION_TO_CLIENT: Check = Check {
     no_examples: &[],
 };
 
+/// The exception check of a unit sent with the errors the functions it
+/// calls create: "an exception it did not raise itself" held for a handler
+/// returning the message its service raised to explain a missing record,
+/// which stayed a review with the service's raise in view.
+pub const EXCEPTION_TO_CLIENT_FROM_CALLEES: Check = Check {
+    id: "exception_to_client",
+    question: EXCEPTION_TO_CLIENT.question,
+    yes: "The text of an exception that a library, the database or the runtime raised, or a stack trace, is put into the response to a request, such as the message of every exception it catches.",
+    no: "Responses carry fixed messages or codes, or only messages the program writes itself, such as those of the errors in `errors_created_by_functions_it_calls` that explain invalid input or a missing record; details stay in server logs.",
+    no_examples: &[],
+};
+
 const DJANGO_EXCEPTION_TO_CLIENT: Check = Check {
     id: "exception_to_client",
     question: "Does `{code}` send an exception's message, stack trace or a database error to a remote client in a response?",

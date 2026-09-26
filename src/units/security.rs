@@ -53,6 +53,10 @@ pub(super) struct Subject<'a> {
     /// Whether it is Django code, whose questions name Django's calls and
     /// settings and ask its extra checks.
     pub django: bool,
+    /// Errors the functions it calls create, with their messages, shown in
+    /// its sensitive-data trace: whether an error's text that it sends is
+    /// the program's own depends on where the error was raised.
+    pub callee_errors: Vec<Value>,
 }
 
 impl Subject<'_> {
@@ -90,6 +94,7 @@ pub(super) fn function_subject<'a>(
         enums: named_enums(&unit.sites, enums),
         evidence: serde_json::Map::new(),
         django: false,
+        callee_errors: Vec::new(),
     }
 }
 
@@ -175,6 +180,7 @@ pub(super) fn setup_subject<'a>(
         enums: Vec::new(),
         evidence: serde_json::Map::new(),
         django: false,
+        callee_errors: Vec::new(),
     })
 }
 
@@ -536,7 +542,16 @@ fn trace(
         let ids: Vec<String> = (0..messages.len()).map(|i| format!("m{i}")).collect();
         ask("messages", questions::security_message_origin(&ids));
     }
+    // With the errors its callees create in view, the exception check asks
+    // whose text a response carries, not who raised it.
+    let from_callees =
+        rule == SENSITIVE_DATA && !subject.django && !subject.callee_errors.is_empty();
     for check in asked_checks(rule, file.language, subject.django, &subject.source) {
+        let check = if from_callees && check.id == "exception_to_client" {
+            &questions::EXCEPTION_TO_CLIENT_FROM_CALLEES
+        } else {
+            check
+        };
         ask(check.id, check.body(&code));
     }
     let mut state = json!({
@@ -547,6 +562,9 @@ fn trace(
 
     if rule == SENSITIVE_DATA && !messages.is_empty() {
         state["messages"] = json!(messages);
+    }
+    if rule == SENSITIVE_DATA && !subject.callee_errors.is_empty() {
+        state["errors_created_by_functions_it_calls"] = json!(subject.callee_errors);
     }
     if rule == INJECTION && !subject.enums.is_empty() {
         state["enums_named_in_sites"] = json!(subject.enums);

@@ -177,7 +177,15 @@ signatures, or one candidate pair.
    message argument of each error the function creates and asks which one,
    if any, carries another error's text: the response is often written by an
    error handler in another file, and adding the handler to every unit also
-   cleared real leaks. Each registered error handler (`.onError(…)`,
+   cleared real leaks. The trace also lists the errors that the functions it
+   calls create, two calls deep in its own file or files it imports, with
+   their messages, and then asks the exception check about whose text a
+   response carries rather than who raised it: FastAPI handlers returning
+   `str(exc)` for the `LookupError` their service raised with the program's
+   own text ("Imóvel não encontrado") were twelve reviews in one project,
+   since the handler "did not raise it itself"; with the service's raise in
+   view, ten became notes or considers, and tools that return the text of
+   every exception they catch became reviews. Each registered error handler (`.onError(…)`,
    `.setErrorHandler(…)`, Express four-parameter `.use(…)` middleware, Flask
    and FastAPI decorators, NestJS `@Catch` filters, axum `IntoResponse` and
    actix-web `ResponseError` for an error type, Rocket catchers, ASP.NET Core

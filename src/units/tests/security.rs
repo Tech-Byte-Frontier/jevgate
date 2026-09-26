@@ -804,6 +804,57 @@ fn an_undecided_caller_recheck_replaces_an_undecided_traced_lean() {
     );
 }
 
+const SERVICE: &str = "def find_asset(asset_id):\n    asset = ASSETS.get(asset_id)\n    if asset is None:\n        raise LookupError(\"Asset not found\")\n    return asset\n";
+const HANDLER: &str = "from fastapi import HTTPException\n\nfrom app.services import find_asset\n\n\ndef read_asset(asset_id: str):\n    try:\n        return find_asset(asset_id)\n    except LookupError as exc:\n        raise HTTPException(status_code=404, detail=str(exc)) from exc\n";
+
+#[test]
+fn an_error_trace_shows_the_errors_the_called_functions_raise() {
+    let (project, options) = project_with(
+        &[("app/services.py", SERVICE), ("app/api.py", HANDLER)],
+        &[catalog::SENSITIVE_DATA],
+    );
+    let (inputs, plan) = planned(&project, &options);
+    let owner = inputs
+        .iter()
+        .position(|i| i.result.path.ends_with("api.py"))
+        .unwrap();
+    let Detail::Security {
+        trace: Some((trace, _)),
+        ..
+    } = &plan.files[&owner].units[0].detail
+    else {
+        panic!("a traced security unit");
+    };
+    assert_eq!(
+        trace["state"]["errors_created_by_functions_it_calls"],
+        json!([{"function": "find_asset", "error": "LookupError", "message": "\"Asset not found\""}])
+    );
+    assert_eq!(
+        trace["questions"]["exception_to_client"],
+        questions::EXCEPTION_TO_CLIENT_FROM_CALLEES.body("function.source")
+    );
+    let alone = project_with(&[("app/api.py", HANDLER)], &[catalog::SENSITIVE_DATA]);
+    let (_, plan) = planned(&alone.0, &alone.1);
+    let Detail::Security {
+        trace: Some((trace, _)),
+        ..
+    } = &plan.files[&0].units[0].detail
+    else {
+        panic!("a traced security unit");
+    };
+    assert!(
+        trace["state"]
+            .get("errors_created_by_functions_it_calls")
+            .is_none()
+    );
+    assert!(
+        !trace["questions"]["exception_to_client"]
+            .to_string()
+            .contains("errors_created_by_functions_it_calls"),
+        "without callee errors the check is asked as before"
+    );
+}
+
 const ROUTE: &str = "export async function loadThing(c: Context) {\n  const { data, error } = await db.from('things').select('*').eq('id', c.req.param('id'))\n  if (error) throw new InternalError(`Query failed: ${error.message}`, error)\n  if (!data) throw new NotFoundError('Thing not found')\n  return c.json(data)\n}\n";
 
 #[test]
