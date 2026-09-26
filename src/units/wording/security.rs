@@ -18,7 +18,7 @@ const PRIVILEGE: [(&str, &str, &str, &str); 7] = [
     ),
     (
         "unchecked",
-        "reads or changes other users' rows without checking the caller",
+        "reads or changes other users' rows or files without checking the caller",
         "CWE-862 missing authorization",
         "Check `auth.uid()` or a role in the function, or make it SECURITY INVOKER",
     ),
