@@ -943,12 +943,15 @@ const EXCEPTION_TO_CLIENT: Check = Check {
 /// The exception check of a unit sent with the errors the functions it
 /// calls create: "an exception it did not raise itself" held for a handler
 /// returning the message its service raised to explain a missing record,
-/// which stayed a review with the service's raise in view.
+/// which stayed a review with the service's raise in view. It asks whether
+/// the text describes an internal failure, not who raised it: asked about
+/// a library's exceptions, a benchmark returning a framework's bad-request
+/// message (`MultiPartException`) became a review.
 pub const EXCEPTION_TO_CLIENT_FROM_CALLEES: Check = Check {
     id: "exception_to_client",
     question: EXCEPTION_TO_CLIENT.question,
-    yes: "The text of an exception that a library, the database or the runtime raised, or a stack trace, is put into the response to a request, such as the message of every exception it catches.",
-    no: "Responses carry fixed messages or codes, or only messages the program writes itself, such as those of the errors in `errors_created_by_functions_it_calls` that explain invalid input or a missing record; details stay in server logs.",
+    yes: "The text of an exception that describes an internal failure, such as a database, network, file system or library error, or a stack trace, is put into the response to a request, such as the message of every exception it catches.",
+    no: "Responses carry fixed messages or codes, or messages written to explain invalid input or a missing record to the client, whether the program's own, such as the errors in `errors_created_by_functions_it_calls`, or a framework's validation and bad-request errors; details stay in server logs.",
     no_examples: &[],
 };
 
