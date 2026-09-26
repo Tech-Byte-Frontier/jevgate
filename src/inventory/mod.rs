@@ -143,7 +143,12 @@ fn source_paths(
             continue;
         }
         let relative = &discovery::relative(path, &context.root)?;
-        if discovery::source(relative, &args.source_extension)
+        // A server template counts only for its inline scripts and the code
+        // that reads client data.
+        let template = crate::components::server_template(relative)
+            && std::fs::read_to_string(path)
+                .is_ok_and(|text| crate::components::judged(relative, &text));
+        if (discovery::source(relative, &args.source_extension) || template)
             && selected(relative)
             && boundary.permits(relative)
             && super::context::ensure_visible_path(relative).is_ok()

@@ -116,8 +116,24 @@ pub const INERT_MARKUP: [&str; 3] = ["escaped", "text", "none"];
 /// into markup without escaping". A Django view is asked what it sends
 /// back: views that only redirect or render a template split on the markup
 /// check, since the variables they pass on end up in a page, and a template
-/// escapes them unless it writes one with `|safe`.
-pub fn security_markup_output(code: &str, django: bool) -> Value {
+/// escapes them unless it writes one with `|safe`. A function elsewhere
+/// that renders a template writing values unescaped is asked the same way.
+pub fn security_markup_output(code: &str, django: bool, rendered: bool) -> Value {
+    if rendered && !django {
+        return json!({
+            "type": "choice",
+            "instructions": {
+                "question": format!("What does `{code}` send back to the client, and how are the variables in it rendered?"),
+                "note": EVIDENCE,
+            },
+            "criteria": {
+                "escaped": "A page rendered from a template that writes each value it is given with an escaping tag, such as EJS `<%= … %>` or Handlebars `{{ … }}`, or HTML built with an escaping function.",
+                "text": "It is never rendered as HTML: JSON, a file download or plain text.",
+                "raw": "HTML it builds from variables as text itself, or a template that writes a value it is given without escaping, such as with EJS `<%- … %>`, Handlebars `{{{ … }}}` or a `|safe` filter.",
+                "none": "No markup with variables: it only redirects, or sends nothing to a client itself.",
+            },
+        });
+    }
     if django {
         return json!({
             "type": "choice",

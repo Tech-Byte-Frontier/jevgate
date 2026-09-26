@@ -14,6 +14,7 @@
 | PHP | `.php` `.phtml` | ✅ | ✅ PHPUnit `…TestCase` classes, Pest `test`/`it` | ✅ | ✅ comments |
 | Java | `.java` | ✅ | ✅ JUnit 4 and 5, TestNG: `@Test`, `@ParameterizedTest`, `@Nested`, JUnit 3 `TestCase` | ✅ | ✅ comments |
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ✅ script comments |
+| Server templates: ERB, EJS, JSP, Handlebars, Mustache, Nunjucks, Twig, Jinja, Go | `.erb` `.ejs` `.jsp` `.hbs` `.mustache` `.njk` `.twig` `.jinja` `.j2` `.tmpl` `.gohtml`, and `.html` under `templates/`, `views/`, `layouts/`, `partials/` or `includes/` | ✅ inline scripts only | ➖ | ✅ inline scripts, as the page's code in the visitor's browser; and the code that reads the request, a cookie, the session or the signed-in user: tags that write it unescaped (`<%= raw … %>`, `.html_safe`, `<%== … %>`, `<%- … %>`, `{{{ … }}}`, `\|safe`, `\|raw`) and a JSP page's scriptlets | ✅ script comments |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
 | GitHub Actions | `.github/workflows/*.yml` | ➖ | ➖ | ✅ workflows | ➖ |
 | Markdown, MDX | `.md` `.mdx` at the root, in `docs/` or `doc/`, READMEs and CONTRIBUTING files; agent instruction files; Claude Code skills, commands and subagents | ➖ | ➖ | ➖ | ✅ |
@@ -21,7 +22,7 @@
 
 | Framework or platform | What JevGate understands |
 |---|---|
-| Hono, Express, Fastify, Koa | Route handlers written inline (`app.post('/pages', async (c) => …)`); error handlers (`app.onError`, `setErrorHandler`, four-parameter Express middleware) |
+| Hono, Express, Fastify, Koa | Route handlers written inline (`app.post('/pages', async (c) => …)`); error handlers (`app.onError`, `setErrorHandler`, four-parameter Express middleware); views rendered by name (`res.render('app/products')`), with the lines that write values unescaped (EJS `<%- … %>`, Handlebars `{{{ … }}}`, Pug `!=`, Nunjucks and Swig `\|safe`) |
 | NestJS | Exception filters (`@Catch`) |
 | Next.js (App Router and Pages Router) | Route handlers (`app/**/route.ts`), Server Actions (`'use server'` files and functions), `pages/api` routes, middleware, client components, error boundaries and pages are named to Jev with who calls them and where they run, so a Server Action's arguments read as client input and a client component's requests as the user's own; `dangerouslySetInnerHTML`, redirects to client-chosen URLs, raw Prisma and Drizzle queries (`$queryRawUnsafe`, `sql.raw`) as opposed to their binding tagged templates, `NEXT_PUBLIC_` secrets, and `next.config` headers |
 | SvelteKit | Server load functions and form actions (`+page.server.js`, `export const actions = {…}`), endpoints (`+server.js`) and server hooks are named to Jev with who calls them, so their request, form data, URL and cookies read as client input, and `cookies.set` is read with its secure defaults |

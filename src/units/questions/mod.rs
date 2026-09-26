@@ -166,8 +166,9 @@ mod tests {
             security_url_parts("function.source", true),
             security_redirect_target("function.source", false),
             security_redirect_target("function.source", true),
-            security_markup_output("function.source", false),
-            security_markup_output("function.source", true),
+            security_markup_output("function.source", false, false),
+            security_markup_output("function.source", true, false),
+            security_markup_output("function.source", false, true),
             security_markup_parts("function.source", false),
             security_markup_parts("function.source", true),
             security_path_parts("function.source"),
@@ -187,9 +188,11 @@ mod tests {
         all.extend(security_checks());
         for django in [false, true] {
             all.extend([
-                security_interpreted("function.source", django, None, false),
-                security_interpreted("function.source", django, Some("pickle"), false),
-                security_interpreted("function.source", django, Some("pickle"), true),
+                security_interpreted("function.source", django, false, None, false),
+                security_interpreted("function.source", django, false, Some("pickle"), false),
+                security_interpreted("function.source", django, false, Some("pickle"), true),
+                security_interpreted("function.source", django, true, None, false),
+                security_interpreted("function.source", django, true, Some("pickle"), false),
                 security_resource("function.source", django),
                 security_error_details("function.source", django),
                 security_weakened("function.source", django),
@@ -201,7 +204,7 @@ mod tests {
         for (id, mut body) in [
             (
                 "interpreted",
-                security_interpreted("function.source", false, None, false),
+                security_interpreted("function.source", false, false, None, false),
             ),
             ("resource", security_resource("function.source", false)),
             (
@@ -222,6 +225,7 @@ mod tests {
             .chain(&WEAK_SETTINGS)
             .chain(&EXPOSURES)
             .chain(&DJANGO_VARIANTS)
+            .chain([&VIEW_MARKUP])
             .chain(&DJANGO_UNHANDLED)
             .chain(&DJANGO_SETTINGS)
             .chain(&DJANGO_EXPOSURES)

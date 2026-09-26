@@ -33,7 +33,7 @@ Consider (2):
 | Security | Injection, sensitive data, unsafe settings, SQL access control, GitHub workflows; each finding names a CWE | `--rule security` |
 | Documentation | Agent instruction files, large and stale docs, duplicated sections, code comments | `--rule documentation` |
 
-It reads Rust, Python, JavaScript, TypeScript, Go, C#, Ruby, PHP and Java, the scripts of Astro, Vue and Svelte files, SQL for PostgreSQL and Supabase, GitHub Actions workflows, and Markdown, MDX, reStructuredText and AsciiDoc, and knows the routes, handlers and settings of frameworks from Express, Next.js and SvelteKit to Django, Laravel, ASP.NET Core and Spring MVC. [What it finds](https://tech-byte-frontier.github.io/jevgate/what-it-finds.html) and [supported languages and frameworks](https://tech-byte-frontier.github.io/jevgate/languages.html) have the details; `jevgate rules` prints every rule with the question it asks.
+It reads Rust, Python, JavaScript, TypeScript, Go, C#, Ruby, PHP and Java, the scripts of Astro, Vue and Svelte files and the inline scripts of server templates (ERB, EJS, JSP, Handlebars, Jinja and others), SQL for PostgreSQL and Supabase, GitHub Actions workflows, and Markdown, MDX, reStructuredText and AsciiDoc, and knows the routes, handlers and settings of frameworks from Express, Next.js and SvelteKit to Django, Laravel, ASP.NET Core and Spring MVC. [What it finds](https://tech-byte-frontier.github.io/jevgate/what-it-finds.html) and [supported languages and frameworks](https://tech-byte-frontier.github.io/jevgate/languages.html) have the details; `jevgate rules` prints every rule with the question it asks.
 
 ## Install
 

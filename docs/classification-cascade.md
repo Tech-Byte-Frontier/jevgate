@@ -46,7 +46,22 @@ signatures, or one candidate pair.
    names no method, so such tests had no code under test.
    Astro, Vue and
    Svelte files are parsed as their scripts: Astro frontmatter and `<script>`
-   contents, with every other byte a space, so lines stay the file's.
+   contents, with every other byte a space, so lines stay the file's. A
+   server template (ERB, EJS, JSP, Handlebars, Mustache, Nunjucks, Twig,
+   Jinja or Go, or HTML under `templates/`, `views/`, `layouts/`,
+   `partials/` or `includes/`) is selected only when it holds an inline
+   script, and parsed as its scripts the same way, with its tags blanked:
+   `<%= … %>`, `<%- … %>` and `{{ … }}` read as a name of the same length,
+   other tags as spaces. Its top-level script statements are the page's
+   code and are judged like a function by every security rule, as a PHP
+   page script is, and its requests say that the code runs in the
+   visitor's browser. Its server code that reads the request, a cookie, the
+   session or the signed-in user is one more unit, `template code`: each
+   tag that writes such a value unescaped (ERB `raw` and `html_safe`, EJS
+   `<%- … %>`, `{{{ … }}}`, `|safe`, `|raw`), and every scriptlet of a JSP
+   page once one reads the request. RailsGoat's `raw cookies[:font]` and
+   JavaVulnerableLab's scriptlet queries were read by no rule. A template
+   holding neither is not selected.
    A file whose parse holds syntax errors is not judged, unless they are few
    and small (at most three regions, an eighth of the source in all), since
    grammars miss some valid code: tree-sitter-typescript reads a call
@@ -270,7 +285,12 @@ signatures, or one candidate pair.
    URL routes that reach it (a `\d+` parameter holds digits), the templates
    it renders that write values unescaped, and the module constants it
    names; a management command is marked as run by hand, since its options
-   came back as another party's. A settings module is one unit whose
+   came back as another party's. A Node handler that renders a view by name
+   (`res.render('app/products', …)`, a view under `views/` named without
+   its extension) is sent the view's lines that write values unescaped, in
+   its engine's syntax (EJS `<%- … %>`, Handlebars `{{{ … }}}`, Pug `!=`,
+   Nunjucks's and Swig's `|safe`), and its presence question, markup check
+   and markup Choice name such templates, as Django's do. A settings module is one unit whose
    statements are its settings, with secret literals redacted to their
    length (a dotted path such as a secret-key getter is not a secret). It is
    sent with the lines that select it (`DJANGO_SETTINGS_MODULE` in a
