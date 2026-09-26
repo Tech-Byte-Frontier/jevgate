@@ -122,7 +122,9 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
     } else if unit.rule == catalog::COMMENTS {
         comment_answers(unit, judgments)
     } else if unit.rule == catalog::TEST_VALUE {
-        test_value_answers(unit, judgments)
+        let merged = test_value_answers(unit, judgments);
+        let outcome = leaning_test(unit, judgments, unit_outcome(unit, &merged));
+        return (outcome, merged);
     } else if unit.rule == catalog::TEST_REDUNDANCY {
         // Whether each test checks something the other does not, asked of a
         // pair that reached a review, sits beside its answers.
@@ -133,6 +135,26 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
         return rechecked(unit, judgments);
     };
     (unit_outcome(unit, &merged), merged)
+}
+
+/// A test whose hollow checks stay undecided once its recheck is asked (or
+/// when it has none) leans: below 0.50 it is clear. Labeled from the code,
+/// 4 of 43 such tests below 0.50 checked only their mocks or recomputed
+/// their expected value (5 counting a test whose one real check is weak),
+/// against 10 of 35 at 0.50 or more; 636 of the 792 undecided tests on the
+/// corpus lean below.
+fn leaning_test(unit: &UnitPlan, judgments: &[Judgment], outcome: Outcome) -> Outcome {
+    let rechecked =
+        unit.recheck.is_none() || !answers(judgments, &unit.id, Pass::Recheck).is_empty();
+    match outcome {
+        Outcome::Uncertain(p)
+            if rechecked
+                && !crate::policy::probability_at_least(p, crate::policy::LEADING_PROBABILITY) =>
+        {
+            Outcome::Clear
+        }
+        other => other,
+    }
 }
 
 /// The pass of the follow-ups whose questions sit beside the first answers
