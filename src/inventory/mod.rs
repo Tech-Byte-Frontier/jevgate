@@ -236,7 +236,7 @@ fn load(
     extra: &[super::context::ContextInput],
 ) -> Result<Input> {
     let relative = &discovery::relative(&path, &context.root).context("Source outside root")?;
-    let mut result = pending_result(relative, &role, args, extra);
+    let result = pending_result(relative, &role, args, extra);
     if !matches!(role.as_str(), "source" | "test") {
         return Ok(excluded(result, &role, relative));
     }
@@ -258,14 +258,19 @@ fn load(
             Some(kind) => recast(result, kind, relative),
             None => source_input(result, source, (&path, relative), args, context, extra),
         }),
-        // Binary and non-UTF-8 files are reported and skipped; they never make a run incomplete.
-        Err(error) if not_text(&error) => {
-            result.status = Status::Skipped;
-            result.error = Some(format!("{error}; this file was not judged."));
-            Ok(bare_input(result))
-        }
-        Err(error) => Ok(error_input(result, error)),
+        Err(error) => Ok(unread(result, error)),
     }
+}
+
+/// A file that could not be read. Binary and non-UTF-8 files are reported and
+/// skipped; they never make a run incomplete.
+fn unread(mut result: FileResult, error: anyhow::Error) -> Input {
+    if not_text(&error) {
+        result.status = Status::Skipped;
+        result.error = Some(format!("{error}; this file was not judged."));
+        return bare_input(result);
+    }
+    error_input(result, error)
 }
 
 /// Application source or a test read whole, at `path` and `relative` to the
