@@ -3,6 +3,7 @@
 //! Jev answers short literal questions, and `compose` turns answers into results.
 mod access;
 mod answers;
+mod client_app;
 mod comments;
 pub mod compose;
 mod documents;

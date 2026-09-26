@@ -136,6 +136,7 @@ fn file_context<'a>(
                 &input.result.path,
                 input.source.as_deref().unwrap_or(""),
             )
+            .or_else(|| crate::units::client_app::describe(input.package.as_ref()))
             .map(str::to_string)
         }),
     }
