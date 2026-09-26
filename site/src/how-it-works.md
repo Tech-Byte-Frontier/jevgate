@@ -186,7 +186,15 @@ signatures, or one candidate pair.
    message argument of each error the function creates and asks which one,
    if any, carries another error's text: the response is often written by an
    error handler in another file, and adding the handler to every unit also
-   cleared real leaks. Each registered error handler (`.onError(…)`,
+   cleared real leaks. The trace also lists the errors that the functions it
+   calls create, two calls deep in its own file or files it imports, with
+   their messages, and then asks the exception check about whose text a
+   response carries rather than who raised it: FastAPI handlers returning
+   `str(exc)` for the `LookupError` their service raised with the program's
+   own text ("Imóvel não encontrado") were twelve reviews in one project,
+   since the handler "did not raise it itself"; with the service's raise in
+   view, ten became notes or considers, and tools that return the text of
+   every exception they catch became reviews. Each registered error handler (`.onError(…)`,
    `.setErrorHandler(…)`, Express four-parameter `.use(…)` middleware, Flask
    and FastAPI decorators, NestJS `@Catch` filters, axum `IntoResponse` and
    actix-web `ResponseError` for an error type, Rocket catchers, ASP.NET Core
@@ -309,7 +317,16 @@ signatures, or one candidate pair.
    identifiers quoted by doubling embedded quotes as handled (identifiers
    cannot be bound), and the URL check excludes requests a web page sends from
    the user's browser; on fresh repositories both had flagged such code, while
-   the SQL and SSRF advisory functions kept their answers.
+   the SQL and SSRF advisory functions kept their answers. Code whose source
+   names a deserializer that can build any object (Python's `pickle`,
+   `marshal`, `shelve`, `jsonpickle` or `yaml.load`; Ruby's `Marshal.load`
+   or `YAML.load`; Java's `ObjectInputStream`, `XMLDecoder`, XStream or
+   SnakeYAML; node-serialize) is asked about loading data with it in the
+   presence question, and its trace asks that language's deserialize check,
+   as Django views and PHP pages naming `unserialize` are: a Flask route
+   passing `pickle.loads(request.get_data())` was asked only about query,
+   command, code and markup text, and was clear. Only the requests of such
+   functions change.
    PHP units read the presence questions and checks in PHP's own terms
    (`src/units/questions/php.rs`), naming its functions (`echo`,
    `shell_exec` and backticks, `mysqli_real_escape_string`, `password_hash`,
