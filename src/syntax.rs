@@ -2,7 +2,7 @@
 //! trees keyed by grammar and exact source.
 use anyhow::{Result, ensure};
 use std::{cell::RefCell, collections::BTreeMap, path::Path};
-use tree_sitter::{Parser, Tree};
+use tree_sitter::{Node, Parser, Tree};
 
 const CACHE_ENTRIES: usize = 256;
 const CACHE_SOURCE_BYTES: usize = 4 * 1024 * 1024;
@@ -112,20 +112,77 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         return Ok(None);
     };
     let key = (extension.to_owned(), crate::schema::hash(source.as_bytes()));
-    if let Some(tree) = PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
-        return Ok(Some(tree));
-    }
-    let mut parser = Parser::new();
-    parser.set_language(&language)?;
-    let tree = parser
-        .parse(scripts.as_deref().unwrap_or(source), None)
-        .ok_or_else(|| anyhow::anyhow!("Parser did not produce a tree"))?;
+    let tree = match PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
+        Some(tree) => tree,
+        None => {
+            let mut parser = Parser::new();
+            parser.set_language(&language)?;
+            let tree = parser
+                .parse(scripts.as_deref().unwrap_or(source), None)
+                .ok_or_else(|| anyhow::anyhow!("Parser did not produce a tree"))?;
+            PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
+            tree
+        }
+    };
+    // Whether errors are tolerable depends on the path, not only the source.
     ensure!(
-        !tree.root_node().has_error(),
+        if template(path, source) {
+            !tree.root_node().has_error()
+        } else {
+            tolerable(tree.root_node(), source.len())
+        },
         "Syntax errors: semantic evaluation was not attempted"
     );
-    PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
     Ok(Some(tree))
+}
+
+/// Error regions a file may hold and still be judged.
+const ERROR_REGIONS: usize = 3;
+
+/// A generator template, whose placeholders are no syntax of its language:
+/// a file under a `templates` directory, or one holding ERB tags (`<%=`)
+/// or `dotnet new` conditions (`//#if`). Its parse errors keep it unjudged.
+fn template(path: &Path, source: &str) -> bool {
+    path.iter()
+        .any(|part| matches!(part.to_str(), Some("templates" | "template")))
+        || source.contains("<%")
+        || source.contains("//#if")
+}
+
+/// Whether a tree's syntax errors are few and small enough to judge the
+/// rest of the file. Grammars miss some valid code: tree-sitter-typescript
+/// reads a call signature that starts with `<T>` on the line after another
+/// as its continuation, which left four of zustand's source files
+/// unjudged, and tree-sitter-go flags a `const (…)` group closed on a raw
+/// string's line. At most three error regions, an eighth of the source in
+/// all; units holding an error are left out (`analysis::units`).
+fn tolerable(root: Node<'_>, len: usize) -> bool {
+    if !root.has_error() {
+        return true;
+    }
+    if root.is_error() {
+        return false;
+    }
+    let mut regions = Vec::new();
+    error_regions(root, &mut regions);
+    let bytes: usize = regions.iter().map(|r| r.len()).sum();
+    regions.len() <= ERROR_REGIONS && bytes * 8 <= len
+}
+
+/// The smallest nodes that hold a syntax error.
+fn error_regions(node: Node<'_>, out: &mut Vec<std::ops::Range<usize>>) {
+    let mut cursor = node.walk();
+    let holding: Vec<Node<'_>> = node
+        .children(&mut cursor)
+        .filter(|child| child.has_error())
+        .collect();
+    if holding.is_empty() || node.is_error() || node.is_missing() {
+        out.push(node.byte_range());
+        return;
+    }
+    for child in holding {
+        error_regions(child, out);
+    }
 }
 
 #[cfg(test)]

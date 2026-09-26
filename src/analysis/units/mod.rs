@@ -166,6 +166,10 @@ fn framework_config(path: &Path) -> bool {
 }
 
 fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    // What a parser could not read holds no definitions to judge.
+    if node.is_error() {
+        return;
+    }
     match node.kind() {
         "use_declaration" | "import_statement" | "import_from_statement" => {
             imports(node, source, &mut file.imports);
@@ -639,7 +643,9 @@ fn push(
     source: &str,
     file: &mut FileUnits,
 ) {
-    if short_name.is_empty() {
+    // A definition holding a syntax error is not judged: the rest of its
+    // file can be, when its errors are few (`syntax::parse`).
+    if short_name.is_empty() || definition.outer.has_error() {
         return;
     }
     let Definition { outer, node, body } = definition;
