@@ -81,7 +81,42 @@ pub struct Settle {
     /// The Choice's question id, which `security::SETTLES` maps to the checks
     /// it settles and the options that clear them.
     pub question: &'static str,
-    pub request: (Value, Asked),
+    pub request: FollowUp,
+}
+
+/// A follow-up request, kept as its JSON text until it is asked: most are
+/// never sent, and held as JSON values, the traces, rechecks and settles of
+/// laravel/framework's security units took about 2 GB while planning.
+/// `serde_json` reads the text back to the same value, so the request, and
+/// the answer cache it keys, do not change.
+#[derive(Clone, Debug)]
+pub struct FollowUp {
+    request: Box<str>,
+    pub asked: Asked,
+}
+
+impl FollowUp {
+    pub fn request(&self) -> Value {
+        serde_json::from_str(&self.request).expect("a follow-up is JSON it wrote itself")
+    }
+
+    /// The request, planned for the file at `owner`.
+    pub fn planned(&self, owner: usize) -> Planned {
+        Planned {
+            owner,
+            request: self.request(),
+            asked: self.asked.clone(),
+        }
+    }
+}
+
+impl From<(Value, Asked)> for FollowUp {
+    fn from((request, asked): (Value, Asked)) -> Self {
+        Self {
+            request: request.to_string().into_boxed_str(),
+            asked,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -90,7 +125,7 @@ pub enum Detail {
         blocks: Vec<Block>,
         /// The follow-up that asks which block to extract, sent only after the
         /// split question raises a review or consider.
-        locate: Option<(Value, Asked)>,
+        locate: Option<FollowUp>,
     },
     Outline {
         /// A test file's cases rather than application members.
@@ -99,7 +134,7 @@ pub enum Detail {
         /// How many members the outline lists.
         members: usize,
         /// What kind of file it is, asked after a recheck that stays undecided.
-        kind: Option<(Value, Asked)>,
+        kind: Option<FollowUp>,
     },
     Pair {
         differences: Vec<crate::analysis::clones::Difference>,
@@ -119,7 +154,7 @@ pub enum Detail {
         choices: Vec<String>,
         /// Whether each choice's text is not written exactly once in the file.
         repeated: Vec<bool>,
-        locate: Option<(Value, Asked)>,
+        locate: Option<FollowUp>,
     },
     /// A comment of application code and the unit it documents or sits in.
     Comment {
@@ -130,14 +165,14 @@ pub enum Detail {
         /// tool may render even when it repeats the signature.
         documentation: bool,
         /// What kind of comment it is, asked when its questions stay undecided.
-        kind: Option<(Value, Asked)>,
+        kind: Option<FollowUp>,
     },
     /// A file's module-level constants and the literal values they hold.
     Constants {
         values: Vec<String>,
         /// Which constant a review or consider is about, asked after it;
         /// its options are the unit's locations, one per constant, in order.
-        locate: Option<(Value, Asked)>,
+        locate: Option<FollowUp>,
     },
     /// A security unit: its statements as sites for locating a finding, and
     /// the trace follow-up sent when presence is not clear.
@@ -146,7 +181,7 @@ pub enum Detail {
         /// The message argument of each error it creates, by position (`m0`…),
         /// for sensitive-data units.
         messages: Vec<String>,
-        trace: Option<(Value, Asked)>,
+        trace: Option<FollowUp>,
         /// One Choice per kind of check that can stay undecided after the
         /// trace and recheck, such as where its URLs come from or its output
         /// goes; each is asked only while its checks are undecided.
@@ -161,9 +196,9 @@ pub enum Detail {
     /// and the follow-up that locates a split.
     Document {
         parts: Vec<Block>,
-        locate: Option<(Value, Asked)>,
+        locate: Option<FollowUp>,
         /// What kind of document it is, asked when the split stays undecided.
-        kind: Option<(Value, Asked)>,
+        kind: Option<FollowUp>,
     },
     /// A document whose release is tagged or whose named paths were deleted:
     /// the facts a finished plan finding cites.
@@ -174,18 +209,18 @@ pub enum Detail {
     /// sent unless its document is a finished plan.
     Stale {
         missing: Vec<String>,
-        check: Option<(Value, Asked)>,
+        check: Option<FollowUp>,
         /// What the section treats the missing names as, asked when the
         /// check stays undecided.
-        settle: Option<(Value, Asked)>,
+        settle: Option<FollowUp>,
     },
     /// A candidate pair of sections, the other in `other`, and the check
     /// sent unless either document is a finished plan.
     DocPair {
         other: Location,
-        check: Option<(Value, Asked)>,
+        check: Option<FollowUp>,
         /// How the two sections relate, asked when the check stays undecided.
-        settle: Option<(Value, Asked)>,
+        settle: Option<FollowUp>,
     },
     /// A heading section of an agent instruction file.
     Section {
@@ -218,7 +253,7 @@ pub enum Detail {
         unseen_setup: bool,
         /// Outside Ruby, whether each test checks something the other does
         /// not, asked only of a pair that reached a review.
-        confirm: Option<(Value, Asked)>,
+        confirm: Option<FollowUp>,
     },
 }
 
@@ -251,7 +286,7 @@ pub struct UnitPlan {
     /// Identity for the finding fingerprint: survives moves and unrelated edits.
     pub identity: String,
     pub detail: Detail,
-    pub recheck: Option<(Value, Asked)>,
+    pub recheck: Option<FollowUp>,
 }
 
 #[derive(Clone, Debug, Default)]

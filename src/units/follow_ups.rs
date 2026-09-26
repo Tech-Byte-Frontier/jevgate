@@ -1,9 +1,8 @@
 //! Follow-up requests that recorded answers call for: traces of security
 //! units, rechecks of undecided units, the kind of an outline still undecided
 //! and locating split findings.
-use super::{Detail, Plan, Planned, UnitPlan, compose};
+use super::{Detail, FollowUp, Plan, Planned, UnitPlan, compose};
 use crate::schema::{FileResult, Judgment, Status};
-use serde_json::Value;
 use std::collections::BTreeSet;
 
 /// One locate follow-up per function whose split raised a review or consider,
@@ -40,15 +39,11 @@ pub fn doc_checks(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
                 .judgments
                 .iter()
                 .any(|j| j.unit == unit.id && j.pass == crate::schema::Pass::Trace);
-            if let Some((request, questions)) = check
+            if let Some(check) = check
                 && !asked
                 && other.is_none_or(|p| !finished.contains(p))
             {
-                planned.push(Planned {
-                    owner,
-                    request: request.clone(),
-                    asked: questions.clone(),
-                });
+                planned.push(check.planned(owner));
             }
         }
     }
@@ -87,11 +82,7 @@ pub fn settles(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
             };
             let open = compose::unsettled(unit, &file.judgments);
             for settle in settles.iter().filter(|s| open.contains(s.question)) {
-                planned.push(Planned {
-                    owner,
-                    request: settle.request.0.clone(),
-                    asked: settle.request.1.clone(),
-                });
+                planned.push(settle.request.planned(owner));
             }
         }
     }
@@ -117,7 +108,7 @@ fn follow_ups(
     plan: &Plan,
     files: &[FileResult],
     select: fn(&super::FilePlan, &[Judgment]) -> BTreeSet<String>,
-    follow_up: fn(&UnitPlan) -> Option<&(Value, super::Asked)>,
+    follow_up: fn(&UnitPlan) -> Option<&FollowUp>,
 ) -> Vec<Planned> {
     let mut planned = Vec::new();
     for (&owner, file_plan) in &plan.files {
@@ -127,14 +118,10 @@ fn follow_ups(
         }
         let selected = select(file_plan, &file.judgments);
         for unit in &file_plan.units {
-            if let Some((request, asked)) = follow_up(unit)
+            if let Some(follow_up) = follow_up(unit)
                 && selected.contains(&unit.id)
             {
-                planned.push(Planned {
-                    owner,
-                    request: request.clone(),
-                    asked: asked.clone(),
-                });
+                planned.push(follow_up.planned(owner));
             }
         }
     }

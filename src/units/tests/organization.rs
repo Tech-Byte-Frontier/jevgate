@@ -47,10 +47,11 @@ fn an_uncertain_outline_is_rechecked_once_with_the_application_source() {
         Status::Clear
     );
     let (_, plan) = planned(&project, &options);
-    let (request, _) = plan.files.values().next().unwrap().units[0]
+    let request = plan.files.values().next().unwrap().units[0]
         .recheck
         .as_ref()
-        .unwrap();
+        .unwrap()
+        .request();
     let sent = request["state"]["file"]["source"].as_str().unwrap();
     assert!(sent.contains("fn warm0") && !sent.contains("hidden_check"));
 }
@@ -125,13 +126,12 @@ fn an_outline_too_long_for_a_recheck_is_decided_by_its_kind_alone() {
     let unit = &plan.files.values().next().unwrap().units[0];
     assert!(unit.recheck.is_none());
     let Detail::Outline {
-        kind: Some((kind, _)),
-        ..
+        kind: Some(kind), ..
     } = &unit.detail
     else {
         panic!("the kind is asked from the outline");
     };
-    assert!(kind["state"]["file"]["source"].is_null());
+    assert!(kind.request()["state"]["file"]["source"].is_null());
 }
 
 #[test]
@@ -233,10 +233,11 @@ fn test_files_are_outlined_by_suite_without_include_tests() {
     assert_eq!(report.files[0].findings[0].strength, Strength::Note);
     options.refresh = false;
     let (_, plan) = planned(&project, &options);
-    let (request, _) = plan.files.values().next().unwrap().units[0]
+    let request = plan.files.values().next().unwrap().units[0]
         .recheck
         .as_ref()
-        .unwrap();
+        .unwrap()
+        .request();
     let state = &request["state"];
     assert_eq!(state["members"][0]["kind"], "test");
     assert_eq!(state["members"][0]["suite"], "parse");

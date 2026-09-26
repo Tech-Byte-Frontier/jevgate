@@ -43,8 +43,11 @@ pub(super) fn plan(
             quote: None,
             lines: unit.lines(),
             identity: identity(&[&unit.name, &compact(source)]),
-            detail: Detail::Function { blocks, locate },
-            recheck,
+            detail: Detail::Function {
+                blocks,
+                locate: locate.map(Into::into),
+            },
+            recheck: recheck.map(Into::into),
         });
         if presence == Presence::Judged {
             judged.push(Item {

@@ -110,7 +110,7 @@ pub(super) fn plan_values(
             lines: case.end_line + 1 - case.line,
             identity: identity(&[&case.name, &compact(source)]),
             detail: Detail::Test,
-            recheck,
+            recheck: recheck.map(Into::into),
         });
         items.push((out.units.len() - 1, id, case, test_item(case, source, ruby)));
     }
@@ -626,9 +626,11 @@ pub(super) fn plan_pairs(
                 table,
                 unseen_setup: !ruby && a.suite != b.suite,
                 identical,
-                confirm: confirm.filter(|(request, _)| fits && file.budget.fits(request)),
+                confirm: confirm
+                    .filter(|(request, _)| fits && file.budget.fits(request))
+                    .map(Into::into),
             },
-            recheck: recheck.filter(|_| fits),
+            recheck: recheck.filter(|_| fits).map(Into::into),
         });
         if fits {
             requests.push(Planned {
