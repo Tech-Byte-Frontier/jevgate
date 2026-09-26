@@ -103,21 +103,30 @@ pub(crate) fn supported(path: &Path) -> bool {
         || crate::components::server_template(path)
 }
 
+/// The grammar a file is parsed with, and the text parsed in place of its
+/// source when that is not its code as written: a component's or server
+/// template's scripts, or a project template without its Jinja tags.
+fn parsed_text(path: &Path, source: &str) -> Option<(tree_sitter::Language, Option<String>)> {
+    let extension = extension(path);
+    if crate::components::FORMATS.contains(&extension) {
+        let (scripts, language) = crate::components::scripts(extension, source);
+        Some((language, Some(scripts)))
+    } else if crate::components::server_template(path) {
+        let (scripts, language) = crate::components::scripts("html", source);
+        Some((language, Some(without_tags(&scripts, true))))
+    } else {
+        let language = grammar(path)?;
+        Some((
+            language,
+            project_template(path).then(|| without_jinja(source)),
+        ))
+    }
+}
+
 pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     let extension = extension(path);
     let server_template = crate::components::server_template(path);
-    let (language, scripts) = if crate::components::FORMATS.contains(&extension) {
-        let (scripts, language) = crate::components::scripts(extension, source);
-        (language, Some(scripts))
-    } else if server_template {
-        let (scripts, language) = crate::components::scripts("html", source);
-        (language, Some(without_tags(&scripts, true)))
-    } else if let Some(language) = grammar(path) {
-        (
-            language,
-            project_template(path).then(|| without_jinja(source)),
-        )
-    } else {
+    let Some((language, scripts)) = parsed_text(path, source) else {
         return Ok(None);
     };
     // A template's tree is of its code without the Jinja tags, apart from
