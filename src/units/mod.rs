@@ -153,6 +153,8 @@ pub enum Detail {
         /// Django code, asked the Django checks: a weak setting must be
         /// named by one of them.
         django: bool,
+        /// Code at a test path, such as a test app's settings or models.
+        test_path: bool,
     },
     /// A large document judged by its outline, with its top-level parts
     /// and the follow-up that locates a split.

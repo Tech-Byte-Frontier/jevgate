@@ -511,7 +511,7 @@ impl<'p> Tally<'p> {
         let (outcome, answers) = resolved(unit, judgments);
         let outcome = if unnamed_value(unit, judgments) {
             lowered(lowered(outcome))
-        } else if single_use_value(unit, judgments) {
+        } else if single_use_value(unit, judgments) || test_path_security(unit) {
             lowered(outcome)
         } else if short_outline(unit) {
             at_most_note(outcome)
@@ -1094,6 +1094,22 @@ fn single_use_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     only_named
         && located_option(unit, judgments, ("value", 'v'))
             .is_some_and(|i| repeated.get(i) == Some(&false))
+}
+
+/// A security unit of a file at a test path, judged as application code
+/// because it holds no tests, such as a test app's settings or a model only
+/// tests use: like code that runs only in development, it is one level
+/// lower. The dummy apps of devise and clearance and a test model hashing
+/// with `password.reverse` were three wrong reviews, the only security
+/// reviews or considers at test paths across 103 projects.
+fn test_path_security(unit: &UnitPlan) -> bool {
+    matches!(
+        unit.detail,
+        Detail::Security {
+            test_path: true,
+            ..
+        }
+    )
 }
 
 /// Why a hardcoded-value finding is below the level its answers reached,
