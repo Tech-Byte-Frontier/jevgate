@@ -278,13 +278,25 @@ pub fn files(
             source: source.clone(),
         })
         .collect();
-    // A link loads its target's text under its own name.
+    // A link loads its target's text under its own name. A target that no
+    // harness reads by its own name, such as refined-github's `agents.md`
+    // behind its `CLAUDE.md`, is read through the link instead: it takes the
+    // link's readers, so its findings name the file itself and its text is
+    // counted once.
     for (link, target) in links {
-        let Some(source) = target.as_ref().and_then(|t| sources.get(t)) else {
+        let Some((target, source)) = target.as_ref().and_then(|t| sources.get_key_value(t)) else {
             continue;
         };
+        let linked = readers(link, &markdown::parse(source), &exists);
+        if let Some(file) = files
+            .iter_mut()
+            .find(|f| f.path == *target && f.readers.is_empty())
+        {
+            file.readers = linked;
+            continue;
+        }
         files.push(File {
-            readers: readers(link, &markdown::parse(source), &exists),
+            readers: linked,
             path: link.clone(),
             source: source.clone(),
         });
@@ -727,6 +739,25 @@ mod tests {
             &load_of(&[("AGENTS.md", &over)]),
             "1 of these 32769 bytes are not loaded"
         ));
+    }
+
+    #[test]
+    fn a_link_to_a_file_no_harness_names_reads_that_file() {
+        let project = crate::tests::Project::new();
+        let text = "# Build\nRun `make`.\n";
+        project.write("agents.md", text);
+        let links = [(PathBuf::from("CLAUDE.md"), Some(PathBuf::from("agents.md")))];
+        let files = files(
+            [(PathBuf::from("agents.md"), text.to_string())].into(),
+            &links,
+        );
+        let claude: Vec<_> = files
+            .iter()
+            .flat_map(|f| f.readers.iter().map(move |r| (&f.path, r)))
+            .filter(|(_, r)| r.harness == CLAUDE)
+            .map(|(p, _)| p.to_str().unwrap())
+            .collect();
+        assert_eq!(claude, ["agents.md"], "read once, under the file itself");
     }
 
     #[test]

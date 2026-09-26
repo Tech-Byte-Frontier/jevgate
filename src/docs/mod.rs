@@ -47,7 +47,11 @@ impl Repository {
 
 pub fn scan(root: &Path) -> Result<Repository> {
     let found = discover::discover(root)?;
-    let sources = agent_sources(root, &found.agent);
+    // A link's target is read even when its own name is no instruction
+    // file's (`load::files`).
+    let mut read = found.agent.clone();
+    read.extend(found.links.iter().filter_map(|(_, target)| target.clone()));
+    let sources = agent_sources(root, &read);
     let generated_files: BTreeSet<PathBuf> = sources
         .iter()
         .filter(|(_, source)| generated(source))
