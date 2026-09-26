@@ -85,28 +85,41 @@ fn cargo_manifest(text: &str) -> Manifest {
 /// each its own module, read as one package, and 9 of 10 copies found
 /// between them were wrong: each service is built on its own.
 fn go_manifest(text: &str) -> Manifest {
-    let mut name = None;
-    let mut dependencies = Vec::new();
+    let lines: Vec<&str> = text
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or("").trim())
+        .collect();
+    let name = lines
+        .iter()
+        .find_map(|line| line.strip_prefix("module "))
+        .map(|path| path.trim_matches('"').to_string());
+    (name, go_requirements(&lines))
+}
+
+/// The module paths of `require` lines and of `require ( … )` blocks.
+fn go_requirements(lines: &[&str]) -> Vec<String> {
+    let mut required = Vec::new();
     let mut block = false;
-    for line in text.lines() {
-        let line = line.split("//").next().unwrap_or("").trim();
-        if let Some(path) = line.strip_prefix("module ") {
-            name = Some(path.trim().trim_matches('"').to_string());
-        } else if line.starts_with("require (") {
-            block = true;
-        } else if block && line == ")" {
-            block = false;
-        } else if let Some(path) = if block {
-            Some(line)
-        } else {
-            line.strip_prefix("require ")
-        }
-        .and_then(|rest| rest.split_whitespace().next())
-        {
-            dependencies.push(path.to_string());
-        }
+    for line in lines {
+        let requirement = match (block, *line) {
+            (true, ")") => {
+                block = false;
+                None
+            }
+            (true, entry) => Some(entry),
+            (false, line) if line.starts_with("require (") => {
+                block = true;
+                None
+            }
+            (false, line) => line.strip_prefix("require "),
+        };
+        required.extend(
+            requirement
+                .and_then(|r| r.split_whitespace().next())
+                .map(str::to_string),
+        );
     }
-    (name, dependencies)
+    required
 }
 
 fn python_manifest(text: &str) -> Manifest {
