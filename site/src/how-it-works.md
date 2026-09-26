@@ -107,7 +107,12 @@ signatures, or one candidate pair.
    deprecated (a `@deprecated` tag, annotation or decorator,
    `#[deprecated]`, `[Obsolete]`, or a `Deprecated:` comment above it): it
    goes with the next major version, and flysystem's deprecated phpseclib 2
-   adapter was paired with the adapter replacing it in seven reviews.
+   adapter was paired with the adapter replacing it in seven reviews. Nor
+   does code in a directory named `deprecated`, `archive`, `attic`,
+   `retired`, `obsolete` or proof of concept (`poc`, `ProofOfConcept`): a
+   Unity project's retired proof builders were paired with its live scene
+   builders in six reviews. `legacy` is left out, since legacy code is
+   often still served.
 3. **First pass** (`src/units/`). One dispatch of every unit request. Functions,
    for simplification, hardcoded values and security, are packed eight per
    request within runs of functions, a run ending after a function whose name
@@ -237,10 +242,23 @@ signatures, or one candidate pair.
    trace in C# also gets the `const` and `static readonly` fields the code
    names, often declared in another file, so a key written in the code does
    not read as configuration. Other languages keep their wording: the
-   additions were measured on ASP.NET Core projects only. A broad weak-setting
+   additions were measured on ASP.NET Core projects only. Code outside C#
+   and Django is asked C#'s token and key checks in general words (a JSON
+   Web Token decoded without verifying its signature, a session secret such
+   as `'keyboard cat'` written in the code), and every language is asked
+   whether code turns off HTML escaping (`autoescape: false`,
+   `escape_html_entities_in_json = false`) and whether passwords are saved
+   or checked as plain text: in DVGA, JavaVulnerableLab, NodeGoat and
+   RailsGoat the broad question found these at 0.93 to 0.98 while no check
+   named the setting, so they were notes. A broad weak-setting
    answer that none of the specific checks leans toward names no setting to
    change and is at most a note: on an action marked `[AllowAnonymous]` on
    purpose it was 0.85 while every check stayed at 0.30 or less.
+   A Python file that imports graphene, strawberry or ariadne is named
+   GraphQL server code the same way, since a resolver's arguments are a
+   client's query: DVGA's SQL injection, SSRF and command injection through
+   `resolve_*` and `mutate` arguments were considers "if a caller passes
+   outside input", and one a note; they are reviews.
    In a package that depends on `next`, a file's path names its role
    (`app/**/route.ts`, `pages/api/**`, `middleware.ts` or `proxy.ts`,
    `app/**/error.tsx`, pages and layouts, `next.config.*`), and in any
@@ -317,8 +335,7 @@ signatures, or one candidate pair.
    code, returned by its own server or what callers pass, checked, or no
    redirect); how its markup is rendered (escaped by JSX or a template, or
    shown as text; PHP units are asked what they join instead, see below); which sites may send credentialed requests (none, listed
-   origins, or any origin without credentials); what its logs write (only
-   messages, ids and caught errors); or where its text goes (anywhere but a
+   origins, or any origin without credentials); or where its text goes (anywhere but a
    remote client at 0.80 clears undecided error details). Offered beside
    "a whole URL handed to it", the browser lost for a client component's
    fetch helper, which is why where code runs is its own Choice. A consider
@@ -327,6 +344,26 @@ signatures, or one candidate pair.
    a client or the request leaves a server. On three Next.js apps these
    Choices took the uncertain files from 56 to 34, most of them client
    components that navigate to fixed paths or render values as attributes.
+   Four Choices are asked whenever their checks are not clear, even when
+   a check found a concern, and each can clear it: what the code does with
+   tokens (verifies them, only creates, stores or sends them, reads the
+   claims of a token verified before or only reads what one says, decides
+   access with one unverified, or turns a library's verification off), how
+   it handles users' passwords (a slow hash or a framework that hashes
+   them, plain text, a fast hash, or none: HMAC signing had been a
+   password-hash review), what its logs write, where who did what (a
+   user's id, name, email or address beside the action, as an audit log
+   records) and values a command-line tool shows its operator on purpose
+   clear it (10 of 19 labeled logging reviews were audit lines naming who
+   signed in or commands printing recovery codes for the admin who ran
+   them), and where its text goes, whose local option names the screens a
+   desktop, game or mobile app reaches through a channel, event or IPC call.
+   A password or token check stays a review only when that Choice names
+   what the function itself does, a fast hash or verification turned off:
+   whether a callee or an entity's `@BeforeInsert` hook hashes the password
+   a function saves, or a token was verified before the function reads it,
+   lies outside the function, and such reviews were wrong outside
+   intentionally vulnerable apps. They are considers.
    A Choice about what a query builder joins into SQL (its own clauses,
    numbers, or values handed to it) was tried for considers on parameters
    and dropped: it cleared a sort column taken from the request as readily
@@ -523,9 +560,15 @@ signatures, or one candidate pair.
    token claims it reads, such as a custom access token hook: without the
    hook, 63 of one project's policies stayed undecided on whether users can
    change the claim. A SECURITY DEFINER function goes with its grants and
-   revokes of EXECUTE; a grant with whether its table has row-level security.
-   The criteria name role checks, service roles, restrictive policies and
-   trigger functions, which a literal "other users' rows" question flagged.
+   revokes of EXECUTE, and the question says that PostgreSQL lets every
+   role execute a new function unless a revoke takes it from public:
+   chatbot-ui's `delete_storage_object`, which deletes any stored file with
+   the service role key and which nothing revokes, stayed at 0.68 on
+   skipping the caller check with an empty list. A grant goes with whether
+   its table has row-level security.
+   The criteria name role checks, service roles, restrictive policies,
+   trigger functions and rows their owners marked shared (`sharing <>
+   'private'`), which a literal "other users' rows" question flagged.
    SpacetimeDB modules (TypeScript files that import `spacetimedb/server`,
    Rust files with `#[table]`, `#[reducer]` or `#[view]` attributes) are read
    for access control too, whatever the application: each public table with
@@ -566,7 +609,13 @@ signatures, or one candidate pair.
    outside example code was right, since a central handler replaced the
    text with a generic message, the error was one written for users, or no
    remote client read it. Instruction sections are
-   cleanups, so their findings are at most a consider. Comments are cleanups
+   cleanups, so their findings are at most a consider, and a section of
+   fewer than 15 tokens is a note: 1 of 10 labeled findings on such
+   sections was right, most of them a title and a "Last updated" line read
+   as a record of past work. Security findings in a file at a test path,
+   judged as application code because it holds no tests (a test app's
+   settings, a model only tests use), are one level lower, like code that
+   runs only in development. Comments are cleanups
    too: at most a consider, and documentation that only repeats the
    declaration it documents is at most a note, since documentation tools and docstring
    linters expect a summary even when it says what the name says. A
@@ -582,7 +631,13 @@ signatures, or one candidate pair.
    the Score's acceptable levels do and nothing is at review; public tables
    and views are at most a consider, reducers can be reviews. A
    hardcoded-value review or consider whose value the locate Choice could not
-   name is one level lower. Messages show the probability that set a finding's
+   name is one level lower. A finding resting only on whether a value needs
+   a name is at most a consider, since naming a value is a cleanup (17 such
+   reviews were right and 18 wrong, most of those tuning in game, audio and
+   animation code), and a note when its file writes the value once: labeled
+   by hand on 35 projects, such considers were right 19 times in 52, against
+   34 in 49 for values the file repeats, since a delay given to `setTimeout`
+   or a CSS class reads where it is used. Messages show the probability that set a finding's
    level (a consider shows the middle-or-top mass, not the top level); notes
    show none. Finished plans in one directory become one finding identified by
    the directory, and the others become notes pointing at it. On its
