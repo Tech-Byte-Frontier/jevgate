@@ -25,15 +25,14 @@ fn django_project() -> (Project, CheckArgs) {
 }
 
 /// The trace request of the injection unit of the function `name`.
-fn injection_trace<'p>(plan: &'p Plan, name: &str) -> &'p Value {
+fn injection_trace(plan: &Plan, name: &str) -> Value {
     plan.files
         .values()
         .flat_map(|f| &f.units)
         .find_map(|u| match &u.detail {
             Detail::Security {
-                trace: Some((request, _)),
-                ..
-            } if u.rule == catalog::INJECTION && u.name == name => Some(request),
+                trace: Some(trace), ..
+            } if u.rule == catalog::INJECTION && u.name == name => Some(trace.request()),
             _ => None,
         })
         .unwrap_or_else(|| panic!("an injection trace for {name}"))
@@ -53,7 +52,7 @@ fn django_views_are_asked_the_django_checks_and_other_python_the_common_ones() {
     let (project, options) = django_project();
     let (_, plan) = planned(&project, &options);
     let view = injection_trace(&plan, "search");
-    let questions = asked(view);
+    let questions = asked(&view);
     for check in ["redirect", "deserialize", "sql", "markup"] {
         assert!(questions.contains(&check.to_string()), "{questions:?}");
     }
@@ -64,7 +63,7 @@ fn django_views_are_asked_the_django_checks_and_other_python_the_common_ones() {
             .contains("RawSQL")
     );
     let plain = injection_trace(&plan, "archive");
-    let questions = asked(plain);
+    let questions = asked(&plain);
     assert!(
         !questions.contains(&"deserialize".to_string()),
         "{questions:?}"

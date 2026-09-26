@@ -58,7 +58,7 @@ fn an_undecided_test_pair_is_asked_again_with_the_body_of_its_subject() {
         .iter()
         .find(|u| u.rule == catalog::TEST_REDUNDANCY)
         .unwrap();
-    let (request, _) = pair.recheck.as_ref().expect("a recheck");
+    let request = pair.recheck.as_ref().expect("a recheck").request();
     assert_eq!(request["jevgate"]["stage"], "recheck");
     assert!(
         request["state"]["subject"]["source"]
@@ -119,7 +119,7 @@ fn an_undecided_test_is_asked_again_with_its_subjects_and_setup() {
     );
     let (_, plan) = planned(&project, &options);
     let file = file_plan(&plan, "profile.test.ts");
-    let (request, _) = file.units[0].recheck.as_ref().expect("a recheck");
+    let request = file.units[0].recheck.as_ref().expect("a recheck").request();
     let state = &request["state"];
     assert!(
         state["subjects"][0]["source"]
@@ -200,7 +200,7 @@ fn a_ruby_test_is_rechecked_with_its_groups_the_setup_it_reads_and_its_helpers()
     let file = file_plan(&plan, "invoice_spec.rb");
     let first = first_request(&plan, "tests");
     assert_eq!(first["state"]["tests"][0]["suite"], "Invoice");
-    let (request, _) = file.units[0].recheck.as_ref().expect("a recheck");
+    let request = file.units[0].recheck.as_ref().expect("a recheck").request();
     let setup = request["state"]["setup"].as_str().unwrap();
     assert_eq!(
         setup,
@@ -339,7 +339,7 @@ fn a_mockmvc_test_is_rechecked_with_the_controller_method_its_request_reaches() 
         .flat_map(|f| &f.units)
         .find(|u| u.name == "showsOwner")
         .and_then(|u| u.recheck.as_ref())
-        .map(|(request, _)| request["state"]["subjects"].clone())
+        .map(|recheck| recheck.request()["state"]["subjects"].clone())
         .unwrap();
     let subjects = recheck.as_array().unwrap();
     assert_eq!(subjects.len(), 1, "{subjects:?}");

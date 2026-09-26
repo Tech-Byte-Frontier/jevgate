@@ -109,7 +109,7 @@ pub(super) fn plan(
                     .chain(&pair.copies)
                     .all(in_case),
             },
-            recheck,
+            recheck: recheck.map(Into::into),
         });
     }
 }

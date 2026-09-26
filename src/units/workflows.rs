@@ -54,7 +54,9 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
             lines: job.end_line + 1 - job.start_line,
             identity: identity(&[&id, &compact(&job.source)]),
             detail: Detail::Job { expressions },
-            recheck: recheck.filter(|(request, _)| file.budget.fits(request)),
+            recheck: recheck
+                .filter(|(request, _)| file.budget.fits(request))
+                .map(Into::into),
         });
         if fits {
             requests.push(Planned {

@@ -174,7 +174,8 @@ fn plan_outline(
                 .into_iter()
                 .filter(|_| judged)
                 .map(|source| outline.request(file, Ask::Kind(source)))
-                .find(|(request, _)| file.budget.fits(request)),
+                .find(|(request, _)| file.budget.fits(request))
+                .map(Into::into),
             groups: ids
                 .into_iter()
                 .zip(&sets)
@@ -193,7 +194,8 @@ fn plan_outline(
         },
         recheck: judged
             .then(|| outline.request(file, Ask::Recheck(source.clone())))
-            .filter(|(request, _)| file.budget.fits(request)),
+            .filter(|(request, _)| file.budget.fits(request))
+            .map(Into::into),
     });
     if judged {
         requests.push(Planned {

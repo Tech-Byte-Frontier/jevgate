@@ -392,13 +392,12 @@ fn traced_checks(path: &str, source: &str) -> serde_json::Map<String, Value> {
     let plan = injection_plan(path, source);
     let trace = &plan.files[&0].units[0];
     let Detail::Security {
-        trace: Some((request, _)),
-        ..
+        trace: Some(trace), ..
     } = &trace.detail
     else {
         panic!("no trace planned");
     };
-    request["questions"].as_object().unwrap().clone()
+    trace.request()["questions"].as_object().unwrap().clone()
 }
 
 #[test]
@@ -859,12 +858,12 @@ fn an_error_trace_shows_the_errors_the_called_functions_raise() {
         .position(|i| i.result.path.ends_with("api.py"))
         .unwrap();
     let Detail::Security {
-        trace: Some((trace, _)),
-        ..
+        trace: Some(trace), ..
     } = &plan.files[&owner].units[0].detail
     else {
         panic!("a traced security unit");
     };
+    let trace = trace.request();
     assert_eq!(
         trace["state"]["errors_created_by_functions_it_calls"],
         json!([{"function": "find_asset", "error": "LookupError", "message": "\"Asset not found\""}])
@@ -879,18 +878,18 @@ fn an_error_trace_shows_the_errors_the_called_functions_raise() {
             .contains("errors_created_by_functions_it_calls")
     };
     assert!(
-        names_callees(trace),
+        names_callees(&trace),
         "passing on a callee's own error text is the program's own"
     );
     let alone = project_with(&[("app/api.py", HANDLER)], &[catalog::SENSITIVE_DATA]);
     let (_, plan) = planned(&alone.0, &alone.1);
     let Detail::Security {
-        trace: Some((trace, _)),
-        ..
+        trace: Some(trace), ..
     } = &plan.files[&0].units[0].detail
     else {
         panic!("a traced security unit");
     };
+    let trace = trace.request();
     assert!(
         trace["state"]
             .get("errors_created_by_functions_it_calls")
@@ -902,7 +901,7 @@ fn an_error_trace_shows_the_errors_the_called_functions_raise() {
             .contains("errors_created_by_functions_it_calls"),
         "without callee errors the check is asked as before"
     );
-    assert!(trace["questions"].get("messages").is_some() && !names_callees(trace));
+    assert!(trace["questions"].get("messages").is_some() && !names_callees(&trace));
 }
 
 const ROUTE: &str = "export async function loadThing(c: Context) {\n  const { data, error } = await db.from('things').select('*').eq('id', c.req.param('id'))\n  if (error) throw new InternalError(`Query failed: ${error.message}`, error)\n  if (!data) throw new NotFoundError('Thing not found')\n  return c.json(data)\n}\n";
@@ -915,13 +914,14 @@ fn each_created_error_message_is_asked_about_and_names_the_foreign_one() {
     options.rules = vec![catalog::SENSITIVE_DATA.into()];
     let (_, plan) = planned(&project, &options);
     let Detail::Security {
-        trace: Some((trace, _)),
+        trace: Some(trace),
         messages,
         ..
     } = &plan.files[&0].units[0].detail
     else {
         panic!("a traced security unit");
     };
+    let trace = trace.request();
     assert_eq!(
         messages,
         &["`Query failed: ${error.message}`", "'Thing not found'"]
@@ -979,15 +979,14 @@ fn an_injection_trace_shows_the_enums_its_sites_name() {
     let mut options = args();
     options.rules = vec![catalog::INJECTION.into()];
     let (_, plan) = planned(&project, &options);
-    let traces: Vec<&Value> = plan
+    let traces: Vec<Value> = plan
         .files
         .values()
         .flat_map(|f| &f.units)
         .filter_map(|u| match &u.detail {
             Detail::Security {
-                trace: Some((request, _)),
-                ..
-            } => Some(request),
+                trace: Some(trace), ..
+            } => Some(trace.request()),
             _ => None,
         })
         .collect();

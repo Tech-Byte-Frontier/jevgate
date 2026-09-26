@@ -74,7 +74,7 @@ pub(super) fn plan(
         let item = (*index, id.clone(), state.clone());
         let (request, asked) = kind_request(file, &evidence, &item);
         if file.budget.fits(&request) {
-            out.units[*index].recheck = Some((request, asked));
+            out.units[*index].recheck = Some((request, asked).into());
         }
     }
     // Runs end after headings, never after a unit's name, which names a

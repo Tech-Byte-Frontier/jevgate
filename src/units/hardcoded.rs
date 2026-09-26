@@ -57,10 +57,11 @@ pub(super) fn plan(
                         .map(|c| occurrences(file.source, c) != 1)
                         .collect(),
                     choices,
-                    locate,
+                    locate: locate.map(Into::into),
                 }
             },
-            recheck: benign_request(file, &id, json!({"functions": [state.clone()]}), true),
+            recheck: benign_request(file, &id, json!({"functions": [state.clone()]}), true)
+                .map(Into::into),
         });
         items.push((out.units.len() - 1, id, state));
     }
@@ -281,9 +282,9 @@ fn plan_constants(
         identity: identity(&names),
         detail: Detail::Constants {
             values: constants.iter().flat_map(|c| c.values.clone()).collect(),
-            locate,
+            locate: locate.map(Into::into),
         },
-        recheck: recheck.filter(|_| fits),
+        recheck: recheck.filter(|_| fits).map(Into::into),
     });
     if fits {
         requests.push(Planned {

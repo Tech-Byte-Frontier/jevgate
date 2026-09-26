@@ -82,9 +82,9 @@ pub(super) fn plan(
                 documentation: teaching
                     || matches!(comment.placement, Placement::Declaration | Placement::File)
                     || crate::analysis::comments::banner(&comment.text),
-                kind,
+                kind: kind.map(Into::into),
             },
-            recheck,
+            recheck: recheck.map(Into::into),
         });
         let entry = Entry {
             id,

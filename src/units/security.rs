@@ -299,12 +299,12 @@ fn push_unit(
             } else {
                 Vec::new()
             },
-            trace,
+            trace: trace.map(Into::into),
             settles,
             django: subject.django,
             test_path: subject.test_path,
         },
-        recheck,
+        recheck: recheck.map(Into::into),
     });
     (rule, out.units.len() - 1, id.to_string())
 }
@@ -873,7 +873,7 @@ fn settles(
             let request = settle(file, subject, kind, id);
             file.budget.fits(&request.0).then_some(Settle {
                 question: kind.question,
-                request,
+                request: request.into(),
             })
         })
         .collect()

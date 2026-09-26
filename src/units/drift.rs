@@ -261,8 +261,8 @@ impl<'a> Shared<'a> {
             identity: identity(&[&compact(&section.text), &compact(&other_section.text)]),
             detail: Detail::DocPair {
                 other,
-                check: fits.then_some((request, asked)),
-                settle: fits.then_some(settle),
+                check: fits.then(|| (request, asked).into()),
+                settle: fits.then(|| settle.into()),
             },
             recheck: None,
         }
@@ -441,8 +441,8 @@ fn stale_section(
         identity: identity(&[&section.heading, &compact(&section.text)]),
         detail: Detail::Stale {
             missing: missing.iter().map(describe).collect(),
-            check: fits.then_some((request, asked)),
-            settle: fits.then_some(settle),
+            check: fits.then(|| (request, asked).into()),
+            settle: fits.then(|| settle.into()),
         },
         recheck: None,
     }

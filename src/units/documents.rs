@@ -62,8 +62,8 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
     let kind = Some(kind_request(file, &shown)).filter(|(request, _)| file.budget.fits(request));
     unit.detail = Detail::Document {
         parts,
-        locate,
-        kind,
+        locate: locate.map(Into::into),
+        kind: kind.map(Into::into),
     };
     out.units.push(unit);
     requests.push(Planned {
