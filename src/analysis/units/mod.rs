@@ -714,6 +714,46 @@ fn equality_override(node: Node<'_>, name: &str, source: &str) -> bool {
         })
 }
 
+/// Whether a declaration is marked deprecated in the documentation and
+/// attributes above it or in its header up to its body: a `@deprecated`
+/// docblock tag, Java annotation or Python decorator, Rust's
+/// `#[deprecated]`, C#'s `[Obsolete]`, or a comment line opening with
+/// `Deprecated:` (Go, TomDoc). Without a body only what lies above it
+/// counts: sqlmodel's module root, read whole, marked every class of a file
+/// with one `@deprecated` method.
+pub(crate) fn deprecated(node: Node<'_>, source: &str) -> bool {
+    let end = node
+        .child_by_field_name("definition")
+        .unwrap_or(node)
+        .child_by_field_name("body")
+        .map_or(node.start_byte(), |body| body.start_byte());
+    let header = source
+        .get(leading_start(node)..end)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    header.lines().map(str::trim_start).any(|line| {
+        word(line, "@deprecated")
+            || line.starts_with('@') && word(line, ".deprecated")
+            || line.contains("#[deprecated")
+            || line.contains("[obsolete")
+            // A comment, not a parameter named `deprecated`.
+            || line.strip_prefix(['/', '#', '*']).is_some_and(|comment| {
+                comment
+                    .trim_start_matches(['/', '*', '!'])
+                    .trim_start()
+                    .starts_with("deprecated:")
+            })
+    })
+}
+
+/// Whether `line` holds `name` as a whole word: `@deprecated`, not a mark
+/// named `@deprecated_lifespan`.
+fn word(line: &str, name: &str) -> bool {
+    line.match_indices(name).any(|(at, _)| {
+        !line[at + name.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+    })
+}
+
 /// Include documentation, comments and attributes directly above the definition.
 fn leading_start(node: Node<'_>) -> usize {
     let mut start = node.start_byte();

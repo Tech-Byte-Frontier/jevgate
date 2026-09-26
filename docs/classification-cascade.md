@@ -94,7 +94,11 @@ signatures, or one candidate pair.
    values. Java `equals` and `hashCode` overrides offer no copies or
    values, and neither does an initial capacity (`new ArrayList<>(4)`) or the
    number a method returns whole (`int cost() { return 7; }`), which the
-   method's name already names.
+   method's name already names. Neither does a function or type marked
+   deprecated (a `@deprecated` tag, annotation or decorator,
+   `#[deprecated]`, `[Obsolete]`, or a `Deprecated:` comment above it): it
+   goes with the next major version, and flysystem's deprecated phpseclib 2
+   adapter was paired with the adapter replacing it in seven reviews.
 3. **First pass** (`src/units/`). One dispatch of every unit request. Functions,
    for simplification, hardcoded values and security, are packed eight per
    request within runs of functions, a run ending after a function whose name
