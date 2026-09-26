@@ -208,6 +208,8 @@ const FETCH_QUOTE: &str = "fn quote(client: &Client, base: &Url, symbol: &str) -
 
 const URL_PARTS: [&str; 5] = ["own", "forwards", "given", "outside", "none"];
 
+const PATH_SOURCE: [&str; 5] = ["own", "local", "given", "outside", "none"];
+
 const RUNS_IN: [&str; 3] = ["browser", "server", "either"];
 
 /// Injection status and settle requests with the URL (or path) check at
@@ -224,6 +226,7 @@ fn settled_injection(
         (check, noul_at(0.4)),
         ("origin", spread(0.0, 0.9, 0.1)),
         ("url_parts", choice_of(parts, &URL_PARTS)),
+        ("path_source", choice_of(parts, &PATH_SOURCE)),
         ("runs_in", choice_of("server", &RUNS_IN)),
     ];
     let report = run(project, options, &mut eval);
@@ -254,12 +257,24 @@ fn an_undecided_url_is_settled_only_by_a_host_of_the_programs_own() {
             "{parts}"
         );
     }
-    options.refresh = true;
-    assert_eq!(
-        settled_injection(&project, &options, "path", "own"),
-        (Status::Uncertain, 0),
-        "an undecided path is not settled"
-    );
+}
+
+#[test]
+fn an_undecided_path_is_settled_by_the_programs_own_or_its_local_users_paths() {
+    let (project, mut options) = security_project(FETCH_QUOTE);
+    for (parts, status) in [
+        ("own", Status::Clear),
+        ("local", Status::Clear),
+        ("given", Status::Uncertain),
+        ("outside", Status::Uncertain),
+    ] {
+        assert_eq!(
+            settled_injection(&project, &options, "path", parts),
+            (status, 1),
+            "{parts}"
+        );
+        options.refresh = true;
+    }
 }
 
 #[test]

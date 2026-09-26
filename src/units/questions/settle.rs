@@ -6,6 +6,46 @@
 use super::{EVIDENCE, security::CALLERS};
 use serde_json::{Value, json};
 
+/// Where a source Choice looks for the variables it asks about, and its
+/// note: with `callers`, also in what the functions that call it pass.
+fn sources_shown(callers: bool) -> (&'static str, String) {
+    if callers {
+        (
+            ", in the function or in what `callers` pass it",
+            format!("{CALLERS} {EVIDENCE}"),
+        )
+    } else {
+        ("", EVIDENCE.to_string())
+    }
+}
+
+/// Options of the path-source Choice that rule a path concern out: the
+/// program's own paths, the local user's, or no file.
+pub const OWN_PATHS: [&str; 3] = ["own", "local", "none"];
+
+/// Where the file paths a function opens, writes or deletes come from,
+/// asked outside PHP when the path check stays undecided (PHP asks its own
+/// `path_parts`). Undecided path checks were 348 units across the corpus,
+/// mostly command-line tools writing where their user points them and
+/// helpers joining a fixed directory with a name.
+pub fn security_path_source(code: &str, callers: bool) -> Value {
+    let (shown, note) = sources_shown(callers);
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Where do the file paths that `{code}` opens, writes or deletes come from?"),
+            "note": note,
+        },
+        "criteria": {
+            "own": format!("Directories and file names written in the code, the program's own directories, or its configuration or environment, with only names, ids or numbers from variables{shown}."),
+            "local": "The command line, settings or files of the person running a local program or script, such as an output path they pass.",
+            "given": "A whole path handed to the function as a parameter or field, whose origin this code does not show.",
+            "outside": "Partly from outside the program: a network request, message, uploaded file or archive entry, or a record users can edit.",
+            "none": "It opens, writes or deletes no file.",
+        },
+    })
+}
+
 /// Options of the URL-parts Choice that rule a URL concern out: a host of the
 /// program's own, or no request.
 pub const OWN_PARTS: [&str; 2] = ["own", "none"];
@@ -14,20 +54,12 @@ pub const OWN_PARTS: [&str; 2] = ["own", "none"];
 /// stays undecided: on clients of a fixed or configured service the check
 /// split on a variable path or query, while naming the host decided them. A
 /// host that is sent another URL to fetch is its own option, since internal
-/// proxies fetched what users sent. The same question about paths cleared
-/// real traversals, reading names stored in an index as the program's own,
-/// so paths are not settled this way.
+/// proxies fetched what users sent. The same question about paths once
+/// cleared real traversals, reading names stored in an index as the
+/// program's own; `security_path_source` names such records as another
+/// party's input.
 pub fn security_url_parts(code: &str, callers: bool) -> Value {
-    let shown = if callers {
-        ", in the function or in what `callers` pass it"
-    } else {
-        ""
-    };
-    let note = if callers {
-        format!("{CALLERS} {EVIDENCE}")
-    } else {
-        EVIDENCE.to_string()
-    };
+    let (shown, note) = sources_shown(callers);
     json!({
         "type": "choice",
         "instructions": {

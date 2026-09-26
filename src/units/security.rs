@@ -855,7 +855,7 @@ pub(in crate::units) enum SettleWhen {
 /// does with tokens and how it handles passwords settle those checks
 /// whenever they are not clear: front ends that send their own token and
 /// HMAC signing split on them or were reviews.
-pub(in crate::units) const SETTLES: [SettleKind; 13] = [
+pub(in crate::units) const SETTLES: [SettleKind; 14] = [
     SettleKind {
         rule: INJECTION,
         question: "url_parts",
@@ -918,6 +918,15 @@ pub(in crate::units) const SETTLES: [SettleKind; 13] = [
         callers: false,
         when: SettleWhen::NotClear,
         files: SettleFiles::Only(questions::PHP),
+    },
+    SettleKind {
+        rule: INJECTION,
+        question: "path_source",
+        checks: &["path"],
+        clears: &questions::OWN_PATHS,
+        callers: true,
+        when: SettleWhen::Undecided,
+        files: SettleFiles::Except(questions::PHP),
     },
     SettleKind {
         rule: SENSITIVE_DATA,
@@ -1006,6 +1015,7 @@ fn settle(
     let callers = kind.callers && !subject.callers.is_empty();
     let body = match kind.question {
         "url_parts" => questions::security_url_parts(&code, callers),
+        "path_source" => questions::security_path_source(&code, callers),
         "runs_in" => questions::security_runs_in(&code),
         "redirect_target" => questions::security_redirect_target(&code, callers),
         "markup_output" => {
