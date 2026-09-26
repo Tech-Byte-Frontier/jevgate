@@ -591,7 +591,14 @@ signatures, or one candidate pair.
    borrowed and released around one call, as a missing helper. A test that
    checks several unrelated behaviors is at most a note: on labeled tests,
    tables of inputs and browser journeys rated as high as tests that really
-   mix behaviors. Overlapping test pairs of one subject become one consider
+   mix behaviors. A test said to assert internal details is asked, with the
+   code it calls, what its assertions read: results, state the program shows
+   or acts on next, or effects a caller observes clear it, and stored input
+   or calls between the program's own functions keep the consider. Asked of
+   the test alone, the check read a debug panel's recorded queries and a
+   framework's documented hooks as internals, and 49 of 66 labeled considers
+   were wrong. A test that reads members through reflection or a cast to
+   `any` keeps it without being asked. Overlapping test pairs of one subject become one consider
    for three or more tests only when the pairs connect them: two pairs that
    share no test stay two pairs (a pair of redirect tests and a pair of deny
    tests of `get` are not four overlapping tests). A review always carries a

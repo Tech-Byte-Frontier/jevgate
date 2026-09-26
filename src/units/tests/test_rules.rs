@@ -459,3 +459,65 @@ fn copies_inside_tests_a_redundancy_finding_names_are_reported_once() {
         .collect();
     assert_eq!(rules, [catalog::id(catalog::TEST_REDUNDANCY)], "{rules:?}");
 }
+
+#[test]
+fn an_internal_details_consider_is_confirmed_by_what_its_assertions_read() {
+    let (project, mut options) = tests_project(&[("lib.rs", TESTS)], catalog::TEST_VALUE);
+    let reads = ["effects", "own_calls", "result", "state", "stored"];
+    let mut judged = |reads: Value| {
+        let mut eval = scripted(0);
+        eval.overrides
+            .push(("internal", json!({"type":"noul","noul":0.9})));
+        eval.overrides.push(("reads", reads));
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        report.files[0].dimensions["test_value"].clone()
+    };
+    // Spies on the program's own helpers keep the consider.
+    let own = judged(choice_of("own_calls", &reads));
+    assert_eq!(own.units.consider, 3, "{}", own.decision_basis);
+    // State the program shows or acts on next is what a caller observes.
+    let state = judged(choice_of("state", &reads));
+    assert_eq!(state.units.clear, 3, "{}", state.decision_basis);
+    // Leaning toward what a caller observes, without reaching it: a note.
+    let mut split: serde_json::Map<String, Value> =
+        reads.iter().map(|k| (k.to_string(), json!(0.0))).collect();
+    split.insert("state".into(), json!(0.6));
+    split.insert("stored".into(), json!(0.4));
+    let leaning =
+        judged(json!({"type":"choice","choice":"state","confidence":0.5,"probabilities":split}));
+    assert_eq!(leaning.units.note, 3, "{}", leaning.decision_basis);
+}
+
+#[test]
+fn a_test_that_reaches_past_visibility_keeps_its_internal_details_consider() {
+    let reflected = TESTS.replace(
+        "        assert_eq!(total(&values), 3);\n",
+        "        let field = ReflectionClass::new(\"Totals\");\n        assert_eq!(total(&values), 3);\n",
+    );
+    let (project, options) = tests_project(&[("lib.rs", &reflected)], catalog::TEST_VALUE);
+    let (_, plan) = planned(&project, &options);
+    let confirmed: Vec<bool> = plan.files[&0]
+        .units
+        .iter()
+        .map(|u| matches!(u.detail, Detail::Test { confirm: Some(_) }))
+        .collect();
+    assert_eq!(
+        confirmed,
+        [false, true, true],
+        "only the reflecting test skips it"
+    );
+    let mut eval = scripted(0);
+    eval.overrides
+        .push(("internal", json!({"type":"noul","noul":0.9})));
+    let reads = ["effects", "own_calls", "result", "state", "stored"];
+    eval.overrides.push(("reads", choice_of("state", &reads)));
+    let report = run(&project, &options, &mut eval);
+    let dimension = &report.files[0].dimensions["test_value"];
+    assert_eq!(
+        (dimension.units.consider, dimension.units.clear),
+        (1, 2),
+        "{}",
+        dimension.decision_basis
+    );
+}

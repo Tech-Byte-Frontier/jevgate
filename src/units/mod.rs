@@ -202,9 +202,7 @@ pub enum Detail {
     },
     /// A document whose release is tagged or whose named paths were deleted:
     /// the facts a finished plan finding cites.
-    Plan {
-        facts: Vec<String>,
-    },
+    Plan { facts: Vec<String> },
     /// A section naming paths or scripts the repository lacks, and the check
     /// sent unless its document is a finished plan.
     Stale {
@@ -230,16 +228,16 @@ pub enum Detail {
         loaded: String,
     },
     /// A web framework's error handler and how the program registers it.
-    Handler {
-        registered: String,
-    },
+    Handler { registered: String },
     /// A policy, SECURITY DEFINER function or grant in its final state.
     Access(Access),
     /// A workflow job and the expressions its `run` scripts hold.
-    Job {
-        expressions: Vec<String>,
+    Job { expressions: Vec<String> },
+    Test {
+        /// What its assertions read, asked with the code under test after its
+        /// first answer says it asserts internal details.
+        confirm: Option<FollowUp>,
     },
-    Test,
     TestPair {
         names: [String; 2],
         subject: String,

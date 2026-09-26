@@ -99,7 +99,11 @@ pub(super) fn plan_values(
         } else {
             (setup.clone(), Vec::new())
         };
-        let recheck = value_recheck(file, case, &id, subjects, &own, &helper_paths);
+        let evidence = value_evidence(file, case, subjects, &own, &helper_paths);
+        let recheck = value_recheck(file, &id, &evidence);
+        let confirm = (!reaches_past_visibility(source))
+            .then(|| value_confirm(file, &id, &evidence))
+            .flatten();
         out.units.push(UnitPlan {
             rule: TEST_VALUE,
             id: id.clone(),
@@ -109,7 +113,9 @@ pub(super) fn plan_values(
             quote: None,
             lines: case.end_line + 1 - case.line,
             identity: identity(&[&case.name, &compact(source)]),
-            detail: Detail::Test,
+            detail: Detail::Test {
+                confirm: confirm.map(Into::into),
+            },
             recheck: recheck.map(Into::into),
         });
         items.push((out.units.len() - 1, id, case, test_item(case, source, ruby)));
@@ -126,21 +132,40 @@ pub(super) fn plan_values(
             for (unit, ..) in group {
                 out.units[unit].presence = Presence::NeedsContext;
                 out.units[unit].recheck = None;
+                out.units[unit].detail = Detail::Test { confirm: None };
             }
         }
     }
 }
 
-/// The hollow-test questions again for one test, with the bodies of the
-/// functions it calls and its file's setup; none when there is nothing to add.
-fn value_recheck(
+/// One test with the bodies of the functions it calls and its file's setup,
+/// and the files they come from: the evidence of its recheck and confirm.
+struct Evidence {
+    state: Value,
+    sources: Vec<(PathBuf, String)>,
+    /// Whether it adds a body or setup to what the first pass showed.
+    adds: bool,
+    ruby: bool,
+}
+
+impl Evidence {
+    fn request(&self, file: &FileContext<'_>, stage: &str, questions: Questions) -> (Value, Asked) {
+        let paths: Vec<(&Path, &str)> = self
+            .sources
+            .iter()
+            .map(|(path, hash)| (path.as_path(), hash.as_str()))
+            .collect();
+        super::request(file.model, stage, &paths, self.state.clone(), questions)
+    }
+}
+
+fn value_evidence(
     file: &FileContext<'_>,
     case: &TestCase,
-    id: &str,
     subjects: &Subjects<'_>,
     setup: &str,
     setup_paths: &[PathBuf],
-) -> Option<(Value, Asked)> {
+) -> Evidence {
     let mut sources = vec![(file.path.to_path_buf(), file.source_hash.to_string())];
     for path in setup_paths {
         if let Some(hash) = subjects.hashes.get(path)
@@ -151,9 +176,6 @@ fn value_recheck(
     }
     let listed = sourced_subjects(case, subjects, &mut sources);
     let sourced = listed.iter().any(|s| s.get("source").is_some());
-    if !sourced && setup.is_empty() {
-        return None;
-    }
     let ruby = file.path.extension().is_some_and(|e| e == "rb");
     let state = json!({
         "file": file.plain_state(),
@@ -161,12 +183,67 @@ fn value_recheck(
         "subjects": listed,
         "setup": setup,
     });
-    let paths: Vec<(&Path, &str)> = sources
-        .iter()
-        .map(|(path, hash)| (path.as_path(), hash.as_str()))
-        .collect();
-    let questions = recheck_questions(id, ruby);
-    let (request, asked) = super::request(file.model, "recheck", &paths, state, questions);
+    Evidence {
+        state,
+        sources,
+        adds: sourced || !setup.is_empty(),
+        ruby,
+    }
+}
+
+/// The hollow-test questions again for one test, with the bodies of the
+/// functions it calls and its file's setup; none when there is nothing to add.
+fn value_recheck(file: &FileContext<'_>, id: &str, evidence: &Evidence) -> Option<(Value, Asked)> {
+    if !evidence.adds {
+        return None;
+    }
+    let (request, asked) = evidence.request(file, "recheck", recheck_questions(id, evidence.ruby));
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// Calls that reach past a language's visibility: reflection, a cast to
+/// `any`, Ruby's `send(:…)` and `instance_variable_get`.
+const BYPASSES: [&str; 12] = [
+    "ReflectionClass",
+    "ReflectionProperty",
+    "ReflectionMethod",
+    "setAccessible(",
+    "getDeclaredField(",
+    "getDeclaredMethod(",
+    "BindingFlags.NonPublic",
+    "Whitebox.",
+    "ReflectionTestUtils.",
+    "as any)",
+    "instance_variable_get",
+    ".send(:",
+];
+
+/// Whether a test reads or calls members past its language's visibility. It
+/// reads internals by the language's own definition, so an internal-details
+/// consider on it is not asked what its assertions read: 4 of the 6 labeled
+/// tests that did so were right, and the question read two reflected private
+/// properties and two `(service as any)` fields as results or state.
+fn reaches_past_visibility(source: &str) -> bool {
+    BYPASSES.iter().any(|b| source.contains(b))
+}
+
+/// What the test's assertions read, with the same evidence as its recheck.
+fn value_confirm(file: &FileContext<'_>, id: &str, evidence: &Evidence) -> Option<(Value, Asked)> {
+    let mut questions = Questions::default();
+    let kind = if evidence.ruby {
+        TestEvidence::RecheckGroups
+    } else {
+        TestEvidence::Recheck
+    };
+    questions.ask(
+        "reads".into(),
+        questions::test_reads("tests[0].source", kind),
+        id,
+        TEST_VALUE,
+        "reads",
+        Pass::Locate,
+    );
+    let (request, asked) = evidence.request(file, "locate", questions);
     file.budget.fits(&request).then_some((request, asked))
 }
 

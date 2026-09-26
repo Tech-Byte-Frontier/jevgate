@@ -6,7 +6,8 @@ use crate::schema::{FileResult, Judgment, Status};
 use std::collections::BTreeSet;
 
 /// One locate follow-up per function whose split raised a review or consider,
-/// and per hardcoded-value function raised to a review or consider.
+/// per hardcoded-value function raised to a review or consider, per redundant
+/// test pair raised to a review, and per test that asserts internal details.
 pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::unlocated_units, |unit| {
         match &unit.detail {
@@ -14,7 +15,7 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
             | Detail::Document { locate, .. }
             | Detail::Values { locate, .. }
             | Detail::Constants { locate, .. } => locate.as_ref(),
-            Detail::TestPair { confirm, .. } => confirm.as_ref(),
+            Detail::TestPair { confirm, .. } | Detail::Test { confirm } => confirm.as_ref(),
             _ => None,
         }
     })
