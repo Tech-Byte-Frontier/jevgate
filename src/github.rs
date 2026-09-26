@@ -84,7 +84,8 @@ fn summary(report: &Report, shown: &[(&Path, &Finding)], args: &CheckArgs) -> St
         .count();
     if failed > 0 {
         text.push_str(&format!(
-            "- **{failed} file(s) not judged;** the annotations give each reason.\n\n"
+            "- **{} not judged;** the annotations give each reason.\n\n",
+            crate::output::count(failed, "file")
         ));
     }
     if shown.is_empty() {
