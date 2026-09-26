@@ -741,42 +741,32 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn a_link_to_a_file_no_harness_names_reads_that_file() {
+    /// `CLAUDE.md` linked to `target`: the files Claude Code reads, and
+    /// the load facts.
+    fn linked_claude(target: &str) -> (Vec<String>, usize) {
         let project = crate::tests::Project::new();
         let text = "# Build\nRun `make`.\n";
-        project.write("agents.md", text);
-        let links = [(PathBuf::from("CLAUDE.md"), Some(PathBuf::from("agents.md")))];
-        let files = files(
-            [(PathBuf::from("agents.md"), text.to_string())].into(),
-            &links,
-        );
-        let claude: Vec<_> = files
+        project.write(target, text);
+        let links = [(PathBuf::from("CLAUDE.md"), Some(PathBuf::from(target)))];
+        let files = files([(PathBuf::from(target), text.to_string())].into(), &links);
+        let claude = files
             .iter()
-            .flat_map(|f| f.readers.iter().map(move |r| (&f.path, r)))
-            .filter(|(_, r)| r.harness == CLAUDE)
-            .map(|(p, _)| p.to_str().unwrap())
+            .filter(|f| f.readers.iter().any(|r| r.harness == CLAUDE))
+            .map(|f| f.path.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(claude, ["agents.md"], "read once, under the file itself");
+        (claude, context_load(&files, &links, &project.0).facts.len())
     }
 
     #[test]
     fn a_linked_claude_file_reads_the_same_instructions() {
-        let project = crate::tests::Project::new();
-        let text = "# Build\nRun `make`.\n";
-        project.write("AGENTS.md", text);
-        let links = [(PathBuf::from("CLAUDE.md"), Some(PathBuf::from("AGENTS.md")))];
-        let files = files(
-            [(PathBuf::from("AGENTS.md"), text.to_string())].into(),
-            &links,
+        assert_eq!(
+            linked_claude("AGENTS.md"),
+            (vec!["CLAUDE.md".to_string()], 0)
         );
-        let claude: Vec<_> = files
-            .iter()
-            .flat_map(|f| f.readers.iter().map(move |r| (&f.path, r)))
-            .filter(|(_, r)| r.harness == CLAUDE)
-            .map(|(p, _)| p.to_str().unwrap())
-            .collect();
-        assert_eq!(claude, ["CLAUDE.md"]);
-        assert!(context_load(&files, &links, &project.0).facts.is_empty());
+        // A target no harness names is read once, under its own name.
+        assert_eq!(
+            linked_claude("agents.md"),
+            (vec!["agents.md".to_string()], 0)
+        );
     }
 }
