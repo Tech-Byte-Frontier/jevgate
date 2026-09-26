@@ -55,7 +55,12 @@ pub(super) fn plan_file(
     {
         plan_values(&scope.units[&owner], &context, &lines, &mut file, requests);
     }
-    if shared.enabled(catalog::COMMENTS) && view.application {
+    // Laravel's configuration files come from the framework and its
+    // packages, with their documentation as comments: on two Laravel apps,
+    // all six comment considers there were the publisher's text, and 14
+    // files' comments stayed undecided.
+    let published = shared.laravel && laravel_config(context.path);
+    if shared.enabled(catalog::COMMENTS) && view.application && !published {
         let comments = (&lines[..], shared.teaching);
         plan_comments(
             &scope.units[&owner],
@@ -204,6 +209,16 @@ fn plan_comments(
         .filter(|c| !lines.iter().any(|l| l.contains(&c.line)))
         .collect();
     comments::plan(context, (&parsed.units, teaching), &found, file, requests);
+}
+
+/// A PHP file directly in the project's `config` directory.
+fn laravel_config(path: &std::path::Path) -> bool {
+    let mut parts = path.iter();
+    parts.next().is_some_and(|dir| dir == "config")
+        && parts
+            .next()
+            .is_some_and(|file| file.to_string_lossy().ends_with(".php"))
+        && parts.next().is_none()
 }
 
 /// A SpacetimeDB module file, whose definitions are sent with the helpers

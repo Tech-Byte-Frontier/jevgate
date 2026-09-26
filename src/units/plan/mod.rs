@@ -92,6 +92,7 @@ pub fn plan(
     let scope = parsed_scope(inputs, views, &mut result.skipped);
     let mut shared = Shared::new(&scope, args);
     shared.teaching = crate::docs::teaching(root);
+    shared.laravel = root.join("artisan").is_file();
     for &owner in &scope.owners {
         let file = plan_file(&scope, &shared, owner, args, budget, &mut result.requests);
         result.files.insert(owner, file);
