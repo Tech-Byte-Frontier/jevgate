@@ -125,6 +125,19 @@ fn project_doc(path: &Path) -> bool {
         && !RECORD_STEMS.contains(&stem.as_str())
 }
 
+/// Claude Code skills, commands and subagent definitions: Markdown under
+/// `.claude/skills`, `.claude/commands` or `.claude/agents`. A session loads
+/// only their descriptions and reads the rest when one is used, so they are
+/// project documentation, checked for stale paths, repetition and size: one
+/// project's fifteen skills cited documentation paths a rename had removed.
+fn claude_doc(path: &Path) -> bool {
+    let parts: Vec<&str> = path.iter().filter_map(|p| p.to_str()).collect();
+    parts
+        .windows(2)
+        .any(|w| w[0] == ".claude" && matches!(w[1], "skills" | "commands" | "agents"))
+        && path.extension().and_then(|e| e.to_str()) == Some("md")
+}
+
 fn file_name(path: &Path) -> &str {
     path.file_name().and_then(|n| n.to_str()).unwrap_or("")
 }
@@ -152,7 +165,7 @@ pub fn discover(root: &Path) -> Result<Found> {
             found.directories.insert(relative);
         } else if agent_file(&relative) {
             add_agent(root, relative, &mut found);
-        } else if project_doc(&relative) {
+        } else if project_doc(&relative) || claude_doc(&relative) {
             found.project.insert(relative);
         }
     }
@@ -222,8 +235,13 @@ fn walk_agent_dir(root: &Path, dir: &Path, found: &mut Found) -> Result<()> {
     {
         let entry = entry.context("Failed while discovering agent instructions")?;
         let relative = crate::discovery::relative(entry.path(), root)?;
-        if !entry.file_type().is_some_and(|t| t.is_dir()) && agent_file(&relative) {
+        if entry.file_type().is_some_and(|t| t.is_dir()) {
+            continue;
+        }
+        if agent_file(&relative) {
             add_agent(root, relative, found);
+        } else if claude_doc(&relative) {
+            found.project.insert(relative);
         }
     }
     Ok(())
@@ -312,6 +330,12 @@ mod tests {
             ("AGENTS.md", "# A\n"),
             ("README.md", "# R\n"),
             (".claude/rules/x.md", "# X\n"),
+            (
+                ".claude/skills/deploy/SKILL.md",
+                "---\nname: deploy\n---\n# Deploy\n",
+            ),
+            (".claude/skills/deploy/run.sh", "echo\n"),
+            (".claude/commands/review.md", "# Review\n"),
             ("notes/n.md", "# N\n"),
             ("src/CLAUDE.md", "# C\n"),
             ("node_modules/p/README.md", "# P\n"),
@@ -322,6 +346,14 @@ mod tests {
         let agent: Vec<_> = found.agent.iter().map(|p| p.to_str().unwrap()).collect();
         assert_eq!(agent, [".claude/rules/x.md", "AGENTS.md", "src/CLAUDE.md"]);
         let docs: Vec<_> = found.project.iter().map(|p| p.to_str().unwrap()).collect();
-        assert_eq!(docs, ["README.md", "docs/plan.md"]);
+        assert_eq!(
+            docs,
+            [
+                ".claude/commands/review.md",
+                ".claude/skills/deploy/SKILL.md",
+                "README.md",
+                "docs/plan.md"
+            ]
+        );
     }
 }
