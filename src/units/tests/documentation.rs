@@ -598,12 +598,14 @@ fn an_undecided_instruction_section_settles_by_its_kind() {
     assert_eq!(decided.units.consider, 1, "{}", decided.decision_basis);
 }
 
-const DOCUMENT_KINDS: [&str; 5] = [
+const DOCUMENT_KINDS: [&str; 7] = [
     "collection",
     "guide",
     "introduction",
     "migration",
+    "plan",
     "reference",
+    "requirements",
 ];
 
 #[test]
@@ -662,7 +664,21 @@ fn an_undecided_large_document_is_asked_its_kind() {
         "{}",
         collection.findings[0].message
     );
-    // A decided split is not asked its kind.
+    // A split finding is asked its kind: a plan for one release clears it,
+    // and a collection keeps it.
+    let found = || spread(0.1, 0.25, 0.65);
+    let plan = large_doc(found(), choice_of("plan", &DOCUMENT_KINDS));
+    let dimension = &plan.dimensions[catalog::LARGE_DOCS];
+    assert_eq!(dimension.units.clear, 1, "{}", dimension.decision_basis);
+    assert!(
+        plan.judgments.iter().all(|j| j.question != "part"),
+        "a cleared split is not located: {:?}",
+        plan.judgments
+    );
+    let kept = large_doc(found(), choice_of("collection", &DOCUMENT_KINDS));
+    assert_eq!(kept.findings.len(), 1);
+    assert_eq!(kept.findings[0].strength, Strength::Consider);
+    // A split that clears is not asked its kind.
     let decided = large_doc(
         spread(0.9, 0.1, 0.0),
         choice_of("collection", &DOCUMENT_KINDS),
