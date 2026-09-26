@@ -46,6 +46,7 @@
 | Spring MVC | A MockMvc or RestTemplate test request reaches the controller method whose `@GetMapping`, `@PostMapping` or `@RequestMapping` route serves it, so the test is judged with that method as its code under test |
 | Bundlers and compilers | Minified and compiled output (a source map reference, very long lines) is skipped as generated |
 | Copied libraries | A library copied into the repository (a versioned file name such as `jquery-3.6.0.js`, the readable build beside a `.min.js`, a license banner naming a version, or a script under `assets`, `static` or `vendor` that opens with a whole license and copyright) is skipped as vendored, whatever its size |
+| Project templates (cookiecutter, copier) | Files under a directory named with a `{{ … }}` placeholder are parsed without their Jinja tags, so the generated project's code is judged instead of skipped for syntax errors |
 | Migrations | Directories named `migrations`, Rails' `db/migrate` and timestamped scripts under `db/`, and Alembic's `alembic/versions` are skipped as migrations; SQL migrations are still read for access control |
 
 Other files, such as Kotlin, are listed as skipped with the reason and never fail the gate.
