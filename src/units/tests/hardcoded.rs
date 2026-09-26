@@ -1,6 +1,31 @@
 //! Hardcoded values: value units, benign kinds and repeated literals.
 use super::*;
 
+/// A run answering `overrides`, the finding on `symbol` and how many locate
+/// requests it asked; later runs with `options` ask again.
+fn judged(
+    project: &Project,
+    options: &mut CheckArgs,
+    overrides: Vec<(&'static str, Value)>,
+    symbol: &str,
+) -> (crate::schema::Finding, u64) {
+    let mut eval = scripted(0);
+    eval.overrides = overrides;
+    let report = run(project, options, &mut eval);
+    options.refresh = true;
+    let asked = report
+        .stages
+        .get("locate")
+        .map_or(0, |stage| stage.successful_requests);
+    let finding = report.files[0]
+        .findings
+        .iter()
+        .find(|f| f.symbol.as_deref() == Some(symbol))
+        .cloned()
+        .unwrap();
+    (finding, asked)
+}
+
 #[test]
 fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
     let (project, options) = hardcoded_project();
@@ -43,6 +68,49 @@ fn a_finding_on_module_constants_points_at_the_constant_it_is_about() {
         finding.message.ends_with("The constant is `API_URL`."),
         "{}",
         finding.message
+    );
+}
+
+#[test]
+fn an_environment_finding_whose_constant_stays_the_same_everywhere_is_a_note() {
+    let source = "const API_URL: &str = \"https://api.prod.example.com\";\nconst RETRIES: u32 = 3;\n\nfn client() -> Client {\n    Client::new(API_URL)\n}\n";
+    let (project, mut options) = rule_project(source, catalog::HARDCODED_VALUES);
+    let (_, plan) = planned(&project, &options);
+    let locate = plan.files[&0]
+        .units
+        .iter()
+        .find_map(|u| match &u.detail {
+            Detail::Constants {
+                locate: Some(locate),
+                ..
+            } => Some(locate.request()),
+            _ => None,
+        })
+        .expect("a locate for the constants");
+    assert_eq!(
+        locate["state"]["constants"][0]["used_at"],
+        json!(["5: Client::new(API_URL)"])
+    );
+    assert!(locate["state"]["constants"][1].get("used_at").is_none());
+    let kinds = ["author", "each", "fallback", "not_run", "same"];
+    let overrides = |kind: &str| {
+        vec![
+            ("environment", spread(0.0, 0.05, 0.95)),
+            ("constant", choice_of("c0", &["c0", "c1", "none"])),
+            ("environment_kind", choice_of(kind, &kinds)),
+        ]
+    };
+    // A server each installation must set keeps the review.
+    let (kept, _) = judged(&project, &mut options, overrides("each"), "API_URL");
+    assert_eq!(kept.strength, Strength::Review, "{}", kept.message);
+    let (same, _) = judged(&project, &mut options, overrides("same"), "API_URL");
+    assert_eq!(same.strength, Strength::Note);
+    assert!(
+        same.message.ends_with(
+            "The constant is `API_URL`. It likely stays the same wherever the program runs, or is only a fallback, so it is a note."
+        ),
+        "{}",
+        same.message
     );
 }
 
@@ -169,33 +237,19 @@ fn a_named_value_that_reads_for_itself_is_a_note() {
     );
     let (project, mut options) = rule_project(&source, catalog::HARDCODED_VALUES);
     let kinds = ["copies", "idiom", "named", "tuning", "unexplained"];
-    let mut connect = |kind: &str| {
-        let mut eval = scripted(0);
-        eval.overrides = vec![
+    let overrides = |kind: &str| {
+        vec![
             ("magic", spread(0.1, 0.35, 0.55)),
             ("value", choice_of("v1", &["v0", "v1", "none"])),
             ("value_kind", choice_of(kind, &kinds)),
-        ];
-        let report = run(&project, &options, &mut eval);
-        options.refresh = true;
-        let asked = report
-            .stages
-            .get("locate")
-            .map_or(0, |stage| stage.successful_requests);
-        let finding = report.files[0]
-            .findings
-            .iter()
-            .find(|f| f.symbol.as_deref() == Some("connect"))
-            .cloned()
-            .unwrap();
-        (finding, asked)
+        ]
     };
     // Copies that must change together keep the consider.
-    let (kept, asked) = connect("copies");
+    let (kept, asked) = judged(&project, &mut options, overrides("copies"), "connect");
     assert_eq!(kept.strength, Strength::Consider, "{}", kept.message);
     // Both functions' values are located, then both are asked their kind.
     assert_eq!(asked, 4);
-    let (named, _) = connect("named");
+    let (named, _) = judged(&project, &mut options, overrides("named"), "connect");
     assert_eq!(named.strength, Strength::Note);
     assert!(
         named
