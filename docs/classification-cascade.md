@@ -258,7 +258,16 @@ signatures, or one candidate pair.
    trace in C# also gets the `const` and `static readonly` fields the code
    names, often declared in another file, so a key written in the code does
    not read as configuration. Other languages keep their wording: the
-   additions were measured on ASP.NET Core projects only. A broad weak-setting
+   additions were measured on ASP.NET Core projects only. Outside C#, PHP and
+   Django, the TLS check asks whether code accepts a server's certificate,
+   host key or host name without verifying it, so a connection made without
+   TLS (gRPC's insecure credentials, an insecure OpenTelemetry exporter,
+   `sslmode=disable`) presents nothing to verify, and verification skipped
+   only when a caller or the operator asks for it is not turned off: asked
+   whether code turns verification off, a microservices demo's
+   cluster-internal gRPC clients stayed reviews whatever the examples said.
+   The escape check names i18next's `escapeValue: false` in a React app as
+   escaping kept. A broad weak-setting
    answer that none of the specific checks leans toward names no setting to
    change and is at most a note: on an action marked `[AllowAnonymous]` on
    purpose it was 0.85 while every check stayed at 0.30 or less.

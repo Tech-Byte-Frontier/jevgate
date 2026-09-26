@@ -478,13 +478,27 @@ pub const VIEW_MARKUP: Check = Check {
 /// Specific weak settings, asked when the broad presence question is not clear.
 /// Turning off output escaping had no check: NodeGoat's `autoescape: false`
 /// and RailsGoat's `escape_html_entities_in_json = false` were at most notes.
+/// The TLS check's examples name what turns no verification off: in
+/// microservices-demo, gRPC's insecure credentials between the cluster's
+/// services, OpenTelemetry exporters sending to a local collector and
+/// `sslmode=disable` behind the AlloyDB connector were seven wrong reviews,
+/// and so were httpx's `verify=False` branch and vaultwarden's setting that
+/// lets the operator accept invalid SMTP certificates. Asked whether code
+/// turns verification off, gRPC's insecure credentials stayed reviews
+/// whatever the examples said, as turning TLS off; asked whether code
+/// accepts what a server presents without verifying it, a connection
+/// without TLS presents nothing. i18next's `escapeValue: false` in a React
+/// Native app was a wrong escape review.
 pub const WEAK_SETTINGS: [Check; 7] = [
     Check {
         id: "tls",
-        question: "Does `{code}` turn off certificate or host name verification?",
-        yes: "It turns off certificate or host name checks, or accepts invalid certificates or host names.",
-        no: "It keeps verification on, or makes no TLS connection.",
-        no_examples: &[],
+        question: "Does `{code}` accept a server's certificate, host key or host name without verifying it?",
+        yes: "It turns off certificate, host key or host name checks, or accepts invalid ones, such as with `verify=False`, `InsecureSkipVerify`, `rejectUnauthorized: false`, `CERT_NONE` or a host key callback that accepts any key.",
+        no: "It verifies what the server presents; it connects without TLS, where no certificate is presented to verify; or it skips verification only when its caller or the operator asks for it, and verifies by default.",
+        no_examples: &[
+            "A connection made without TLS, such as gRPC's `insecure.NewCredentials()` or `insecure_channel`, an OpenTelemetry exporter with `insecure=True`, or `sslmode=disable`",
+            "A library function that builds a TLS context without verification only when its caller passes `verify=False`, or a mail transport that accepts invalid certificates only when the operator turns on a setting for it",
+        ],
     },
     Check {
         id: "hash",
@@ -529,7 +543,9 @@ pub const WEAK_SETTINGS: [Check; 7] = [
         question: "Does `{code}` turn off the automatic escaping of values written into HTML?",
         yes: "It turns off a template engine's or serializer's escaping of HTML for output that browsers render, such as autoescape set to false or escape_html_entities_in_json set to false.",
         no: "Escaping stays on; the output is not HTML that browsers render, such as Markdown, plain-text email or source code; or it configures no escaping.",
-        no_examples: &[],
+        no_examples: &[
+            "i18next's `escapeValue: false` in a React or React Native app, whose components escape the translated text they render",
+        ],
     },
 ];
 
