@@ -61,9 +61,19 @@ pub(super) struct Subject<'a> {
     pub test_path: bool,
 }
 
+/// The evidence key of the templates a function renders that write values
+/// without escaping.
+pub(super) const RENDERED: &str = "templates_it_renders_that_write_values_without_escaping";
+
 impl Subject<'_> {
     fn code(&self) -> String {
         format!("{}.source", self.kind)
+    }
+
+    /// Whether it renders a template that writes values without escaping,
+    /// outside Django, whose questions name its templates already.
+    fn renders(&self) -> bool {
+        !self.django && self.evidence.contains_key(RENDERED)
     }
 
     /// Its name, source and framework evidence, as sent.
@@ -187,6 +197,39 @@ pub(super) fn setup_subject<'a>(
         test_path: false,
     })
 }
+
+/// A server template's code that reads client data, judged like a function
+/// by every security rule.
+pub(super) fn template_subject<'a>(
+    file: &FileContext<'_>,
+    code: &'a crate::analysis::sites::Setup,
+) -> Option<Subject<'a>> {
+    let first = code.statements.first()?;
+    let last = code.statements.last()?;
+    let source: Vec<&str> = code
+        .statements
+        .iter()
+        .map(|(range, ..)| &file.source[range.clone()])
+        .collect();
+    Some(Subject {
+        name: TEMPLATE_CODE.into(),
+        kind: "function",
+        source: source.join("\n"),
+        sites: &code.sites,
+        errors: &[],
+        lines: (first.1, last.2),
+        callers: Vec::new(),
+        enums: Vec::new(),
+        constants: Vec::new(),
+        evidence: serde_json::Map::new(),
+        django: false,
+        callee_errors: Vec::new(),
+        test_path: false,
+    })
+}
+
+/// The name of the unit that holds a server template's code.
+pub(super) const TEMPLATE_CODE: &str = "template code";
 
 /// The name of the unit that holds a file's top-level setup statements.
 pub(super) const MODULE_SETUP: &str = "module setup";
@@ -368,11 +411,12 @@ fn presence_request(
         let source = items[index].1["source"].as_str().unwrap_or_default();
         let deserializers = questions::deserializers_named(file.language, source);
         let xml = questions::parses_xml(file.source, source);
+        let rendered = !django && items[index].1.get(RENDERED).is_some();
         for (rule, _, id) in units {
             for question in presence_questions(rule) {
                 questions.ask(
                     format!("{}{index}_{question}", &key[..1]),
-                    presence_body(question, &code, django, (deserializers, xml)),
+                    presence_body(question, &code, (django, rendered), (deserializers, xml)),
                     id,
                     rule,
                     question,
@@ -404,11 +448,13 @@ pub(super) fn presence_questions(rule: &str) -> &'static [&'static str] {
 fn presence_body(
     question: &str,
     code: &str,
-    django: bool,
+    (django, rendered): (bool, bool),
     (deserializers, xml): (Option<&str>, bool),
 ) -> Value {
     match question {
-        "interpreted" => questions::security_interpreted(code, django, deserializers, xml),
+        "interpreted" => {
+            questions::security_interpreted(code, django, rendered, deserializers, xml)
+        }
         "resource" => questions::security_resource(code, django),
         "logs_secret" => questions::security_logs_secret(code),
         "error_details" => questions::security_error_details(code, django),
@@ -579,21 +625,57 @@ fn trace(
             questions::security_message_origin(&ids, from_callees),
         );
     }
-    let xml = questions::parses_xml(file.source, &subject.source);
-    for check in asked_checks(rule, file.language, subject.django, &subject.source, xml) {
-        let check = if from_callees && check.id == "exception_to_client" {
-            &questions::EXCEPTION_TO_CLIENT_FROM_CALLEES
-        } else {
-            check
-        };
+    for check in trace_checks(file, subject, rule, from_callees) {
         ask(check.id, check.body(&code));
     }
+    file.request(
+        "trace",
+        trace_state(file, subject, rule, messages),
+        questions,
+    )
+}
+
+/// The checks a unit's trace and recheck ask, in the variants its evidence
+/// calls for: the exception check of text its callees create, and the
+/// markup check of a function that renders unescaped templates.
+fn trace_checks(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    rule: &'static str,
+    from_callees: bool,
+) -> Vec<&'static questions::Check> {
+    let xml = questions::parses_xml(file.source, &subject.source);
+    asked_checks(rule, file.language, subject.django, &subject.source, xml)
+        .into_iter()
+        // A template's code writes its values unescaped by construction,
+        // which injection judges; it turns no escaping setting off. Asked
+        // anyway, a JSP page's `<%= … %>` read as one.
+        .filter(|check| !(subject.name == TEMPLATE_CODE && check.id == "escape"))
+        .map(|check| {
+            if from_callees && check.id == "exception_to_client" {
+                &questions::EXCEPTION_TO_CLIENT_FROM_CALLEES
+            } else if subject.renders() && check.id == "markup" {
+                &questions::VIEW_MARKUP
+            } else {
+                check
+            }
+        })
+        .collect()
+}
+
+/// A trace's state: the unit's source with its sites, and the evidence its
+/// rule's checks read.
+fn trace_state(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    rule: &str,
+    messages: Vec<Value>,
+) -> Value {
     let mut state = json!({
         "file": file.file_state(),
         subject.kind: subject.state(),
         "sites": subject.sites.iter().map(|s| json!({"id": s.id, "source": s.text})).collect::<Vec<_>>(),
     });
-
     if rule == SENSITIVE_DATA && !messages.is_empty() {
         state["messages"] = json!(messages);
     }
@@ -606,8 +688,7 @@ fn trace(
     if rule == UNSAFE_SETTINGS && !subject.constants.is_empty() {
         state["constants_named"] = json!(subject.constants);
     }
-
-    file.request("trace", state, questions)
+    state
 }
 
 /// The origin question and the injection checks again, with the functions
@@ -627,14 +708,7 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
         "origin",
         Pass::Recheck,
     );
-    let xml = questions::parses_xml(file.source, &subject.source);
-    for check in asked_checks(
-        INJECTION,
-        file.language,
-        subject.django,
-        &subject.source,
-        xml,
-    ) {
+    for check in trace_checks(file, subject, INJECTION, false) {
         questions.ask(
             check.id.into(),
             check.with_callers(&code),
@@ -891,7 +965,9 @@ fn settle(
         "url_parts" => questions::security_url_parts(&code, callers),
         "runs_in" => questions::security_runs_in(&code),
         "redirect_target" => questions::security_redirect_target(&code, callers),
-        "markup_output" => questions::security_markup_output(&code, subject.django),
+        "markup_output" => {
+            questions::security_markup_output(&code, subject.django, subject.renders())
+        }
         "markup_parts" => questions::security_markup_parts(&code, callers),
         "path_parts" => questions::security_path_parts(&code),
         "shell_parts" => questions::security_shell_parts(&code),

@@ -16,8 +16,10 @@ pub mod ruby;
 pub mod sites;
 pub mod sql;
 mod summary;
+pub mod template_code;
 pub mod test_map;
 pub mod units;
+pub mod views;
 pub mod workflow;
 
 use tree_sitter::Node;

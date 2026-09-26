@@ -98,14 +98,20 @@ fn extension(path: &Path) -> &str {
 
 /// Whether a parser supports this file's language.
 pub(crate) fn supported(path: &Path) -> bool {
-    grammar(path).is_some() || crate::components::FORMATS.contains(&extension(path))
+    grammar(path).is_some()
+        || crate::components::FORMATS.contains(&extension(path))
+        || crate::components::server_template(path)
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     let extension = extension(path);
+    let server_template = crate::components::server_template(path);
     let (language, scripts) = if crate::components::FORMATS.contains(&extension) {
         let (scripts, language) = crate::components::scripts(extension, source);
         (language, Some(scripts))
+    } else if server_template {
+        let (scripts, language) = crate::components::scripts("html", source);
+        (language, Some(without_tags(&scripts, true)))
     } else if let Some(language) = grammar(path) {
         (
             language,
@@ -136,7 +142,7 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     };
     // Whether errors are tolerable depends on the path, not only the source.
     ensure!(
-        if template(path, source) {
+        if template(path, source) && !server_template {
             !tree.root_node().has_error()
         } else {
             tolerable(tree.root_node(), source.len())
@@ -178,14 +184,31 @@ fn project_template(path: &Path) -> bool {
 /// that byte offsets and lines stay the file's: `from {{ slug }}.users
 /// import User` reads as an import, and both branches of an `{% if %}` stay.
 fn without_jinja(source: &str) -> String {
+    without_tags(source, false)
+}
+
+/// Jinja's tags blanked as `without_jinja` does, and with `server`, a server
+/// template's as well: Handlebars' `{{{ … }}}` and each ERB, EJS or JSP
+/// `<%= … %>` or `<%- … %>` read as a name, other `<% … %>` tags blanked.
+fn without_tags(source: &str, server: bool) -> String {
     let bytes = source.as_bytes();
     let mut out = bytes.to_vec();
     let mut at = 0;
     while at + 1 < bytes.len() {
+        let next = bytes.get(at + 2).copied();
         let (close, fill) = match (bytes[at], bytes[at + 1]) {
             (b'{', b'%') => ("%}", b' '),
             (b'{', b'#') => ("#}", b' '),
+            (b'{', b'{') if server && next == Some(b'{') => ("}}}", b'_'),
             (b'{', b'{') => ("}}", b'_'),
+            (b'<', b'%') if server => (
+                "%>",
+                if matches!(next, Some(b'=' | b'-')) {
+                    b'_'
+                } else {
+                    b' '
+                },
+            ),
             _ => {
                 at += 1;
                 continue;
@@ -194,7 +217,7 @@ fn without_jinja(source: &str) -> String {
         let Some(length) = source[at + 2..].find(close) else {
             break;
         };
-        let end = at + 2 + length + 2;
+        let end = at + 2 + length + close.len();
         for byte in &mut out[at..end] {
             if *byte != b'\n' {
                 *byte = fill;
@@ -296,6 +319,39 @@ mod tests {
             collect(path, source, Path::new(".")).unwrap().1,
             vec![("before".into(), 1)]
         );
+    }
+
+    #[test]
+    fn a_server_template_parses_as_its_inline_scripts_with_its_tags_blanked() {
+        let erb = "<h1><%= @title %></h1>\n<% if admin? %><p>Admin</p><% end %>\n<script>\n  var name = \"<%= raw current_user.first_name %>\";\n  var tags = <%== @tags.to_json %>;\n  function greet() { document.write(name + location.hash) }\n</script>\n";
+        let (masked, _) = crate::components::scripts("html", erb);
+        let blanked = without_tags(&masked, true);
+        assert_eq!(blanked.len(), erb.len());
+        assert_eq!(blanked.lines().count(), erb.lines().count());
+        assert!(!blanked.contains("<h1>") && !blanked.contains("<%"));
+        assert!(blanked.contains(&format!(
+            "var tags = {};",
+            "_".repeat("<%== @tags.to_json %>".len())
+        )));
+        // Handlebars' triple stash and Jinja's tags, in a template directory.
+        let jinja = "{% extends 'base.html' %}\n<script>\n  const user = {{{ user_json }}};\n  {% if debug %}console.log(user);{% endif %}\n  function show() { el.innerHTML = user.bio }\n</script>\n";
+        for (path, source, function) in [
+            ("app/views/sessions/new.html.erb", erb, ("greet", 6)),
+            ("server/templates/profile.html", jinja, ("show", 5)),
+        ] {
+            let path = Path::new(path);
+            assert!(
+                !parse(path, source)
+                    .unwrap()
+                    .unwrap()
+                    .root_node()
+                    .has_error()
+            );
+            assert_eq!(
+                collect(path, source, Path::new(".")).unwrap().1,
+                vec![(function.0.into(), function.1)]
+            );
+        }
     }
 
     #[test]

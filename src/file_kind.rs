@@ -132,6 +132,10 @@ pub fn unsent(path: &Path, named_source: &str, detail: &str) -> Classification {
 }
 
 pub fn language(path: &Path) -> &'static str {
+    if crate::components::server_template(path) {
+        // Only its inline scripts are parsed and judged.
+        return "JavaScript";
+    }
     match extension(path).as_str() {
         "rs" => "Rust",
         "py" => "Python",
