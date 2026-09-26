@@ -17,11 +17,14 @@ fn sql_noul(question: &str, yes: &str, no: &str, context: &str) -> Value {
 
 /// "Let a user read other users' rows" was read literally and flagged role
 /// checks, admin policies and restrictive policies; the criteria name them.
+/// So was reading rows their owners chose to share: chatbot-ui's ten
+/// `using (sharing <> 'private')` policies, the read side of its sharing,
+/// were considers.
 pub fn policy_others() -> Value {
     sql_noul(
         "Does the policy in `policy.source` let every user it applies to read or change rows that belong to other users or accounts?",
         "Its condition admits other people's rows for every user it applies to, such as `using (true)` on private data, a check only that the user is signed in, or a write without a `with check` that ties the row to the user.",
-        "Its condition ties the rows it admits to the user, their account or membership, or to a role or permission check; it applies only to administrative or service roles; it is restrictive, so it only narrows other policies; or the table holds data meant for everyone to read.",
+        "Its condition ties the rows it admits to the user, their account or membership, or to a role or permission check; it applies only to administrative or service roles; it is restrictive, so it only narrows other policies; it lets others read only rows their owners marked as shared or public, such as `sharing <> 'private'` or `is_public`; or the table holds data meant for everyone to read.",
         POLICY_CONTEXT,
     )
 }
@@ -49,12 +52,16 @@ pub fn definer_search_path() -> Value {
 /// A secret token the function looks up is the caller's capability:
 /// basejump's `accept_invitation` and `lookup_invitation`, which find an
 /// invitation by its token, were reviews for checking no `auth.uid()`.
+/// The note says who may call a function nothing revokes: chatbot-ui's
+/// `delete_storage_object`, which deletes any stored file with the service
+/// role key and is callable by anyone, stayed at 0.68 with an empty
+/// `function.privileges`.
 pub fn definer_unchecked() -> Value {
     sql_noul(
         "Does the SECURITY DEFINER function in `function.source` read or change rows of other users without checking who the caller is?",
         "It runs with its owner's privileges and returns or changes rows chosen by its arguments, without comparing them to `auth.uid()` or checking a role, and clients can call it.",
         "It checks the caller, touches only the caller's rows, acts only for whoever holds a secret token it looks up by value, such as an invitation or reset token, only returns data meant for everyone, is a trigger function that runs on table events, or `function.privileges` revokes EXECUTE from public, anon and authenticated so only roles clients do not use, such as `supabase_auth_admin` or `service_role`, may call it.",
-        "`function.privileges` lists the grants and revokes of EXECUTE on it, when found.",
+        "`function.privileges` lists the grants and revokes of EXECUTE on it, when found. PostgreSQL lets every role execute a new function, so unless a revoke there takes EXECUTE from public, clients can call it, anon included.",
     )
 }
 
