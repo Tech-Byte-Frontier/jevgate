@@ -3,8 +3,8 @@
 use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, benefit, checks, choice, lowered, noul, open, origin_outcome, score,
-        several_kind, unit_outcome, value_signals,
+        Answers, Outcome, at_most_note, benefit, checks, choice, lowered, noul, open,
+        origin_outcome, score, several_kind, unit_outcome, value_signals,
     },
     wording::{comment_reason, comment_wording},
     wording::{
@@ -492,6 +492,8 @@ impl<'p> Tally<'p> {
         let (outcome, answers) = resolved(unit, judgments);
         let outcome = if unnamed_value(unit, judgments) {
             lowered(lowered(outcome))
+        } else if short_outline(unit) {
+            at_most_note(outcome)
         } else if unnamed_outline(unit, judgments) || few.contains(unit.id.as_str()) {
             lowered(outcome)
         } else {
@@ -899,8 +901,13 @@ fn finding(
                 .filter(|b| !most_of(&b.location, &unit.locations));
             function_wording(name, strength, p, answers, block)
         }
-        Detail::Outline { tests, groups, .. } => {
-            let chosen = outline_groups(answers.get("module").copied(), groups);
+        Detail::Outline {
+            tests,
+            groups,
+            members,
+            ..
+        } => {
+            let chosen = outline_groups(answers.get("module").copied(), groups, *members);
             symbol = chosen.first().map(|group| group.id.clone());
             if !chosen.is_empty() {
                 locations = chosen.iter().flat_map(|g| g.locations.clone()).collect();
@@ -1077,20 +1084,47 @@ fn unnamed_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
 /// Its finding is a note, since a reader cannot tell which members to move.
 /// A review, or a consider the kind decided, says to split the whole file.
 fn unnamed_outline(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
-    let Detail::Outline { groups, .. } = &unit.detail else {
+    let Detail::Outline {
+        groups, members, ..
+    } = &unit.detail
+    else {
         return false;
     };
     let (outcome, answers) = resolved(unit, judgments);
     let get = |q: &str| answers.get(q).copied();
     matches!(outcome, Outcome::Consider(_))
         && several_kind(get("split"), get("kind")).is_none()
-        && outline_groups(get("module"), groups).is_empty()
+        && outline_groups(get("module"), groups, *members).is_empty()
+}
+
+/// Files shorter than this many lines read easily whole.
+const OUTLINE_NOTE_LINES: usize = 250;
+
+/// A file-organization finding on a file of fewer than 250 lines is a note:
+/// of 32 such findings labeled by hand on 25 projects, 3 were right, while
+/// splitting a 138-line module or a 175-line test helper file would only
+/// scatter it; 21 of 29 on longer files were right.
+fn short_outline(unit: &UnitPlan) -> bool {
+    matches!(unit.detail, Detail::Outline { .. }) && unit.lines < OUTLINE_NOTE_LINES
 }
 
 /// The group a module Choice picks clearly, or else the two it leans toward
 /// when together they reach the location probability: flask's `cli.py`
 /// split 0.45 and 0.23 over two of six groups. None when it spreads wider.
+/// A group holding three quarters or more of the outline's `members` is
+/// left out: moving 14 of a file's 15 members, or 9 of its 11 tests, moves
+/// the file rather than splitting it.
 fn outline_groups<'g>(
+    module: Option<&Answer>,
+    groups: &'g [super::GroupInfo],
+    members: usize,
+) -> Vec<&'g super::GroupInfo> {
+    let mut chosen = chosen_groups(module, groups);
+    chosen.retain(|g| g.names.len() * 4 < members * 3);
+    chosen
+}
+
+fn chosen_groups<'g>(
     module: Option<&Answer>,
     groups: &'g [super::GroupInfo],
 ) -> Vec<&'g super::GroupInfo> {

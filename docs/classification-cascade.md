@@ -557,7 +557,14 @@ signatures, or one candidate pair.
    for three or more tests only when the pairs connect them: two pairs that
    share no test stay two pairs (a pair of redirect tests and a pair of deny
    tests of `get` are not four overlapping tests). A review always carries a
-   finding.
+   finding. A file-organization finding on a file of fewer than 250 lines is
+   a note: of 32 such findings labeled by hand on 25 projects, 3 were right,
+   and splitting a 138-line module or a 175-line test helper file only
+   scatters it, while 21 of 29 on longer files were right. A group that
+   holds three quarters or more of the outline's members is not named:
+   moving 14 of a file's 15 members, or 9 of its 11 tests, moves the file
+   rather than splitting it, so a consider left naming no group is a note
+   and a review says to split the whole file.
 6. **Gate.** `--fail-on`, `[[scope]]` levels per path and the baseline act on
    composed findings only. Baseline entries can carry a reason (`intended`,
    `later`, `wrong`) that survives rewrites; `baseline stats` counts them.
