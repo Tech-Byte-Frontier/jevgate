@@ -119,6 +119,12 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
         comment_answers(unit, judgments)
     } else if unit.rule == catalog::TEST_VALUE {
         test_value_answers(unit, judgments)
+    } else if unit.rule == catalog::TEST_REDUNDANCY {
+        // Whether each test checks something the other does not, asked of a
+        // pair that reached a review, sits beside its answers.
+        let (_, mut merged) = rechecked(unit, judgments);
+        merged.extend(answers(judgments, &unit.id, Pass::Locate));
+        merged
     } else {
         return rechecked(unit, judgments);
     };
@@ -234,6 +240,9 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                 | Detail::Constants {
                     locate: Some(_), ..
                 } => raised(Some(outcome)),
+                Detail::TestPair {
+                    confirm: Some(_), ..
+                } => matches!(outcome, Outcome::Review(_)),
                 Detail::Function {
                     locate: Some(_), ..
                 }

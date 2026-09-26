@@ -15,6 +15,7 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
             | Detail::Document { locate, .. }
             | Detail::Values { locate, .. }
             | Detail::Constants { locate, .. } => locate.as_ref(),
+            Detail::TestPair { confirm, .. } => confirm.as_ref(),
             _ => None,
         }
     })

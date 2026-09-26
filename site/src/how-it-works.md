@@ -161,7 +161,11 @@ signatures, or one candidate pair.
    undecided. Ruby test pairs carry their groups and hooks when these differ,
    and are also asked whether each test checks something the other does not
    (another method, matcher, attribute, option or code path); "one adds
-   nothing" is a review only when that is ruled out at 0.80. Copied RSpec
+   nothing" is a review only when that is ruled out at 0.80. Pairs in other
+   languages are asked it after the fact, only when they would be a review
+   and do not read the same apart from their names: tests of two overloads
+   (`writeTo(Path)` and `writeTo(File)`) and of two public methods were
+   reviews, and six of ten labeled reviews were wrong. Copied RSpec
    examples for an alias and its original (`each` and `each_pair`) or for two
    predicates of one record were otherwise reviews.
    A controller method a test reaches through a request carries that route.

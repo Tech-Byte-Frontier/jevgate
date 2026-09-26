@@ -617,6 +617,22 @@ pub(super) fn plan_pairs(
             }
         }
         let recheck = pair_recheck(file, &id, &state, &pair.subject, subjects, ruby);
+        let identical = a.suite == b.suite
+            && words(&a.source(file.source).replace(a.name.as_str(), ""))
+                == words(&b.source(file.source).replace(b.name.as_str(), ""));
+        // Tests that read the same apart from their names check nothing apart.
+        let confirm = (!ruby && !identical).then(|| {
+            let mut questions = Questions::default();
+            questions.ask(
+                "distinct".into(),
+                questions::test_pair_distinct(),
+                &id,
+                TEST_REDUNDANCY,
+                "distinct",
+                Pass::Locate,
+            );
+            file.request("locate", state.clone(), questions)
+        });
         let (request, asked) = file.request("test-pair", state, questions);
         let fits = file.budget.fits(&request);
         out.units.push(UnitPlan {
@@ -645,9 +661,8 @@ pub(super) fn plan_pairs(
                 subject: pair.subject.clone(),
                 table,
                 unseen_setup: !ruby && a.suite != b.suite,
-                identical: a.suite == b.suite
-                    && words(&a.source(file.source).replace(a.name.as_str(), ""))
-                        == words(&b.source(file.source).replace(b.name.as_str(), "")),
+                identical,
+                confirm: confirm.filter(|(request, _)| fits && file.budget.fits(request)),
             },
             recheck: recheck.filter(|_| fits),
         });
