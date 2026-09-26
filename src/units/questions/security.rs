@@ -185,6 +185,46 @@ pub fn security_origin(code: &str, callers: bool, django: bool) -> Value {
     )
 }
 
+/// What the values of an injection consider resting on the function's
+/// parameters can hold, asked only for such a finding, with its callers.
+/// Labeled by hand, those considers were right 30 times in 81: most wrong
+/// ones placed text every caller passes as a literal, such as a Rust
+/// helper's SQL fragments, or a command-line tool's own arguments, while
+/// right ones placed names from a database others write, fetched page
+/// titles or model output. Asked where the values come from, the recheck
+/// answered "the function's parameters" at 0.9 even when its callers passed
+/// literals.
+pub fn injection_values(code: &str, callers: bool) -> Value {
+    let (fixed, note) = if callers {
+        (
+            "Only text the program fixes: literals and constants, written in this code or passed by every caller in `callers`; numbers, dates or other typed values that cannot hold markup or syntax; or names chosen from a fixed list.",
+            format!("{CALLERS} {EVIDENCE}"),
+        )
+    } else {
+        (
+            "Only text the program fixes: literals and constants written in this code; numbers, dates or other typed values that cannot hold markup or syntax; or names chosen from a fixed list.",
+            EVIDENCE.to_string(),
+        )
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What can the values that `{code}` places into a query, command, code or markup without binding or escaping them hold?"),
+            "note": note,
+        },
+        "criteria": {
+            "fixed": fixed,
+            "own": "Values the program creates or keeps for itself, such as ids it generates, the names of its own tables, files or settings, or text it wrote itself.",
+            "local": "The arguments of a command-line program, build script or code generator, typed by the person who runs it on their own machine, or text that person runs on purpose, such as a query they typed.",
+            "outside": "Text another party can set: a network request, message or uploaded file, a page or feed fetched from the network, a language model's output, or records and names other users can write, such as rows of a shared database.",
+            "unknown": "Values from parameters or calls whose origin is not shown, which may hold any of these.",
+        },
+    })
+}
+
+/// The options of `injection_values` that hold only the program's own values.
+pub const PROGRAM_VALUES: [&str; 3] = ["fixed", "own", "local"];
+
 /// Asked in the sensitive-data trace: whether every error message is the
 /// program's own. It can only clear the error-detail signals; functions that
 /// throw the program's typed errors otherwise stayed undecided, since the

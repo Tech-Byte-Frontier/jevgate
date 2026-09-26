@@ -70,6 +70,9 @@ fn an_unhandled_value_from_another_party_is_a_located_injection_review() {
     assert!(finding.action.contains("bound query parameters"));
 }
 
+/// The options of the Choice on what an injection consider's values can hold.
+const VALUES: [&str; 5] = ["fixed", "local", "outside", "own", "unknown"];
+
 #[test]
 fn a_parameter_origin_is_a_consider_that_callers_can_settle() {
     let caller = format!(
@@ -80,6 +83,7 @@ fn a_parameter_origin_is_a_consider_that_callers_can_settle() {
             ("interpreted", noul_at(0.95)),
             ("sql", noul_at(0.95)),
             ("origin", spread(0.0, 0.9, 0.1)),
+            ("values", choice_of("unknown", &VALUES)),
         ]
     };
     let (project, options) = security_project(QUERY);
@@ -96,7 +100,7 @@ fn a_parameter_origin_is_a_consider_that_callers_can_settle() {
     eval.overrides = overrides();
     eval.recheck_level = Some(0);
     let report = run(&project, &options, &mut eval);
-    assert_eq!(eval.stages.last().unwrap(), "recheck");
+    assert!(eval.stages.contains(&"recheck".to_string()));
     let find = |report: &Report| {
         report.files[0]
             .findings
@@ -104,6 +108,56 @@ fn a_parameter_origin_is_a_consider_that_callers_can_settle() {
             .any(|f| f.rule == "security/injection" && f.symbol.as_deref() == Some("find"))
     };
     assert!(!find(&report), "the caller passes a fixed value");
+}
+
+#[test]
+fn a_parameter_consider_is_a_note_when_its_values_are_the_programs_own() {
+    let caller = format!(
+        "{QUERY}\nfn handler(conn: &Connection) -> Result<Row> {{\n    find(conn, \"admin\")\n}}\n"
+    );
+    let (project, mut options) = security_project(&caller);
+    let mut judged = |values: Value| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("interpreted", noul_at(0.95)),
+            ("sql", noul_at(0.95)),
+            ("origin", spread(0.0, 0.9, 0.1)),
+        ];
+        // The recheck with callers keeps the parameters as the origin.
+        eval.recheck_overrides = vec![
+            ("sql", noul_at(0.95)),
+            ("origin", spread(0.0, 0.9, 0.1)),
+            ("values", values),
+        ];
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.rule == "security/injection" && f.symbol.as_deref() == Some("find"))
+            .map(|f| f.strength)
+    };
+    assert_eq!(
+        judged(choice_of("fixed", &VALUES)),
+        Some(Strength::Note),
+        "the caller passes a literal"
+    );
+    assert_eq!(
+        judged(choice_of("outside", &VALUES)),
+        Some(Strength::Consider)
+    );
+    let mut split: serde_json::Map<String, Value> =
+        VALUES.iter().map(|k| (k.to_string(), json!(0.0))).collect();
+    split.insert("own".into(), json!(0.3));
+    split.insert("local".into(), json!(0.25));
+    split.insert("unknown".into(), json!(0.45));
+    let leaning =
+        json!({"type":"choice","choice":"unknown","confidence":0.4,"probabilities":split});
+    assert_eq!(
+        judged(leaning),
+        Some(Strength::Note),
+        "the program's own options together lead"
+    );
 }
 
 #[test]
@@ -1277,6 +1331,8 @@ fn settled_status(
     let mut eval = scripted(0);
     eval.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
     eval.overrides.push(("origin", spread(0.0, 0.9, 0.1)));
+    eval.overrides
+        .push(("values", choice_of("unknown", &VALUES)));
     eval.overrides.push(settle);
     let report = run(project, options, &mut eval);
     (

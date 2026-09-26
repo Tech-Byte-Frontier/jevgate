@@ -186,6 +186,9 @@ pub enum Detail {
         /// trace and recheck, such as where its URLs come from or its output
         /// goes; each is asked only while its checks are undecided.
         settles: Vec<Settle>,
+        /// For injection, what the values it places can hold, asked only
+        /// after a consider that rests on its parameters.
+        confirm: Option<FollowUp>,
         /// Django code, asked the Django checks: a weak setting must be
         /// named by one of them.
         django: bool,
