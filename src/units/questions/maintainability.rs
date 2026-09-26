@@ -172,6 +172,18 @@ pub fn outline_kind(tests: bool) -> Value {
     })
 }
 
+/// Asked only after a finding on a file's constants, to name the constant it
+/// is about: "one of this file's constants" left a reader to search 14 of
+/// them for the three URLs holding the author's account name.
+pub fn hardcoded_constant(ids: &[String]) -> Value {
+    choose_id(
+        "Which constant in `constants` most needs to come from configuration because it would change in another environment?",
+        format!("Options are the `id` values in `constants`. {EVIDENCE}"),
+        ids,
+        "No single constant stands out.",
+    )
+}
+
 /// Asked only after a hardcoded-value finding, to name the value it is about.
 pub fn hardcoded_value(ids: &[String]) -> Value {
     choose_id(

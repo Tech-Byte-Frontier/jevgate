@@ -13,7 +13,8 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
         match &unit.detail {
             Detail::Function { locate, .. }
             | Detail::Document { locate, .. }
-            | Detail::Values { locate, .. } => locate.as_ref(),
+            | Detail::Values { locate, .. }
+            | Detail::Constants { locate, .. } => locate.as_ref(),
             _ => None,
         }
     })

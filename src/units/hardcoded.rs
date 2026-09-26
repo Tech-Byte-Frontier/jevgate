@@ -202,6 +202,32 @@ fn plan_constants(
         json!({"constants": listed.clone()}),
         false,
     );
+    let locate = (constants.len() <= LOCATE_CHOICES).then(|| {
+        let ids: Vec<String> = (0..constants.len()).map(|i| format!("c{i}")).collect();
+        let mut questions = Questions::default();
+        questions.ask(
+            "constant".into(),
+            questions::hardcoded_constant(&ids),
+            CONSTANTS_ID,
+            HARDCODED_VALUES,
+            "constant",
+            Pass::Locate,
+        );
+        let with_ids: Vec<Value> = ids
+            .iter()
+            .zip(&listed)
+            .map(|(id, constant)| {
+                let mut constant = constant.clone();
+                constant["id"] = json!(id);
+                constant
+            })
+            .collect();
+        file.request(
+            "locate",
+            json!({"file": file.file_state(), "constants": with_ids}),
+            questions,
+        )
+    });
     let state = json!({"file": file.file_state(), "constants": listed});
     let (request, asked) = file.request("constants", state, questions);
     let fits = file.budget.fits(&request);
@@ -224,6 +250,7 @@ fn plan_constants(
         identity: identity(&names),
         detail: Detail::Constants {
             values: constants.iter().flat_map(|c| c.values.clone()).collect(),
+            locate,
         },
         recheck: recheck.filter(|_| fits),
     });

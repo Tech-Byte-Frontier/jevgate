@@ -131,6 +131,9 @@ pub enum Detail {
     /// A file's module-level constants and the literal values they hold.
     Constants {
         values: Vec<String>,
+        /// Which constant a review or consider is about, asked after it;
+        /// its options are the unit's locations, one per constant, in order.
+        locate: Option<(Value, Asked)>,
     },
     /// A security unit: its statements as sites for locating a finding, and
     /// the trace follow-up sent when presence is not clear.
