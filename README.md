@@ -77,7 +77,7 @@ jobs:
       - uses: Tech-Byte-Frontier/jevgate-action@v1
         with:
           api-key: ${{ secrets.TYPESAFE_API_KEY }}
-          version: 0.18.0
+          version: 0.19.0
 ```
 
 It reviews only the changed files, annotates each finding on its line and writes a job summary; unchanged code is answered from the cache for free. [Continuous integration](https://tech-byte-frontier.github.io/jevgate/ci.html) covers pre-commit, other CI systems, pull requests from forks, budgets and a gate policy the change cannot edit.

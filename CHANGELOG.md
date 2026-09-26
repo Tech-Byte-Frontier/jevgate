@@ -4,8 +4,11 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-25
+
 - Inline suppressions: a comment `jevgate: allow(RULE) reason` on a finding's line, or in the comments and attributes directly above it, accepts that finding as the baseline does. RULE is a rule ID, key or group, and the reason is required; the report keeps the finding with its reason (`suppressed`, and `gate.suppressed_findings`), and `jevgate baseline` leaves it out.
 - `jevgate mcp` runs a Model Context Protocol server on stdin and stdout, so coding agents can call JevGate as a tool: `jevgate_check` runs a check and returns its findings (an incomplete run is a tool error), `jevgate_findings` reads the last report, and `jevgate_rules` lists the rules.
+- The README is short and points to the [documentation site](https://tech-byte-frontier.github.io/jevgate/), which gains a page on versions and stability: what semver will cover from 1.0.
 
 ## [0.18.0] - 2026-09-25
 
@@ -156,7 +159,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.15.0...v0.16.0
