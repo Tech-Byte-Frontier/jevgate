@@ -33,6 +33,7 @@ pub const ACCESS_CONTROL: &str = "access_control";
 pub const WORKFLOWS: &str = "workflows";
 pub const TEST_VALUE: &str = "test_value";
 pub const TEST_REDUNDANCY: &str = "test_redundancy";
+pub const LAWS: &str = "laws";
 pub const AGENT_CONTEXT: &str = "agent_context";
 pub const LARGE_DOCS: &str = "large_docs";
 pub const DOC_STALENESS: &str = "doc_staleness";
@@ -194,6 +195,20 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Do the two tests check the same behavior, with different or equivalent inputs?",
             acceptable_example: "Tests of different behaviors of one function",
             requires_tests: true,
+            evaluation_dataset: DATASET,
+            thresholds_validated: false,
+        },
+        Rule {
+            id: "tests/laws",
+            group: "tests",
+            default_enabled: true,
+            key: LAWS,
+            version: rule_version(LAWS),
+            scope: "Bend 2 laws that state a claim (an equality, a witness or a proposition) under a comment, outside tests",
+            unit: "one law with its comment and the signatures, documentation and short bodies of the definitions it names",
+            inspection: "Does the comment above a law promise more than, or something other than, what the law states, so a definition could break the promise while every proof passes?",
+            acceptable_example: "A comment that puts its law in words; laws that declare a signature or a primitive",
+            requires_tests: false,
             evaluation_dataset: DATASET,
             thresholds_validated: false,
         },

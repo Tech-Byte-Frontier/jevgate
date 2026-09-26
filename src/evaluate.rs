@@ -504,9 +504,9 @@ fn schedule(
     }
     let plan = match crate::file_kind::plan(input, args, budget) {
         Ok(plan) => plan,
-        Err(_) => {
+        Err(error) => {
             // Invalid syntax cannot be located; it is reported, not judged.
-            skip(file, "Syntax errors; this file was not judged.");
+            skip(file, crate::syntax::skip_reason(&error));
             return Ok(Scheduled::None);
         }
     };

@@ -43,18 +43,21 @@ impl FileContext<'_> {
     /// The file's path and language, for questions about how code reads:
     /// a framework role sent there moved split answers without informing them.
     pub(super) fn plain_state(&self) -> Value {
-        json!({"path": self.path, "language": self.language})
+        let mut state = json!({"path": self.path, "language": self.language});
+        if self.language == crate::analysis::bend::LANGUAGE {
+            state["notation"] = json!(BEND_NOTATION);
+        }
+        state
     }
 
     /// The file's path, language and framework role, for questions about
     /// where values come from and go, and which values a reader must guess.
     pub(super) fn file_state(&self) -> Value {
-        match &self.framework {
-            Some(framework) => {
-                json!({"path": self.path, "language": self.language, "framework": framework})
-            }
-            None => json!({"path": self.path, "language": self.language}),
+        let mut state = self.plain_state();
+        if let Some(framework) = &self.framework {
+            state["framework"] = json!(framework);
         }
+        state
     }
 
     pub(super) fn request(
@@ -84,7 +87,10 @@ pub(super) fn request(
 ) -> (Value, Asked) {
     let (mut questions, asked) = questions.finish();
     if state["file"]["framework"].is_string() {
-        point_to_framework(&mut questions);
+        point_to(&mut questions, FRAMEWORK_NOTE);
+    }
+    if state["file"]["notation"].is_string() {
+        point_to(&mut questions, NOTATION_NOTE);
     }
     let sources: Vec<_> = sources
         .iter()
@@ -99,18 +105,25 @@ pub(super) fn request(
     (request, asked)
 }
 
-/// What a note adds when the state names the file's framework role: stated
-/// only in the state, a client component's role did not clear its browser
-/// requests, since the questions never pointed at it.
+/// What a note adds when the state names the file's framework role.
 const FRAMEWORK_NOTE: &str =
     "`file.framework` states who calls this file's code and where it runs.";
 
-fn point_to_framework(questions: &mut serde_json::Map<String, Value>) {
+/// Bend 2's notation, sent beside its files' code: a model may know Bend 1,
+/// a different language with the same extension, or no Bend at all.
+const BEND_NOTATION: &str = "Bend 2 (bendlang/bend 2.0.x), not Bend 1: a pure, affine, dependently typed language. `def f(x: A, +y: B, -T: Type) -> R:` defines a function: `+y` may be used more than once, `-T` is erased (seen by types and proofs only), `~g` is a template argument inlined at compile time, and `@unsafe` skips the termination check. `match x:` with `case K{a, b}:` is the only branching and recursion replaces loops. `law name:` states a claim (`for x: A` is for every x, `exs y: B` asks for a witness, `where P` adds a hypothesis, `{a == b : T}` is an equality) that a `def` of the same name proves; a law no def fills declares a signature or a primitive. In proofs `{==}` is reflexivity, `%e : P` rewrites with the equality `e`, and `?name` or `?TODO` leaves a goal open. `(a + b : U32)` computes at type U32, `3n` is a Nat, `1n+p` matches a successor, `h <> t` builds a list and `++` joins strings. `do IO<T>:` sequences effects: `x : T <- m` binds a result and `return v` ends the block. A test file ends in `#|` lines, the output its run must print.";
+
+const NOTATION_NOTE: &str = "`file.notation` explains the language's notation.";
+
+/// Point every question at a fact the state holds beside the file's code:
+/// stated only in the state, a client component's role did not clear its
+/// browser requests, since the questions never pointed at it.
+fn point_to(questions: &mut serde_json::Map<String, Value>, fact: &str) {
     for body in questions.values_mut() {
         let instructions = &mut body["instructions"];
         let note = match instructions["note"].as_str() {
-            Some(note) => format!("{FRAMEWORK_NOTE} {note}"),
-            None => FRAMEWORK_NOTE.to_string(),
+            Some(note) => format!("{fact} {note}"),
+            None => fact.to_string(),
         };
         instructions["note"] = Value::String(note);
     }

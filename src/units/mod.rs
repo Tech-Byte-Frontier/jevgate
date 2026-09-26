@@ -17,6 +17,7 @@ pub mod grouping;
 mod handlers;
 mod hardcoded;
 mod instructions;
+mod laws;
 mod nextjs;
 mod outcome;
 pub(crate) mod outline;
@@ -236,6 +237,8 @@ pub enum Detail {
     Access(Access),
     /// A workflow job and the expressions its `run` scripts hold.
     Job { expressions: Vec<String> },
+    /// A Bend 2 claim with the comment above it.
+    Law,
     Test {
         /// What its assertions read, asked with the code under test after its
         /// first answer says it asserts internal details.

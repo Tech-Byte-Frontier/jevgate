@@ -34,6 +34,9 @@ const LITERAL_KINDS: &[&str] = &[
     "verbatim_string_literal",
     "interpolated_string_expression",
     "real_literal",
+    // Bend 2: `256n` and `'c'`.
+    "natural",
+    "char",
 ];
 
 /// Syntax whose literals are not program values: documentation, attributes,
@@ -132,23 +135,56 @@ fn capacity_hint(node: Node<'_>, source: &str) -> bool {
 /// A Java method whose whole body returns one number, as in
 /// `int cost() { return 7; }`: the method's name names the value. A returned
 /// string stays a candidate, since it may be an address or other setting.
+/// Bend 2 names its constants the same way (`bend_constant`).
 pub fn returns_constant(node: Node<'_>) -> bool {
-    node.kind() == "method_declaration"
+    bend_constant(node)
+        || node.kind() == "method_declaration"
+            && node
+                .child_by_field_name("body")
+                .filter(|body| body.named_child_count() == 1)
+                .and_then(|body| body.named_child(0))
+                .filter(|statement| statement.kind() == "return_statement")
+                .and_then(|statement| statement.named_child(0))
+                .is_some_and(|value| {
+                    let value = if value.kind() == "unary_expression" {
+                        value.child_by_field_name("operand").unwrap_or(value)
+                    } else {
+                        value
+                    };
+                    value.kind().ends_with("integer_literal")
+                        || value.kind().ends_with("floating_point_literal")
+                })
+}
+
+/// A Bend 2 def without parameters whose whole body is one number, as in
+/// `def size.big() -> Nat: 15n`, `def limit() -> U32: {11730 : U32}` or
+/// `def keys() -> Nat: U32.to_nat(16384)`: Bend has no other constants,
+/// and the def's name names the value. On the Bend repository's benchmarks,
+/// 10 of 60 hardcoded-value considers were such defs.
+fn bend_constant(node: Node<'_>) -> bool {
+    fn fixed(node: Node<'_>) -> bool {
+        match node.kind() {
+            "integer" | "natural" | "float" => true,
+            "annotation" => node.child_by_field_name("value").is_some_and(fixed),
+            "parenthesized_expression" => node.named_child(0).is_some_and(fixed),
+            "call" => node.child_by_field_name("arguments").is_some_and(|args| {
+                let mut cursor = args.walk();
+                let all = args.named_children(&mut cursor).all(fixed);
+                all && args.named_child_count() > 0
+            }),
+            _ => false,
+        }
+    }
+    node.kind() == "function_definition"
+        && node.child_by_field_name("return_type").is_some()
+        && node
+            .child_by_field_name("parameters")
+            .is_some_and(|p| p.named_child_count() == 0)
         && node
             .child_by_field_name("body")
             .filter(|body| body.named_child_count() == 1)
             .and_then(|body| body.named_child(0))
-            .filter(|statement| statement.kind() == "return_statement")
-            .and_then(|statement| statement.named_child(0))
-            .is_some_and(|value| {
-                let value = if value.kind() == "unary_expression" {
-                    value.child_by_field_name("operand").unwrap_or(value)
-                } else {
-                    value
-                };
-                value.kind().ends_with("integer_literal")
-                    || value.kind().ends_with("floating_point_literal")
-            })
+            .is_some_and(fixed)
 }
 
 /// A Python docstring: a string that is the first statement of a body or module.
@@ -178,6 +214,7 @@ fn eligible(kind: &str, value: &str) -> bool {
             | "binary_integer_literal"
             | "decimal_floating_point_literal"
             | "hex_floating_point_literal"
+            | "natural"
     ) {
         let digits = value.trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '_');
         return !matches!(digits, "0" | "1" | "2" | "0.0" | "1.0" | "2.0");

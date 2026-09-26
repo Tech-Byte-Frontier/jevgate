@@ -5,7 +5,7 @@ use crate::{
     analysis::{
         imports::Links,
         test_map::{self, TestCase},
-        units::{FileUnits, Unit},
+        units::{FileUnits, Role, Unit},
     },
     catalog,
     file_kind::View,
@@ -13,7 +13,7 @@ use crate::{
     options::CheckArgs,
     token_budget::TokenBudget,
     units::{
-        FileContext, FilePlan, Planned, comments, duplicates, functions, hardcoded, outline,
+        FileContext, FilePlan, Planned, comments, duplicates, functions, hardcoded, laws, outline,
         spacetimedb, test_units,
     },
 };
@@ -90,6 +90,12 @@ pub(super) fn plan_file(
             requests,
         );
     }
+    if shared.enabled(catalog::LAWS)
+        && view.application
+        && crate::analysis::bend::file(context.path)
+    {
+        plan_laws(scope, shared, &context, &lines, &mut file, requests);
+    }
     if view.tests && args.include_tests {
         let table = parameterizable(input);
         plan_tests(
@@ -159,6 +165,9 @@ fn plan_outline(
     requests: &mut Vec<Planned>,
 ) {
     let owner = context.owner;
+    if crate::analysis::bend::law_file(context.path) {
+        return;
+    }
     if view.application {
         let units = &scope.units[&owner].units;
         let members: Vec<usize> = (0..units.len())
@@ -192,10 +201,12 @@ fn plan_values(
 ) {
     file.rules.insert(catalog::HARDCODED_VALUES, 0);
     let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
+    // A Bend 2 proof's literals state its property (`1n+p`, `{Nat.add(x,
+    // 0n) == x : Nat}`), and a type-level def's are part of a type.
     let units: Vec<&Unit> = parsed
         .units
         .iter()
-        .filter(|u| u.callable() && outside_tests(u.line))
+        .filter(|u| u.callable() && u.role == Role::Code && outside_tests(u.line))
         .collect();
     let constants: Vec<_> = parsed
         .constants
@@ -204,6 +215,44 @@ fn plan_values(
         .cloned()
         .collect();
     hardcoded::plan(context, &units, &constants, file, requests);
+}
+
+/// The claims of a Bend 2 file outside tests, with the defs they name: the
+/// file's own and those of the files it imports.
+fn plan_laws(
+    scope: &Scope<'_>,
+    shared: &Shared<'_>,
+    context: &FileContext<'_>,
+    lines: &[Range<usize>],
+    file: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
+    let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
+    let units: Vec<Unit> = scope.units[&context.owner]
+        .units
+        .iter()
+        .filter(|u| outside_tests(u.line))
+        .cloned()
+        .collect();
+    let defs: Vec<laws::Named<'_>> = shared
+        .links
+        .reachable_from(context.owner)
+        .iter()
+        .filter_map(|owner| {
+            let source = scope.inputs[*owner].source.as_deref()?;
+            Some(
+                scope
+                    .units
+                    .get(owner)?
+                    .units
+                    .iter()
+                    .map(move |unit| laws::Named { unit, source }),
+            )
+        })
+        .flatten()
+        .filter(|named| named.unit.callable())
+        .collect();
+    laws::plan(context, &units, &shared.propositions, &defs, file, requests);
 }
 
 /// Comments outside tests.

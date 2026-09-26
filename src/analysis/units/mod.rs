@@ -5,7 +5,7 @@ mod facts;
 mod import_names;
 mod ruby_definitions;
 
-use super::{is_comment, line_of, summary, text};
+use super::{bend, is_comment, line_of, summary, text};
 use anyhow::Result;
 use callbacks::{callback, csharp_callbacks, registered_callbacks};
 use facts::Facts;
@@ -22,6 +22,22 @@ pub enum Kind {
     Function,
     Method,
     Type,
+    /// A Bend 2 law: a claim, a signature or a postulate, with the calls of
+    /// its statement, which name the functions it is about.
+    Law,
+}
+
+/// What a callable unit is to the rules that judge only running code.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Role {
+    /// Code that runs: every unit outside Bend 2, and most Bend 2 defs.
+    #[default]
+    Code,
+    /// A Bend 2 proof of a law or lemma: its literals and calls state a
+    /// property, and it never runs outside the checker.
+    Proof,
+    /// A Bend 2 def that computes a type (`-> Type`), such as a proposition.
+    TypeLevel,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +78,15 @@ pub struct Unit {
     pub routes: Vec<super::routes::Route>,
     /// Type, field and imported names this unit mentions, including its own name.
     pub refs: BTreeSet<String>,
+    pub role: Role,
+    /// A Bend 2 def that performs effects: it returns `IO`, runs a `do IO`
+    /// block or imports its host code.
+    pub effects: bool,
+    /// A Bend 2 def that joins text with `++`, as a request, query or
+    /// markup is built before an effect sends it.
+    pub joins_text: bool,
+    /// What a Bend 2 law states, which tells a claim from a signature.
+    pub statement: Option<bend::Statement>,
     /// Plain identifiers, used only while parsing to find functions passed by name.
     mentions: BTreeSet<String>,
 }
@@ -71,8 +96,17 @@ impl Unit {
         &source[self.span.clone()]
     }
 
+    /// Code whose values can reach another program, a log or a user: every
+    /// callable outside Bend 2, and a Bend 2 def that runs and performs
+    /// effects or builds text. Bend's other defs are pure: nothing reaches
+    /// them from outside the program but through their callers, and they
+    /// send, store and log nothing.
+    pub fn reaches_out(&self, bend: bool) -> bool {
+        self.callable() && (!bend || self.role == Role::Code && (self.effects || self.joins_text))
+    }
+
     pub fn callable(&self) -> bool {
-        self.kind != Kind::Type
+        !matches!(self.kind, Kind::Type | Kind::Law)
     }
 
     pub fn too_small(&self) -> bool {
@@ -115,6 +149,20 @@ pub struct FileUnits {
     /// In a server template, the code it runs while rendering that reads
     /// client data (`template_code`).
     pub template_code: super::sites::Setup,
+    /// In Bend 2 code, the names that tell its proofs apart.
+    bend: Option<BendNames>,
+}
+
+/// A Bend 2 file's claims (laws a proof must hold), the laws that give a
+/// def an `IO` type (`law main: IO(Unit)` above `def main():`) and import
+/// aliases, and whether it is a `PROOF.bend`, to tell its proofs from its
+/// code and its effects from pure code.
+#[derive(Clone, Debug, Default)]
+struct BendNames {
+    claims: Vec<String>,
+    effects: Vec<String>,
+    aliases: Vec<String>,
+    proofs: bool,
 }
 
 /// Units of a supported language. Unsupported languages return an unparsed,
@@ -127,9 +175,13 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     let mut file = FileUnits {
         parsed: true,
         django: settings || super::django::imports_django(path, tree.root_node(), source),
+        bend: bend::file(path).then(|| bend_names(path, tree.root_node(), source)),
         ..Default::default()
     };
     walk(tree.root_node(), source, "", &mut file);
+    if let Some(names) = &file.bend {
+        unaliased_calls(&mut file.units, &names.aliases);
+    }
     if file.django {
         file.routes = super::django::routes(tree.root_node(), source);
         if !settings {
@@ -167,6 +219,51 @@ fn setup_of(
     }
 }
 
+/// A Bend 2 file's claims and aliases. A law is a claim here when its
+/// statement holds an equality or asks for a witness, or applies a def of
+/// this file that computes a type, such as `Sorted(sort(xs))`.
+fn bend_names(path: &Path, root: Node<'_>, source: &str) -> BendNames {
+    let mut cursor = root.walk();
+    let top: Vec<Node<'_>> = root.named_children(&mut cursor).collect();
+    let propositions: BTreeSet<String> = top
+        .iter()
+        .filter(|n| n.kind() == "function_definition" && bend::type_level(**n))
+        .map(|n| name_of(*n, source))
+        .collect();
+    let claims = top
+        .iter()
+        .filter(|n| bend::statement(**n, source).is_some_and(|s| s.claim(&propositions)))
+        .map(|n| name_of(*n, source))
+        .collect();
+    let effects = top
+        .iter()
+        .filter(|n| bend::statement(**n, source).is_some_and(|s| s.head.as_deref() == Some("IO")))
+        .map(|n| name_of(*n, source))
+        .collect();
+    BendNames {
+        claims,
+        effects,
+        aliases: bend::aliases(root, source),
+        proofs: path.file_name().is_some_and(|n| n == "PROOF.bend"),
+    }
+}
+
+/// A Bend 2 call through an import alias, `Sort.sort(xs)`, also calls the
+/// def `sort` that the aliased file declares.
+fn unaliased_calls(units: &mut [Unit], aliases: &[String]) {
+    for unit in units {
+        let unaliased: Vec<String> = unit
+            .calls
+            .iter()
+            .filter_map(|call| {
+                let (alias, name) = call.split_once('.')?;
+                aliases.iter().any(|a| a == alias).then(|| name.to_string())
+            })
+            .collect();
+        unit.calls.extend(unaliased);
+    }
+}
+
 /// A function passed by name, such as `map(parse)`, is used like a call.
 fn calls_by_name(units: &mut [Unit]) {
     let names: BTreeSet<String> = units.iter().map(|u| u.short_name.clone()).collect();
@@ -196,6 +293,20 @@ fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
         return;
     }
     match node.kind() {
+        // Bend 2: `import ./main.bend as Sort` names its module `Sort`.
+        "import_declaration" if file.bend.is_some() => {
+            if let Some(alias) = node.child_by_field_name("alias") {
+                file.imports.insert(text(alias, source).to_string());
+            }
+        }
+        "type_declaration" if file.bend.is_some() => {
+            let name = name_of(node, source);
+            push(Definition::whole(node), &name, "", Kind::Type, source, file);
+        }
+        "law_declaration" => {
+            let name = name_of(node, source);
+            push(Definition::whole(node), &name, "", Kind::Law, source, file);
+        }
         "use_declaration" | "import_statement" | "import_from_statement" => {
             imports(node, source, &mut file.imports);
         }
@@ -691,6 +802,14 @@ fn push(
         refs.insert(owner.to_string());
     }
     let equality = equality_override(node, short_name, source);
+    let (role, effects, joins_text) = match &file.bend {
+        Some(names) if node.kind() == "function_definition" => (
+            bend_role(node, names, source),
+            bend::effectful(node, source) || names.effects.iter().any(|n| n == short_name),
+            bend::joins_text(node, source),
+        ),
+        _ => (Role::Code, false, false),
+    };
     file.units.push(Unit {
         name: if owner.is_empty() {
             short_name.to_string()
@@ -722,8 +841,22 @@ fn push(
         equality,
         routes: super::routes::spring(node, source),
         refs,
+        role,
+        effects,
+        joins_text,
+        statement: bend::statement(node, source),
         mentions: facts.idents,
     });
+}
+
+fn bend_role(definition: Node<'_>, names: &BendNames, source: &str) -> Role {
+    if names.proofs || bend::proof(definition, &names.claims, &names.aliases, source) {
+        Role::Proof
+    } else if bend::type_level(definition) {
+        Role::TypeLevel
+    } else {
+        Role::Code
+    }
 }
 
 /// A Java method that overrides `Object.equals` or `Object.hashCode`.

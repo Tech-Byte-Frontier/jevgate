@@ -985,6 +985,7 @@ dependencies = [
  "signal-hook",
  "toml",
  "tree-sitter",
+ "tree-sitter-bend2",
  "tree-sitter-c-sharp",
  "tree-sitter-go",
  "tree-sitter-java",
@@ -1813,6 +1814,16 @@ dependencies = [
  "regex",
  "serde_json",
  "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-bend2"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ddf4353a57c0beb3184db2d742e5cb367438f26e7fb733d33a7c657b9ea8910"
+dependencies = [
+ "cc",
  "tree-sitter-language",
 ]
 
