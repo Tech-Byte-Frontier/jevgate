@@ -17,10 +17,7 @@ fn two_concerns() -> String {
 
 #[test]
 fn file_organization_review_without_a_module_choice_is_a_file_wide_finding() {
-    let project = Project::new();
-    project.write("lib.rs", &two_concerns());
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
+    let (project, options) = organized("lib.rs", &two_concerns());
     let report = run(&project, &options, &mut scripted(2));
     let file = &report.files[0];
     assert_eq!(file.status, Status::Review);
@@ -60,8 +57,7 @@ fn an_uncertain_outline_is_rechecked_once_with_the_application_source() {
 
 #[test]
 fn an_undecided_recheck_is_decided_by_the_kind_of_file() {
-    let project = Project::new();
-    project.write("lib.rs", &two_concerns());
+    let (project, mut options) = organized("lib.rs", &two_concerns());
     let (_, report) = run_rechecked(&project, catalog::FILE_ORGANIZATION, 3);
     assert_eq!(
         report.files[0].dimensions["file_organization"].status,
@@ -74,8 +70,6 @@ fn an_undecided_recheck_is_decided_by_the_kind_of_file() {
         (1, 1),
         "the kind is its own request"
     );
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
     options.refresh = true;
     let mut eval = scripted(3);
     let mut probabilities: serde_json::Map<String, Value> =
@@ -146,11 +140,8 @@ fn outlines_carry_member_and_file_sizes() {
 
 #[test]
 fn a_split_of_a_short_file_is_a_note() {
-    let project = Project::new();
     let short: String = (0..14).map(|i| function(&format!("warm{i}"))).collect();
-    project.write("lib.rs", &short);
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
+    let (project, options) = organized("lib.rs", &short);
     let report = run(&project, &options, &mut scripted(2));
     assert_eq!(
         report.files[0].findings[0].strength,
@@ -161,10 +152,7 @@ fn a_split_of_a_short_file_is_a_note() {
 
 #[test]
 fn a_group_that_holds_most_of_the_file_is_not_named() {
-    let project = Project::new();
-    project.write("tests/app.test.ts", &two_suites());
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
+    let (project, mut options) = organized("tests/app.test.ts", &two_suites());
     let named = run(&project, &options, &mut moving_g1());
     assert_eq!(named.files[0].findings[0].strength, Strength::Consider);
     // Ten of twelve tests in the first suite: moving it would move the file.
@@ -176,6 +164,15 @@ fn a_group_that_holds_most_of_the_file_is_not_named() {
         Strength::Note,
         "a consider that names no group is a note"
     );
+}
+
+/// A project holding `source` at `path`, checked for file organization only.
+fn organized(path: &str, source: &str) -> (Project, CheckArgs) {
+    let project = Project::new();
+    project.write(path, source);
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    (project, options)
 }
 
 /// Answers at the top level that pick G1 as the group to move.
@@ -209,10 +206,7 @@ fn suites(parse: usize, render: usize) -> String {
 
 #[test]
 fn test_files_are_outlined_by_suite_without_include_tests() {
-    let project = Project::new();
-    project.write("tests/app.test.ts", &two_suites());
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
+    let (project, mut options) = organized("tests/app.test.ts", &two_suites());
     let report = run(&project, &options, &mut moving_g1());
     let file = &report.files[0];
     assert_eq!(file.classification.as_ref().unwrap().kind, "tests");
@@ -266,15 +260,11 @@ fn test_files_are_outlined_by_suite_without_include_tests() {
 
 #[test]
 fn a_java_test_outline_names_each_subject_by_the_class_that_owns_it() {
-    let project = Project::new();
-    project.write(
+    let (project, options) = organized(
         "src/main/java/app/StringUtil.java",
         "package app;\n\nclass StringUtil {\n\tstatic boolean isBlank(String s) {\n\t\treturn s.isBlank();\n\t}\n\n\tstatic String join(String a, String b) {\n\t\treturn a + b;\n\t}\n}\n",
     );
-    project.write(
-        "src/main/java/app/Paths.java",
-        "package app;\n\nclass Paths {\n\tstatic String join(String a, String b) {\n\t\treturn a + \"/\" + b;\n\t}\n}\n",
-    );
+    project.write( "src/main/java/app/Paths.java", "package app;\n\nclass Paths {\n\tstatic String join(String a, String b) {\n\t\treturn a + \"/\" + b;\n\t}\n}\n", );
     let mut tests = String::from("package app;\n\nclass StringUtilTest {\n");
     for i in 0..12 {
         let call = if i % 2 == 0 {
@@ -282,14 +272,10 @@ fn a_java_test_outline_names_each_subject_by_the_class_that_owns_it() {
         } else {
             "StringUtil.join(\"a\", \"b\")"
         };
-        tests.push_str(&format!(
-            "\t@Test\n\tvoid case{i}() {{\n\t\tObject value = {call};\n\t\tassertNotNull(value);\n\t\tassertEquals(value, value);\n\t\tassertTrue(value != null);\n\t\tassertFalse(value == null);\n\t\tassertSame(value, value);\n\t}}\n\n"
-        ));
+        tests.push_str(&format!( "\t@Test\n\tvoid case{i}() {{\n\t\tObject value = {call};\n\t\tassertNotNull(value);\n\t\tassertEquals(value, value);\n\t\tassertTrue(value != null);\n\t\tassertFalse(value == null);\n\t\tassertSame(value, value);\n\t}}\n\n" ));
     }
     tests.push_str("}\n");
     project.write("src/test/java/app/StringUtilTest.java", &tests);
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
     let (_, plan) = planned(&project, &options);
     let outline = plan
         .requests
@@ -311,13 +297,10 @@ fn a_java_test_outline_names_each_subject_by_the_class_that_owns_it() {
 
 #[test]
 fn short_files_are_too_small_to_split_and_never_clear() {
-    let project = Project::new();
-    project.write(
+    let (project, options) = organized(
         "lib.rs",
         &format!("{}{}", function("warm"), function("render")),
     );
-    let mut options = args();
-    only(&mut options, catalog::FILE_ORGANIZATION);
     let mut mock = Mock::default();
     let report = run(&project, &options, &mut mock);
     let dimension = &report.files[0].dimensions["file_organization"];
