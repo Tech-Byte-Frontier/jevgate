@@ -509,21 +509,7 @@ impl<'p> Tally<'p> {
             return;
         }
         let (outcome, answers) = resolved(unit, judgments);
-        let outcome = if unnamed_value(unit, judgments) {
-            lowered(lowered(outcome))
-        } else if single_use_value(unit, judgments) {
-            at_most_note(outcome)
-        } else if named_value_only(unit, judgments) {
-            at_most_consider(outcome)
-        } else if test_path_security(unit) || outside_function(unit, judgments) {
-            lowered(outcome)
-        } else if short_outline(unit) || small_section(unit) {
-            at_most_note(outcome)
-        } else if unnamed_outline(unit, judgments) || few.contains(unit.id.as_str()) {
-            lowered(outcome)
-        } else {
-            outcome
-        };
+        let outcome = capped(unit, judgments, few, outcome);
         // Two tests that check one behavior with different inputs are a note
         // on their own; three or more linked by such pairs are grouped into a
         // consider below. Labeled by hand on just, express, gson and
@@ -1060,6 +1046,33 @@ fn finding(
         baselined: false,
         suppressed: None,
     }
+}
+
+/// A unit's outcome under the caps its rule and facts put on it: an
+/// unnamed or single-use value, a value that only needs a name, security
+/// code at a test path or resting on what lies outside the function, a
+/// short outline or section, an outline naming no group, and comments too
+/// few to act on.
+fn capped(
+    unit: &UnitPlan,
+    judgments: &[Judgment],
+    few: &BTreeSet<&str>,
+    outcome: Outcome,
+) -> Outcome {
+    if unnamed_value(unit, judgments) {
+        return lowered(lowered(outcome));
+    }
+    if single_use_value(unit, judgments) || short_outline(unit) || small_section(unit) {
+        return at_most_note(outcome);
+    }
+    if named_value_only(unit, judgments) {
+        return at_most_consider(outcome);
+    }
+    let lower = test_path_security(unit)
+        || outside_function(unit, judgments)
+        || unnamed_outline(unit, judgments)
+        || few.contains(unit.id.as_str());
+    if lower { lowered(outcome) } else { outcome }
 }
 
 /// A function's hardcoded-value review or consider whose value was not
