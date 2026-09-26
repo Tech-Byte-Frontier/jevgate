@@ -1091,6 +1091,7 @@ fn capped(
     }
     if single_use_value(unit, judgments)
         || readable_value(unit, judgments)
+        || same_everywhere(unit, judgments)
         || short_outline(unit)
         || small_section(unit)
     {
@@ -1106,9 +1107,11 @@ fn capped(
     if lower { lowered(outcome) } else { outcome }
 }
 
-/// The follow-up of each hardcoded-value consider that rests on a value's
-/// name, whose value the locate named and its file writes again, not yet
-/// asked what that value is.
+/// The kind follow-up of each hardcoded-value finding not yet asked one:
+/// what the value is, for a consider that rests on a value's name whose
+/// file writes the value again; where the value or constant would differ,
+/// for a finding that rests on the environment. Both need the value or
+/// constant the locate named.
 pub fn unkinded_values(
     plan: &FilePlan,
     judgments: &[Judgment],
@@ -1117,24 +1120,34 @@ pub fn unkinded_values(
         .iter()
         .filter(|u| u.presence == Presence::Judged)
         .filter_map(|u| {
-            let Detail::Values {
-                locate: Some(locate),
-                repeated,
-                ..
-            } = &u.detail
-            else {
-                return None;
-            };
-            if answers(judgments, &u.id, Pass::Locate).contains_key("value_kind")
-                || !named_value_only(u, judgments)
-            {
+            let asked = answers(judgments, &u.id, Pass::Locate);
+            if asked.contains_key("value_kind") || asked.contains_key("environment_kind") {
                 return None;
             }
-            let option = located_option(u, judgments, ("value", 'v'))?;
-            if repeated.get(option) != Some(&true) {
-                return None;
+            match &u.detail {
+                Detail::Values {
+                    locate: Some(locate),
+                    repeated,
+                    ..
+                } => {
+                    let option = located_option(u, judgments, ("value", 'v'))?;
+                    if named_value_only(u, judgments) && repeated.get(option) == Some(&true) {
+                        super::hardcoded::value_kind(locate, option, &u.id)
+                    } else if environment_only(u, judgments) {
+                        super::hardcoded::environment_kind(locate, option, &u.id)
+                    } else {
+                        None
+                    }
+                }
+                Detail::Constants {
+                    locate: Some(locate),
+                    ..
+                } if environment_only(u, judgments) => {
+                    let option = located_constant(u, judgments)?;
+                    super::hardcoded::environment_kind(locate, option, &u.id)
+                }
+                _ => None,
             }
-            super::hardcoded::value_kind(locate, option, &u.id)
         })
         .collect()
 }
@@ -1159,6 +1172,25 @@ fn readable_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         })
 }
 
+/// A finding that rests on the environment whose value or constant, asked
+/// where it would differ, needs no configuration at the review threshold:
+/// the same in every copy of the program on purpose, a fallback used only
+/// when configuration gives none, or code no deployment runs. Its finding
+/// is a note. Labeled by hand, that took 17 of 36 wrong reviews and
+/// considers and 2 of 17 right ones (a frontend's API host, edited in code
+/// three times, and a template author's domain as a fallback); leaning at
+/// 0.50 would have taken 25 wrong and 6 right.
+fn same_everywhere(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    environment_only(unit, judgments)
+        && choice_mass(
+            answers(judgments, &unit.id, Pass::Locate)
+                .get("environment_kind")
+                .copied(),
+            &super::questions::SAME_EVERYWHERE,
+        )
+        .is_some_and(|p| crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY))
+}
+
 /// A function's hardcoded-value review or consider whose value was not
 /// named: the locate Choice picked none clearly, or there were too many
 /// values to offer. Its finding is a note, since a reader cannot tell what
@@ -1178,7 +1210,22 @@ fn unnamed_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
 /// wrong ones tuning in game, audio and animation code (a scheduler's
 /// 500 ms, a hash seed, a mix gain, a float epsilon).
 fn named_value_only(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
-    if !matches!(unit.detail, Detail::Values { .. }) {
+    matches!(unit.detail, Detail::Values { .. }) && rests_only_on(unit, judgments, "magic")
+}
+
+/// A hardcoded-value review or consider that rests only on whether a value
+/// changes between environments: a file's constants always do.
+fn environment_only(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    rests_only_on(unit, judgments, "environment")
+}
+
+/// A hardcoded-value review or consider whose raised questions are all
+/// `question`.
+fn rests_only_on(unit: &UnitPlan, judgments: &[Judgment], question: &str) -> bool {
+    if !matches!(
+        unit.detail,
+        Detail::Values { .. } | Detail::Constants { .. }
+    ) {
         return false;
     }
     let (outcome, answers) = resolved(unit, judgments);
@@ -1190,7 +1237,7 @@ fn named_value_only(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         .unwrap_or_default()
         .iter()
         .filter(|(_, o, _)| matches!(o, Outcome::Review(_) | Outcome::Consider(_)))
-        .all(|(question, ..)| *question == "magic")
+        .all(|(raised, ..)| *raised == question)
 }
 
 /// Such a finding about a value its file writes once is a note: labeled by
@@ -1291,6 +1338,8 @@ fn lowered_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<(Strength, &
         "It is written once in its file, so it is a note."
     } else if readable_value(unit, judgments) {
         "It reads for itself where it is used, so it is a note."
+    } else if same_everywhere(unit, judgments) {
+        "It likely stays the same wherever the program runs, or is only a fallback, so it is a note."
     } else if named_value_only(unit, judgments)
         && matches!(resolved(unit, judgments).0, Outcome::Review(_))
     {
