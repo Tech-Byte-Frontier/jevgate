@@ -65,7 +65,7 @@ impl FailOn {
 }
 
 /// A `--fail-on` value: a level for every rule, or `TARGET=LEVEL` for a rule
-/// ID, key or group.
+/// ID, name, key or group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FailOnSpec {
     pub target: Option<String>,
@@ -134,7 +134,7 @@ pub struct CheckArgs {
     /// edit.
     #[arg(long, value_name = "FILE", help_heading = SCOPE)]
     pub config: Option<PathBuf>,
-    /// Select a rule ID, key or group (repeatable) [default: the `default` group]
+    /// Select a rule ID, name, key or group (repeatable) [default: the `default` group]
     ///
     /// Groups: maintainability, tests, security, documentation, default (every
     /// rule on by default) and all. Naming any rule replaces the configured
@@ -142,7 +142,7 @@ pub struct CheckArgs {
     /// need --include-tests. `jevgate rules` lists every rule.
     #[arg(long = "rule", value_name = "RULE", help_heading = RULES)]
     pub rules: Vec<String>,
-    /// Deselect a rule ID, key or group (repeatable); applied after --rule and jevgate.toml
+    /// Deselect a rule ID, name, key or group (repeatable); applied after --rule and jevgate.toml
     #[arg(long = "skip-rule", value_name = "RULE", help_heading = RULES)]
     pub skip_rules: Vec<String>,
     /// What fails the gate: LEVEL for every rule, or TARGET=LEVEL (repeatable) [default: review]

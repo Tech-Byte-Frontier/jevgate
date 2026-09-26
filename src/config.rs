@@ -350,13 +350,14 @@ impl Levels {
     }
 }
 
-/// Rule keys named by rule IDs, keys or groups; an unknown name is an error.
+/// Rule keys named by rule IDs, names, keys or groups; an unknown name is an
+/// error.
 fn expand(names: &[String]) -> Result<Vec<&'static str>> {
     let mut keys = Vec::new();
     for name in names {
         let selected = catalog::select(name).ok_or_else(|| {
             anyhow!(
-                "Unknown rule or group: {name} (groups: {}, {}, {})",
+                "Unknown rule or group: {name}; `jevgate rules` lists the rules (groups: {}, {}, {})",
                 catalog::groups().join(", "),
                 catalog::DEFAULT_GROUP,
                 catalog::ALL_GROUP
@@ -416,6 +417,23 @@ mod tests {
             .collect();
         context.configure(&mut args)?;
         Ok(args)
+    }
+
+    #[test]
+    fn a_rule_is_named_by_its_id_its_name_or_its_key() {
+        for rule in catalog::rules() {
+            let (_, short) = rule.id.rsplit_once('/').unwrap();
+            for name in [rule.id, short, rule.key] {
+                assert_eq!(catalog::select(name).unwrap(), [rule.key], "{name}");
+            }
+        }
+        let args = configured("", &["file-organization", "redundancy"], &[]).unwrap();
+        assert_eq!(
+            args.rules,
+            [catalog::FILE_ORGANIZATION, catalog::TEST_REDUNDANCY]
+        );
+        let error = configured("", &["file-organisation"], &[]).unwrap_err();
+        assert!(error.to_string().contains("`jevgate rules`"), "{error}");
     }
 
     #[test]

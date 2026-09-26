@@ -224,7 +224,7 @@ fn tools() -> Value {
                 "properties": {
                     "base": {"type": "string", "description": "Review only files changed since this Git revision, such as origin/main"},
                     "paths": {"type": "array", "items": {"type": "string"}, "description": "Files or directories to review instead of the discovered source"},
-                    "rules": {"type": "array", "items": {"type": "string"}, "description": "Rule IDs, keys or groups, such as security; replaces the configured selection"},
+                    "rules": {"type": "array", "items": {"type": "string"}, "description": "Rule IDs, names, keys or groups, such as security or file-organization; replaces the configured selection"},
                     "include_tests": {"type": "boolean", "description": "Also judge tests"},
                     "dry_run": {"type": "boolean", "description": "List the files and planned requests without sending anything"},
                     "verbose": {"type": "boolean", "description": "Also show optional notes and per-file detail"},

@@ -47,10 +47,18 @@ pub fn schema() -> Value {
     schema
 }
 
-/// Every rule ID, key and group, and the `default` and `all` groups.
+/// Every rule ID, name, key and group, and the `default` and `all` groups.
 fn rule_names() -> Value {
     let rules = catalog::rules();
-    let mut names: Vec<&str> = rules.iter().flat_map(|r| [r.id, r.key]).collect();
+    let mut names: Vec<&str> = Vec::new();
+    for rule in &rules {
+        let short = rule.id.rsplit_once('/').map_or(rule.id, |(_, short)| short);
+        for name in [rule.id, short, rule.key] {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
     names.extend(catalog::groups());
     names.extend([catalog::DEFAULT_GROUP, catalog::ALL_GROUP]);
     json!(names)

@@ -149,7 +149,7 @@ pub enum BaselineAction {
         reason: Disposition,
         #[arg(required = true, value_name = "TARGET")]
         targets: Vec<String>,
-        /// Only findings of this rule ID, key or group (repeatable)
+        /// Only findings of this rule ID, name, key or group (repeatable)
         #[arg(long = "rule", value_name = "RULE")]
         rules: Vec<String>,
     },

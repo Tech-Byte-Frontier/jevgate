@@ -302,14 +302,27 @@ pub fn groups() -> Vec<&'static str> {
     groups
 }
 
-/// The rule keys a rule ID, key or group names; `None` when it names nothing.
+/// Whether `name` is the rule's ID (`maintainability/file-organization`),
+/// its name (`file-organization`, the ID after its group) or its key
+/// (`file_organization`).
+pub fn names(rule: &Rule, name: &str) -> bool {
+    name == rule.key
+        || name == rule.id
+        || rule
+            .id
+            .rsplit_once('/')
+            .is_some_and(|(_, short)| short == name)
+}
+
+/// The rule keys a rule ID, name, key or group names; `None` when it names
+/// nothing.
 pub fn select(name: &str) -> Option<Vec<&'static str>> {
     let selected: Vec<&str> = rules()
         .into_iter()
         .filter(|r| match name {
             ALL_GROUP => true,
             DEFAULT_GROUP => r.default_enabled,
-            _ => r.key == name || r.id == name || r.group == name,
+            _ => names(r, name) || r.group == name,
         })
         .map(|r| r.key)
         .collect();
@@ -319,7 +332,7 @@ pub fn select(name: &str) -> Option<Vec<&'static str>> {
 /// How specifically `name` addresses `rule`: 3 for the rule itself, 2 for its
 /// group, 1 for `default` or `all`, 0 when it does not address it.
 pub fn specificity(name: &str, rule: &Rule) -> u8 {
-    if name == rule.key || name == rule.id {
+    if names(rule, name) {
         3
     } else if name == rule.group {
         2
@@ -330,9 +343,9 @@ pub fn specificity(name: &str, rule: &Rule) -> u8 {
     }
 }
 
-/// A rule key or its catalog ID.
+/// A rule by its key, catalog ID or name.
 pub fn find(name: &str) -> Option<Rule> {
-    rules().into_iter().find(|r| r.key == name || r.id == name)
+    rules().into_iter().find(|r| names(r, name))
 }
 
 pub fn id(key: &str) -> &'static str {
