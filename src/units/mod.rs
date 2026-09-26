@@ -11,6 +11,7 @@ mod duplicates;
 mod evidence;
 mod follow_ups;
 mod functions;
+mod graphql;
 pub mod grouping;
 mod handlers;
 mod hardcoded;
