@@ -869,6 +869,15 @@ fn an_error_trace_shows_the_errors_the_called_functions_raise() {
         trace["questions"]["exception_to_client"],
         questions::EXCEPTION_TO_CLIENT_FROM_CALLEES.body("function.source")
     );
+    let names_callees = |trace: &Value| {
+        trace["questions"]["messages"]
+            .to_string()
+            .contains("errors_created_by_functions_it_calls")
+    };
+    assert!(
+        names_callees(trace),
+        "passing on a callee's own error text is the program's own"
+    );
     let alone = project_with(&[("app/api.py", HANDLER)], &[catalog::SENSITIVE_DATA]);
     let (_, plan) = planned(&alone.0, &alone.1);
     let Detail::Security {
@@ -889,6 +898,7 @@ fn an_error_trace_shows_the_errors_the_called_functions_raise() {
             .contains("errors_created_by_functions_it_calls"),
         "without callee errors the check is asked as before"
     );
+    assert!(trace["questions"].get("messages").is_some() && !names_callees(trace));
 }
 
 const ROUTE: &str = "export async function loadThing(c: Context) {\n  const { data, error } = await db.from('things').select('*').eq('id', c.req.param('id'))\n  if (error) throw new InternalError(`Query failed: ${error.message}`, error)\n  if (!data) throw new NotFoundError('Thing not found')\n  return c.json(data)\n}\n";

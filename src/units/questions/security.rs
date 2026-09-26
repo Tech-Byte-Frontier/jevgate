@@ -428,15 +428,29 @@ pub fn security_own_messages(code: &str) -> Value {
 /// Which created error's message carries another error's text. Asking per
 /// message decided error details the response path left open: on MyOasis
 /// units whose handler is in another file, 21 of 25 chose `none` decisively
-/// while real leaks (`error.message` in the message) were picked.
-pub fn security_message_origin(ids: &[String]) -> Value {
+/// while real leaks (`error.message` in the message) were picked. With the
+/// errors its callees create in view (`callees`), passing their text on is
+/// the program's own: a FastAPI route that returns the `LookupError` its
+/// service raises with its own not-found text was picked at 0.93.
+pub fn security_message_origin(ids: &[String], callees: bool) -> Value {
+    let (callee_note, none) = if callees {
+        (
+            " `errors_created_by_functions_it_calls` lists errors the functions it calls raise with the program's own text: passing on the text of an error caught there is the program's own when only those errors can be caught.",
+            "Every message is text the program writes itself, or passes on the text of errors from `errors_created_by_functions_it_calls`; an error may only be attached as a cause.",
+        )
+    } else {
+        (
+            "",
+            "Every message is text the program writes itself; an error may only be attached as a cause.",
+        )
+    };
     choose_id(
         "Which entry in `messages` puts the text of an error the program did not create, such as a database or library error message, into the message?",
         format!(
-            "Options are the `id` values in `messages`, each the message argument of an error the function creates. {EVIDENCE}"
+            "Options are the `id` values in `messages`, each the message argument of an error the function creates.{callee_note} {EVIDENCE}"
         ),
         ids,
-        "Every message is text the program writes itself; an error may only be attached as a cause.",
+        none,
     )
 }
 

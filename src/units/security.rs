@@ -555,14 +555,18 @@ fn trace(
         .collect();
     if rule == SENSITIVE_DATA && messages.is_empty() {
         ask("own_messages", questions::security_own_messages(&code));
-    } else if rule == SENSITIVE_DATA {
-        let ids: Vec<String> = (0..messages.len()).map(|i| format!("m{i}")).collect();
-        ask("messages", questions::security_message_origin(&ids));
     }
     // With the errors its callees create in view, the exception check asks
     // whose text a response carries, not who raised it.
     let from_callees =
         rule == SENSITIVE_DATA && !subject.django && !subject.callee_errors.is_empty();
+    if rule == SENSITIVE_DATA && !messages.is_empty() {
+        let ids: Vec<String> = (0..messages.len()).map(|i| format!("m{i}")).collect();
+        ask(
+            "messages",
+            questions::security_message_origin(&ids, from_callees),
+        );
+    }
     let xml = questions::parses_xml(file.source, &subject.source);
     for check in asked_checks(rule, file.language, subject.django, &subject.source, xml) {
         let check = if from_callees && check.id == "exception_to_client" {
