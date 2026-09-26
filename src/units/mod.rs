@@ -94,6 +94,8 @@ pub enum Detail {
         /// A test file's cases rather than application members.
         tests: bool,
         groups: Vec<GroupInfo>,
+        /// How many members the outline lists.
+        members: usize,
         /// What kind of file it is, asked after a recheck that stays undecided.
         kind: Option<(Value, Asked)>,
     },

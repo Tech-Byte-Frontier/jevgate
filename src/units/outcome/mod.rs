@@ -139,6 +139,14 @@ pub(super) fn open(unit: &UnitPlan, answers: &Answers<'_>, outcome: Outcome) -> 
     }
 }
 
+/// A review or consider as a note; other outcomes as they are.
+pub(super) fn at_most_note(outcome: Outcome) -> Outcome {
+    match outcome {
+        Outcome::Review(p) | Outcome::Consider(p) => Outcome::Note(p),
+        other => other,
+    }
+}
+
 /// One level lower: review becomes consider, consider becomes note.
 pub(super) fn lowered(outcome: Outcome) -> Outcome {
     match outcome {

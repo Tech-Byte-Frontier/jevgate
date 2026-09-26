@@ -1,13 +1,15 @@
 //! File organization: outlines of application and test files.
 use super::*;
 
+/// Two concerns of sixteen functions each: 258 lines, long enough that a
+/// split is weighed (shorter files are notes).
 fn two_concerns() -> String {
     let mut source = String::from("struct Cache { entries: Vec<u8> }\n");
-    for i in 0..7 {
+    for i in 0..16 {
         source.push_str(&function(&format!("warm{i}")));
     }
     source.push_str("struct Page { body: String }\n");
-    for i in 0..7 {
+    for i in 0..16 {
         source.push_str(&function(&format!("render{i}")));
     }
     source
@@ -138,19 +140,63 @@ fn outlines_carry_member_and_file_sizes() {
     let mut mock = Mock::default();
     run(&project, &options, &mut mock);
     let state = &mock.requests[0]["state"];
-    assert_eq!(state["file"]["lines"], 16 + 14 * 7);
+    assert_eq!(state["file"]["lines"], 2 + 32 * 8);
     assert_eq!(state["members"][1]["lines"], 8);
 }
 
-/// Two suites of cases, each calling its own subject.
+#[test]
+fn a_split_of_a_short_file_is_a_note() {
+    let project = Project::new();
+    let short: String = (0..14).map(|i| function(&format!("warm{i}"))).collect();
+    project.write("lib.rs", &short);
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    let report = run(&project, &options, &mut scripted(2));
+    assert_eq!(
+        report.files[0].findings[0].strength,
+        Strength::Note,
+        "112 lines read easily whole"
+    );
+}
+
+#[test]
+fn a_group_that_holds_most_of_the_file_is_not_named() {
+    let project = Project::new();
+    project.write("tests/app.test.ts", &two_suites());
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    let mut eval = scripted(2);
+    eval.overrides = vec![("module", choice_of("G1", &["G1", "G2", "none"]))];
+    let named = run(&project, &options, &mut eval);
+    assert_eq!(named.files[0].findings[0].strength, Strength::Consider);
+    // Ten of twelve tests in the first suite: moving it would move the file.
+    project.write("tests/app.test.ts", &suites(10, 2));
+    options.refresh = true;
+    let mut eval = scripted(2);
+    eval.overrides = vec![("module", choice_of("G1", &["G1", "G2", "none"]))];
+    let unnamed = run(&project, &options, &mut eval);
+    assert_eq!(
+        unnamed.files[0].findings[0].strength,
+        Strength::Note,
+        "a consider that names no group is a note"
+    );
+}
+
+/// Two suites of six cases, each calling its own subject.
 fn two_suites() -> String {
+    suites(6, 6)
+}
+
+/// A suite of `parse` cases and one of `render` cases.
+fn suites(parse: usize, render: usize) -> String {
     let mut source =
         String::from("import { parse } from './parse';\nimport { render } from './render';\n\n");
-    for subject in ["parse", "render"] {
+    for (subject, cases) in [("parse", parse), ("render", render)] {
         source.push_str(&format!("describe('{subject}', () => {{\n"));
-        for i in 0..6 {
+        for i in 0..cases {
             source.push_str(&format!(
-                "  it('case {i}', () => {{\n    const value = {subject}({{ id: {i} }});\n    expect(value.id).toBe({i});\n    expect(value).toBeDefined();\n    expect(value).not.toBeNull();\n    expect(typeof value).toBe('object');\n    expect(Object.keys(value)).toContain('id');\n    expect(value).toEqual({{ id: {i} }});\n  }});\n"
+                "  it('case {i}', () => {{\n    const value = {subject}({{ id: {i} }});\n    expect(value.id).toBe({i});\n    expect(value).toBeDefined();\n    expect(value).not.toBeNull();\n    expect(typeof value).toBe('object');\n    expect(Object.keys(value)).toContain('id');\n    expect(value).toEqual({{ id: {i} }});\n{}  }});\n",
+                "    expect(value).toBeTruthy();\n".repeat(12)
             ));
         }
         source.push_str("});\n");

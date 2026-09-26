@@ -167,6 +167,7 @@ fn plan_outline(
         identity: identity(&names),
         detail: Detail::Outline {
             tests,
+            members: listed.len(),
             // A file too long to send whole is asked its kind from the
             // outline alone, so its undecided split is not left open.
             kind: [Some(source.clone()), None]

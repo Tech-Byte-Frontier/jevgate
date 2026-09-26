@@ -31,13 +31,6 @@ pub(in crate::units) fn comment_signals<'a>(
     Some(signals)
 }
 
-fn at_most_note(outcome: Outcome) -> Outcome {
-    match outcome {
-        Outcome::Review(p) | Outcome::Consider(p) => Outcome::Note(p),
-        other => other,
-    }
-}
-
 /// The strongest of a comment's signals, or when they stay undecided, the
 /// kind of comment: the kinds a reader could do without reaching the
 /// threshold raise a consider (a note for documentation that repeats its
