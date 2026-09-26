@@ -146,7 +146,7 @@ const INJECTIONS: [(&str, &str, &str, &str); 12] = [
 ];
 
 /// Weak settings: what the code does, its weakness and remedy.
-const SETTINGS: [(&str, &str, &str, &str); 12] = [
+const SETTINGS: [(&str, &str, &str, &str); 13] = [
     (
         "tls",
         "turns off certificate or signature verification",
@@ -155,8 +155,8 @@ const SETTINGS: [(&str, &str, &str, &str); 12] = [
     ),
     (
         "hash",
-        "hashes passwords with a fast or broken hash",
-        "CWE-916 weak password hash",
+        "keeps passwords as plain text or hashes them with a fast or broken hash",
+        "CWE-256 plaintext password or CWE-916 weak password hash",
         "Hash passwords with Argon2, bcrypt or scrypt",
     ),
     (
@@ -200,6 +200,12 @@ const SETTINGS: [(&str, &str, &str, &str); 12] = [
         "reads a secret from an environment variable the build puts into browser code",
         "CWE-200 secret exposed to browsers",
         "Read the secret from a variable without the public prefix, only in server code, and rotate it",
+    ),
+    (
+        "escape",
+        "turns off the escaping of values written into HTML",
+        "CWE-79 cross-site scripting",
+        "Keep automatic escaping on and mark only values that are already safe HTML as raw",
     ),
     (
         "csrf",

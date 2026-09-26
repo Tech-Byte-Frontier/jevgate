@@ -121,23 +121,23 @@ const WORDING: [Wording; 17] = [
     },
     Wording {
         id: "hash",
-        question: "Does `{code}` hash passwords or derive keys from them with a fast or broken hash, or with few iterations?",
-        yes: "It hashes passwords or derives keys from them with md5, sha1, crypt with a weak salt, a single round of SHA-256 through hash, or hash_pbkdf2 with few iterations.",
-        no: "It uses password_hash and password_verify, or hash_pbkdf2 with many iterations, or it does not handle passwords.",
+        question: "Does `{code}` keep passwords as plain text, or hash them or derive keys from them with a fast or broken hash, or with few iterations?",
+        yes: "It saves passwords, or checks a login against saved passwords, as plain text, or hashes passwords or derives keys from them with md5, sha1, crypt with a weak salt, a single round of SHA-256 through hash, or hash_pbkdf2 with few iterations.",
+        no: "It uses password_hash and password_verify, or hash_pbkdf2 with many iterations; it hands passwords to a framework that hashes them, such as WordPress's wp_hash_password or Laravel's Hash; or it does not handle passwords.",
         no_examples: CALLED,
     },
     Wording {
         id: "random",
         question: "Does `{code}` make a token, code, password or identifier that must be unguessable with a non-cryptographic generator or from a predictable value?",
         yes: "It makes a secret value, such as a session id, token, reset or verification code, or random password, with rand, mt_rand, uniqid or lcg_value, or from a counter, the time or a hash of such values.",
-        no: "It uses random_bytes, random_int, openssl_random_pseudo_bytes or Laravel's Str::random, which is built on random_bytes, or the value is not a secret.",
+        no: "It uses random_bytes, random_int, openssl_random_pseudo_bytes, Laravel's Str::random, which is built on random_bytes, or WordPress's wp_rand and wp_generate_password, which are built on random_int, or the value is not a secret.",
         no_examples: CALLED,
     },
     Wording {
         id: "cookie",
         question: "Does `{code}` set or configure a session or authentication cookie without the Secure or HttpOnly flag?",
         yes: "It sets a cookie that holds a session or token with setcookie or session_set_cookie_params, or starts a session after setting session.cookie_httponly or session.cookie_secure off, without Secure or without HttpOnly.",
-        no: "Such cookies have both flags, the cookie holds no session or token, or the code sets no cookie.",
+        no: "Such cookies have both flags, the cookie holds no session or token, it is set empty and already expired to delete it, or the code sets no cookie.",
         no_examples: CALLED,
     },
     Wording {
