@@ -158,6 +158,8 @@ signatures, or one candidate pair.
    its mocks is asked again with the bodies of the functions it calls and its
    file's imports, mocks and setup hooks (a part too long is left out, never
    cut); each answer replaces the first unless only the first is decisive.
+   One still undecided then leans: below 0.50 it is clear. Labeled from the
+   code, 4 of 43 such tests below 0.50 were hollow, against 10 of 35 above.
    A Ruby test is sent with the groups it is declared in, since an RSpec
    example reads as a sentence continuing them and the outer group often names
    the class under test. Its recheck shows, instead of every hook of the
@@ -372,8 +374,15 @@ signatures, or one candidate pair.
    numbers, or values handed to it) was tried for considers on parameters
    and dropped: it cleared a sort column taken from the request as readily
    as clauses with placeholders. The same question about paths cleared real
-   traversals, reading names stored in an index as the program's own, so path
-   checks stay undecided until callers show more. The SQL check counts
+   traversals, reading names stored in an index as the program's own. Outside
+   PHP, an undecided path check is now asked, with its callers, where the
+   paths come from, naming a record users can edit as another party's input
+   and offering the local user's command line or settings: the program's own
+   paths or the local user's at 0.80 clear it (74 units on the corpus, among
+   them httprouter serving a directory through `http.Dir`). A path, URL or
+   redirect check still undecided on the function's parameters, whose Choice
+   does not lean toward another party's input, is a note, as a found one
+   already was: 450 injection units had stayed uncertain that way. The SQL check counts
    identifiers quoted by doubling embedded quotes as handled (identifiers
    cannot be bound), and the URL check excludes requests a web page sends from
    the user's browser; on fresh repositories both had flagged such code, while
