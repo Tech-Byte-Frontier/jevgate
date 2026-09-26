@@ -25,6 +25,28 @@ fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
 }
 
 #[test]
+fn a_finding_on_module_constants_points_at_the_constant_it_is_about() {
+    let source =
+        "const API_URL: &str = \"https://api.prod.example.com\";\nconst RETRIES: u32 = 3;\n";
+    let (project, options) = rule_project(source, catalog::HARDCODED_VALUES);
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("environment", spread(0.0, 0.05, 0.95)),
+        ("constant", choice_of("c0", &["c0", "c1", "none"])),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.locations.len(), 1);
+    assert_eq!(finding.line, 1);
+    assert_eq!(finding.symbol.as_deref(), Some("API_URL"));
+    assert!(
+        finding.message.ends_with("The constant is `API_URL`."),
+        "{}",
+        finding.message
+    );
+}
+
+#[test]
 fn a_local_default_is_a_note_and_a_special_case_is_a_review() {
     let (project, mut options) = hardcoded_project();
     let run_with = |options: &CheckArgs, overrides: Vec<(&'static str, Value)>| {

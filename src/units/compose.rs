@@ -230,6 +230,9 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
             match &u.detail {
                 Detail::Values {
                     locate: Some(_), ..
+                }
+                | Detail::Constants {
+                    locate: Some(_), ..
                 } => raised(Some(outcome)),
                 Detail::Function {
                     locate: Some(_), ..
@@ -702,7 +705,7 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
         questions.push("no answer".into());
     }
     let values = match &unit.detail {
-        Detail::Values { values, .. } | Detail::Constants { values }
+        Detail::Values { values, .. } | Detail::Constants { values, .. }
             if values.len() <= SHOWN_VALUES =>
         {
             values.clone()
@@ -940,9 +943,17 @@ fn finding(
                 .flatten();
             let (message, action) =
                 values_wording(name, &unit.detail, (strength, unnamed), p, answers);
-            match located_value(unit, judgments) {
-                Some(value) => (format!("{message} The value is {value}."), action),
-                None => (message, action),
+            if let Some(index) = located_constant(unit, judgments) {
+                // The finding points at the constant the Choice named.
+                locations = vec![unit.locations[index].clone()];
+                symbol = unit.locations[index].symbol.clone();
+                let constant = symbol.as_deref().unwrap_or("");
+                (format!("{message} The constant is `{constant}`."), action)
+            } else {
+                match located_value(unit, judgments) {
+                    Some(value) => (format!("{message} The value is {value}."), action),
+                    None => (message, action),
+                }
             }
         }
         Detail::Security {
@@ -1163,6 +1174,17 @@ fn chosen_groups<'g>(
 }
 
 /// The value a hardcoded-value finding is about, when the locate choice is clear.
+/// The position of the constant the locate Choice names, when it is clear.
+fn located_constant(unit: &UnitPlan, judgments: &[Judgment]) -> Option<usize> {
+    if !matches!(unit.detail, Detail::Constants { .. }) {
+        return None;
+    }
+    let located = answers(judgments, &unit.id, Pass::Locate);
+    let (id, _) = choice(located.get("constant").copied())?;
+    let index: usize = id.strip_prefix('c')?.parse().ok()?;
+    (index < unit.locations.len()).then_some(index)
+}
+
 fn located_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<String> {
     let Detail::Values { choices, .. } = &unit.detail else {
         return None;
