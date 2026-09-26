@@ -4,7 +4,7 @@ use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, at_most_note, benefit, checks, choice, lowered, noul, open,
-        origin_outcome, score, several_kind, unit_outcome, value_signals,
+        origin_outcome, score, settled_checks, several_kind, unit_outcome, value_signals,
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
@@ -511,9 +511,12 @@ impl<'p> Tally<'p> {
         let (outcome, answers) = resolved(unit, judgments);
         let outcome = if unnamed_value(unit, judgments) {
             lowered(lowered(outcome))
-        } else if single_use_value(unit, judgments) || test_path_security(unit) {
+        } else if single_use_value(unit, judgments)
+            || test_path_security(unit)
+            || unverified_token(unit, judgments)
+        {
             lowered(outcome)
-        } else if short_outline(unit) {
+        } else if short_outline(unit) || small_section(unit) {
             at_most_note(outcome)
         } else if unnamed_outline(unit, judgments) || few.contains(unit.id.as_str()) {
             lowered(outcome)
@@ -1094,6 +1097,48 @@ fn single_use_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     only_named
         && located_option(unit, judgments, ("value", 'v'))
             .is_some_and(|i| repeated.get(i) == Some(&false))
+}
+
+/// An unsafe-settings review that only the token check names, on code that
+/// does not turn a library's verification off: whether a token was verified
+/// before the function reads it, by middleware, the platform or the server
+/// that issued it, lies outside the function. Labeled by hand, the reviews
+/// that decoded a token and decided access with it were right in
+/// intentionally vulnerable apps and wrong in three others (a SpacetimeDB
+/// module whose host verifies tokens, a SvelteKit hook whose API verifies
+/// them, an identity provider's token read over TLS), while the one that
+/// turned `verify_signature` off was right. It is one level lower.
+fn unverified_token(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    if unit.rule != catalog::UNSAFE_SETTINGS {
+        return false;
+    }
+    let (outcome, answers) = resolved(unit, judgments);
+    if !matches!(outcome, Outcome::Review(_)) {
+        return false;
+    }
+    let get = |q: &str| answers.get(q).copied();
+    let named: Vec<&str> = settled_checks(unit.rule, &get)
+        .into_iter()
+        .filter(|(_, o)| matches!(o, Outcome::Review(_)))
+        .map(|(id, _)| id)
+        .collect();
+    let turned_off = matches!(
+        choice(get("token_use")),
+        Some(("turned_off", p)) if crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY)
+    );
+    named == ["token"] && !turned_off
+}
+
+/// Instruction sections of fewer tokens than this cost a session too little
+/// to be worth a consider.
+const SECTION_NOTE_TOKENS: usize = 15;
+
+/// An instruction section of fewer than 15 tokens is a note: labeled by
+/// hand, 1 of 10 findings on such sections was right, most of them a title
+/// and a "Last updated" line read as a record of past work, against 64 of
+/// 68 on larger ones.
+fn small_section(unit: &UnitPlan) -> bool {
+    matches!(unit.detail, Detail::Section { tokens, .. } if tokens < SECTION_NOTE_TOKENS)
 }
 
 /// A security unit of a file at a test path, judged as application code

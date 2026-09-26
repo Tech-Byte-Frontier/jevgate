@@ -717,7 +717,11 @@ pub(in crate::units) enum SettleWhen {
 /// handlers that answer preflights for any origin without credentials. What
 /// its logs write settles its logging signals whenever they are not clear:
 /// a logged object split on errors caught from a payment or database call,
-/// and audit lines naming who signed in were logged personal data. Where a function's text goes settles error
+/// and audit lines naming who signed in were logged personal data. Where a
+/// function's text goes is asked whenever its error-detail signals are not
+/// clear, too: a game client handing the server's error text to its own
+/// window over a channel whose messages are named `Response` was fifteen
+/// reviews for sending details to a remote client. Where a function's text goes settles error
 /// details (see `exposure_signal`), also under a finding that claims the text
 /// likely reaches a client.
 ///
@@ -804,7 +808,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 13] = [
         checks: &["error_details", "exception_to_client"],
         clears: &questions::AWAY_FROM_CLIENTS,
         callers: false,
-        when: SettleWhen::UndecidedOrFinding,
+        when: SettleWhen::NotClear,
         files: SettleFiles::All,
     },
     SettleKind {

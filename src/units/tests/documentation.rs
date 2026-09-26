@@ -9,7 +9,7 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
     project.write("web/app.ts", "");
     project.write(
         "AGENTS.md",
-        "# Stack\nThis is a Rust project.\n\n# Web\nUse the design tokens in `web/theme.ts`.\n\n# Release\nTag with `v` then push.\n",
+        "# Stack\nThis is a Rust project: the library lives in `src/lib.rs` and the web client in `web/app.ts`.\n\n# Web\nUse the design tokens in `web/theme.ts`.\n\n# Release\nTag with `v` then push.\n",
     );
     let mut options = args();
     only(&mut options, catalog::AGENT_CONTEXT);
@@ -56,6 +56,23 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
     assert!(file.findings[1].action.starts_with("Optional: move it"));
     let load = report.context_load.as_ref().unwrap();
     assert!(load.harnesses.iter().any(|h| h.harness == "Codex"));
+    // A section of fewer than 15 tokens costs a session too little for a
+    // consider, whatever its answers.
+    let mut eval = scripted(0);
+    eval.overrides = vec![(
+        "s2_inferable",
+        json!({"type":"score","score":2.0,"confidence":1.0,
+            "probabilities":{"0":0.0,"1":0.0,"2":1.0}}),
+    )];
+    options.refresh = true;
+    let report = run(&project, &options, &mut eval);
+    let release = report
+        .files
+        .iter()
+        .flat_map(|f| &f.findings)
+        .find(|f| f.symbol.as_deref() == Some("Release"))
+        .unwrap();
+    assert_eq!(release.strength, Strength::Note, "{}", release.message);
 }
 
 fn git(project: &Project, args: &[&str]) {

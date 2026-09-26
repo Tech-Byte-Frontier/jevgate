@@ -377,7 +377,8 @@ pub fn security_token_use(code: &str) -> Value {
             "passes": "It only creates, signs, stores, sends or forwards tokens, or checks that one is present, while a server verifies them.",
             "verified_before": "It reads the claims of a token verified before it runs, such as by middleware, or of a token it has just received from an identity provider over TLS.",
             "reads_claims": "It decodes a token only to read or show what it says, such as a user id, a name or its expiry, while other code or a server decides what the caller may do.",
-            "decides_access": "It decides what the caller may do, such as signing them in, granting a role or accepting a reset, from a token it has not verified, or it turns a signature or expiry check off.",
+            "decides_access": "It decides what the caller may do, such as signing them in, granting a role or accepting a reset, from a token it has not verified.",
+            "turned_off": "It turns off a check a library makes by default, such as verify_signature=False, verify=False, an algorithm list that allows none, or ignoreExpiration.",
             "none": "It handles no security tokens.",
         },
     })
