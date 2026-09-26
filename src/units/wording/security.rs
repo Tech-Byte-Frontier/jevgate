@@ -245,7 +245,7 @@ fn found_checks(rule: &str, answers: &Answers<'_>) -> Vec<&'static str> {
         return found.into_iter().map(|(id, _)| id).collect();
     }
     // A note from a leaning check names the kind it leaned toward.
-    crate::units::security::checks(rule)
+    let leaning: Vec<&'static str> = crate::units::security::checks(rule)
         .iter()
         .filter_map(|check| match answers.get(check.id) {
             Some(Answer::Noul { noul })
@@ -261,6 +261,15 @@ fn found_checks(rule: &str, answers: &Answers<'_>) -> Vec<&'static str> {
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(id, _)| id)
         .into_iter()
+        .collect();
+    if !leaning.is_empty() {
+        return leaning;
+    }
+    // A note from undecided checks of paths, URLs or redirects names them.
+    settled_checks(rule, &get)
+        .into_iter()
+        .filter(|(id, outcome)| *outcome != Outcome::Clear && RESOURCE_CHECKS.contains(id))
+        .map(|(id, _)| id)
         .collect()
 }
 

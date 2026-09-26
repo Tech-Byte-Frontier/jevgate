@@ -26,7 +26,7 @@ pub(in crate::units) fn origin_outcome(answer: &Answer) -> Outcome {
 /// Kinds where a variable is a concern only when another party controls it:
 /// helpers that build a path, URL or redirect target from their parameters
 /// are everywhere.
-const RESOURCE_CHECKS: [&str; 3] = ["path", "url", "redirect"];
+pub(in crate::units) const RESOURCE_CHECKS: [&str; 3] = ["path", "url", "redirect"];
 
 /// Presence alone never raises an injection: it only decides whether the
 /// trace is asked. When every specific check clears the unit, it is clear;
@@ -96,6 +96,24 @@ fn found_injections<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<&'stat
         .collect()
 }
 
+/// Whether the Choice that settles an undecided resource check was asked
+/// (where its paths, URLs or redirect targets come from) without leaning
+/// toward another party's input, which keeps the check open.
+fn settle_asked<'a>(check: &str, get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    let question = match check {
+        "path" if get("path_parts").is_some() => "path_parts",
+        "path" => "path_source",
+        "url" => "url_parts",
+        "redirect" => "redirect_target",
+        _ => return false,
+    };
+    choice_mass(get(question), &OUTSIDE_SOURCES)
+        .is_some_and(|p| !probability_at_least(p, LEADING_PROBABILITY))
+}
+
+/// Options of the settle Choices that name another party's input.
+const OUTSIDE_SOURCES: [&str; 3] = ["outside", "request", "stored"];
+
 /// The origin's outcome given the checks that found something: with none,
 /// another party's values are a note and parameters a note only when a
 /// check leans toward a concern; parameters only in paths or URLs are lower.
@@ -108,14 +126,26 @@ fn by_origin<'a>(
     match outcome {
         Outcome::Review(p) if found.is_empty() => Outcome::Note(p),
         Outcome::Consider(p) if found.is_empty() => {
-            let leaning = settled_checks(catalog::INJECTION, get)
+            let open: Vec<(&str, Outcome)> = settled_checks(catalog::INJECTION, get)
                 .into_iter()
                 .filter(|(_, o)| *o != Outcome::Clear)
+                .collect();
+            let leaning = open
+                .iter()
                 .filter_map(|(id, _)| get(id))
                 .map(lean)
                 .fold(0.0, f64::max);
-            if probability_at_least(leaning, LEADING_PROBABILITY) {
-                Outcome::Note(leaning)
+            // Parameters in a path, URL or redirect are a note until a caller
+            // shows another party controls them, found or not: undecided,
+            // 320 such units on the corpus stayed uncertain while a found one
+            // was a note. Only once the Choice that settles each check was
+            // asked and did not clear it.
+            let resources_open = !open.is_empty()
+                && open
+                    .iter()
+                    .all(|(id, _)| RESOURCE_CHECKS.contains(id) && settle_asked(id, get));
+            if probability_at_least(leaning, LEADING_PROBABILITY) || resources_open {
+                Outcome::Note(leaning.max(p))
             } else {
                 Outcome::Uncertain(p)
             }

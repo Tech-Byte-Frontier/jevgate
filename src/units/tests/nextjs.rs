@@ -215,11 +215,13 @@ fn an_undecided_redirect_is_settled_by_where_its_target_comes_from() {
         settled_redirect(&project, &options, "own"),
         (Status::Clear, 1)
     );
-    for chosen in ["given", "outside"] {
+    // A target its caller gives is a note, as a found one would be; one a
+    // request carries stays open.
+    for (chosen, status) in [("given", Status::Note), ("outside", Status::Uncertain)] {
         options.refresh = true;
         assert_eq!(
             settled_redirect(&project, &options, chosen),
-            (Status::Uncertain, 1),
+            (status, 1),
             "{chosen}"
         );
     }
