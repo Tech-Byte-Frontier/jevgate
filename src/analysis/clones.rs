@@ -162,6 +162,7 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
                 && !separate_examples(a.path, b.path)
         })
         .filter_map(|window| pair(files, &parsed, &blocks, window))
+        .filter(|p| !deprecated(files, &p.a) && !deprecated(files, &p.b))
         .collect();
     drop_nested(&mut pairs);
     pairs.sort_by(by_rank);
@@ -169,6 +170,32 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
     // Groups rank by size times their number of copies.
     pairs.sort_by(by_rank);
     capped(one_per_function_pair(pairs))
+}
+
+/// Whether a copy lies in a function or type marked deprecated: it goes
+/// with the next major version, so sharing its code with its replacement
+/// is not worth doing. flysystem's deprecated phpseclib 2 adapter was
+/// paired with its phpseclib 3 successor in 7 reviews.
+fn deprecated(files: &[SourceFile<'_>], site: &Site) -> bool {
+    let file = &files[site.file];
+    let Ok(Some(tree)) = crate::syntax::parse(file.path, file.source) else {
+        return false;
+    };
+    let mut node = tree
+        .root_node()
+        .descendant_for_byte_range(site.span.start, site.span.start);
+    while let Some(current) = node {
+        let kind = current.kind();
+        let declaration = kind.ends_with("_declaration")
+            || kind.ends_with("_definition")
+            || kind.ends_with("_item")
+            || matches!(kind, "method" | "class" | "module" | "function");
+        if declaration && super::units::deprecated(current, file.source) {
+            return true;
+        }
+        node = current.parent();
+    }
+    false
 }
 
 /// A directory of example code: `examples`, `demo`, `tutorial`, or a name
@@ -1231,6 +1258,54 @@ mod tests {
     }
 
     const LOAD: &str = "fn load_user(path: &str) -> Result<User> {\n    let text = std::fs::read_to_string(path)?;\n    let value: Value = serde_json::from_str(&text)?;\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    Ok(User { name })\n}\n";
+
+    #[test]
+    fn copies_in_deprecated_code_are_not_candidates() {
+        assert_eq!(
+            run(&[("a.rs", LOAD, true), ("b.rs", LOAD, true)])
+                .pairs
+                .len(),
+            1
+        );
+        for mark in [
+            "#[deprecated(note = \"use load_account\")]\n",
+            "/// Deprecated: use load_account.\n",
+            "/** @deprecated use load_account */\n",
+        ] {
+            let old = format!("{mark}{LOAD}");
+            assert!(
+                run(&[("a.rs", LOAD, true), ("b.rs", &old, true)])
+                    .pairs
+                    .is_empty(),
+                "{mark}"
+            );
+        }
+        // A method of a class whose documentation marks it deprecated.
+        let class = |doc: &str| {
+            format!(
+                "<?php\n{doc}class Adapter\n{{\n    public function read(string $path): string\n    {{\n        $location = $this->prefix->prefixPath($path);\n        $contents = $this->connection->get($location);\n        if ($contents === false) {{\n            throw UnableToReadFile::fromLocation($path);\n        }}\n        return $contents;\n    }}\n}}\n"
+            )
+        };
+        let current = class("");
+        let legacy = class("/**\n * @deprecated use the V3 adapter\n */\n");
+        let pairs = |b: &str| run(&[("v3/A.php", &current, true), ("v2/A.php", b, true)]).pairs;
+        assert_eq!(pairs(&current).len(), 1);
+        assert!(pairs(&legacy).is_empty());
+        // Only a declaration's own header and the lines above it count:
+        // another method's decorator, a parameter named `deprecated` or a
+        // mark named `deprecated_lifespan` leave the copy a candidate.
+        let python = |mark: &str| {
+            format!(
+                "import json\n\n\nclass Reader:\n    @deprecated(\"use read\")\n    def old(self):\n        return None\n\n{mark}    def load_user(self, path,\n                  deprecated: bool = False):\n        text = open(path).read()\n        value = json.loads(text)\n        name = value[\"name\"].strip().lower().replace(\" \", \"_\")\n        return User(name=name, path=path)\n"
+            )
+        };
+        let current = python("");
+        let pairs = |b: &str| run(&[("a.py", &current, true), ("b.py", b, true)]).pairs;
+        assert_eq!(pairs(&current).len(), 1);
+        assert_eq!(pairs(&python("    @deprecated_lifespan\n")).len(), 1);
+        assert!(pairs(&python("    @deprecated(\"use load\")\n")).is_empty());
+        assert!(pairs(&python("    @typing_extensions.deprecated(\"x\")\n")).is_empty());
+    }
 
     #[test]
     fn renamed_copies_match_across_files_with_statement_aligned_quotes() {
