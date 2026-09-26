@@ -1,5 +1,5 @@
-//! JavaScript and TypeScript tests: `describe`, `it` and `test` calls and
-//! their hooks, as statements.
+//! JavaScript and TypeScript tests: `describe`, `it`, `test` and
+//! `Deno.test` calls and their hooks, as statements.
 use super::child_text;
 use tree_sitter::Node;
 
@@ -25,6 +25,7 @@ fn is_test_call(name: &str) -> bool {
         "afterEach",
         "beforeAll",
         "afterAll",
+        "Deno.test",
     ];
     NAMES
         .iter()

@@ -6,8 +6,8 @@
 |---|---|:---:|:---:|:---:|:---:|
 | Rust | `.rs` | ✅ | ✅ `#[test]`, `#[cfg(test)]` | ✅ | ✅ comments |
 | Python | `.py` | ✅ | ✅ pytest, unittest | ✅ | ✅ comments |
-| JavaScript | `.js` `.jsx` `.mjs` `.cjs` | ✅ | ✅ `describe`/`it`/`test` | ✅ | ✅ comments |
-| TypeScript | `.ts` `.tsx` `.mts` `.cts` | ✅ | ✅ `describe`/`it`/`test` | ✅ | ✅ comments |
+| JavaScript | `.js` `.jsx` `.mjs` `.cjs` | ✅ | ✅ `describe`/`it`/`test`, `Deno.test` | ✅ | ✅ comments |
+| TypeScript | `.ts` `.tsx` `.mts` `.cts` | ✅ | ✅ `describe`/`it`/`test`, `Deno.test` | ✅ | ✅ comments |
 | Go | `.go` | ✅ | ✅ `Test…(t *testing.T)` | ✅ | ✅ comments |
 | C# | `.cs` | ✅ | ✅ xUnit, NUnit, MSTest | ✅ | ✅ comments |
 | Ruby | `.rb` | ✅ | ✅ RSpec, Minitest, Rails `test "…" do` | ✅ no Ruby framework handlers yet | ✅ comments |
