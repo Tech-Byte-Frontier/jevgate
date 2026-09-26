@@ -378,13 +378,18 @@ fn redirects_deserializers_and_uploads_are_checked_kinds_with_their_weakness() {
     }
 }
 
-/// The questions of the trace planned for the first unit of `path`.
-fn traced_checks(path: &str, source: &str) -> serde_json::Map<String, Value> {
+/// The injection plan of a project holding only `source` at `path`.
+fn injection_plan(path: &str, source: &str) -> Plan {
     let project = Project::new();
     project.write(path, source);
     let mut options = args();
     options.rules = vec![catalog::INJECTION.into()];
-    let (_, plan) = planned(&project, &options);
+    planned(&project, &options).1
+}
+
+/// The questions of the trace planned for the first unit of `path`.
+fn traced_checks(path: &str, source: &str) -> serde_json::Map<String, Value> {
+    let plan = injection_plan(path, source);
     let trace = &plan.files[&0].units[0];
     let Detail::Security {
         trace: Some((request, _)),
@@ -430,12 +435,7 @@ const PICKLED: &str = "import pickle\n\nfrom flask import jsonify, request\n\n\n
 #[test]
 fn a_deserializer_is_asked_about_only_where_the_source_names_one() {
     let first = |path: &str, source: &str| {
-        let project = Project::new();
-        project.write(path, source);
-        let mut options = args();
-        options.rules = vec![catalog::INJECTION.into()];
-        let (_, plan) = planned(&project, &options);
-        plan.requests[0].request["questions"]["f0_interpreted"].clone()
+        injection_plan(path, source).requests[0].request["questions"]["f0_interpreted"].clone()
     };
     let named = first("shop/cart.py", PICKLED);
     assert!(named.to_string().contains("pickle, marshal"), "{named}");

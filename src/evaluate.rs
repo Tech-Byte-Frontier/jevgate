@@ -138,17 +138,12 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
         match schedule(input, args, budget, &mut report.files[owner]) {
             Ok(Scheduled::None) => {}
             Ok(Scheduled::Purpose(request)) => {
-                if let Some(body) = crate::requests::answered(root, args, &request) {
-                    let file = &mut report.files[owner];
-                    let view = crate::file_kind::record_purpose(file, &request, &body)
-                        .and_then(|()| crate::file_kind::decide_after_purpose(input, args, file));
-                    match view {
-                        Ok(Some(view)) => {
-                            views.insert(owner, view);
-                        }
-                        Ok(None) => {}
-                        Err(error) => report.errors.push(error.to_string()),
+                match cached_purpose(input, args, root, &request, &mut report.files[owner]) {
+                    Ok(Some(view)) => {
+                        views.insert(owner, view);
                     }
+                    Ok(None) => {}
+                    Err(error) => report.errors.push(error.to_string()),
                 }
                 planned.push(request);
             }
@@ -181,6 +176,22 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
                 .push(crate::requests::provider_request(&request).into_owned());
         }
     }
+}
+
+/// A file's view as a run decides it after its purpose request, when the
+/// cache answers that request; none when it does not.
+fn cached_purpose(
+    input: &Input,
+    args: &CheckArgs,
+    root: &std::path::Path,
+    request: &serde_json::Value,
+    file: &mut FileResult,
+) -> Result<Option<crate::file_kind::View>> {
+    let Some(body) = crate::requests::answered(root, args, request) else {
+        return Ok(None);
+    };
+    crate::file_kind::record_purpose(file, request, &body)?;
+    crate::file_kind::decide_after_purpose(input, args, file)
 }
 
 impl Session<'_> {

@@ -165,21 +165,24 @@ fn a_group_that_holds_most_of_the_file_is_not_named() {
     project.write("tests/app.test.ts", &two_suites());
     let mut options = args();
     only(&mut options, catalog::FILE_ORGANIZATION);
-    let mut eval = scripted(2);
-    eval.overrides = vec![("module", choice_of("G1", &["G1", "G2", "none"]))];
-    let named = run(&project, &options, &mut eval);
+    let named = run(&project, &options, &mut moving_g1());
     assert_eq!(named.files[0].findings[0].strength, Strength::Consider);
     // Ten of twelve tests in the first suite: moving it would move the file.
     project.write("tests/app.test.ts", &suites(10, 2));
     options.refresh = true;
-    let mut eval = scripted(2);
-    eval.overrides = vec![("module", choice_of("G1", &["G1", "G2", "none"]))];
-    let unnamed = run(&project, &options, &mut eval);
+    let unnamed = run(&project, &options, &mut moving_g1());
     assert_eq!(
         unnamed.files[0].findings[0].strength,
         Strength::Note,
         "a consider that names no group is a note"
     );
+}
+
+/// Answers at the top level that pick G1 as the group to move.
+fn moving_g1() -> Scripted {
+    let mut eval = scripted(2);
+    eval.overrides = vec![("module", choice_of("G1", &["G1", "G2", "none"]))];
+    eval
 }
 
 /// Two suites of six cases, each calling its own subject.
@@ -210,9 +213,7 @@ fn test_files_are_outlined_by_suite_without_include_tests() {
     project.write("tests/app.test.ts", &two_suites());
     let mut options = args();
     only(&mut options, catalog::FILE_ORGANIZATION);
-    let mut eval = scripted(2);
-    eval.overrides = vec![("module", choice_of("G1", &["G1", "G2", "none"]))];
-    let report = run(&project, &options, &mut eval);
+    let report = run(&project, &options, &mut moving_g1());
     let file = &report.files[0];
     assert_eq!(file.classification.as_ref().unwrap().kind, "tests");
     assert_eq!(

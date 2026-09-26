@@ -1121,7 +1121,7 @@ fn outline_groups<'g>(
     members: usize,
 ) -> Vec<&'g super::GroupInfo> {
     let mut chosen = chosen_groups(module, groups);
-    chosen.retain(|g| g.names.len() * 4 < members * 3);
+    chosen.retain(|g| !three_quarters(g.names.len(), members));
     chosen
 }
 
@@ -1174,7 +1174,12 @@ fn most_of(block: &crate::schema::Location, function: &[crate::schema::Location]
     let lines = |l: &crate::schema::Location| l.end_line + 1 - l.start_line;
     function
         .first()
-        .is_some_and(|f| lines(block) * 4 >= lines(f) * 3)
+        .is_some_and(|f| three_quarters(lines(block), lines(f)))
+}
+
+/// Whether `part` is three quarters or more of `whole`.
+fn three_quarters(part: usize, whole: usize) -> bool {
+    part * 4 >= whole * 3
 }
 
 /// The block chosen by the locate follow-up `question`, when its choice is clear.

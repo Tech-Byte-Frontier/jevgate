@@ -229,35 +229,53 @@ fn callee_errors(
     for _ in 0..2 {
         let mut next = Vec::new();
         for (file, caller) in callers {
-            let reached = scope.owners.iter().filter(|&&other| {
-                other == file || imports[&file].reach(&scope.inputs[other].result.path)
-            });
-            for &other in reached {
-                let lines = scope.test_lines(other);
-                for callee in &scope.units[&other].units {
-                    if !callee.callable()
-                        || visited.contains(&callee.name)
-                        || !caller.calls.contains(&callee.short_name)
-                        || lines.iter().any(|l| callee.overlaps(l))
-                    {
-                        continue;
-                    }
-                    visited.push(callee.name.clone());
-                    for error in &callee.errors {
-                        if found.len() == CALLEE_ERRORS {
-                            return found;
-                        }
-                        found.push(serde_json::json!({
-                            "function": callee.name,
-                            "error": error.error,
-                            "message": error.message,
-                        }));
-                    }
-                    next.push((other, callee));
+            for (other, callee) in callees(scope, imports, file, caller) {
+                if visited.contains(&callee.name) {
+                    continue;
                 }
+                visited.push(callee.name.clone());
+                found.extend(callee.errors.iter().map(|error| {
+                    serde_json::json!({
+                        "function": callee.name,
+                        "error": error.error,
+                        "message": error.message,
+                    })
+                }));
+                next.push((other, callee));
             }
         }
         callers = next;
+    }
+    found.truncate(CALLEE_ERRORS);
+    found
+}
+
+/// The application functions `caller` calls, in its own file or files it
+/// imports, with the file each is in.
+fn callees<'s>(
+    scope: &'s Scope<'_>,
+    imports: &BTreeMap<usize, Imports>,
+    file: usize,
+    caller: &Unit,
+) -> Vec<(usize, &'s Unit)> {
+    let reached =
+        scope.owners.iter().copied().filter(|&other| {
+            other == file || imports[&file].reach(&scope.inputs[other].result.path)
+        });
+    let mut found = Vec::new();
+    for other in reached {
+        let lines = scope.test_lines(other);
+        found.extend(
+            scope.units[&other]
+                .units
+                .iter()
+                .filter(|callee| {
+                    callee.callable()
+                        && caller.calls.contains(&callee.short_name)
+                        && !lines.iter().any(|l| callee.overlaps(l))
+                })
+                .map(|callee| (other, callee)),
+        );
     }
     found
 }
