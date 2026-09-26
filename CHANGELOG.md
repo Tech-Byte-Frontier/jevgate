@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-26
+
 - Injection: code that names a deserializer that can build any object is asked whether it loads data another party sends, in Python, Ruby, Java, JavaScript and TypeScript: Python's `pickle`, `marshal`, `shelve`, `jsonpickle` and `yaml.load`, Ruby's `Marshal.load` and `YAML.load`, Java's `ObjectInputStream`, `XMLDecoder`, XStream and SnakeYAML, and node-serialize. Only Django views and PHP `unserialize` were asked before, so a Flask route passing `pickle.loads(request.get_data())` was clear; it is now a review (CWE-502). Other requests are unchanged, so cached answers stay valid.
 - File organization: a file of fewer than 250 lines gets at most a note, and a group holding three quarters or more of a file's members is no longer named as the part to move (a consider left naming no group is a note; a review says to split the whole file). Checked by hand on 25 projects, 3 of 32 findings on shorter files were right against 21 of 29 on longer ones; review precision went from 50% to 67% and consider precision from 46% to 71%. No request changes, so cached answers stay valid.
 - Sensitive data: an error-detail trace lists the errors the functions it calls create, with their messages, and asks whether the text a response carries describes an internal failure (a database, network, file or library error) or explains invalid input, instead of who raised it. A handler that returns the message its own service raised to explain a missing record (`except LookupError as exc: raise HTTPException(404, detail=str(exc))`) is no longer a review, while one that returns the text of every exception it catches still is. The Choice over which message a function creates carries another error's text is told the same, so passing on such an error's text is the program's own. On 71 projects, 11 of one FastAPI project's 12 wrong reviews became notes or considers and its two wrong considers became notes, as did a local tool's consider about the text of an API error it returns to the user's own agent; only error-detail traces are asked again.
@@ -179,7 +181,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.16.0...v0.17.0
