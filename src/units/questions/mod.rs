@@ -16,6 +16,7 @@ mod maintainability;
 mod php;
 mod privilege;
 mod security;
+mod settle;
 mod spacetimedb;
 mod test_rules;
 pub use comments::*;
@@ -27,6 +28,7 @@ pub use maintainability::*;
 pub use php::*;
 pub use privilege::*;
 pub use security::*;
+pub use settle::*;
 pub use spacetimedb::*;
 pub use test_rules::*;
 
