@@ -60,7 +60,19 @@ pub(in crate::units) fn injection_outcome<'a>(
         (_, Some(p)) => Outcome::Review(p),
         (outcome, None) => outcome,
     };
-    Some(by_origin(origin, &found, get))
+    Some(match by_origin(origin, &found, get) {
+        Outcome::Consider(p) if program_values(get) => Outcome::Note(p),
+        outcome => outcome,
+    })
+}
+
+/// Whether what a consider's values can hold, asked after it, leans toward
+/// the program's own: literals its callers pass, values it creates, or the
+/// arguments of a local tool. Such a consider, resting on the function's
+/// parameters, is a note.
+fn program_values<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    choice_mass(get("values"), &questions::PROGRAM_VALUES)
+        .is_some_and(|p| probability_at_least(p, LEADING_PROBABILITY))
 }
 
 /// When the markup check found a variable and the PHP markup Choice names

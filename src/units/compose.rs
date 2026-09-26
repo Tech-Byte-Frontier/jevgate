@@ -59,8 +59,10 @@ fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'
             merged.insert(question, answer);
         }
     }
-    // The settle answers sit beside the checks they settle, under their own names.
+    // The settle answers sit beside the checks they settle, under their own
+    // names, and so does what an injection consider's values can hold.
     merged.extend(answers(judgments, &unit.id, Pass::Settle));
+    merged.extend(answers(judgments, &unit.id, Pass::Locate));
     merged
 }
 
@@ -248,6 +250,16 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                 } => matches!(outcome, Outcome::Review(_)),
                 // Only the internal-details check raises a test's consider.
                 Detail::Test { confirm: Some(_) } => matches!(outcome, Outcome::Consider(_)),
+                // An injection consider rests on the function's parameters
+                // unless its origin was another party.
+                Detail::Security {
+                    confirm: Some(_), ..
+                } => {
+                    matches!(outcome, Outcome::Consider(_))
+                        && !resolved
+                            .get("origin")
+                            .is_some_and(|a| matches!(origin_outcome(a), Outcome::Review(_)))
+                }
                 Detail::Function {
                     locate: Some(_), ..
                 } => raised(resolved.get("split").map(|a| benefit(a))),

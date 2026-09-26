@@ -202,7 +202,14 @@ signatures, or one candidate pair.
    `eval` of model output; a check per kind decides and names the kind. An
    injection whose origin stays unclear or is the function's parameters is
    asked its origin and checks again with up to three callers; its answer
-   replaces the traced one unless only the traced one is decisive.
+   replaces the traced one unless only the traced one is decisive. A consider
+   that still rests on the function's parameters is asked, with its callers,
+   what the values it places can hold: text the program fixes (literals its
+   callers pass, numbers, names from a fixed list), values it creates itself,
+   or a local tool's own arguments make it a note; text another party can set,
+   or callers not shown, keep it. Asked where the values come from, the
+   recheck answered "the function's parameters" at 0.9 even for a helper
+   whose every caller passed a literal SQL fragment.
    The markup check names text shown as a JSX child and CSS values or class
    names as escaped or inert; sending where each built string goes did not
    settle React units, the examples did. A sensitive-data trace lists the

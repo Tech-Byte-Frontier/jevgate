@@ -325,6 +325,9 @@ fn push_unit(
     let recheck = (rule == INJECTION)
         .then(|| recheck(file, subject, id))
         .flatten();
+    let confirm = (rule == INJECTION)
+        .then(|| confirm(file, subject, id))
+        .flatten();
     let settles = settles(file, subject, rule, id);
     out.units.push(UnitPlan {
         rule,
@@ -344,6 +347,7 @@ fn push_unit(
             },
             trace: trace.map(Into::into),
             settles,
+            confirm: confirm.map(Into::into),
             django: subject.django,
             test_path: subject.test_path,
         },
@@ -386,9 +390,16 @@ fn send(
                 let unit = &mut out.units[*index];
                 unit.presence = Presence::NeedsContext;
                 unit.recheck = None;
-                if let Detail::Security { trace, settles, .. } = &mut unit.detail {
+                if let Detail::Security {
+                    trace,
+                    settles,
+                    confirm,
+                    ..
+                } = &mut unit.detail
+                {
                     *trace = None;
                     settles.clear();
+                    *confirm = None;
                 }
             }
         }
@@ -718,15 +729,47 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
             Pass::Recheck,
         );
     }
+    let (request, asked) = file.request("recheck", with_callers(file, subject), questions);
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// The unit's code with the functions that call it and the enums its sites
+/// name: the evidence of its recheck and of what its values can hold.
+fn with_callers(file: &FileContext<'_>, subject: &Subject<'_>) -> Value {
     let mut state = json!({
         "file": file.file_state(),
         subject.kind: subject.state(),
-        "callers": subject.callers.iter().map(|(name, source)| json!({"name": name, "source": source})).collect::<Vec<_>>(),
     });
+    if !subject.callers.is_empty() {
+        state["callers"] = json!(
+            subject
+                .callers
+                .iter()
+                .map(|(name, source)| json!({"name": name, "source": source}))
+                .collect::<Vec<_>>()
+        );
+    }
     if !subject.enums.is_empty() {
         state["enums_named_in_sites"] = json!(subject.enums);
     }
-    let (request, asked) = file.request("recheck", state, questions);
+    state
+}
+
+/// What the values an injection consider rests on can hold, asked only
+/// when its origin was the function's parameters: the function, and the
+/// functions that call it.
+fn confirm(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(Value, Asked)> {
+    let code = subject.code();
+    let mut questions = Questions::default();
+    questions.ask(
+        "values".into(),
+        questions::injection_values(&code, !subject.callers.is_empty()),
+        id,
+        INJECTION,
+        "values",
+        Pass::Locate,
+    );
+    let (request, asked) = file.request("locate", with_callers(file, subject), questions);
     file.budget.fits(&request).then_some((request, asked))
 }
 
