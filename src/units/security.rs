@@ -354,11 +354,13 @@ fn presence_request(
         } else {
             format!("functions[{index}].source")
         };
+        let source = items[index].1["source"].as_str().unwrap_or_default();
+        let deserializers = questions::deserializers_named(file.language, source);
         for (rule, _, id) in units {
             for question in presence_questions(rule) {
                 questions.ask(
                     format!("{}{index}_{question}", &key[..1]),
-                    presence_body(question, &code, django),
+                    presence_body(question, &code, django, deserializers),
                     id,
                     rule,
                     question,
@@ -385,9 +387,9 @@ pub(super) fn presence_questions(rule: &str) -> &'static [&'static str] {
         .map_or(&[], |(_, questions)| questions)
 }
 
-fn presence_body(question: &str, code: &str, django: bool) -> Value {
+fn presence_body(question: &str, code: &str, django: bool, deserializers: Option<&str>) -> Value {
     match question {
-        "interpreted" => questions::security_interpreted(code, django),
+        "interpreted" => questions::security_interpreted(code, django, deserializers),
         "resource" => questions::security_resource(code, django),
         "logs_secret" => questions::security_logs_secret(code),
         "error_details" => questions::security_error_details(code, django),
@@ -444,7 +446,9 @@ fn rule_checks(
 /// The checks a rule's trace asks about `source` in a file in `language`;
 /// Django code (`django`) is asked the Django variant of a check where one
 /// exists, and the Django checks besides; PHP files are asked PHP's own
-/// checks only of source that names what they ask about.
+/// checks only of source that names what they ask about, and other code
+/// the deserialize check of its language when its source names one of the
+/// language's deserializers.
 fn asked_checks(
     rule: &str,
     language: &str,
@@ -472,6 +476,11 @@ fn asked_checks(
         .chain(csharp)
         .chain(framework)
         .chain(php)
+        .chain(
+            (rule == INJECTION && !django)
+                .then(|| questions::deserializer_check(language, source))
+                .flatten(),
+        )
         .collect()
 }
 
