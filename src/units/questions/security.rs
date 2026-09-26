@@ -455,7 +455,10 @@ pub const AWAY_FROM_CLIENTS: [&str; 4] = ["local", "logs", "caller", "stored"];
 
 /// Where a function's text goes, asked when an error-detail signal stays
 /// undecided. An error or body shaped for a response counts as the client:
-/// helpers that format errors for a server's callers return them.
+/// helpers that format errors for a server's callers return them. A game
+/// client that hands the server's error text to its own window over a
+/// channel of `Response` messages was answered as sending it to a client,
+/// so the local option names the program's own screens.
 pub fn security_destination(code: &str) -> Value {
     json!({
         "type": "choice",
@@ -464,8 +467,8 @@ pub fn security_destination(code: &str) -> Value {
             "note": EVIDENCE,
         },
         "criteria": {
-            "client": "Into a response to a request from another computer: an HTTP, API or RPC response, a message to a connected client, or an error, status or body shaped for such a response that it builds or returns.",
-            "local": "To the person running a local program: a terminal, console, window, or a report or file on their own machine.",
+            "client": "Into a response to a request from another computer: an HTTP, API or RPC response, a message to a connected remote client, or an error, status or body shaped for such a response that it builds or returns.",
+            "local": "To the person running a local program: a terminal, console or window, the program's own screens that a desktop, game or mobile app reaches through a channel, event or IPC call, or a report or file on their own machine.",
             "logs": "To logs, or to the program's own error reporting or monitoring.",
             "caller": "Back to the code that called it as an ordinary error or value, such as a parse, lookup or validation failure, not shaped as a response.",
             "stored": "Into a database, queue, cache or job record.",
