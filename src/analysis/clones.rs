@@ -193,6 +193,9 @@ fn example_directory(part: &str) -> bool {
 /// Also a top-level `samples` or `sample` directory (a Java package named
 /// `samples` is source), a .NET project named like `MediatR.Examples.Autofac`,
 /// and Go's `example_*_test.go` files, which show how to call a package.
+/// Directories below a JVM source root (`src/main/java`) are packages, not
+/// examples: Spring Initializr names a new project's package
+/// `com.example.demo`, which made every finding of such a project a note.
 pub(crate) fn example_code(path: &Path) -> bool {
     let name = path
         .file_name()
@@ -204,14 +207,31 @@ pub(crate) fn example_code(path: &Path) -> bool {
         .map(|p| p.to_string_lossy().to_ascii_lowercase())
         .filter(|_| path.iter().count() > 1)
         .unwrap_or_default();
+    let directories: Vec<String> = path
+        .parent()
+        .map(|dir| {
+            dir.iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let packages = jvm_source_root(&directories).unwrap_or(directories.len());
     (name.starts_with("example_") && name.ends_with("_test.go"))
         || matches!(top.as_str(), "samples" | "sample")
-        || path.parent().is_some_and(|dir| {
-            dir.iter().any(|part| {
-                let part = part.to_string_lossy();
-                example_directory(&part) || part.to_ascii_lowercase().contains(".examples")
-            })
+        || directories[..packages]
+            .iter()
+            .any(|part| example_directory(part) || part.to_ascii_lowercase().contains(".examples"))
+}
+
+/// Where the package directories of a JVM source root begin: after
+/// `src/<source set>/java` (or `kotlin`, `scala`, `groovy`).
+fn jvm_source_root(directories: &[String]) -> Option<usize> {
+    directories
+        .windows(3)
+        .position(|w| {
+            w[0] == "src" && matches!(w[2].as_str(), "java" | "kotlin" | "scala" | "groovy")
         })
+        .map(|at| at + 3)
 }
 
 /// Whether two files are separate variants of one example, kept side by
@@ -1567,6 +1587,15 @@ mod tests {
         }
         assert!(!super::example_code(Path::new(
             "src/main/java/org/springframework/samples/petclinic/Owner.java"
+        )));
+        for path in [
+            "src/main/java/com/example/demo/OrderController.java",
+            "service/src/test/kotlin/com/example/OrderTest.kt",
+        ] {
+            assert!(!super::example_code(Path::new(path)), "{path}");
+        }
+        assert!(super::example_code(Path::new(
+            "examples/spring/src/main/java/com/example/demo/Main.java"
         )));
     }
 
