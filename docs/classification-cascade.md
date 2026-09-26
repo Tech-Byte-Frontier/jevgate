@@ -316,8 +316,14 @@ signatures, or one candidate pair.
    presence question, and its trace asks that language's deserialize check,
    as Django views and PHP pages naming `unserialize` are: a Flask route
    passing `pickle.loads(request.get_data())` was asked only about query,
-   command, code and markup text, and was clear. Only the requests of such
-   functions change.
+   command, code and markup text, and was clear. Code that parses XML with a
+   parser able to resolve external entities (it names lxml, SAX, pulldom,
+   DocumentBuilderFactory, XmlDocument, SimpleXML, libxmljs or Nokogiri, or
+   its file imports one and it calls a parse method) is asked the same way
+   about XML with external entities (CWE-611): pygoat's lab calling
+   `make_parser()` with external entities turned on, and a Spring controller
+   parsing its body with a default DocumentBuilderFactory, were clear. Only
+   the requests of such functions change.
    PHP units read the presence questions and checks in PHP's own terms
    (`src/units/questions/php.rs`), naming its functions (`echo`,
    `shell_exec` and backticks, `mysqli_real_escape_string`, `password_hash`,

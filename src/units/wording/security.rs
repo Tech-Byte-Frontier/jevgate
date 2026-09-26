@@ -70,7 +70,7 @@ pub(in crate::units) fn privilege_wording(
 }
 
 /// Injection kinds: the text a variable is placed into, its weakness and remedy.
-const INJECTIONS: [(&str, &str, &str, &str); 11] = [
+const INJECTIONS: [(&str, &str, &str, &str); 12] = [
     (
         "sql",
         "a database query",
@@ -124,6 +124,12 @@ const INJECTIONS: [(&str, &str, &str, &str); 11] = [
         "a deserializer that can build any object",
         "CWE-502 deserialization of untrusted data",
         "Parse the data as JSON or with a safe loader such as `yaml.safe_load`, or restrict the classes it may create",
+    ),
+    (
+        "xxe",
+        "an XML parser that resolves external entities",
+        "CWE-611 XML external entity reference",
+        "Turn off document type definitions and external entities in the parser, or parse with one that never resolves them",
     ),
     (
         "upload",

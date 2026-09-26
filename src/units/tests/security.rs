@@ -444,7 +444,7 @@ fn a_deserializer_is_asked_about_only_where_the_source_names_one() {
         .replace("pickle.loads", "json.loads");
     assert_eq!(
         first("shop/cart.py", &parsed),
-        questions::security_interpreted("functions[0].source", false, None),
+        questions::security_interpreted("functions[0].source", false, None, false),
         "code that names no deserializer keeps its question and cached answer"
     );
     assert!(traced_checks("shop/cart.py", PICKLED).contains_key("deserialize"));
@@ -482,6 +482,42 @@ fn request_data_given_to_pickle_is_a_deserialization_review() {
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-502 deserialization of untrusted data")
+    );
+    assert_eq!(finding.strength, Strength::Review);
+}
+
+const XML_IMPORT: &str = "import java.io.InputStream;\nimport javax.xml.parsers.DocumentBuilderFactory;\n\nclass Catalog {\n  int count(InputStream body) throws Exception {\n    var document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(body);\n    return document.getElementsByTagName(\"item\").getLength();\n  }\n}\n";
+
+#[test]
+fn xml_parsed_with_entities_is_asked_about_only_where_a_parser_is_named() {
+    let path = "src/main/java/shop/Catalog.java";
+    let named = traced_checks(path, XML_IMPORT);
+    assert!(named["xxe"].to_string().contains("DocumentBuilderFactory"));
+    let plain = XML_IMPORT
+        .replace("import javax.xml.parsers.DocumentBuilderFactory;\n", "")
+        .replace(
+            "DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(body)",
+            "Json.parse(body)",
+        );
+    assert!(!traced_checks(path, &plain).contains_key("xxe"));
+    // A module that imports the parser at its top, as Python code does.
+    let module = "from lxml import etree\n\n\ndef count(body):\n    root = etree.fromstring(body)\n    return len(root.findall('item'))\n";
+    assert!(traced_checks("shop/catalog.py", module).contains_key("xxe"));
+    let project = Project::new();
+    project.write(path, XML_IMPORT);
+    let mut options = args();
+    options.rules = vec![catalog::INJECTION.into()];
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("interpreted", noul_at(0.95)),
+        ("xxe", noul_at(0.95)),
+        ("origin", spread(0.0, 0.05, 0.95)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(
+        finding.category.as_deref(),
+        Some("CWE-611 XML external entity reference")
     );
     assert_eq!(finding.strength, Strength::Review);
 }
