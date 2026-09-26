@@ -62,7 +62,8 @@ pub(super) fn load_document(
                 templates: Vec::new(),
             }
         }
-        Err(error) => error_input(result, error),
+        // dvja's docs hold a Markdown file with NUL bytes, which made the run incomplete.
+        Err(error) => unread(result, error),
     })
 }
 

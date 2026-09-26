@@ -589,6 +589,24 @@ const DOCUMENT_KINDS: [&str; 5] = [
     "reference",
 ];
 
+#[test]
+fn a_binary_document_is_skipped_without_blocking_the_run() {
+    let project = Project::new();
+    project.write("docs/guide.md", "# Guide\n\nRun the app.\n");
+    std::fs::write(project.0.join("docs/bootstrap.md"), b"# Bootstrap\n\0\0\n").unwrap();
+    let mut options = args();
+    only(&mut options, catalog::LARGE_DOCS);
+    let report = run(&project, &options, &mut scripted(0));
+    assert!(report.complete, "{:?}", report.files);
+    let binary = report
+        .files
+        .iter()
+        .find(|f| f.path == std::path::Path::new("docs/bootstrap.md"))
+        .unwrap();
+    assert_eq!(binary.status, Status::Skipped);
+    assert!(binary.error.as_ref().unwrap().contains("not judged"));
+}
+
 /// A long guide checked for large docs, its split answered with `split`
 /// and its kind, when asked, with `kind`.
 fn large_doc(split: Value, kind: Value) -> crate::schema::FileResult {
