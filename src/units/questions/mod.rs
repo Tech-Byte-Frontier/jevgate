@@ -143,6 +143,8 @@ mod tests {
             test_mock_only("tests[0].source", TestEvidence::Recheck),
             test_mock_only("tests[0].source", TestEvidence::RecheckGroups),
             test_several("tests[0].source"),
+            test_reads("tests[0].source", TestEvidence::Recheck),
+            test_reads("tests[0].source", TestEvidence::RecheckGroups),
             test_pair_overlap(false),
             test_pair_overlap(true),
             test_pair_distinct(),

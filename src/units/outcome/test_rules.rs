@@ -23,7 +23,7 @@ pub(in crate::units) fn test_value_outcome<'a>(
     Some(if let Some(p) = strongest(&hollow) {
         Outcome::Review(p)
     } else if let Some(p) = strongest(&weak) {
-        Outcome::Consider(p)
+        internal_outcome(p, get("reads"))
     } else if let Outcome::Review(p) = several {
         Outcome::Note(p)
     } else if hollow.iter().all(|o| *o == Outcome::Clear) {
@@ -31,6 +31,32 @@ pub(in crate::units) fn test_value_outcome<'a>(
     } else {
         Outcome::Uncertain(hollow.iter().map(|o| o.concern()).fold(0.0, f64::max))
     })
+}
+
+/// An internal-details consider, weighed with what the test's assertions
+/// read once that is asked: results, state or effects a caller observes at
+/// the threshold clear it, stored input or the program's own calls leading
+/// keep it, and otherwise it is a note.
+fn internal_outcome(p: f64, reads: Option<&Answer>) -> Outcome {
+    let Some(Answer::Choice { probabilities, .. }) = reads else {
+        return Outcome::Consider(p);
+    };
+    let mass: f64 = probabilities.values().sum();
+    if mass <= 0.0 {
+        return Outcome::Consider(p);
+    }
+    let observed: f64 = probabilities
+        .iter()
+        .filter(|(kind, _)| questions::OBSERVED_READS.contains(&kind.as_str()))
+        .map(|(_, q)| q / mass)
+        .sum();
+    if at_least(observed) {
+        Outcome::Clear
+    } else if probability_at_least(1.0 - observed, LEADING_PROBABILITY) {
+        Outcome::Consider(p)
+    } else {
+        Outcome::Note(p)
+    }
 }
 
 /// Two tests that check the same behavior with equivalent inputs make a

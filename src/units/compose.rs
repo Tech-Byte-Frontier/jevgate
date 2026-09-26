@@ -196,6 +196,8 @@ fn test_value_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers
             merged.insert(question, answer);
         }
     }
+    // What its assertions read, asked after an internal-details consider.
+    merged.extend(answers(judgments, &unit.id, Pass::Locate));
     merged
 }
 
@@ -244,6 +246,8 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                 Detail::TestPair {
                     confirm: Some(_), ..
                 } => matches!(outcome, Outcome::Review(_)),
+                // Only the internal-details check raises a test's consider.
+                Detail::Test { confirm: Some(_) } => matches!(outcome, Outcome::Consider(_)),
                 Detail::Function {
                     locate: Some(_), ..
                 } => raised(resolved.get("split").map(|a| benefit(a))),
@@ -1013,7 +1017,7 @@ fn finding(
             let reason = comment_reason(answers, documented(unit));
             comment_wording(name, &[(&unit.locations[0], reason)], strength, p)
         }
-        Detail::Test => test_wording(name, strength, p, answers),
+        Detail::Test { .. } => test_wording(name, strength, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;
             test_pair_wording(name, strength == Strength::Review, p)

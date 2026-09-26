@@ -137,6 +137,34 @@ pub fn test_mock_only(path: &str, evidence: TestEvidence) -> Value {
     })
 }
 
+/// The `reads` options that name what a caller can observe.
+pub const OBSERVED_READS: [&str; 3] = ["effects", "result", "state"];
+
+/// What a test's assertions read, asked with the code under test once its
+/// first answer said it asserts internal details. Asked of the test and the
+/// signatures it calls, that check read a debug panel's recorded queries
+/// (`panel._queries`, which the panel renders), a framework's documented
+/// hooks and an app's state after an action as internals: of 66 such
+/// considers labeled by hand, 49 were wrong, and all 44 whose assertions
+/// read state or effects were among them, while 16 of the 19 reading stored
+/// input or the program's own calls were right.
+pub fn test_reads(path: &str, evidence: TestEvidence) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What do the assertions of the test in `{path}` read where they use private names, mocks or spies?"),
+            "note": test_note(evidence),
+        },
+        "criteria": {
+            "result": "What the code under test returns or builds, read through its fields, private ones included.",
+            "state": "The state an action leaves the object under test in, when the program shows that state or acts on it next, such as records a panel collects and renders or a flag a later call reads.",
+            "effects": "Effects a caller or another system can observe: rows written, responses, files, rendered output, requests a stand-in received, or calls to hooks and callbacks that the caller or a framework supplies.",
+            "stored": "That a constructor or setter kept what it was given, or private fields that no behavior of the code depends on.",
+            "own_calls": "Which of the program's own functions were called, how often or in what order, through spies or mocks on its own helpers.",
+        },
+    })
+}
+
 pub fn test_several(path: &str) -> Value {
     noul(
         format!("Does the test in `{path}` check several unrelated behaviors?"),
