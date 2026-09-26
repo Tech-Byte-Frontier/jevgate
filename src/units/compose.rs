@@ -511,6 +511,8 @@ impl<'p> Tally<'p> {
         let (outcome, answers) = resolved(unit, judgments);
         let outcome = if unnamed_value(unit, judgments) {
             lowered(lowered(outcome))
+        } else if single_use_value(unit, judgments) {
+            lowered(outcome)
         } else if short_outline(unit) {
             at_most_note(outcome)
         } else if unnamed_outline(unit, judgments) || few.contains(unit.id.as_str()) {
@@ -1069,6 +1071,44 @@ fn unnamed_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         )
 }
 
+/// A hardcoded-value consider that rests only on whether a value needs a
+/// name, about a value its file writes once: labeled by hand on 35
+/// projects, such considers were right 19 times in 52, against 34 in 49 for
+/// a value its file repeats. A delay given to `setTimeout`, a size given to
+/// an attribute or a CSS class reads where it is used; a value written twice
+/// can drift apart. Its finding is a note; reviews stay.
+fn single_use_value(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    let Detail::Values { repeated, .. } = &unit.detail else {
+        return false;
+    };
+    let (outcome, answers) = resolved(unit, judgments);
+    if !matches!(outcome, Outcome::Consider(_)) {
+        return false;
+    }
+    let get = |q: &str| answers.get(q).copied();
+    let only_named = crate::units::outcome::value_signals(&get, &unit.detail, true)
+        .unwrap_or_default()
+        .iter()
+        .filter(|(_, o, _)| matches!(o, Outcome::Review(_) | Outcome::Consider(_)))
+        .all(|(question, ..)| *question == "magic");
+    only_named
+        && located_option(unit, judgments, ("value", 'v'))
+            .is_some_and(|i| repeated.get(i) == Some(&false))
+}
+
+/// Why a hardcoded-value finding is below the level its answers reached,
+/// with that level.
+fn lowered_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<(Strength, &'static str)> {
+    let why = if unnamed_value(unit, judgments) {
+        "No single value stood out, so it is a note."
+    } else if single_use_value(unit, judgments) {
+        "It is written once in its file, so it is a note."
+    } else {
+        return None;
+    };
+    strength_of(resolved(unit, judgments).0).map(|(s, _)| (s, why))
+}
+
 /// A file-organization consider that says only that some members could
 /// move, naming no group: the module Choice was not asked (one group or
 /// none) or spread wider than two groups, and no kind of file decided it.
@@ -1155,21 +1195,25 @@ fn values_finding(
     answers: &Answers<'_>,
     judgments: &[Judgment],
 ) -> (Wording, Option<Location>) {
-    let unnamed = unnamed_value(unit, judgments)
-        .then(|| strength_of(resolved(unit, judgments).0).map(|(s, _)| s))
-        .flatten();
-    let (message, action) =
-        values_wording(&unit.name, &unit.detail, (strength, unnamed), p, answers);
+    let lowered = lowered_value(unit, judgments);
+    let (message, action) = values_wording(
+        &unit.name,
+        &unit.detail,
+        (strength, lowered.map(|(reached, _)| reached)),
+        p,
+        answers,
+    );
+    let why = lowered.map_or(String::new(), |(_, why)| format!(" {why}"));
     if let Some(index) = located_constant(unit, judgments) {
         // The finding points at the constant the Choice named.
         let location = unit.locations[index].clone();
         let constant = location.symbol.as_deref().unwrap_or("");
-        let message = format!("{message} The constant is `{constant}`.");
+        let message = format!("{message} The constant is `{constant}`.{why}");
         return ((message, action), Some(location));
     }
     let wording = match located_value(unit, judgments) {
-        Some(value) => (format!("{message} The value is {value}."), action),
-        None => (message, action),
+        Some(value) => (format!("{message} The value is {value}.{why}"), action),
+        None => (format!("{message}{why}"), action),
     };
     (wording, None)
 }

@@ -115,6 +115,8 @@ pub enum Detail {
         /// Its distinct values, whose ids `v0`, `v1`, ... the locate follow-up
         /// chooses among; that follow-up is sent only after a review or consider.
         choices: Vec<String>,
+        /// Whether each choice's text is not written exactly once in the file.
+        repeated: Vec<bool>,
         locate: Option<(Value, Asked)>,
     },
     /// A comment of application code and the unit it documents or sits in.
