@@ -284,6 +284,7 @@ pub fn rule_version(key: &str) -> &'static str {
         COMMENTS => "3",
         ACCESS_CONTROL | LARGE_DOCS => "2",
         DOC_STALENESS | DOC_DUPLICATION => "3",
+        WORKFLOWS => "2",
         _ => "1",
     }
 }

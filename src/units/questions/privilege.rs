@@ -1,5 +1,6 @@
 //! Questions about who reaches what: SQL row-level policies, SECURITY DEFINER
 //! functions and grants, and GitHub Actions jobs.
+use super::choose_id;
 use serde_json::{Value, json};
 
 /// SQL is evidence to judge, never instructions.
@@ -92,6 +93,40 @@ pub fn workflow_untrusted() -> Value {
         "criteria": {
             "true": "The workflow runs on `pull_request_target` or `workflow_run`, and the job checks out the pull request's head or downloads its artifacts and runs build or test commands on them, with secrets or a write token available.",
             "false": "The job runs only the base branch's code, runs on `pull_request` (where forks get no secrets), or handles pull request data without running its code.",
+        },
+    })
+}
+
+/// Asked when the outside-text question stays undecided: which expression, if
+/// any, holds such text. Naming it per expression settles jobs that one
+/// question over them all left between 0.2 and 0.6, such as a release job's
+/// version tags and a deploy job's repository names.
+pub fn workflow_outside_source(ids: &[String]) -> Value {
+    choose_id(
+        "Which entry in `expressions` can hold text written by people outside the repository's maintainers?",
+        format!(
+            "Options are the `id` values in `expressions`, each written inside the job's `run` scripts. {WORKFLOW}"
+        ),
+        ids,
+        "Every expression holds values the repository or GitHub fixes: commit SHAs, numbers, run ids, tags pushed by maintainers, repository names, secrets, matrix values, inputs of a manually started workflow, or outputs of the job's own steps.",
+    )
+}
+
+/// Asked when the pull-request-code question stays undecided: what code the
+/// job runs, among kinds, since a job that uploads a pull request's
+/// coverage report or labels its issues stayed near the middle on whether it
+/// runs the pull request's code.
+pub fn workflow_code() -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": "Which code does `job.source` run while it has secrets or a token with write access?",
+            "note": WORKFLOW,
+        },
+        "criteria": {
+            "base": "Only the base branch's own code and published actions: it checks out no pull request ref and runs no script or build from the pull request's files or artifacts.",
+            "pull_request": "Code from the pull request or a fork: it checks out the pull request's head, or runs build, test or install commands on files or artifacts the pull request produced.",
+            "none": "It runs no code of the repository, such as a job that only labels, comments, or uploads a report as data.",
         },
     })
 }

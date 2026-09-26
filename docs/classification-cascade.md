@@ -527,7 +527,11 @@ signatures, or one candidate pair.
    whether one can hold text outside people write: one question over the
    whole job scored obvious injections 0.57 to 0.79. Jobs of workflows that
    run on `pull_request_target` or `workflow_run` are asked whether they run
-   pull request code with secrets.
+   pull request code with secrets. A job left undecided is asked, apart,
+   which expression holds outside text and what code it runs (the base
+   branch's, the pull request's, or none), as Choices that can only clear:
+   a release job's tag names and a job uploading a pull request's coverage
+   report stayed between 0.2 and 0.6, and 7 of 14 such jobs were settled.
 5. **Composition** (`src/units/compose.rs`). Pure. On a Score whose top level is
    the actionable concern: review at 0.80 on the top level, consider at 0.80 on
    middle-or-top, clear when the top level is ruled out at 0.80, otherwise

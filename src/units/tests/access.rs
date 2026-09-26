@@ -92,6 +92,37 @@ fn access_units_follow_the_final_state_across_migrations() {
 }
 
 #[test]
+fn an_undecided_job_is_cleared_by_its_recheck_choices() {
+    let (project, mut options) = project_with(
+        &[(".github/workflows/greet.yml", WORKFLOW_FILE)],
+        &[catalog::WORKFLOWS],
+    );
+    options.refresh = true;
+    let status = |outside: &str| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![("outside", noul_at(0.5)), ("untrusted", noul_at(0.5))];
+        eval.recheck_level = Some(0);
+        eval.recheck_overrides = vec![
+            ("outside_source", choice_of(outside, &["e0", "none"])),
+            (
+                "pull_request_code",
+                choice_of("base", &["base", "pull_request", "none"]),
+            ),
+        ];
+        let report = run(&project, &options, &mut eval);
+        report.files[0].dimensions[catalog::WORKFLOWS]
+            .status
+            .clone()
+    };
+    assert_eq!(status("none"), Status::Clear);
+    assert_eq!(
+        status("e0"),
+        Status::Uncertain,
+        "a Choice that names the title only clears nothing"
+    );
+}
+
+#[test]
 fn access_control_judges_migrations_beside_the_code_rules() {
     let (project, mut options) = configuration_project();
     options.rules.push(catalog::INJECTION.into());
