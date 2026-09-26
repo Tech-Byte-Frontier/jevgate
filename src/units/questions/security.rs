@@ -322,11 +322,15 @@ pub fn security_markup_output(code: &str, django: bool) -> Value {
 }
 
 /// Options of the logging Choice that rule a logged secret out.
-pub const PLAIN_LOGS: [&str; 2] = ["plain", "none"];
+pub const PLAIN_LOGS: [&str; 4] = ["plain", "identity", "operator", "none"];
 
-/// What a function's log statements write, asked when the check for a
-/// logged object that holds a secret stays undecided: an error caught from a
-/// payment or database call, logged with a message, split on it.
+/// What a function's log statements write, asked whenever a logging signal
+/// is not clear: an error caught from a payment or database call, logged
+/// with a message, split on the check for a logged object; and the question
+/// whether it logs personal data found an audit line naming who signed in
+/// (vaultwarden's "User {email} logged in successfully. IP: {ip}") and a
+/// command printing recovery codes for the admin who ran it: 10 of 19
+/// labeled logging reviews were such lines.
 pub fn security_logged(code: &str) -> Value {
     json!({
         "type": "choice",
@@ -336,9 +340,57 @@ pub fn security_logged(code: &str) -> Value {
         },
         "criteria": {
             "plain": "Only messages, ids, counts, statuses, or an error caught from a failed call, none of which holds a password, token or key.",
+            "identity": "Who did what: a user's id, name, email address or IP address beside the action they took, as an audit or access log records, and no secret.",
+            "operator": "Values it shows on purpose to the person running a command-line tool, such as recovery codes or credentials a command prints for that person.",
             "secret": "A password, token, API key or other secret, or a whole object, configuration, request or argument list that holds one.",
-            "personal": "Personal data about a person, such as an email address, name, address or document number.",
+            "personal": "Other personal data about a person, such as a home address, document number, or health or payment details.",
             "none": "It logs or prints nothing.",
+        },
+    })
+}
+
+/// Options of the token Choice that rule an unverified-token concern out.
+pub const VERIFIED_TOKENS: [&str; 4] = ["verifies", "passes", "verified_before", "none"];
+
+/// What a function does with security tokens, asked whenever the token check
+/// is not clear: front-end hooks that read their own token to send it and
+/// middleware that looks a session up stayed between 0.2 and 0.5 on the
+/// check, while naming what the code does with tokens decides.
+pub fn security_token_use(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What does `{code}` do with security tokens, such as JSON Web Tokens or session tokens?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "verifies": "It verifies each token's signature and expiry, or looks the token up in its own store, before trusting what it holds.",
+            "passes": "It only creates, signs, stores, sends or forwards tokens, or checks that one is present, while a server verifies them.",
+            "verified_before": "It reads the claims of a token verified before it runs, such as by middleware, or of a token it has just received from an identity provider over TLS.",
+            "unverified": "It trusts what a token says, such as its user or role, without verifying its signature or expiry, or turns such a check off.",
+            "none": "It handles no security tokens.",
+        },
+    })
+}
+
+/// Options of the password Choice that rule a weak-password concern out.
+pub const HASHED_PASSWORDS: [&str; 2] = ["slow_hash", "none"];
+
+/// How a function treats users' passwords, asked whenever the password
+/// check is not clear: HMAC signing, key loading and a demo login form were
+/// reviews or stayed between 0.2 and 0.4 on it.
+pub fn security_password_handling(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("How does `{code}` handle users' passwords?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "slow_hash": "It hashes them with bcrypt, scrypt, Argon2 or a key derivation function with many iterations, or hands them to a library, framework or model hook that does.",
+            "plain": "It saves them, or checks a login against saved ones, as plain text.",
+            "fast_hash": "It hashes them with MD5, SHA-1, a single round of SHA-256 or another fast hash, or derives keys from them with few iterations.",
+            "none": "It stores and checks no users' passwords: what it hashes, signs or encrypts is other data, such as tokens, messages, files or keys, or it only fills in or sends a password someone types.",
         },
     })
 }
