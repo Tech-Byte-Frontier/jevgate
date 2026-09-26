@@ -85,16 +85,7 @@ fn locate(
     id: &str,
     choices: &[String],
 ) -> (Value, super::Asked) {
-    let ids: Vec<String> = (0..choices.len()).map(|i| format!("v{i}")).collect();
-    let mut questions = Questions::default();
-    questions.ask(
-        "value".into(),
-        questions::hardcoded_value(&ids),
-        id,
-        HARDCODED_VALUES,
-        "value",
-        Pass::Locate,
-    );
+    let ids = option_ids('v', choices.len());
     let state = json!({
         "file": file.file_state(),
         "function": {
@@ -103,6 +94,30 @@ fn locate(
             "values": ids.iter().zip(choices).map(|(id, value)| json!({"id": id, "value": value})).collect::<Vec<_>>(),
         },
     });
+    locate_request(file, id, ("value", questions::hardcoded_value(&ids)), state)
+}
+
+/// Option ids `{prefix}0`, `{prefix}1`, … for a locate Choice over `count` entries.
+fn option_ids(prefix: char, count: usize) -> Vec<String> {
+    (0..count).map(|i| format!("{prefix}{i}")).collect()
+}
+
+/// A locate request asking one Choice, `question` with its body, about `state`.
+fn locate_request(
+    file: &FileContext<'_>,
+    id: &str,
+    (question, body): (&'static str, Value),
+    state: Value,
+) -> (Value, super::Asked) {
+    let mut questions = Questions::default();
+    questions.ask(
+        question.into(),
+        body,
+        id,
+        HARDCODED_VALUES,
+        question,
+        Pass::Locate,
+    );
     file.request("locate", state, questions)
 }
 
@@ -203,16 +218,7 @@ fn plan_constants(
         false,
     );
     let locate = (constants.len() <= LOCATE_CHOICES).then(|| {
-        let ids: Vec<String> = (0..constants.len()).map(|i| format!("c{i}")).collect();
-        let mut questions = Questions::default();
-        questions.ask(
-            "constant".into(),
-            questions::hardcoded_constant(&ids),
-            CONSTANTS_ID,
-            HARDCODED_VALUES,
-            "constant",
-            Pass::Locate,
-        );
+        let ids = option_ids('c', constants.len());
         let with_ids: Vec<Value> = ids
             .iter()
             .zip(&listed)
@@ -222,10 +228,11 @@ fn plan_constants(
                 constant
             })
             .collect();
-        file.request(
-            "locate",
+        locate_request(
+            file,
+            CONSTANTS_ID,
+            ("constant", questions::hardcoded_constant(&ids)),
             json!({"file": file.file_state(), "constants": with_ids}),
-            questions,
         )
     });
     let state = json!({"file": file.file_state(), "constants": listed});

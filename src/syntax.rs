@@ -136,8 +136,10 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     Ok(Some(tree))
 }
 
-/// Error regions a file may hold and still be judged.
+/// Error regions a file may hold and still be judged, and the part of its
+/// source they may cover in all: one byte in eight.
 const ERROR_REGIONS: usize = 3;
+const ERROR_SHARE: usize = 8;
 
 /// A generator template, whose placeholders are no syntax of its language:
 /// a file under a `templates` directory, or one holding ERB tags (`<%=`)
@@ -166,7 +168,7 @@ fn tolerable(root: Node<'_>, len: usize) -> bool {
     let mut regions = Vec::new();
     error_regions(root, &mut regions);
     let bytes: usize = regions.iter().map(|r| r.len()).sum();
-    regions.len() <= ERROR_REGIONS && bytes * 8 <= len
+    regions.len() <= ERROR_REGIONS && bytes * ERROR_SHARE <= len
 }
 
 /// The smallest nodes that hold a syntax error.

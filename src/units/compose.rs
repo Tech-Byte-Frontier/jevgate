@@ -1182,26 +1182,33 @@ fn chosen_groups<'g>(
     }
 }
 
-/// The value a hardcoded-value finding is about, when the locate choice is clear.
 /// The position of the constant the locate Choice names, when it is clear.
 fn located_constant(unit: &UnitPlan, judgments: &[Judgment]) -> Option<usize> {
     if !matches!(unit.detail, Detail::Constants { .. }) {
         return None;
     }
-    let located = answers(judgments, &unit.id, Pass::Locate);
-    let (id, _) = choice(located.get("constant").copied())?;
-    let index: usize = id.strip_prefix('c')?.parse().ok()?;
-    (index < unit.locations.len()).then_some(index)
+    located_option(unit, judgments, ("constant", 'c')).filter(|&i| i < unit.locations.len())
 }
 
+/// The value a hardcoded-value finding is about, when the locate choice is clear.
 fn located_value(unit: &UnitPlan, judgments: &[Judgment]) -> Option<String> {
     let Detail::Values { choices, .. } = &unit.detail else {
         return None;
     };
+    choices
+        .get(located_option(unit, judgments, ("value", 'v'))?)
+        .cloned()
+}
+
+/// The index of the option `{prefix}N` a clear locate Choice `question` names.
+fn located_option(
+    unit: &UnitPlan,
+    judgments: &[Judgment],
+    (question, prefix): (&str, char),
+) -> Option<usize> {
     let located = answers(judgments, &unit.id, Pass::Locate);
-    let (id, _) = choice(located.get("value").copied())?;
-    let index: usize = id.strip_prefix('v')?.parse().ok()?;
-    choices.get(index).cloned()
+    let (id, _) = choice(located.get(question).copied())?;
+    id.strip_prefix(prefix)?.parse().ok()
 }
 
 /// Whether a block spans most of its function, three quarters or more:

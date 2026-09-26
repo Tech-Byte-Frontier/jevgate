@@ -578,44 +578,8 @@ pub(super) fn plan_pairs(
     for pair in pairs {
         let (a, b) = (&cases[pair.a], &cases[pair.b]);
         let id = format!("test-pair:{}|{}", a.name, b.name);
-        let mut questions = Questions::default();
-        let distinct = ruby.then(|| ("distinct", questions::test_pair_distinct()));
-        for (question, body) in [
-            ("overlap", questions::test_pair_overlap(ruby)),
-            ("same_input", questions::test_pair_same_input()),
-            ("same_outcome", questions::test_pair_same_outcome()),
-        ]
-        .into_iter()
-        .chain(distinct)
-        {
-            questions.ask(
-                question.into(),
-                body,
-                &id,
-                TEST_REDUNDANCY,
-                question,
-                Pass::First,
-            );
-        }
-        let mut state = json!({
-            "test_a": {"name": a.name, "source": a.source(file.source)},
-            "test_b": {"name": b.name, "source": b.source(file.source)},
-            "subject": subject_state(&[&pair.subject], subjects.signatures).remove(0),
-        });
-        // Tests in different groups can run on different setup: two RSpec
-        // examples that read alike may build different records first.
-        if ruby && a.suite != b.suite {
-            for (key, case) in [("test_a", a), ("test_b", b)] {
-                if !case.suite.is_empty() {
-                    state[key]["suite"] = json!(case.suite.join(" > "));
-                }
-            }
-            let (setup_a, setup_b) = (hook_text(file.source, a), hook_text(file.source, b));
-            if setup_a != setup_b {
-                state["test_a"]["setup"] = json!(setup_a);
-                state["test_b"]["setup"] = json!(setup_b);
-            }
-        }
+        let subject = subject_state(&[&pair.subject], subjects.signatures).remove(0);
+        let state = pair_state(file, (a, b), subject, ruby);
         let recheck = pair_recheck(file, &id, &state, &pair.subject, subjects, ruby);
         let identical = a.suite == b.suite
             && words(&a.source(file.source).replace(a.name.as_str(), ""))
@@ -633,7 +597,7 @@ pub(super) fn plan_pairs(
             );
             file.request("locate", state.clone(), questions)
         });
-        let (request, asked) = file.request("test-pair", state, questions);
+        let (request, asked) = file.request("test-pair", state, pair_questions(&id, ruby));
         let fits = file.budget.fits(&request);
         out.units.push(UnitPlan {
             rule: TEST_REDUNDANCY,
@@ -674,6 +638,60 @@ pub(super) fn plan_pairs(
             });
         }
     }
+}
+
+/// The first-pass questions of a test pair; Ruby pairs are also asked
+/// whether each test checks something the other does not.
+fn pair_questions(id: &str, ruby: bool) -> Questions {
+    let mut questions = Questions::default();
+    let distinct = ruby.then(|| ("distinct", questions::test_pair_distinct()));
+    for (question, body) in [
+        ("overlap", questions::test_pair_overlap(ruby)),
+        ("same_input", questions::test_pair_same_input()),
+        ("same_outcome", questions::test_pair_same_outcome()),
+    ]
+    .into_iter()
+    .chain(distinct)
+    {
+        questions.ask(
+            question.into(),
+            body,
+            id,
+            TEST_REDUNDANCY,
+            question,
+            Pass::First,
+        );
+    }
+    questions
+}
+
+/// Both tests of a pair with their subject.
+fn pair_state(
+    file: &FileContext<'_>,
+    (a, b): (&TestCase, &TestCase),
+    subject: Value,
+    ruby: bool,
+) -> Value {
+    let mut state = json!({
+        "test_a": {"name": a.name, "source": a.source(file.source)},
+        "test_b": {"name": b.name, "source": b.source(file.source)},
+        "subject": subject,
+    });
+    // Tests in different groups can run on different setup: two RSpec
+    // examples that read alike may build different records first.
+    if ruby && a.suite != b.suite {
+        for (key, case) in [("test_a", a), ("test_b", b)] {
+            if !case.suite.is_empty() {
+                state[key]["suite"] = json!(case.suite.join(" > "));
+            }
+        }
+        let (setup_a, setup_b) = (hook_text(file.source, a), hook_text(file.source, b));
+        if setup_a != setup_b {
+            state["test_a"]["setup"] = json!(setup_a);
+            state["test_b"]["setup"] = json!(setup_b);
+        }
+    }
+    state
 }
 
 /// The overlap question again for an undecided pair, with the body of the
