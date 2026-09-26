@@ -201,7 +201,10 @@ signatures, or one candidate pair.
    own text ("Imóvel não encontrado") were twelve reviews in one project,
    since the handler "did not raise it itself"; with the service's raise in
    view, ten became notes or considers, and tools that return the text of
-   every exception they catch became reviews. Each registered error handler (`.onError(…)`,
+   every exception they catch became reviews. The Choice over the messages
+   it creates is told the same, since two of those considers remained
+   because passing on the service's error read as "another error's text".
+   Each registered error handler (`.onError(…)`,
    `.setErrorHandler(…)`, Express four-parameter `.use(…)` middleware, Flask
    and FastAPI decorators, NestJS `@Catch` filters, axum `IntoResponse` and
    actix-web `ResponseError` for an error type, Rocket catchers, ASP.NET Core
