@@ -120,7 +120,10 @@ const SHORT_COPY_LINES: usize = 4;
 /// idiom as often as they hide a missing helper. On 17 projects, 5 of the 9
 /// reviews of copies that short were idioms: constructor middleware
 /// declarations, hook preambles, a Go validator's field copies. Short copies
-/// inside test cases, a login step or an assertion tail, are notes.
+/// inside test cases, a login step or an assertion tail, are notes. Copies
+/// in test code outside its cases, in fixtures, helpers and setup, are at
+/// most a consider: labeled by hand on 25 projects, 13 of 19 such reviews
+/// were a level too strong, while 11 of 12 considers were right as they were.
 pub(in crate::units) fn shared_outcome(
     required: Option<&Answer>,
     same: Option<&Answer>,
@@ -147,6 +150,7 @@ pub(in crate::units) fn shared_outcome(
         // Short copies in test support, such as a run of one-line assertions.
         (Detail::Pair { in_tests: true, .. }, _) if short => lowered(same),
         (Detail::Pair { in_cases: true, .. }, _) => lowered(same),
+        (Detail::Pair { in_tests: true, .. }, Outcome::Review(p)) => Outcome::Consider(p),
         (_, Outcome::Review(p)) if short => Outcome::Consider(p),
         _ => same,
     })
