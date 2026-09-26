@@ -35,7 +35,7 @@ fn copies_inside_one_test_raise_at_most_a_consider() {
 }
 
 #[test]
-fn copies_across_test_cases_are_one_level_lower_than_copies_in_support_code() {
+fn copies_in_test_code_are_at_most_a_consider_and_across_cases_one_level_lower() {
     let block = "    let text = std::fs::read_to_string(path).unwrap();\n    let value: Value = serde_json::from_str(&text).unwrap();\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    let name = name.to_lowercase();\n";
     let second = block.replace("text", "body").replace("value", "parsed");
     let cases = format!(
@@ -47,20 +47,24 @@ fn copies_across_test_cases_are_one_level_lower_than_copies_in_support_code() {
     let mut options = args();
     options.include_tests = true;
     only(&mut options, catalog::SHARED_LOGIC);
-    let strength = |source: &str| {
+    let at = |source: &str, level: usize| {
         let project = Project::new();
         project.write("tests/cases.rs", source);
-        let mut same = scripted(2);
+        let mut same = scripted(level);
         same.overrides
             .push(("required", json!({"type":"noul","noul":0.05})));
         let report = run(&project, &options, &mut same);
         let finding = report.files[0].findings[0].clone();
         (finding.strength, finding.message)
     };
+    let strength = |source: &str| at(source, 2);
     let (in_cases, message) = strength(&cases);
     assert_eq!(in_cases, Strength::Consider);
     assert!(message.contains("across test cases"), "{message}");
-    assert_eq!(strength(&support).0, Strength::Review);
+    // Support code of tests: a review is a consider, a consider stays one.
+    assert_eq!(strength(&support).0, Strength::Consider);
+    assert_eq!(at(&support, 1).0, Strength::Consider);
+    assert_eq!(at(&cases, 1).0, Strength::Note);
     // A short copy across test cases, such as a login step, is a note.
     let short = cases
         .replace("    let name = name.to_lowercase();\n", "")

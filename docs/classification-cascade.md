@@ -562,7 +562,8 @@ signatures, or one candidate pair.
    labeled set, no living document leaned past 0.50. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
    Jev does not count reliably and reads "tasks" literally. Copies inside test
-   cases are one level lower. Copies of three lines or fewer are at most a
+   cases are one level lower, and copies in their fixtures, helpers and setup
+   at most a consider. Copies of three lines or fewer are at most a
    consider: in Java such a copy was as often an idiom, a pooled builder
    borrowed and released around one call, as a missing helper. A test that
    checks several unrelated behaviors is at most a note: on labeled tests,
