@@ -27,7 +27,7 @@ pub(super) use comments::{comment_concern_kind, comment_outcome, comment_signals
 use documentation::stale_outcome;
 pub(super) use documentation::{document_outcome, document_split, section_signals};
 pub(super) use exposure::{Messages, django_settings_outcome, exposure_outcome, messages};
-pub(super) use injection::{injection_outcome, origin_outcome};
+pub(super) use injection::{RESOURCE_CHECKS, injection_outcome, origin_outcome};
 pub(super) use maintainability::{
     benign_key, function_outcome, organization_outcome, several_kind, shared_outcome,
     value_signals, values_outcome,
