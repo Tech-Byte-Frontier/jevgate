@@ -185,6 +185,7 @@ fn findings(report: &Report, prefix: Option<&str>, include_notes: bool) -> Value
                 "action": f.action,
                 "probability": f.concern_probability,
                 "baselined": f.baselined,
+                "suppressed": f.suppressed,
             })
         })
         .collect();
