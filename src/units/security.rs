@@ -57,6 +57,8 @@ pub(super) struct Subject<'a> {
     /// its sensitive-data trace: whether an error's text that it sends is
     /// the program's own depends on where the error was raised.
     pub callee_errors: Vec<Value>,
+    /// Whether its file sits at a test path, such as a test app's settings.
+    pub test_path: bool,
 }
 
 impl Subject<'_> {
@@ -95,6 +97,7 @@ pub(super) fn function_subject<'a>(
         evidence: serde_json::Map::new(),
         django: false,
         callee_errors: Vec::new(),
+        test_path: false,
     }
 }
 
@@ -181,6 +184,7 @@ pub(super) fn setup_subject<'a>(
         evidence: serde_json::Map::new(),
         django: false,
         callee_errors: Vec::new(),
+        test_path: false,
     })
 }
 
@@ -298,6 +302,7 @@ fn push_unit(
             trace,
             settles,
             django: subject.django,
+            test_path: subject.test_path,
         },
         recheck,
     });

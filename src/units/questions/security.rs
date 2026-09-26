@@ -350,12 +350,21 @@ pub fn security_logged(code: &str) -> Value {
 }
 
 /// Options of the token Choice that rule an unverified-token concern out.
-pub const VERIFIED_TOKENS: [&str; 4] = ["verifies", "passes", "verified_before", "none"];
+pub const VERIFIED_TOKENS: [&str; 5] = [
+    "verifies",
+    "passes",
+    "verified_before",
+    "reads_claims",
+    "none",
+];
 
 /// What a function does with security tokens, asked whenever the token check
 /// is not clear: front-end hooks that read their own token to send it and
 /// middleware that looks a session up stayed between 0.2 and 0.5 on the
-/// check, while naming what the code does with tokens decides.
+/// check, while naming what the code does with tokens decides. Reading a
+/// token's claims is apart from deciding access with them: code that read
+/// the expiry of a token its identity provider had just sent, or the
+/// character id of an access token, was chosen as trusting it unverified.
 pub fn security_token_use(code: &str) -> Value {
     json!({
         "type": "choice",
@@ -367,7 +376,8 @@ pub fn security_token_use(code: &str) -> Value {
             "verifies": "It verifies each token's signature and expiry, or looks the token up in its own store, before trusting what it holds.",
             "passes": "It only creates, signs, stores, sends or forwards tokens, or checks that one is present, while a server verifies them.",
             "verified_before": "It reads the claims of a token verified before it runs, such as by middleware, or of a token it has just received from an identity provider over TLS.",
-            "unverified": "It trusts what a token says, such as its user or role, without verifying its signature or expiry, or turns such a check off.",
+            "reads_claims": "It decodes a token only to read or show what it says, such as a user id, a name or its expiry, while other code or a server decides what the caller may do.",
+            "decides_access": "It decides what the caller may do, such as signing them in, granting a role or accepting a reset, from a token it has not verified, or it turns a signature or expiry check off.",
             "none": "It handles no security tokens.",
         },
     })

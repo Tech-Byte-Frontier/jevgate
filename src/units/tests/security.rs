@@ -1146,11 +1146,12 @@ fn code_outside_csharp_and_django_is_asked_about_tokens_keys_and_escaping() {
 
 #[test]
 fn a_token_the_code_only_passes_on_is_no_review() {
-    const USES: [&str; 5] = [
+    const USES: [&str; 6] = [
         "verifies",
         "passes",
         "verified_before",
-        "unverified",
+        "reads_claims",
+        "decides_access",
         "none",
     ];
     let strength = |choice: &str| {
@@ -1174,7 +1175,8 @@ fn a_token_the_code_only_passes_on_is_no_review() {
         );
         report.files[0].findings.first().map(|f| f.strength)
     };
-    assert_eq!(strength("unverified"), Some(Strength::Review));
+    assert_eq!(strength("decides_access"), Some(Strength::Review));
+    assert_eq!(strength("reads_claims"), Some(Strength::Note));
     assert_eq!(
         strength("passes"),
         Some(Strength::Note),

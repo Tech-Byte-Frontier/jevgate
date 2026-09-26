@@ -32,6 +32,7 @@ pub(super) fn plan_security(
         file.rules.insert(rule, 0);
     }
     let parsed = &scope.units[&context.owner];
+    let test_path = scope.inputs[context.owner].result.role == "test";
     let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
     let subjects: Vec<security::Subject<'_>> = parsed
         .units
@@ -54,6 +55,7 @@ pub(super) fn plan_security(
                 subject.callee_errors = callee_errors(scope, &shared.links, context.owner, unit);
             }
             subject.django = parsed.django;
+            subject.test_path = test_path;
             if parsed.django {
                 django_evidence(scope, context, parsed, unit, rules, &mut subject);
             }
@@ -67,6 +69,7 @@ pub(super) fn plan_security(
     // settings module, keeps the common questions.
     if let Some(setup) = setup.as_mut() {
         setup.django = parsed.setup.settings;
+        setup.test_path = test_path;
     }
     if let Some(setup) = setup.as_mut().filter(|_| parsed.setup.settings) {
         let selected = selections(&scope.inputs[context.owner].settings_selected_by);
