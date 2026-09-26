@@ -4,8 +4,7 @@
 //! Python function under an error-handler decorator, and the views a Django
 //! URLconf or Django REST framework's `EXCEPTION_HANDLER` names.
 use super::{Handler, Scope, named_handler};
-use crate::analysis::imports::Imports;
-use std::collections::BTreeMap;
+use crate::analysis::imports::Links;
 
 /// Calls that register a web framework's error handler, by the method that
 /// takes it; the handler is the function named or written in the call.
@@ -26,11 +25,7 @@ const HANDLER_DECORATORS: [&str; 2] = [".exception_handler(", ".errorhandler("];
 
 /// Handlers one file passes to a registration call: a function named there,
 /// or the function written inside the call.
-pub(super) fn registered(
-    scope: &Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
-    owner: usize,
-) -> Vec<Handler> {
+pub(super) fn registered(scope: &Scope<'_>, links: &Links, owner: usize) -> Vec<Handler> {
     let input = &scope.inputs[owner];
     let source = input.source.as_deref().unwrap_or("");
     let lines = scope.test_lines(owner);
@@ -51,7 +46,7 @@ pub(super) fn registered(
             {
                 continue;
             }
-            found.extend(registration(scope, imports, owner, needle, at));
+            found.extend(registration(scope, links, owner, needle, at));
         }
     }
     found
@@ -62,7 +57,7 @@ pub(super) fn registered(
 /// counts only with the error-middleware parameter count.
 fn registration(
     scope: &Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
+    links: &Links,
     owner: usize,
     needle: &str,
     at: usize,
@@ -90,7 +85,7 @@ fn registration(
         return None;
     }
     let (owner, name, source, lines) = if named {
-        named_handler(scope, imports, owner, quoted)?
+        named_handler(scope, links, owner, quoted)?
     } else {
         let first = crate::analysis::line_of(source, open);
         let last = crate::analysis::line_of(source, open + argument.len());
@@ -165,11 +160,7 @@ const DRF_EXCEPTION_HANDLER: &str = "EXCEPTION_HANDLER";
 /// Views a Django URLconf names for errors (`handler500 = views.server_error`
 /// or a dotted path in a string), and the function Django REST framework's
 /// `EXCEPTION_HANDLER` setting names, found by their last name segment.
-pub(super) fn django_views(
-    scope: &Scope<'_>,
-    imports: &BTreeMap<usize, Imports>,
-    owner: usize,
-) -> Vec<Handler> {
+pub(super) fn django_views(scope: &Scope<'_>, links: &Links, owner: usize) -> Vec<Handler> {
     let input = &scope.inputs[owner];
     if input.result.path.extension().is_none_or(|e| e != "py") {
         return Vec::new();
@@ -214,7 +205,7 @@ pub(super) fn django_views(
             continue;
         }
         let Some((handler_owner, handler_name, handler_source, lines)) =
-            named_handler(scope, imports, owner, name)
+            named_handler(scope, links, owner, name)
         else {
             continue;
         };

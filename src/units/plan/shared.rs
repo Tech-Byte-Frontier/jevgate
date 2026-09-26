@@ -7,7 +7,7 @@ use super::{
 use crate::{
     analysis::{
         clones::{self, SourceFile},
-        imports::Imports,
+        imports::Links,
         routes::Route,
         test_map::{self, TestCase},
         units::Unit,
@@ -21,11 +21,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Facts that span files: clone groups, imports, callable subjects and hashes.
+/// Facts that span files: clone groups, links, callable subjects and hashes.
 pub(super) struct Shared<'a> {
     pub(super) rules: &'a [String],
     pub(super) pairs: clones::Candidates,
-    pub(super) imports: BTreeMap<usize, Imports>,
+    pub(super) links: Links,
     /// Callable short names to their signatures, for test subjects.
     pub(super) subjects: BTreeMap<String, String>,
     /// Java method short names to the Java types that own a method of that name.
@@ -102,7 +102,7 @@ impl<'a> Shared<'a> {
         let mut shared = Self {
             rules: &args.rules,
             pairs: clones::Candidates::default(),
-            imports: imports(scope),
+            links: links(scope),
             subjects: BTreeMap::new(),
             subject_owners: BTreeMap::new(),
             subject_sources: BTreeMap::new(),
@@ -311,15 +311,11 @@ fn test_cases(scope: &Scope<'_>) -> BTreeMap<PathBuf, Vec<TestCase>> {
         .collect()
 }
 
-/// Import lines of every selected file, for caller lookups.
-fn imports(scope: &Scope<'_>) -> BTreeMap<usize, Imports> {
-    scope
-        .owners
-        .iter()
-        .map(|&owner| {
-            let input = &scope.inputs[owner];
-            let source = input.source.as_deref().unwrap_or("");
-            (owner, Imports::new(&input.result.path, source))
-        })
-        .collect()
+/// Which selected files import which, for caller lookups.
+fn links(scope: &Scope<'_>) -> Links {
+    Links::new(scope.owners.iter().map(|&owner| {
+        let input = &scope.inputs[owner];
+        let source = input.source.as_deref().unwrap_or("");
+        (owner, input.result.path.as_path(), source)
+    }))
 }
