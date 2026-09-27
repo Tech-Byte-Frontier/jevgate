@@ -34,7 +34,7 @@ Accept it with `jevgate baseline`, and record why with `jevgate baseline mark wr
 
 ## A file is skipped
 
-Skipped files are listed with the reason: generated, vendored or minified code, migrations, an unsupported language, or a path outside the upload patterns. `generated`, `tests` and the upload patterns in `jevgate.toml` change what is selected. A file larger than `max_file_bytes` is not skipped but reported as `needs-context`, never truncated.
+Skipped files are listed with the reason: generated, vendored or minified code, migrations, an unsupported language, syntax errors, a parser that did not finish within 10 seconds, Bend 1 code (JevGate reads Bend 2), or a path outside the upload patterns. `generated`, `tests` and the upload patterns in `jevgate.toml` change what is selected. A file larger than `max_file_bytes` is not skipped but reported as `needs-context`, never truncated, and so is a unit whose request the provider refuses as beyond the model's context.
 
 ## No colors, or escape codes in a log
 
