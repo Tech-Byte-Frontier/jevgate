@@ -120,6 +120,28 @@ pub(crate) fn law_file(path: &Path) -> bool {
         .is_some_and(|name| name == "LAWS.bend" || name == "PROOF.bend")
 }
 
+/// A file of proofs: a `PROOF.bend`, a file named after what it proves
+/// (`padding_proof.bend`, mylsm's `BloomSafeProof.bend`) or one under a
+/// `proof` or `proofs` directory, as bend-collections keeps its lemmas.
+/// Its defs are steps of proofs, and the comments of its laws say how a
+/// proof goes: on the 16 projects where such files were first judged, 12
+/// of 14 function-simplification findings in them were wrong and the rest
+/// debatable, as were 14 of 15 law findings, and 36 of 40 hardcoded-value
+/// findings were wrong.
+pub(crate) fn proof_file(path: &Path) -> bool {
+    let named = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|stem| stem.ends_with("proof") || stem.ends_with("proofs"));
+    let placed = path.parent().is_some_and(|dir| {
+        dir.iter().any(|part| {
+            let part = part.to_string_lossy().to_ascii_lowercase();
+            part == "proof" || part == "proofs"
+        })
+    });
+    file(path) && (named || placed)
+}
+
 /// Whether a Bend 2 file defines `main`, the def its run starts from.
 pub(crate) fn defines_main(source: &str) -> bool {
     source.lines().any(|line| {
@@ -534,6 +556,28 @@ mod tests {
         assert_eq!(&test[start..], "#|7\n#|exit 0\n\n");
         assert_eq!(expected_output("def main() -> U32:\n  7\n# 7\n"), None);
         assert_eq!(expected_output("#|only\n"), Some(0));
+    }
+
+    #[test]
+    fn files_of_proofs_are_told_by_their_name_or_directory() {
+        for path in [
+            "PROOF.bend",
+            "demos/sort/PROOF.bend",
+            "padding_proof.bend",
+            "proofs/BloomSafeProof.bend",
+            "proofs/lib/lemmas/map.bend",
+            "src/proof/nat.bend",
+        ] {
+            assert!(proof_file(Path::new(path)), "{path}");
+        }
+        for path in [
+            "LAWS.bend",
+            "src/proofreader.bend",
+            "spec/containers/lru.bend",
+            "proofs/notes.md",
+        ] {
+            assert!(!proof_file(Path::new(path)), "{path}");
+        }
     }
 
     #[test]

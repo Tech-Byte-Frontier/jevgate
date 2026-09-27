@@ -155,8 +155,8 @@ pub struct FileUnits {
 
 /// A Bend 2 file's claims (laws a proof must hold), the laws that give a
 /// def an `IO` type (`law main: IO(Unit)` above `def main():`) and import
-/// aliases, and whether it is a `PROOF.bend`, to tell its proofs from its
-/// code and its effects from pure code.
+/// aliases, and whether it is a file of proofs (`bend::proof_file`), to
+/// tell its proofs from its code and its effects from pure code.
 #[derive(Clone, Debug, Default)]
 struct BendNames {
     claims: Vec<String>,
@@ -244,7 +244,7 @@ fn bend_names(path: &Path, root: Node<'_>, source: &str) -> BendNames {
         claims,
         effects,
         aliases: bend::aliases(root, source),
-        proofs: path.file_name().is_some_and(|n| n == "PROOF.bend"),
+        proofs: bend::proof_file(path),
     }
 }
 
