@@ -3,7 +3,7 @@
 //! statements inside function bodies; identifiers must be renamed consistently.
 use super::{
     fast_hash, is_comment, line_of, text,
-    units::{Kind, Role, Unit},
+    units::{Kind, Unit},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -350,11 +350,7 @@ fn one_per_function_pair(pairs: Vec<Pair>) -> Vec<Pair> {
         .collect()
 }
 
-/// Tokens of every file and the statement blocks inside unit bodies. A Bend
-/// 2 proof holds none: its cases repeat the rewrites each constructor
-/// needs, and a lemma copied into a standalone demo or eval is part of
-/// what that program shows. The 3 shared-logic findings on proofs across
-/// thirteen Bend 2 projects were all wrong.
+/// Tokens of every file and the statement blocks inside unit bodies.
 fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block>) {
     let mut parsed = Vec::new();
     let mut blocks = Vec::new();
@@ -369,7 +365,7 @@ fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block
         let bodies: Vec<Range<usize>> = file
             .units
             .iter()
-            .filter(|u| !u.equality && u.role != Role::Proof)
+            .filter(|u| !u.equality)
             .filter_map(|u| u.body.clone())
             .collect();
         collect_blocks(tree.root_node(), file, index, &bodies, &tokens, &mut blocks);
@@ -1300,26 +1296,6 @@ mod tests {
             pairs_between(("tests/io/a.bend", &other), ("tests/io/b.bend", &other)),
             1,
             "tests that check themselves may share a helper"
-        );
-    }
-
-    #[test]
-    fn copies_in_bend_proofs_are_not_candidates() {
-        let lemma = |returns: &str| {
-            format!(
-                "import Base\n\ndef add_swap(+x: Nat, +y: Nat, +z: Nat) -> {returns}:\n  match x:\n    case 0n:\n      {{==}}\n    case 1n+q:\n      %add_succ(y, Nat.add(q, z)) : {{1n+Nat.add(q, Nat.add(y, z)) == _ : Nat}}\n      %add_swap(q, y, z) : {{1n+Nat.add(q, Nat.add(y, z)) == 1n+_ : Nat}}\n      %add_zero(Nat.add(q, Nat.add(y, z))) : {{1n+Nat.add(q, Nat.add(y, z)) == 1n+_ : Nat}}\n      {{==}}\n"
-            )
-        };
-        let proof = lemma("{Nat.add(x, Nat.add(y, z)) == Nat.add(y, Nat.add(x, z)) : Nat}");
-        assert_eq!(
-            pairs_between(("demos/sort/PROOF.bend", &proof), ("lib/nat.bend", &proof)),
-            0
-        );
-        let code = lemma("Nat");
-        assert_eq!(
-            pairs_between(("lib/a.bend", &code), ("lib/b.bend", &code)),
-            1,
-            "the same steps outside proofs"
         );
     }
 

@@ -325,8 +325,8 @@ fn plan_module(
 /// Callable units: application code with the application view, and test
 /// support (not test cases) with the test view. A Bend 2 proof is left out:
 /// its steps follow the cases of what it proves, not jobs a reader could
-/// pull apart, and each function-simplification finding on one across
-/// thirteen Bend 2 projects (4 labeled) was wrong.
+/// pull apart, and the 16 function-simplification findings on proofs across
+/// 41 Bend 2 projects were all wrong (2 more debatable).
 fn plan_functions(
     scope: &Scope<'_>,
     context: &FileContext<'_>,
