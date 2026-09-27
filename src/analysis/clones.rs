@@ -247,6 +247,13 @@ fn example_directory(part: &str) -> bool {
         || part.ends_with("-examples")
 }
 
+fn benchmark_directory(part: &str) -> bool {
+    matches!(
+        part.to_ascii_lowercase().as_str(),
+        "bench" | "benches" | "benchmark" | "benchmarks"
+    )
+}
+
 /// Whether a file is example code, written to be read beside other examples.
 /// Also a top-level `samples` or `sample` directory (a Java package named
 /// `samples` is source), a .NET project named like `MediatR.Examples.Autofac`,
@@ -296,9 +303,12 @@ fn jvm_source_root(directories: &[String]) -> Option<usize> {
 /// side on purpose: under the same `examples` (or `demo`, `tutorial`)
 /// directory, in different directories below it. django-styleguide shows a
 /// Google login flow written by hand in `blog_examples/…/raw` and with the
-/// SDK in `…/sdk`; their copies are the point.
+/// SDK in `…/sdk`; their copies are the point. Benchmarks kept so are
+/// separate programs too: each of bendlang/bend's `bench/runtime/*` is a
+/// standalone program measured beside its C, TypeScript and Lean twins,
+/// and the 6 shared-logic findings across them were labeled wrong.
 fn separate_examples(a: &Path, b: &Path) -> bool {
-    let example = |part: &str| example_directory(part);
+    let example = |part: &str| example_directory(part) || benchmark_directory(part);
     let dirs = |p: &Path| -> Vec<String> {
         p.parent()
             .map(|d| d.iter().map(|c| c.to_string_lossy().into_owned()).collect())
@@ -1699,6 +1709,15 @@ mod tests {
         assert!(!super::separate_examples(
             Path::new("src/billing/raw/apis.py"),
             Path::new("src/billing/sdk/apis.py")
+        ));
+        // Benchmark programs side by side; one benchmark suite's files are one program.
+        assert!(super::separate_examples(
+            Path::new("bench/runtime/nbody/main.bend"),
+            Path::new("bench/runtime/mandelbrot/main.bend")
+        ));
+        assert!(!super::separate_examples(
+            Path::new("benchmarks/multipart_benchmark.py"),
+            Path::new("benchmarks/urlencoded_benchmark.py")
         ));
         for path in [
             "docs_src/tutorial/one/tutorial001.py",

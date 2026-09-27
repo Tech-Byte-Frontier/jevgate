@@ -50,29 +50,45 @@ pub(super) fn plan(
     if file.path.file_name().is_some_and(|n| n == "PROOF.bend") {
         return;
     }
-    let claims: Vec<(&Unit, String)> = units
+    let claims: Vec<(usize, &Unit, String)> = units
         .iter()
-        .filter(|u| u.kind == Kind::Law)
-        .filter(|u| {
+        .enumerate()
+        .filter(|(_, u)| u.kind == Kind::Law)
+        .filter(|(_, u)| {
             u.statement
                 .as_ref()
                 .is_some_and(|s| s.claim(propositions) && s.general())
         })
-        .filter_map(|u| Some((u, comment(u, file.source)?)))
+        .filter_map(|(at, u)| Some((at, u, comment(u, file.source)?)))
         .collect();
-    let ids = unique_ids("law", claims.iter().map(|(u, _)| u.name.as_str()));
+    let ids = unique_ids("law", claims.iter().map(|(_, u, _)| u.name.as_str()));
     let mut items = Vec::new();
-    for ((unit, comment), id) in claims.into_iter().zip(ids) {
-        let law = &file.source[declaration_start(unit, file.source)..unit.span.end];
-        let named = named_defs(unit, defs);
+    for ((at, unit, comment), id) in claims.into_iter().zip(ids) {
+        let group = group(units, at, file.source);
+        let law = group
+            .iter()
+            .map(|u| &file.source[declaration_start(u, file.source)..u.span.end])
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let reading = |u: &Unit| {
+            u.statement
+                .as_ref()
+                .map(|s| s.reading(propositions))
+                .unwrap_or_default()
+        };
+        let reading = match group.as_slice() {
+            [only] => reading(only),
+            laws => laws
+                .iter()
+                .map(|u| format!("`{}`: {}", u.name, reading(u)))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        let named = named_defs(&group, defs);
         let state = json!({
             "name": unit.name,
             "source": law,
-            "reading": unit
-                .statement
-                .as_ref()
-                .map(|s| s.reading(propositions))
-                .unwrap_or_default(),
+            "reading": reading,
             "comment": comment,
             "defs": named,
         });
@@ -86,7 +102,7 @@ pub(super) fn plan(
             locations: vec![file.location(unit.line, unit.end_line, Some(&unit.name))],
             quote: Some(comment.clone()),
             lines: unit.lines(),
-            identity: identity(&[&unit.name, &compact(law), &compact(&comment)]),
+            identity: identity(&[&unit.name, &compact(&law), &compact(&comment)]),
             detail: Detail::Law,
             recheck: recheck.map(Into::into),
         });
@@ -228,6 +244,20 @@ fn comment(unit: &Unit, source: &str) -> Option<String> {
     (words >= MIN_WORDS).then(|| kept.join("\n"))
 }
 
+/// The law at `at` and the laws right after it that have no comment of
+/// their own, which its comment describes too: a comment saying an NFA is
+/// "sound and complete" heads `nfa_sound` and the uncommented `nfa_complete`
+/// below it.
+fn group<'a>(units: &'a [Unit], at: usize, source: &str) -> Vec<&'a Unit> {
+    let mut laws = vec![&units[at]];
+    laws.extend(
+        units[at + 1..]
+            .iter()
+            .take_while(|u| u.kind == Kind::Law && comment(u, source).is_none()),
+    );
+    laws
+}
+
 /// The byte where the law's own line starts, after the comments above it.
 fn declaration_start(unit: &Unit, source: &str) -> usize {
     source
@@ -238,12 +268,13 @@ fn declaration_start(unit: &Unit, source: &str) -> usize {
         .max(unit.span.start)
 }
 
-/// The defs a law's statement and clauses call, by their full or unaliased
-/// names (`Srv.http_response` names `http_response` of the file imported as
-/// `Srv`), in the order found.
-fn named_defs(law: &Unit, defs: &[Named<'_>]) -> Vec<Value> {
+/// The defs the laws' statements and clauses call, by their full or
+/// unaliased names (`Srv.http_response` names `http_response` of the file
+/// imported as `Srv`), in name order.
+fn named_defs(laws: &[&Unit], defs: &[Named<'_>]) -> Vec<Value> {
     let mut shown = Vec::new();
-    for call in &law.calls {
+    let calls: std::collections::BTreeSet<&String> = laws.iter().flat_map(|l| &l.calls).collect();
+    for call in calls {
         if shown.len() == DEFS {
             break;
         }
