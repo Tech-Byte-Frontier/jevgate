@@ -190,6 +190,40 @@ pub(super) fn choice(answer: Option<&Answer>) -> Option<(&str, f64)> {
 
 pub(super) type Answers<'a> = BTreeMap<&'a str, &'a Answer>;
 
+/// A split weighed with the kind of file or document once it is asked: the
+/// kinds that serve one feature or subject reaching the threshold clear an
+/// undecided split or a finding, and the kinds in `several` reaching it
+/// raise an undecided split to a consider.
+pub(super) fn weighed_by_kind(
+    outcome: Outcome,
+    kind: Option<&Answer>,
+    several: &[&str],
+) -> Outcome {
+    let (
+        Outcome::Uncertain(_) | Outcome::Consider(_) | Outcome::Review(_),
+        Some(Answer::Choice { probabilities, .. }),
+    ) = (outcome, kind)
+    else {
+        return outcome;
+    };
+    let mass: f64 = probabilities.values().sum();
+    if mass <= 0.0 {
+        return outcome;
+    }
+    let share: f64 = probabilities
+        .iter()
+        .filter(|(kind, _)| several.contains(&kind.as_str()))
+        .map(|(_, p)| p / mass)
+        .sum();
+    if at_least(1.0 - share) {
+        Outcome::Clear
+    } else if at_least(share) && matches!(outcome, Outcome::Uncertain(_)) {
+        Outcome::Consider(share)
+    } else {
+        outcome
+    }
+}
+
 /// Each candidate part's answers, in part order.
 pub(super) fn part_answers<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<PartAnswers<'a>> {
     super::outline::PART_QUESTIONS
