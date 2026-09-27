@@ -15,7 +15,7 @@
 |---|---|
 | Test value | `test_total` computes its expected value with the logic it tests. |
 | Test redundancy | Three tests of `parse_date` check the same behavior; one parameterized test could hold them. |
-| Laws (Bend 2) | The comment above law `nfa_sound` promises more than the law states: it says the NFA is sound and complete, and the law states only that it is sound, so a definition could break that promise while every proof passes. |
+| Laws (Bend 2) | The comment above law `body_after_blank` promises more than the law states: it says the text after a blank line is the body, and the law checks only texts that open with the blank line, so an `http_body` that returns a real response's headers could pass every proof. |
 
 **Security** (opt-in with `--rule security`; each finding names a CWE)
 
