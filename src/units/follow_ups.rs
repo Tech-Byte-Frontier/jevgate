@@ -7,11 +7,24 @@ use std::collections::BTreeSet;
 
 /// One locate follow-up per function whose split raised a review or consider,
 /// per hardcoded-value function raised to a review or consider, per redundant
-/// test pair raised to a review, per test that asserts internal details, and
-/// per injection consider that rests on its parameters.
+/// test pair raised to a review, per test that asserts internal details, per
+/// injection consider that rests on its parameters, per injection finding
+/// that rests on a path and per logging finding.
 pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
-    follow_ups(plan, files, compose::unlocated_units, |unit| {
-        match &unit.detail {
+    let mut planned = follow_ups(
+        plan,
+        files,
+        compose::unconfirmed_units,
+        |unit| match &unit.detail {
+            Detail::Security { paths, logging, .. } => paths.as_ref().or(logging.as_ref()),
+            _ => None,
+        },
+    );
+    planned.extend(follow_ups(
+        plan,
+        files,
+        compose::unlocated_units,
+        |unit| match &unit.detail {
             Detail::Function { locate, .. }
             | Detail::Document { locate, .. }
             | Detail::Values { locate, .. }
@@ -20,8 +33,9 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
             | Detail::Test { confirm }
             | Detail::Security { confirm, .. } => confirm.as_ref(),
             _ => None,
-        }
-    })
+        },
+    ));
+    planned
 }
 
 /// One question per hardcoded-value consider resting on a value's name

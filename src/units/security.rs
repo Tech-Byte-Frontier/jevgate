@@ -43,6 +43,10 @@ pub(super) struct Subject<'a> {
     /// defined in this or another selected file: fixed choices, not
     /// parameters, which the trace otherwise could not tell apart.
     pub enums: Vec<String>,
+    /// Definitions of the project's types its parameters name, shown when a
+    /// path finding is confirmed: how a route parameter of that type is
+    /// parsed decides what it can hold.
+    pub types: Vec<String>,
     /// C# constants it names, as `Class.Field = value`: a key written in
     /// the code or a value read from configuration.
     pub constants: Vec<String>,
@@ -90,7 +94,7 @@ pub(super) fn function_subject<'a>(
     file: &FileContext<'_>,
     unit: &'a Unit,
     callers: Vec<(String, String)>,
-    enums: &BTreeMap<String, String>,
+    (enums, types): (&BTreeMap<String, String>, &BTreeMap<String, String>),
     constants: &BTreeMap<String, Vec<String>>,
 ) -> Subject<'a> {
     let source = unit.source(file.source).to_string();
@@ -104,6 +108,7 @@ pub(super) fn function_subject<'a>(
         lines: (unit.line, unit.end_line),
         callers,
         enums: named_enums(&unit.sites, enums),
+        types: named_types(&unit.signature, types),
         evidence: serde_json::Map::new(),
         django: false,
         callee_errors: Vec::new(),
@@ -137,6 +142,25 @@ fn named_constants(
     }
     found.truncate(CONSTANTS);
     found
+}
+
+/// Type definitions shown with one subject, at most.
+const TYPES: usize = 3;
+
+/// The definitions of the project's types named as words in a signature.
+fn named_types(signature: &str, types: &BTreeMap<String, String>) -> Vec<String> {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    types
+        .iter()
+        .filter(|(name, _)| {
+            signature.match_indices(name.as_str()).any(|(at, _)| {
+                !word(signature[..at].chars().next_back())
+                    && !word(signature[at + name.len()..].chars().next())
+            })
+        })
+        .map(|(_, definition)| definition.clone())
+        .take(TYPES)
+        .collect()
 }
 
 /// Enum definitions shown with one subject, at most.
@@ -191,6 +215,7 @@ pub(super) fn setup_subject<'a>(
         lines: (first.1, last.2),
         callers: Vec::new(),
         enums: Vec::new(),
+        types: Vec::new(),
         evidence: serde_json::Map::new(),
         django: false,
         callee_errors: Vec::new(),
@@ -220,6 +245,7 @@ pub(super) fn template_subject<'a>(
         lines: (first.1, last.2),
         callers: Vec::new(),
         enums: Vec::new(),
+        types: Vec::new(),
         constants: Vec::new(),
         evidence: serde_json::Map::new(),
         django: false,
@@ -328,6 +354,12 @@ fn push_unit(
     let confirm = (rule == INJECTION)
         .then(|| confirm(file, subject, id))
         .flatten();
+    let paths = (rule == INJECTION)
+        .then(|| confirm_paths(file, subject, id))
+        .flatten();
+    let logging = (rule == SENSITIVE_DATA)
+        .then(|| confirm_logging(file, subject, id))
+        .flatten();
     let settles = settles(file, subject, rule, id);
     out.units.push(UnitPlan {
         rule,
@@ -348,6 +380,8 @@ fn push_unit(
             trace: trace.map(Into::into),
             settles,
             confirm: confirm.map(Into::into),
+            paths: paths.map(Into::into),
+            logging: logging.map(Into::into),
             django: subject.django,
             test_path: subject.test_path,
         },
@@ -394,12 +428,16 @@ fn send(
                     trace,
                     settles,
                     confirm,
+                    paths,
+                    logging,
                     ..
                 } = &mut unit.detail
                 {
                     *trace = None;
                     settles.clear();
                     *confirm = None;
+                    *paths = None;
+                    *logging = None;
                 }
             }
         }
@@ -770,6 +808,61 @@ fn confirm(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
         Pass::Locate,
     );
     let (request, asked) = file.request("locate", with_callers(file, subject), questions);
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// What the variable parts of the paths a path finding rests on can hold,
+/// asked only after such a finding: the function, the functions that call
+/// it and the project's types its parameters name.
+fn confirm_paths(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    id: &str,
+) -> Option<(Value, Asked)> {
+    let code = subject.code();
+    let mut questions = Questions::default();
+    questions.ask(
+        "paths".into(),
+        questions::injection_paths(
+            &code,
+            !subject.callers.is_empty(),
+            !subject.types.is_empty(),
+        ),
+        id,
+        INJECTION,
+        "paths",
+        Pass::Locate,
+    );
+    let mut state = with_callers(file, subject);
+    if !subject.types.is_empty() {
+        state["types_named_in_parameters"] = json!(subject.types);
+    }
+    let (request, asked) = file.request("locate", state, questions);
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// When the log line of a logging finding runs, asked only after such a
+/// finding: the function alone.
+fn confirm_logging(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    id: &str,
+) -> Option<(Value, Asked)> {
+    let code = subject.code();
+    let mut questions = Questions::default();
+    questions.ask(
+        "logged_when".into(),
+        questions::logged_when(&code),
+        id,
+        SENSITIVE_DATA,
+        "logged_when",
+        Pass::Locate,
+    );
+    let state = json!({
+        "file": file.file_state(),
+        subject.kind: subject.state(),
+    });
+    let (request, asked) = file.request("locate", state, questions);
     file.budget.fits(&request).then_some((request, asked))
 }
 

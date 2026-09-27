@@ -111,8 +111,13 @@ fn function_subject<'a>(
     } else {
         Vec::new()
     };
-    let mut subject =
-        security::function_subject(context, unit, callers, &shared.enums, &shared.constants);
+    let mut subject = security::function_subject(
+        context,
+        unit,
+        callers,
+        (&shared.enums, &shared.types),
+        &shared.constants,
+    );
     if rules.contains(&catalog::SENSITIVE_DATA) {
         subject.callee_errors = callee_errors(scope, &shared.links, context.owner, unit);
     }

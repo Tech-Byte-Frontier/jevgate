@@ -1629,3 +1629,86 @@ fn a_template_writing_client_data_unescaped_is_judged_as_template_code() {
     assert_eq!(code["source"], "<%= raw cookies[:font] %>");
     assert_eq!(plan.files[&0].units[0].locations[0].start_line, 2);
 }
+
+/// A Rocket route joining an id its type parses as a UUID to a directory.
+const DOWNLOAD: &str = "#[derive(Clone, UuidFromParam)]\npub struct FileId(String);\n\n#[get(\"/files/<id>\")]\nasync fn download(id: FileId) -> Option<NamedFile> {\n    let path = Path::new(\"data\").join(id.as_ref());\n    NamedFile::open(path).await.ok()\n}\n";
+
+/// The options of the Choice on what a path finding's paths can hold.
+const PATHS: [&str; 5] = ["confined", "local", "outside", "own", "unknown"];
+
+#[test]
+fn a_path_finding_is_a_note_when_its_paths_stay_in_their_directory() {
+    let (project, mut options) = security_project(DOWNLOAD);
+    let (_, plan) = planned(&project, &options);
+    let paths = plan.files[&0]
+        .units
+        .iter()
+        .find_map(|u| match &u.detail {
+            Detail::Security {
+                paths: Some(paths), ..
+            } => Some(paths.request()),
+            _ => None,
+        })
+        .expect("an injection unit with a path confirm");
+    assert!(
+        paths["state"]["types_named_in_parameters"][0]
+            .as_str()
+            .unwrap()
+            .contains("UuidFromParam"),
+        "the parameter's type is shown with its derive list: {paths}"
+    );
+    let mut judged = |choice: Value| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("resource", noul_at(0.95)),
+            ("path", noul_at(0.95)),
+            ("origin", spread(0.0, 0.0, 1.0)),
+            ("paths", choice),
+        ];
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.rule == "security/injection")
+            .map(|f| f.strength)
+    };
+    assert_eq!(judged(choice_of("outside", &PATHS)), Some(Strength::Review));
+    assert_eq!(
+        judged(choice_of("confined", &PATHS)),
+        Some(Strength::Note),
+        "a UUID cannot climb out of the directory"
+    );
+}
+
+/// Tokens logged only under a setting that exists to log them.
+const TOKENS: &str = "fn exchange(token: &str) -> String {\n    if CONFIG.sso_debug_tokens() {\n        debug!(\"Access token {token}\");\n    }\n    token.to_string()\n}\n";
+
+#[test]
+fn a_log_line_an_operator_turns_on_to_log_tokens_is_a_note() {
+    let (project, mut options) = security_project(TOKENS);
+    let logs = [
+        "plain", "identity", "operator", "secret", "personal", "none",
+    ];
+    let when = ["always", "debug", "none", "opt_in"];
+    let mut judged = |chosen: &str| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("logs_secret", noul_at(0.95)),
+            ("logs_object_secret", noul_at(0.95)),
+            ("logged", choice_of("secret", &logs)),
+            ("logged_when", choice_of(chosen, &when)),
+        ];
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        report.files[0].dimensions[catalog::SENSITIVE_DATA]
+            .status
+            .clone()
+    };
+    assert_eq!(
+        judged("debug"),
+        Status::Review,
+        "debug level is still a log"
+    );
+    assert_eq!(judged("opt_in"), Status::Note);
+}

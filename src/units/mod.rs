@@ -193,6 +193,12 @@ pub enum Detail {
         /// For injection, what the values it places can hold, asked only
         /// after a consider that rests on its parameters.
         confirm: Option<FollowUp>,
+        /// For injection, what the variable parts of its file paths can
+        /// hold, asked only after a finding that rests on a path.
+        paths: Option<FollowUp>,
+        /// For sensitive data, when its log line runs, asked only after a
+        /// finding its log checks raised.
+        logging: Option<FollowUp>,
         /// Django code, asked the Django checks: a weak setting must be
         /// named by one of them.
         django: bool,

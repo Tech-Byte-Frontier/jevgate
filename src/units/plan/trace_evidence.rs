@@ -41,6 +41,48 @@ pub(super) fn enums(scope: &Scope<'_>) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// A type shown with a path confirm is at most this long.
+const TYPE_BYTES: usize = 800;
+
+/// Definitions of the types in selected files and context (structs,
+/// classes, records; not enums) by name, with the documentation and
+/// attributes above them, such as a Rust derive list that says how a route
+/// parameter of that type is parsed; a name defined twice is left out.
+pub(super) fn types(scope: &Scope<'_>) -> BTreeMap<String, String> {
+    let selected = scope.owners.iter().map(|&owner| {
+        (
+            scope.inputs[owner].source.as_deref().unwrap_or(""),
+            &scope.units[&owner].units,
+        )
+    });
+    let context = scope
+        .context
+        .iter()
+        .map(|(_, source, units)| (*source, &units.units));
+    let mut found: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for (source, units) in selected.chain(context) {
+        for unit in units.iter().filter(|u| !u.callable()) {
+            let Some(text) = source.get(unit.span.clone()) else {
+                continue;
+            };
+            let declaration = text
+                .lines()
+                .find(|l| l.contains(&unit.short_name))
+                .unwrap_or("");
+            if !declaration.contains("enum ") && text.len() <= TYPE_BYTES {
+                found
+                    .entry(unit.short_name.clone())
+                    .and_modify(|d| *d = None)
+                    .or_insert_with(|| Some(text.to_string()));
+            }
+        }
+    }
+    found
+        .into_iter()
+        .filter_map(|(name, text)| Some((name, text?)))
+        .collect()
+}
+
 /// A constant shown with a security trace is at most this long.
 const CONSTANT_BYTES: usize = 200;
 
