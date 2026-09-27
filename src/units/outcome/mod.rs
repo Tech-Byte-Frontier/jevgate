@@ -232,7 +232,9 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         // "Slightly" says the comment adds only detail: a note, as a benefit.
-        catalog::LAWS => get("states").map(benefit),
+        catalog::LAWS => get("states")
+            .map(benefit)
+            .or_else(|| get("relation").map(law_relation)),
         catalog::COMMENTS => comment_outcome(
             &get,
             matches!(
@@ -330,6 +332,17 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         Outcome::Review(p) | Outcome::Consider(p) if example => Outcome::Note(p),
         outcome => outcome,
+    }
+}
+
+/// A law recheck's Choice: a consider when the options naming a claim the
+/// law does not state hold the policy's share, clear when the others do.
+fn law_relation(answer: &Answer) -> Outcome {
+    match choice_mass(Some(answer), &questions::LAW_GAPS) {
+        Some(gap) if at_least(gap) => Outcome::Consider(gap),
+        Some(gap) if at_least(1.0 - gap) => Outcome::Clear,
+        Some(gap) => Outcome::Uncertain(gap),
+        None => Outcome::Missing,
     }
 }
 

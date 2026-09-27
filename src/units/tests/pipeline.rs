@@ -128,3 +128,47 @@ fn packing_and_cache_identity_do_not_depend_on_token_calibration() {
     };
     assert_eq!(keys(2.0), keys(6.0));
 }
+
+/// Answers every request at `level`, except that the provider refuses the
+/// requests of one stage as beyond the model's context.
+struct Refusing {
+    stage: &'static str,
+    level: usize,
+}
+
+impl crate::transport::Evaluator for Refusing {
+    fn evaluate(&mut self, request: &Value) -> Result<Value> {
+        if request["jevgate"]["stage"] == self.stage {
+            let body = r#"{"detail":{"error_type":"max_tokens_exceeded"}}"#;
+            return Err(crate::provider_error::provider_error(400, Some(body), None).into());
+        }
+        Ok(answer(request, self.level))
+    }
+}
+
+#[test]
+fn a_request_refused_as_beyond_the_context_leaves_its_units_unsent() {
+    let (project, options) = function_rule_project(&function("total"));
+    let mut refusing = Refusing {
+        stage: "functions",
+        level: 0,
+    };
+    let report = run(&project, &options, &mut refusing);
+    let file = &report.files[0];
+    assert_ne!(file.status, Status::Error, "{:?}", file.error);
+    let units = &file.dimensions["function_simplification"].units;
+    assert_eq!((units.judged, units.needs_context), (0, 1));
+    assert_eq!(file.status, Status::NeedsContext);
+    // A refused recheck leaves the unit with its undecided first answer.
+    let mut options = options;
+    options.refresh = true;
+    let mut refusing = Refusing {
+        stage: "recheck",
+        level: 3,
+    };
+    let report = run(&project, &options, &mut refusing);
+    let file = &report.files[0];
+    assert_ne!(file.status, Status::Error, "{:?}", file.error);
+    let units = &file.dimensions["function_simplification"].units;
+    assert_eq!((units.judged, units.uncertain), (1, 1));
+}

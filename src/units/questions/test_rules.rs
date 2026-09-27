@@ -189,6 +189,30 @@ pub fn law_states(index: usize) -> Value {
     )
 }
 
+/// The options of the law recheck that name something the comment claims
+/// and the law does not state.
+pub const LAW_GAPS: [&str; 3] = ["property", "inputs", "condition"];
+
+/// What a Bend 2 law's comment says beyond its law, asked of a law whose
+/// first answer stayed undecided: its options name what separates a
+/// comment that restates its law from one that promises more.
+pub fn law_relation() -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": "What does the comment in `law.comment` say about behavior beyond what the law, read in `law.reading`, states?",
+            "note": format!("`law.source` is the law as written and `law.defs` the definitions it names; `file.comment`, when present, says what the file's laws pin. {EVIDENCE}"),
+        },
+        "criteria": {
+            "nothing": "Nothing: it states the law in other words, informally, with an example or with its intuition.",
+            "context": "Only why the law matters, where it is used, how it is proven, or that it checks a sample of cases.",
+            "property": "A property the law does not state, such as `complete` beside `sound`, or a result the law leaves free.",
+            "inputs": "The property for more inputs or states than the law's clauses cover.",
+            "condition": "A consequence that follows from the law only under a condition the law does not state.",
+        },
+    })
+}
+
 pub fn test_several(path: &str) -> Value {
     noul(
         format!("Does the test in `{path}` check several unrelated behaviors?"),

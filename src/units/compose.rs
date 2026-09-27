@@ -1055,7 +1055,7 @@ fn finding(
             comment_wording(name, &[(&unit.locations[0], reason)], strength, p)
         }
         Detail::Test { .. } => test_wording(name, strength, p, answers),
-        Detail::Law => law_wording(name, strength, p),
+        Detail::Law => law_wording(name, strength, p, answers),
         Detail::TestPair { .. } => {
             symbol = None;
             test_pair_wording(name, strength == Strength::Review, p)

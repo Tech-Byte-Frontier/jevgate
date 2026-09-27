@@ -65,6 +65,19 @@ pub(super) fn plan(
     for ((unit, comment), id) in claims.into_iter().zip(ids) {
         let law = &file.source[declaration_start(unit, file.source)..unit.span.end];
         let named = named_defs(unit, defs);
+        let state = json!({
+            "name": unit.name,
+            "source": law,
+            "reading": unit
+                .statement
+                .as_ref()
+                .map(|s| s.reading(propositions))
+                .unwrap_or_default(),
+            "comment": comment,
+            "defs": named,
+        });
+        let recheck =
+            Some(recheck(file, &id, &state)).filter(|(request, _)| file.budget.fits(request));
         out.units.push(UnitPlan {
             rule: LAWS,
             id: id.clone(),
@@ -75,22 +88,12 @@ pub(super) fn plan(
             lines: unit.lines(),
             identity: identity(&[&unit.name, &compact(law), &compact(&comment)]),
             detail: Detail::Law,
-            recheck: None,
+            recheck: recheck.map(Into::into),
         });
         items.push(Item {
             index: out.units.len() - 1,
             id,
-            state: json!({
-                "name": unit.name,
-                "source": law,
-                "reading": unit
-                    .statement
-                    .as_ref()
-                    .map(|s| s.reading(propositions))
-                    .unwrap_or_default(),
-                "comment": comment,
-                "defs": named,
-            }),
+            state,
         });
     }
     for group in pack_runs(
@@ -126,6 +129,25 @@ struct Item {
     index: usize,
     id: String,
     state: Value,
+}
+
+/// The Choice a law whose first answer stays undecided is asked: what its
+/// comment says beyond the law.
+fn recheck(file: &FileContext<'_>, id: &str, law: &Value) -> (Value, Asked) {
+    let mut questions = Questions::default();
+    questions.ask(
+        "relation".into(),
+        questions::law_relation(),
+        id,
+        LAWS,
+        "relation",
+        Pass::Recheck,
+    );
+    let mut state = json!({"file": file.plain_state(), "law": law});
+    if let Some(header) = header(file.source) {
+        state["file"]["comment"] = json!(header);
+    }
+    file.request("recheck", state, questions)
 }
 
 fn build(file: &FileContext<'_>, items: &[Item]) -> (Value, Asked) {

@@ -53,17 +53,31 @@ pub(in crate::units) fn test_pair_wording(name: &str, review: bool, p: f64) -> W
     }
 }
 
-/// A Bend 2 law whose comment promises more than, or other than, it states.
-pub(in crate::units) fn law_wording(name: &str, strength: Strength, p: f64) -> Wording {
+/// A Bend 2 law whose comment promises more than, or other than, it states,
+/// naming what it adds when the law's recheck chose it.
+pub(in crate::units) fn law_wording(
+    name: &str,
+    strength: Strength,
+    p: f64,
+    answers: &Answers<'_>,
+) -> Wording {
     if strength == Strength::Note {
         return (
             format!("The comment above law `{name}` says slightly more than the law states."),
             "Check that the comment and the law say the same thing",
         );
     }
+    let adds = match choice(answers.get("relation").copied()) {
+        Some(("property", _)) => ": it claims a property the law does not state",
+        Some(("inputs", _)) => ": it claims the law for more inputs than the law covers",
+        Some(("condition", _)) => {
+            ": it claims a consequence the law yields only under a condition it does not state"
+        }
+        _ => "",
+    };
     (
         format!(
-            "The comment above law `{name}` promises more than the law states{}: a definition could break that promise while every proof passes.",
+            "The comment above law `{name}` promises more than the law states{}{adds}. A definition could break that promise while every proof passes.",
             shown(strength, p)
         ),
         "State the comment's promise in the law, or narrow the comment to what the law states",
