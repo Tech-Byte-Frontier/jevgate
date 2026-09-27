@@ -204,10 +204,11 @@ pub(super) fn value_kind(locate: &FollowUp, option: usize, id: &str) -> Option<(
     if let Some(lines) = entry.get("elsewhere") {
         state["elsewhere"] = lines.clone();
     }
+    let bend = located["state"]["file"]["language"] == crate::analysis::bend::LANGUAGE;
     let mut questions = Questions::default();
     questions.ask(
         "value_kind".into(),
-        questions::hardcoded_value_kind(),
+        questions::hardcoded_value_kind(bend),
         id,
         HARDCODED_VALUES,
         "value_kind",

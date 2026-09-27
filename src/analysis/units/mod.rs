@@ -802,6 +802,9 @@ fn push(
         refs.insert(owner.to_string());
     }
     let equality = equality_override(node, short_name, source);
+    let literals = body
+        .filter(|_| !equality && !super::literals::returns_constant(node))
+        .map_or_else(Vec::new, |b| super::literals::in_node(b, source));
     let (role, effects, joins_text) = match &file.bend {
         Some(names) if node.kind() == "function_definition" => (
             bend_role(node, names, source),
@@ -832,9 +835,7 @@ fn push(
         nesting: body.map_or(0, |b| super::nesting::control(b).0),
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
-        literals: body
-            .filter(|_| !equality && !super::literals::returns_constant(node))
-            .map_or_else(Vec::new, |b| super::literals::in_node(b, source)),
+        literals,
         sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source, file.django)),
         errors: body.map_or_else(Vec::new, |b| super::errors::created_errors(b, source)),
         calls: facts.calls,

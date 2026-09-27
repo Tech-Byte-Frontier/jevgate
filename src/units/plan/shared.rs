@@ -56,6 +56,8 @@ pub(super) struct Shared<'a> {
     /// The Bend 2 defs that compute a type, by name: a law applying one
     /// states a proposition, a claim.
     pub(super) propositions: BTreeSet<String>,
+    /// The Bend 2 predicates laws check and the defs only they call, by name.
+    pub(super) law_predicates: BTreeSet<String>,
 }
 
 impl<'a> Shared<'a> {
@@ -120,6 +122,7 @@ impl<'a> Shared<'a> {
             teaching: false,
             laravel: false,
             propositions: propositions(scope),
+            law_predicates: law_predicates(scope),
         };
         if shared.enabled(catalog::SHARED_LOGIC) {
             shared.pairs = duplicate_candidates(scope);
@@ -342,4 +345,72 @@ fn propositions(scope: &Scope<'_>) -> BTreeSet<String> {
         .filter(|u| u.role == crate::analysis::units::Role::TypeLevel)
         .map(|u| u.name.clone())
         .collect()
+}
+
+/// The Bend 2 predicates that laws check, `law flood: {flood_capped(24n) ==
+/// True{} : Bool}` with a def returning `Bool` that no other code calls, and
+/// the defs only such predicates call: they build the law's samples, and
+/// their literals are its inputs. On a Bend 2 IRC client, 9 of 22 wrong
+/// hardcoded-value considers were such samples. A def a law calls that
+/// returns data, such as the `get` of a JSON library, is the law's subject.
+fn law_predicates(scope: &Scope<'_>) -> BTreeSet<String> {
+    use crate::analysis::units::Kind;
+    let bend = |owner: &&usize| crate::analysis::bend::file(&scope.inputs[**owner].result.path);
+    let mut checked = BTreeSet::new();
+    let mut callers: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut returns_bool = BTreeSet::new();
+    for owner in scope.owners.iter().filter(bend) {
+        let lines = scope.test_lines(*owner);
+        for unit in &scope.units[owner].units {
+            let test = lines.iter().any(|l| unit.overlaps(l));
+            if unit.kind == Kind::Law || test {
+                checked.extend(unit.calls.iter().map(String::as_str));
+                continue;
+            }
+            if !unit.callable() {
+                continue;
+            }
+            if unit.signature.ends_with("-> Bool") {
+                returns_bool.insert(unit.name.as_str());
+            }
+            for call in unit.calls.iter().filter(|c| **c != unit.short_name) {
+                callers.entry(call).or_default().insert(unit.name.as_str());
+            }
+        }
+    }
+    let mut predicates: BTreeSet<&str> = checked
+        .iter()
+        .copied()
+        .filter(|name| returns_bool.contains(name))
+        .collect();
+    // No def outside the predicates calls one; then the defs only they call.
+    loop {
+        let kept: BTreeSet<&str> = predicates
+            .iter()
+            .copied()
+            .filter(|name| {
+                callers
+                    .get(name)
+                    .is_none_or(|by| by.iter().all(|c| predicates.contains(c)))
+            })
+            .collect();
+        if kept == predicates {
+            break;
+        }
+        predicates = kept;
+    }
+    loop {
+        let only_theirs: Vec<&str> = callers
+            .iter()
+            .filter(|(name, by)| {
+                !predicates.contains(**name) && by.iter().all(|c| predicates.contains(c))
+            })
+            .map(|(name, _)| *name)
+            .collect();
+        if only_theirs.is_empty() {
+            break;
+        }
+        predicates.extend(only_theirs);
+    }
+    predicates.into_iter().map(str::to_string).collect()
 }
