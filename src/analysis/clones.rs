@@ -160,6 +160,7 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
             let (a, b) = (&files[blocks[bx].file], &files[blocks[by].file]);
             crate::packages::linked(a.package, b.package, &local)
                 && !separate_examples(a.path, b.path)
+                && !separate_tests(a, b)
         })
         .filter_map(|window| pair(files, &parsed, &blocks, window))
         .filter(|p| !deprecated(files, &p.a) && !deprecated(files, &p.b))
@@ -245,6 +246,17 @@ fn example_directory(part: &str) -> bool {
     .contains(&part.as_str())
         || part.ends_with("_examples")
         || part.ends_with("-examples")
+}
+
+/// Two Bend 2 tests: each is a whole program pinned to the output its run
+/// prints, so their copies are the point of each test. Of 4 shared-logic
+/// findings between such tests on thirteen Bend 2 projects, all were wrong.
+fn separate_tests(a: &SourceFile<'_>, b: &SourceFile<'_>) -> bool {
+    let test = |f: &SourceFile<'_>| {
+        crate::analysis::bend::file(f.path)
+            && crate::analysis::bend::expected_output(f.source).is_some()
+    };
+    a.path != b.path && test(a) && test(b)
 }
 
 fn benchmark_directory(part: &str) -> bool {
