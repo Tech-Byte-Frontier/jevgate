@@ -3,7 +3,7 @@
 use super::{
     Block, Detail, GroupInfo,
     outcome::{
-        Answers, Outcome, RESOURCE_CHECKS, benefit, comment_concern_kind, comment_signals,
+        Answers, Outcome, RESOURCE_CHECKS, benefit, choice, comment_concern_kind, comment_signals,
         disagreement, document_split, noul, origin_outcome, repeated, section_signals,
         settled_checks, value_signals,
     },

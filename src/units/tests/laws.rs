@@ -90,3 +90,34 @@ fn a_comment_claiming_more_than_its_law_is_a_finding_at_the_law() {
     let (dimension, _) = dimension_of(report, "server/LAWS.bend", catalog::LAWS);
     assert_eq!((dimension.units.note, dimension.units.clear), (1, 1));
 }
+
+#[test]
+fn an_undecided_law_is_asked_what_its_comment_adds() {
+    let (project, options) = laws_project();
+    let options_of = ["nothing", "context", "property", "inputs", "condition"];
+    let mut eval = scripted(0);
+    eval.overrides = vec![("l0_states", spread(0.3, 0.3, 0.4))];
+    eval.recheck_overrides = vec![("relation", choice_of("property", &options_of))];
+    let report = run(&project, &options, &mut eval);
+    let (dimension, findings) = dimension_of(report, "server/LAWS.bend", catalog::LAWS);
+    assert_eq!(
+        (dimension.units.consider, dimension.units.uncertain),
+        (1, 0)
+    );
+    assert!(
+        findings[0]
+            .message
+            .contains("it claims a property the law does not state"),
+        "{}",
+        findings[0].message
+    );
+    // A recheck that says the comment only restates the law clears it.
+    let mut options = options;
+    options.refresh = true;
+    let mut eval = scripted(0);
+    eval.overrides = vec![("l0_states", spread(0.3, 0.3, 0.4))];
+    eval.recheck_overrides = vec![("relation", choice_of("nothing", &options_of))];
+    let report = run(&project, &options, &mut eval);
+    let (dimension, _) = dimension_of(report, "server/LAWS.bend", catalog::LAWS);
+    assert_eq!((dimension.units.clear, dimension.units.uncertain), (2, 0));
+}

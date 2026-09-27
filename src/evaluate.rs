@@ -202,7 +202,8 @@ impl Session<'_> {
         if !purpose.is_empty() {
             self.resolve_purposes(inputs, report, purpose, &mut views)?;
         }
-        let plan = crate::units::plan(inputs, &views, self.args, &self.budget, &self.context.root);
+        let mut plan =
+            crate::units::plan(inputs, &views, self.args, &self.budget, &self.context.root);
         for (owner, reason) in &plan.skipped {
             skip(&mut report.files[*owner], reason);
         }
@@ -210,9 +211,10 @@ impl Session<'_> {
             report.files[owner].cached = true;
         }
         let first: Vec<_> = plan.requests.iter().map(Task::unit).collect();
-        self.dispatch(report, first, |file, asked, body| {
+        let oversized = self.dispatch(report, first, |file, asked, body| {
             crate::units::record(file, &asked, body)
         })?;
+        unsent_units(&mut plan, report, oversized);
         // Traces judge where a security concern's values come from; rechecks
         // settle uncertain units; a security check still undecided is asked
         // where its URL comes from or its output goes, and an outline its kind;
@@ -233,9 +235,10 @@ impl Session<'_> {
                 .map(Task::unit)
                 .collect();
             if !tasks.is_empty() {
-                self.dispatch(report, tasks, |file, asked, body| {
+                let oversized = self.dispatch(report, tasks, |file, asked, body| {
                     crate::units::record(file, &asked, body)
                 })?;
+                unsent_units(&mut plan, report, oversized);
             }
         }
         compose_files(&plan, report);
@@ -291,9 +294,14 @@ impl Session<'_> {
         views: &mut BTreeMap<usize, crate::file_kind::View>,
     ) -> Result<()> {
         let owners: Vec<usize> = purpose.iter().map(|t| t.owner).collect();
-        self.dispatch(report, purpose, |file, request, body| {
+        let oversized = self.dispatch(report, purpose, |file, request, body| {
             crate::file_kind::record_purpose(file, &request, body)
         })?;
+        // A file-purpose request too large to answer leaves its file
+        // unjudged, as one the budget does not send.
+        for (owner, _) in oversized {
+            report.files[owner].status = Status::NeedsContext;
+        }
         for owner in owners {
             let file = &mut report.files[owner];
             let answered = file
@@ -314,12 +322,16 @@ impl Session<'_> {
         Ok(())
     }
 
+    /// Send `tasks` and apply each answer to its file. The tasks the provider
+    /// refused as beyond the model's context are returned rather than
+    /// failed: their units were too large to send, as the budget would have
+    /// found them had its estimate been exact.
     fn dispatch<T>(
         &mut self,
         report: &mut Report,
         tasks: Vec<Task<T>>,
         mut apply: impl FnMut(&mut FileResult, T, &serde_json::Value) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<Vec<(usize, T)>> {
         crate::cancellation::check()?;
         let mut ready = Vec::new();
         // Shared evidence is read once while preparing this batch. Actual
@@ -336,6 +348,7 @@ impl Session<'_> {
         }
         let receipts = self.queries(&ready.iter().map(|t| &t.request).collect::<Vec<_>>());
         let mut spans = BTreeMap::<&str, (u64, u64)>::new();
+        let mut oversized = Vec::new();
         for (task, receipt) in ready.into_iter().zip(receipts) {
             let name = crate::requests::stage(&task.request);
             let m = &receipt.metrics;
@@ -349,13 +362,16 @@ impl Session<'_> {
             }
             let file = &mut report.files[task.owner];
             file.elapsed_ms += m.service_ms;
-            apply_receipt(file, receipt.result, task.payload, &mut apply);
+            if let Some(payload) = apply_receipt(file, receipt.result, task.payload, &mut apply) {
+                oversized.push((task.owner, payload));
+            }
         }
         // Concurrent stage spans overlap; service_ms is the additive request duration.
         for (name, (start, end)) in spans {
             report.stages.get_mut(name).unwrap().elapsed_ms += end - start;
         }
-        self.progress(report)
+        self.progress(report)?;
+        Ok(oversized)
     }
 
     fn progress(&self, report: &mut Report) -> Result<()> {
@@ -432,13 +448,14 @@ enum Scheduled {
     Ready(Box<crate::file_kind::View>),
 }
 
-/// Record one answered request on its file, or its first failure.
+/// Record one answered request on its file, or its first failure; a
+/// request refused as beyond the model's context is handed back instead.
 fn apply_receipt<T>(
     file: &mut FileResult,
     result: Result<(serde_json::Value, u64, bool)>,
     payload: T,
     apply: &mut impl FnMut(&mut FileResult, T, &serde_json::Value) -> Result<()>,
-) {
+) -> Option<T> {
     match result {
         Ok((body, timestamp, cached)) => {
             file.cached &= cached;
@@ -451,9 +468,45 @@ fn apply_receipt<T>(
                 fail(file, error);
             }
         }
+        Err(error) if beyond_context(&error) => return Some(payload),
         // Later skipped work must not overwrite this file's first failure.
         Err(error) if file.status != Status::Error => fail(file, error),
         Err(_) => {}
+    }
+    None
+}
+
+/// A request the provider refused as beyond the model's context. The token
+/// budget estimates size from bytes, and dense text can hold more tokens per
+/// byte than it assumes: a Bend 2 proof of SHA-256 and a 328-member outline
+/// were refused, which failed their whole runs.
+fn beyond_context(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::provider_error::ProviderError>()
+        .is_some_and(|e| e.context_limit)
+}
+
+/// The units of requests refused as beyond the model's context that no
+/// other request answered: they need context, as a unit the budget does not
+/// send. A refused follow-up leaves its unit with the answers it has.
+fn unsent_units(
+    plan: &mut crate::units::Plan,
+    report: &Report,
+    oversized: Vec<(usize, crate::units::Asked)>,
+) {
+    for (owner, asked) in oversized {
+        let Some(file_plan) = plan.files.get_mut(&owner) else {
+            continue;
+        };
+        let judgments = &report.files[owner].judgments;
+        for question in &asked.questions {
+            if judgments.iter().any(|j| j.unit == question.unit) {
+                continue;
+            }
+            for unit in file_plan.units.iter_mut().filter(|u| u.id == question.unit) {
+                unit.presence = crate::units::Presence::NeedsContext;
+            }
+        }
     }
 }
 
