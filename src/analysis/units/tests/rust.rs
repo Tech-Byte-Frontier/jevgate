@@ -52,3 +52,19 @@ fn empty_bodies_are_too_small() {
     assert!(!store_unit("Store::open").too_small());
     assert!(store_unit("Store::touch").too_small());
 }
+
+#[test]
+fn a_rust_function_passed_by_path_is_recorded_apart_from_its_calls() {
+    let source = "use super::compose;\n\nfn plan(files: &[File]) -> Vec<Planned> {\n    let due = follow_ups(files, compose::unconfirmed_units);\n    let named = files.iter().map(Self::name_of);\n    let kinds = kinds::<String>(compose::unkinded_units);\n    let status = Status::Error;\n    compose::untraced_units(files);\n    due\n}\n";
+    let file = parse(Path::new("follow_ups.rs"), source).unwrap();
+    let plan = &file.units[0];
+    let passed: Vec<&str> = plan.passed.iter().map(String::as_str).collect();
+    assert_eq!(passed, ["name_of", "unconfirmed_units", "unkinded_units"]);
+    assert!(plan.calls.contains("untraced_units") && !plan.calls.contains("unconfirmed_units"));
+    let python = parse(
+        Path::new("follow_ups.py"),
+        "def plan(files):\n    return follow_ups(files, compose.unconfirmed_units)\n",
+    )
+    .unwrap();
+    assert!(python.units[0].passed.is_empty(), "Rust only");
+}

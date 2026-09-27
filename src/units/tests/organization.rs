@@ -162,6 +162,37 @@ fn a_request_answered_once_fits_whatever_the_calibration() {
 }
 
 #[test]
+fn a_function_another_file_passes_by_path_names_that_file_as_its_user() {
+    let project = Project::new();
+    let selectors: String = (0..14).map(|i| function(&format!("warm{i}"))).collect();
+    project.write("src/selectors.rs", &selectors);
+    project.write(
+        "src/runner.rs",
+        "use crate::selectors;\n\npub fn run(values: &[i32]) -> i32 {\n    apply(values, selectors::warm0)\n}\n\nfn apply(values: &[i32], f: fn(&[i32]) -> i32) -> i32 {\n    f(values)\n}\n",
+    );
+    let mut options = args();
+    only(&mut options, catalog::FILE_ORGANIZATION);
+    let (_, plan) = planned(&project, &options);
+    let outline = plan
+        .requests
+        .iter()
+        .map(|p| &p.request)
+        .find(|r| r["state"]["file"]["path"] == "src/selectors.rs")
+        .unwrap();
+    let used_by = |name: &str| {
+        outline["state"]["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["name"] == name)
+            .unwrap()["used_by"]
+            .clone()
+    };
+    assert_eq!(used_by("warm0"), json!(["src/runner.rs"]));
+    assert!(used_by("warm1").is_null());
+}
+
+#[test]
 fn outlines_carry_member_and_file_sizes() {
     let (project, options) = rule_project(&two_concerns(), catalog::FILE_ORGANIZATION);
     let mut mock = Mock::default();
