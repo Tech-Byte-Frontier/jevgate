@@ -33,7 +33,7 @@ mod workflows;
 use answers::Questions;
 pub use answers::{Asked, record};
 use evidence::{FileContext, compact, identity, pack, pack_runs, request, unique_ids};
-pub use follow_ups::{doc_checks, kinds, locates, rechecks, settles, traces, value_kinds};
+pub use follow_ups::{doc_checks, kinds, locates, parts, rechecks, settles, traces, value_kinds};
 use plan::Scope;
 pub use plan::plan;
 pub use spacetimedb::spacetimedb_module;
@@ -67,6 +67,17 @@ pub struct GroupInfo {
     pub id: String,
     pub names: Vec<String>,
     pub locations: Vec<Location>,
+}
+
+/// A candidate part of a long file and the follow-up that asks whether it
+/// does a job of its own, sent only when the outline raised no finding.
+#[derive(Clone, Debug)]
+pub struct Part {
+    pub names: Vec<String>,
+    pub locations: Vec<Location>,
+    /// The lines of its members.
+    pub lines: usize,
+    pub follow_up: FollowUp,
 }
 
 /// A top-level block of a function body, offered when locating a split.
@@ -139,6 +150,10 @@ pub enum Detail {
         sections: usize,
         /// What kind of file it is, asked after a recheck that stays undecided.
         kind: Option<FollowUp>,
+        /// The candidate parts of a long application file, each asked
+        /// whether it does a job of its own once the outline stays without
+        /// a finding.
+        parts: Vec<Part>,
     },
     Pair {
         differences: Vec<crate::analysis::clones::Difference>,

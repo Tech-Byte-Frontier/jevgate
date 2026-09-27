@@ -4,15 +4,16 @@ use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, at_most_note, benefit, checks, choice, choice_mass, confirmable,
-        document_split, logs_found, lowered, noul, open, origin_outcome, score, settled_checks,
-        several_kind, unit_outcome, value_signals,
+        document_split, logs_found, lowered, noul, open, organization_outcome, origin_outcome,
+        part_answers, score, separable_part, settled_checks, several_kind, unit_outcome,
+        value_signals,
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
         doc_pair_wording, document_wording, function_wording, handler_wording, law_wording,
-        module_wording, outline_wording, pair_wording, plan_wording, privilege_wording,
-        question_label, section_wording, security_wording, stale_wording, test_pair_wording,
-        test_wording, values_wording,
+        module_wording, outline_wording, pair_wording, part_wording, plan_wording,
+        privilege_wording, question_label, section_wording, security_wording, stale_wording,
+        test_pair_wording, test_wording, values_wording,
     },
 };
 use crate::{
@@ -125,6 +126,12 @@ fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers
         let merged = test_value_answers(unit, judgments);
         let outcome = leaning_test(unit, judgments, unit_outcome(unit, &merged));
         return (outcome, merged);
+    } else if unit.rule == catalog::FILE_ORGANIZATION {
+        // Each candidate part's answers, asked of a long file once its
+        // outline raised no finding, sit beside the answers it rests on.
+        let (_, mut merged) = rechecked(unit, judgments);
+        merged.extend(answers(judgments, &unit.id, Pass::Locate));
+        merged
     } else if unit.rule == catalog::TEST_REDUNDANCY {
         // Whether each test checks something the other does not, asked of a
         // pair that reached a review, sits beside its answers.
@@ -430,6 +437,25 @@ fn unkinded_split(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
             Outcome::Consider(_) | Outcome::Review(_) => document || pass == Pass::Recheck,
             _ => false,
         })
+}
+
+/// Outlines of long files left without a finding whose candidate parts are
+/// not yet asked; the kind of file, when due, is asked first.
+pub fn unparted_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    plan.units
+        .iter()
+        .filter(|u| {
+            u.presence == Presence::Judged
+                && matches!(&u.detail, Detail::Outline { parts, .. } if !parts.is_empty())
+                && answers(judgments, &u.id, Pass::Locate).is_empty()
+                && !unkinded_split(u, judgments)
+                && matches!(
+                    resolved(u, judgments).0,
+                    Outcome::Clear | Outcome::Note(_) | Outcome::Uncertain(_)
+                )
+        })
+        .map(|u| u.id.clone())
+        .collect()
 }
 
 /// A section pair or stale section whose checks were asked, stayed
@@ -1011,15 +1037,23 @@ fn finding(
             tests,
             groups,
             members,
+            parts,
             ..
         } => {
-            let chosen = outline_groups(answers.get("module").copied(), groups, *members);
-            symbol = chosen.first().map(|group| group.id.clone());
-            if !chosen.is_empty() {
-                locations = chosen.iter().flat_map(|g| g.locations.clone()).collect();
+            if let Some(part) = deciding_part(answers, parts) {
+                symbol = part.names.first().cloned();
+                locations = part.locations.clone();
+                part_wording(part, strength, p)
+            } else {
+                let chosen = outline_groups(answers.get("module").copied(), groups, *members);
+                symbol = chosen.first().map(|group| group.id.clone());
+                if !chosen.is_empty() {
+                    locations = chosen.iter().flat_map(|g| g.locations.clone()).collect();
+                }
+                let several =
+                    several_kind(answers.get("split").copied(), answers.get("kind").copied());
+                outline_wording(&chosen, *tests, several, strength, p)
             }
-            let several = several_kind(answers.get("split").copied(), answers.get("kind").copied());
-            outline_wording(&chosen, *tests, several, strength, p)
         }
         Detail::Pair {
             differences,
@@ -1427,6 +1461,17 @@ fn at_most_consider(outcome: Outcome) -> Outcome {
     }
 }
 
+/// The candidate part that raised an outline's finding: the outline's split
+/// and kind raised none, and the part does a job of its own.
+fn deciding_part<'p>(answers: &Answers<'_>, parts: &'p [super::Part]) -> Option<&'p super::Part> {
+    let get = |q: &str| answers.get(q).copied();
+    let split = organization_outcome(get("split"), get("kind"), &[]);
+    if matches!(split, Some(Outcome::Review(_) | Outcome::Consider(_))) {
+        return None;
+    }
+    separable_part(&part_answers(&get)).and_then(|(position, _)| parts.get(position))
+}
+
 /// A file-organization consider that says only that some members could
 /// move, naming no group: the module Choice was not asked (one group or
 /// none) or spread wider than two groups, and no kind of file decided it.
@@ -1434,7 +1479,10 @@ fn at_most_consider(outcome: Outcome) -> Outcome {
 /// A review, or a consider the kind decided, says to split the whole file.
 fn unnamed_outline(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     let Detail::Outline {
-        groups, members, ..
+        groups,
+        members,
+        parts,
+        ..
     } = &unit.detail
     else {
         return false;
@@ -1444,6 +1492,7 @@ fn unnamed_outline(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     matches!(outcome, Outcome::Consider(_))
         && several_kind(get("split"), get("kind")).is_none()
         && outline_groups(get("module"), groups, *members).is_empty()
+        && deciding_part(&answers, parts).is_none()
 }
 
 /// Files shorter than this many lines read easily whole.

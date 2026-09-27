@@ -79,34 +79,77 @@ pub(in crate::units) fn values_outcome<'a>(
 /// the recheck raised it from an undecided first answer: of the 18 such
 /// findings the kind cleared on the corpus, 4 were right, and one was the
 /// proposal to split JevGate's own planner of one unit per rule.
+///
+/// An outline left without a finding then reads its candidate parts: a part
+/// of a long file that does a job of its own raises a consider (see
+/// `separable_part`).
 pub(in crate::units) fn organization_outcome(
     split: Option<&Answer>,
     kind: Option<&Answer>,
+    parts: &[PartAnswers<'_>],
 ) -> Option<Outcome> {
-    let outcome = benefit(split?);
+    let outcome = split_outcome(benefit(split?), kind);
+    Some(match separable_part(parts) {
+        Some((_, p)) if !matches!(outcome, Outcome::Review(_) | Outcome::Consider(_)) => {
+            Outcome::Consider(p)
+        }
+        _ => outcome,
+    })
+}
+
+fn split_outcome(outcome: Outcome, kind: Option<&Answer>) -> Outcome {
     let (
         Outcome::Uncertain(_) | Outcome::Consider(_) | Outcome::Review(_),
         Some(Answer::Choice { probabilities, .. }),
     ) = (outcome, kind)
     else {
-        return Some(outcome);
+        return outcome;
     };
     let mass: f64 = probabilities.values().sum();
     if mass <= 0.0 {
-        return Some(outcome);
+        return outcome;
     }
     let several: f64 = probabilities
         .iter()
         .filter(|(kind, _)| questions::SEVERAL_KINDS.contains(&kind.as_str()))
         .map(|(_, p)| p / mass)
         .sum();
-    Some(if at_least(1.0 - several) {
+    if at_least(1.0 - several) {
         Outcome::Clear
     } else if at_least(several) && matches!(outcome, Outcome::Uncertain(_)) {
         Outcome::Consider(several)
     } else {
         outcome
-    })
+    }
+}
+
+/// One candidate part's answers: whether it does a job of its own, and what
+/// it is within its file.
+pub(in crate::units) type PartAnswers<'a> = (Option<&'a Answer>, Option<&'a Answer>);
+
+/// The candidate part, by position, that does a job of its own, with the
+/// probability that it does: its own Noul reaches the location probability
+/// and the role Choice leans to a job of its own. The role keeps apart what
+/// the Noul alone did not: more of what the rest of the file does, such as a
+/// dialect's other queries, read as a job of its own on its own (6 files
+/// labeled for splitting against 3 to keep, and no file to keep with the
+/// role). Of 50 long files the outline cleared, 15 of them worth splitting
+/// by their labels, it raised 4, all worth splitting, each naming the part
+/// the labeler named; on the corpus, 9 of its 11 considers were right.
+pub(in crate::units) fn separable_part(parts: &[PartAnswers<'_>]) -> Option<(usize, f64)> {
+    parts
+        .iter()
+        .enumerate()
+        .filter_map(|(position, &(own, role))| {
+            let Some(Answer::Noul { noul }) = own else {
+                return None;
+            };
+            let own_job = choice_mass(role, &[questions::OWN_JOB])?;
+            (probability_at_least(*noul, LOCATION_PROBABILITY)
+                && probability_at_least(own_job, LEADING_PROBABILITY))
+            .then_some((position, *noul))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
 }
 
 /// The kind of file that decided an undecided split Score toward a split:

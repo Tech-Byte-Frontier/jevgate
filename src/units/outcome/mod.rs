@@ -34,8 +34,8 @@ pub(super) use injection::{
     RESOURCE_CHECKS, confirmable, harmless, injection_outcome, origin_outcome,
 };
 pub(super) use maintainability::{
-    benign_key, function_outcome, organization_outcome, several_kind, shared_outcome,
-    value_signals, values_outcome,
+    PartAnswers, benign_key, function_outcome, organization_outcome, separable_part, several_kind,
+    shared_outcome, value_signals, values_outcome,
 };
 use pairs::doc_pair_outcome;
 pub(super) use pairs::{disagreement, pair_signals, repeated};
@@ -190,6 +190,14 @@ pub(super) fn choice(answer: Option<&Answer>) -> Option<(&str, f64)> {
 
 pub(super) type Answers<'a> = BTreeMap<&'a str, &'a Answer>;
 
+/// Each candidate part's answers, in part order.
+pub(super) fn part_answers<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<PartAnswers<'a>> {
+    super::outline::PART_QUESTIONS
+        .iter()
+        .map(|(own, role)| (get(own), get(role)))
+        .collect()
+}
+
 pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     let outcome = rule_outcome(unit, answers).unwrap_or(Outcome::Missing);
     in_examples(unit, outcome)
@@ -206,7 +214,8 @@ fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
         // with one caller still helps a reader find a feature of a large file.
         // A test file's layout is advice, one level lower.
         catalog::FILE_ORGANIZATION => {
-            organization_outcome(get("split"), get("kind")).map(|outcome| {
+            let parts = part_answers(&get);
+            organization_outcome(get("split"), get("kind"), &parts).map(|outcome| {
                 if matches!(unit.detail, Detail::Outline { tests: true, .. }) {
                     lowered(outcome)
                 } else {

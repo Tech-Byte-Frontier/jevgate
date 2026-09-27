@@ -1,6 +1,6 @@
 //! Follow-up requests that recorded answers call for: traces of security
-//! units, rechecks of undecided units, the kind of an outline still undecided
-//! and locating split findings.
+//! units, rechecks of undecided units, the kind of an outline still undecided,
+//! the parts of a long file without a finding and locating split findings.
 use super::{Detail, FollowUp, Plan, Planned, UnitPlan, compose};
 use crate::schema::{FileResult, Judgment, Status};
 use std::collections::BTreeSet;
@@ -142,6 +142,27 @@ pub fn kinds(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
             _ => None,
         }
     })
+}
+
+/// Whether each candidate part of a long file does a job of its own, asked
+/// once the file's outline, its recheck and its kind raised no finding.
+pub fn parts(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
+    let mut planned = Vec::new();
+    for (&owner, file_plan) in &plan.files {
+        let file = &files[owner];
+        if file.status == Status::Error {
+            continue;
+        }
+        let selected = compose::unparted_units(file_plan, &file.judgments);
+        for unit in &file_plan.units {
+            if let Detail::Outline { parts, .. } = &unit.detail
+                && selected.contains(&unit.id)
+            {
+                planned.extend(parts.iter().map(|part| part.follow_up.planned(owner)));
+            }
+        }
+    }
+    planned
 }
 
 /// The planned follow-up of every selected unit, skipping failed files.

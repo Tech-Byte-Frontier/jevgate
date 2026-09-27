@@ -362,3 +362,134 @@ fn a_bend_file_s_split_is_at_most_a_consider_and_a_note_in_titled_sections() {
     assert_eq!(strength(false), Status::Consider);
     assert_eq!(strength(true), Status::Note);
 }
+
+/// A parser and a renderer of ten functions each, every function naming its
+/// part's two types: two parts of over two hundred lines, 470 in all.
+fn two_parts() -> String {
+    parts_of_steps(20)
+}
+
+/// `two_parts` with `steps` statements in each function.
+fn parts_of_steps(steps: usize) -> String {
+    let mut source = String::new();
+    for (part, state, item) in [
+        ("parse", "Parser", "Token"),
+        ("render", "Renderer", "Glyph"),
+    ] {
+        source.push_str(&format!(
+            "struct {state} {{ at: usize }}\nstruct {item} {{ size: u8 }}\n"
+        ));
+        for i in 0..10 {
+            source.push_str(&format!(
+                "fn {part}_{i}(state: &{state}, item: &{item}) -> usize {{\n"
+            ));
+            for step in 0..steps {
+                source.push_str(&format!(
+                    "    let v{step} = state.at + item.size as usize + {step};\n"
+                ));
+            }
+            source.push_str(&format!("    v{}\n}}\n", steps - 1));
+        }
+    }
+    source
+}
+
+/// Answers that clear the outline and find each part a job of its own.
+fn parts_of_their_own(own: f64, own_job: f64) -> Scripted {
+    let mut eval = scripted(0);
+    let chosen = if own_job >= 0.5 {
+        "own_job"
+    } else {
+        "same_kind"
+    };
+    let role = json!({"type": "choice", "choice": chosen, "confidence": 0.5,
+        "probabilities": {"own_job": own_job, "same_kind": 1.0 - own_job, "support": 0.0, "core": 0.0}});
+    eval.overrides = vec![
+        ("own", json!({"type": "noul", "noul": own})),
+        ("role", role),
+    ];
+    eval
+}
+
+#[test]
+fn a_long_file_s_parts_are_planned_with_their_source_and_the_rest_by_signature() {
+    let (project, options) = organized("src/lib.rs", &two_parts());
+    let (_, plan) = planned(&project, &options);
+    let Detail::Outline { parts, .. } = &plan.files.values().next().unwrap().units[0].detail else {
+        panic!("an outline");
+    };
+    let names: Vec<Vec<&str>> = parts
+        .iter()
+        .map(|p| p.names.iter().map(String::as_str).take(3).collect())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ["Parser", "Token", "parse_0"],
+            ["Renderer", "Glyph", "render_0"]
+        ]
+    );
+    let request = parts[0].follow_up.request();
+    let source = request["state"]["part"]["source"].as_str().unwrap();
+    assert!(source.contains("fn parse_9(") && !source.contains("fn render_0("));
+    assert_eq!(request["state"]["rest"][0]["name"], "Renderer");
+    assert!(
+        request["state"]["rest"][2]["signature"]
+            .as_str()
+            .unwrap()
+            .contains("render_0")
+    );
+    for (path, source) in [
+        ("scripts/lib.rs", two_parts()),
+        // 370 lines, short enough to read whole.
+        ("src/short.rs", parts_of_steps(15)),
+    ] {
+        let (project, options) = organized(path, &source);
+        let (_, plan) = planned(&project, &options);
+        let Detail::Outline { parts, .. } = &plan.files.values().next().unwrap().units[0].detail
+        else {
+            panic!("an outline");
+        };
+        assert!(parts.is_empty(), "{path} is not asked about its parts");
+    }
+}
+
+#[test]
+fn a_part_of_a_long_file_that_does_a_job_of_its_own_is_a_consider_naming_it() {
+    let (project, mut options) = organized("src/lib.rs", &two_parts());
+    let report = run(&project, &options, &mut parts_of_their_own(0.8, 0.7));
+    assert_eq!(report.stages["parts"].successful_requests, 2);
+    let finding = &report.files[0].findings[0];
+    assert_eq!(finding.strength, Strength::Consider);
+    assert!(
+        finding.message.starts_with("`Parser`, `Token`, `parse_0`")
+            && finding.message.contains("do a job of their own"),
+        "{}",
+        finding.message
+    );
+    assert_eq!(finding.symbol.as_deref(), Some("Parser"));
+    assert_eq!(finding.locations.len(), 12);
+    options.refresh = true;
+    for (own, own_job) in [(0.6, 0.9), (0.9, 0.4)] {
+        let report = run(&project, &options, &mut parts_of_their_own(own, own_job));
+        assert_eq!(
+            report.files[0].dimensions["file_organization"].status,
+            Status::Clear,
+            "own {own}, own job {own_job}"
+        );
+    }
+}
+
+#[test]
+fn an_outline_with_a_finding_is_not_asked_about_its_parts() {
+    let (project, options) = organized("src/lib.rs", &two_parts());
+    let mut eval = parts_of_their_own(0.9, 0.9);
+    eval.level = 2;
+    let report = run(&project, &options, &mut eval);
+    assert!(!report.stages.contains_key("parts"));
+    assert!(
+        report.files[0].findings[0]
+            .message
+            .contains("several features")
+    );
+}
