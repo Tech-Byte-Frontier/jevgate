@@ -120,6 +120,14 @@ pub(crate) fn law_file(path: &Path) -> bool {
         .is_some_and(|name| name == "LAWS.bend" || name == "PROOF.bend")
 }
 
+/// Whether a Bend 2 file defines `main`, the def its run starts from.
+pub(crate) fn defines_main(source: &str) -> bool {
+    source.lines().any(|line| {
+        line.strip_prefix("def main")
+            .is_some_and(|rest| rest.starts_with(['(', ':', ' ']))
+    })
+}
+
 /// The byte where a test's expected output starts: the `#|` lines that end
 /// the file, which its run must print. Blank lines may follow them.
 pub(crate) fn expected_output(source: &str) -> Option<usize> {
