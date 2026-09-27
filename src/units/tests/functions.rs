@@ -170,7 +170,7 @@ fn a_torn_note_gets_the_recheck_and_takes_its_decisive_answer() {
 #[test]
 fn a_function_clears_when_the_split_level_is_ruled_out() {
     let project = Project::new();
-    project.write("lib.rs", &function("borderline"));
+    project.write("lib.rs", &long_function("borderline"));
     let mut options = args();
     options.refresh = true;
     only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
@@ -181,6 +181,13 @@ fn a_function_clears_when_the_split_level_is_ruled_out() {
     };
     assert_eq!(status(spread(0.5, 0.35, 0.15)), Status::Clear);
     assert_eq!(status(spread(0.1, 0.3, 0.6)), Status::Consider);
+    project.write("lib.rs", &function("short"));
+    assert_eq!(
+        status(spread(0.1, 0.3, 0.6)),
+        Status::Note,
+        "a function of twenty lines or fewer reads in one look"
+    );
+    project.write("lib.rs", &long_function("borderline"));
     assert_eq!(
         status(spread(0.1, 0.5, 0.4)),
         Status::Note,

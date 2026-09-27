@@ -24,9 +24,11 @@ mod test_rules;
 
 use access::access_outcome;
 pub(super) use comments::{comment_concern_kind, comment_outcome, comment_signals};
-use documentation::stale_outcome;
+use documentation::staleness_outcome;
 pub(super) use documentation::{document_outcome, document_split, section_signals};
-pub(super) use exposure::{Messages, django_settings_outcome, exposure_outcome, messages};
+pub(super) use exposure::{
+    Messages, django_settings_outcome, exposure_outcome, messages, settings_module_outcome,
+};
 pub(super) use injection::{RESOURCE_CHECKS, injection_outcome, origin_outcome};
 pub(super) use maintainability::{
     benign_key, function_outcome, organization_outcome, several_kind, shared_outcome,
@@ -34,8 +36,8 @@ pub(super) use maintainability::{
 };
 use pairs::doc_pair_outcome;
 pub(super) use pairs::{disagreement, pair_signals, repeated};
-pub(super) use security::{checks, choice_mass, settled_checks};
-pub(super) use test_rules::{redundancy_outcome, test_value_outcome};
+pub(super) use security::{checks, choice_mass, settled_checks, workflows_outcome};
+pub(super) use test_rules::{test_pair_outcome, test_value_outcome};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Outcome {
@@ -186,9 +188,17 @@ pub(super) fn choice(answer: Option<&Answer>) -> Option<(&str, f64)> {
 pub(super) type Answers<'a> = BTreeMap<&'a str, &'a Answer>;
 
 pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
+    let outcome = rule_outcome(unit, answers).unwrap_or(Outcome::Missing);
+    in_examples(unit, outcome)
+}
+
+/// The outcome of a unit's answers under its rule's policy.
+fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
     let get = |q: &str| answers.get(q).copied();
-    let result = match unit.rule {
-        catalog::FUNCTION_SIMPLIFICATION => function_outcome(get("split"), get("flatten")),
+    match unit.rule {
+        catalog::FUNCTION_SIMPLIFICATION => {
+            function_outcome(get("split"), get("flatten"), unit.lines)
+        }
         // Who calls a group is evidence in the outline, not a gate: a module
         // with one caller still helps a reader find a feature of a large file.
         // A test file's layout is advice, one level lower.
@@ -203,33 +213,7 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), unit),
         catalog::TEST_VALUE => test_value_outcome(&get),
-        catalog::TEST_REDUNDANCY => {
-            let identical = matches!(
-                unit.detail,
-                Detail::TestPair {
-                    identical: true,
-                    ..
-                }
-            );
-            let table = !matches!(unit.detail, Detail::TestPair { table: false, .. });
-            // Express's `when false` and `when true` groups run one body on
-            // apps their `before` hooks build differently.
-            let unseen_setup = matches!(
-                unit.detail,
-                Detail::TestPair {
-                    unseen_setup: true,
-                    ..
-                }
-            );
-            get("overlap").map(|overlap| {
-                // A suggestion to parameterize is only a note where tests cannot be.
-                match redundancy_outcome(overlap, &get, identical) {
-                    Outcome::Review(p) if unseen_setup => Outcome::Consider(p),
-                    Outcome::Consider(p) if !table => Outcome::Note(p),
-                    outcome => outcome,
-                }
-            })
-        }
+        catalog::TEST_REDUNDANCY => test_pair_outcome(&get, &unit.detail),
         catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         // "Slightly" says the comment adds only detail: a note, as a benefit.
         catalog::LAWS => get("states")
@@ -253,13 +237,7 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
             exposure_outcome(unit.rule, &get, &["logs_secret", "error_details"])
         }
         catalog::UNSAFE_SETTINGS if unit.name == crate::units::security::SETTINGS_MODULE => {
-            django_settings_outcome(&get).map(|outcome| {
-                if matches!(get("dev_only").map(noul), Some(Outcome::Review(_))) {
-                    lowered(outcome)
-                } else {
-                    outcome
-                }
-            })
+            settings_module_outcome(&get)
         }
         catalog::UNSAFE_SETTINGS
             if matches!(unit.detail, Detail::Security { django: true, .. }) =>
@@ -268,53 +246,25 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         }
         catalog::UNSAFE_SETTINGS => exposure_outcome(unit.rule, &get, &["weakened"]),
         catalog::ACCESS_CONTROL => access_outcome(&get, &unit.detail),
-        catalog::WORKFLOWS => {
-            // An undecided concern is clear when its recheck Choice rules it
-            // out: no expression holds outside text, or the job runs only the
-            // base branch's code or none.
-            let settles = [
-                ("outside", "outside_source", &["none"][..]),
-                ("untrusted", "pull_request_code", &["base", "none"][..]),
-            ];
-            let asked: Vec<Outcome> = settles
-                .iter()
-                .filter_map(|(question, choice, clears)| {
-                    Some(match get(question).map(noul)? {
-                        Outcome::Uncertain(_)
-                            if security::choice_mass(get(choice), clears).is_some_and(at_least) =>
-                        {
-                            Outcome::Clear
-                        }
-                        other => other,
-                    })
-                })
-                .collect();
-            (!asked.is_empty()).then(|| strongest(&asked))
-        }
+        catalog::WORKFLOWS => workflows_outcome(&get),
         catalog::LARGE_DOCS => document_outcome(&get),
-        catalog::DOC_STALENESS => {
-            let question = if matches!(unit.detail, Detail::Plan { .. }) {
-                "plan"
-            } else {
-                "relies"
-            };
-            get(question).map(|a| stale_outcome(cleanup(noul(a)), get("role")))
-        }
+        catalog::DOC_STALENESS => staleness_outcome(&get, &unit.detail),
         catalog::DOC_DUPLICATION => doc_pair_outcome(&get),
         catalog::AGENT_CONTEXT => {
             section_signals(&get).map(|s| strongest(&s.iter().map(|(_, o)| *o).collect::<Vec<_>>()))
         }
         _ => None,
-    };
-    let outcome = result.unwrap_or(Outcome::Missing);
-    // Example code is written to be read in one piece, and its settings to be
-    // copied and changed: debug-toolbar's example project keeps a literal
-    // SECRET_KEY, sqlmodel's tutorials run each step in one function, and
-    // express's examples keep session cookies simple. Its findings are at
-    // most notes; a place it passes outside input to a query or command is
-    // still a consider, since examples are copied, and so is a Bend 2 law
-    // that states less than its comment: a demo's laws show how to state
-    // one.
+    }
+}
+
+/// Example code is written to be read in one piece, and its settings to be
+/// copied and changed: debug-toolbar's example project keeps a literal
+/// SECRET_KEY, sqlmodel's tutorials run each step in one function, and
+/// express's examples keep session cookies simple. Its findings are at most
+/// notes; a place it passes outside input to a query or command is still a
+/// consider, since examples are copied, and so is a Bend 2 law that states
+/// less than its comment: a demo's laws show how to state one.
+fn in_examples(unit: &UnitPlan, outcome: Outcome) -> Outcome {
     let example = unit
         .locations
         .iter()
@@ -339,23 +289,33 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
 /// law does not state hold the policy's share, or when the law likely
 /// checks particular inputs its comment generalizes; clear when the
 /// Choice's other options hold the policy's share and the inputs are not
-/// particular. The particular-inputs question takes the located-part share:
-/// on thirteen Bend 2 projects the 4 laws at 0.65 or more were right (two
-/// of them at 0.72 and 0.78), and the highest below was a sanity check at
-/// 0.51.
+/// particular.
 fn law_recheck(relation: &Answer, fixed: Option<&Answer>) -> Outcome {
-    let fixed = match fixed {
-        Some(Answer::Noul { noul, .. }) => Some(*noul),
-        _ => None,
+    if let Some(p) = particular_inputs(fixed) {
+        return Outcome::Consider(p);
+    }
+    let general = match fixed {
+        Some(Answer::Noul { noul, .. }) => at_least(1.0 - noul),
+        _ => true,
     };
-    let particular = fixed.is_some_and(|p| probability_at_least(p, LOCATION_PROBABILITY));
-    let general = fixed.is_none_or(|p| at_least(1.0 - p));
     match choice_mass(Some(relation), &questions::LAW_GAPS) {
-        _ if particular => Outcome::Consider(fixed.unwrap_or_default()),
         Some(gap) if at_least(gap) => Outcome::Consider(gap),
         Some(gap) if general && at_least(1.0 - gap) => Outcome::Clear,
         Some(gap) => Outcome::Uncertain(gap),
         None => Outcome::Missing,
+    }
+}
+
+/// How likely a law checks particular inputs where its comment speaks of
+/// any, when that reaches the located-part share. On thirteen Bend 2
+/// projects the 4 laws at 0.65 or more were right (two of them at 0.72 and
+/// 0.78), and the highest below was a sanity check at 0.51.
+pub(in crate::units) fn particular_inputs(fixed: Option<&Answer>) -> Option<f64> {
+    match fixed {
+        Some(Answer::Noul { noul, .. }) if probability_at_least(*noul, LOCATION_PROBABILITY) => {
+            Some(*noul)
+        }
+        _ => None,
     }
 }
 

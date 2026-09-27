@@ -4,8 +4,8 @@ use super::{
     Block, Detail, GroupInfo,
     outcome::{
         Answers, Outcome, RESOURCE_CHECKS, benefit, choice, comment_concern_kind, comment_signals,
-        disagreement, document_split, noul, origin_outcome, repeated, section_signals,
-        settled_checks, value_signals,
+        disagreement, document_split, noul, origin_outcome, particular_inputs, repeated,
+        section_signals, settled_checks, value_signals,
     },
 };
 use crate::catalog;

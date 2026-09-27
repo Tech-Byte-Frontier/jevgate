@@ -77,6 +77,22 @@ fn copies_in_test_code_are_at_most_a_consider_and_across_cases_one_level_lower()
             "",
         );
     assert_eq!(strength(&short).0, Strength::Note);
+    // The same cases in two test files mirror each other: a note.
+    let project = Project::new();
+    let (a, b) = cases.split_at(cases.find("\n\n#[test]").unwrap());
+    project.write("tests/a.rs", a);
+    project.write("tests/b.rs", b.trim_start());
+    let mut same = scripted(2);
+    same.overrides
+        .push(("required", json!({"type":"noul","noul":0.05})));
+    let report = run(&project, &options, &mut same);
+    let finding = report
+        .files
+        .iter()
+        .flat_map(|f| &f.findings)
+        .next()
+        .unwrap();
+    assert_eq!(finding.strength, Strength::Note, "{}", finding.message);
 }
 
 #[test]

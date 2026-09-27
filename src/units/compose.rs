@@ -368,7 +368,8 @@ pub fn unkinded_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Strin
 /// An outline or large document not yet asked its kind whose split Score
 /// stayed undecided: the recheck's for an outline that has one, else the
 /// first. A large document's split finding is asked its kind as well, since
-/// its Score reads headings alone.
+/// its Score reads headings alone, and so is an outline's finding its
+/// recheck raised from an undecided first answer.
 fn unkinded_split(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
     if ![catalog::FILE_ORGANIZATION, catalog::LARGE_DOCS].contains(&unit.rule)
         || !answers(judgments, &unit.id, Pass::Trace).is_empty()
@@ -385,7 +386,7 @@ fn unkinded_split(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         .get("split")
         .is_some_and(|a| match benefit(a) {
             Outcome::Uncertain(_) => true,
-            Outcome::Consider(_) | Outcome::Review(_) => document,
+            Outcome::Consider(_) | Outcome::Review(_) => document || pass == Pass::Recheck,
             _ => false,
         })
 }

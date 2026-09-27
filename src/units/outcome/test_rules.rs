@@ -59,6 +59,39 @@ fn internal_outcome(p: f64, reads: Option<&Answer>) -> Outcome {
     }
 }
 
+/// A pair of tests: its redundancy, one level lower when their setup runs
+/// where the pair does not show it (Express's `when false` and `when true`
+/// groups run one body on apps their `before` hooks build differently), and a
+/// suggestion to parameterize only a note where the tests cannot share a
+/// table.
+pub(in crate::units) fn test_pair_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    detail: &Detail,
+) -> Option<Outcome> {
+    let identical = matches!(
+        detail,
+        Detail::TestPair {
+            identical: true,
+            ..
+        }
+    );
+    let table = !matches!(detail, Detail::TestPair { table: false, .. });
+    let unseen_setup = matches!(
+        detail,
+        Detail::TestPair {
+            unseen_setup: true,
+            ..
+        }
+    );
+    get("overlap").map(
+        |overlap| match redundancy_outcome(overlap, get, identical) {
+            Outcome::Review(p) if unseen_setup => Outcome::Consider(p),
+            Outcome::Consider(p) if !table => Outcome::Note(p),
+            outcome => outcome,
+        },
+    )
+}
+
 /// Two tests that check the same behavior with equivalent inputs make a
 /// review: one of them adds nothing. A review also needs both tests to
 /// exercise the same input case and expect the same outcome, each at the
@@ -71,7 +104,7 @@ fn internal_outcome(p: f64, reads: Option<&Answer>) -> Outcome {
 /// is available" did, which deleted nothing. When asked (for Ruby) whether
 /// each checks something the other does not, a review also needs that ruled
 /// out.
-pub(in crate::units) fn redundancy_outcome<'a>(
+fn redundancy_outcome<'a>(
     overlap: &Answer,
     get: &impl Fn(&str) -> Option<&'a Answer>,
     identical: bool,
