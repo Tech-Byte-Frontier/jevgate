@@ -37,6 +37,118 @@ pub fn groups(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> 
         .collect()
 }
 
+/// Candidate parts of a long file, for the part follow-up: `groups` links
+/// every method of a class through their owner, so a scraper inside a
+/// model or a codec inside a manager never stood apart. Here methods of a
+/// type with more than `PART_OWNER_MEMBERS` members link only through calls
+/// and shared names, calls to a helper that more than three in ten members
+/// call do not link, and members next to each other or sharing a distinctive
+/// word of their names link once more. Scored against the parts that
+/// labelers named on 23 files, the best matching part rose from 0.45 to
+/// 0.72 (F1 over member lines), and from 5 to 9 of the 15 files to split.
+pub fn parts(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> Vec<Vec<usize>> {
+    clusters(part_weights(units, members, imports))
+        .into_iter()
+        .map(|set| set.into_iter().map(|m| members[m]).collect())
+        .collect()
+}
+
+/// A type with more members than this holds parts of its own.
+const PART_OWNER_MEMBERS: usize = 12;
+/// The share of members calling a helper above which calls to it do not link.
+const HUB_SHARE: f64 = 0.3;
+/// The share of members whose names a word may appear in and still link them.
+const DISTINCT_WORD_SHARE: f64 = 0.25;
+
+fn part_weights(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -> Vec<Vec<u32>> {
+    let n = members.len();
+    let unit = |i: usize| &units[members[i]];
+    let names = linking_names(units, members, imports);
+    let mut called = BTreeMap::<&str, usize>::new();
+    let mut owners = BTreeMap::<&str, usize>::new();
+    let mut words = Vec::with_capacity(n);
+    let mut spread = BTreeMap::<String, usize>::new();
+    for i in 0..n {
+        for call in &unit(i).calls {
+            *called.entry(call.as_str()).or_default() += 1;
+        }
+        if !unit(i).owner.is_empty() {
+            *owners.entry(unit(i).owner.as_str()).or_default() += 1;
+        }
+        let set = name_words(&unit(i).short_name);
+        for word in &set {
+            *spread.entry(word.clone()).or_default() += 1;
+        }
+        words.push(set);
+    }
+    let hub = |name: &str| {
+        called
+            .get(name)
+            .is_some_and(|&c| c as f64 > (n as f64 * HUB_SHARE).max(3.0))
+    };
+    let calls = |x: &Unit, y: &Unit| {
+        !hub(&y.short_name)
+            && (x.calls.contains(&y.short_name)
+                || !y.owner.is_empty() && x.calls.contains(&y.owner) && !hub(&y.owner))
+    };
+    let distinct = (n as f64 * DISTINCT_WORD_SHARE).max(2.0);
+    let mut weights = vec![vec![0u32; n]; n];
+    for i in 0..n {
+        for j in i + 1..n {
+            let (a, b) = (unit(i), unit(j));
+            let mut weight = names[i].intersection(&names[j]).count().min(2) as u32;
+            if calls(a, b) || calls(b, a) {
+                weight += CALL_WEIGHT;
+            }
+            if !a.owner.is_empty()
+                && a.owner == b.owner
+                && owners[a.owner.as_str()] <= PART_OWNER_MEMBERS
+            {
+                weight += OWNER_WEIGHT;
+            }
+            if j == i + 1 {
+                weight += 1;
+            }
+            if words[i]
+                .intersection(&words[j])
+                .any(|w| spread[w] as f64 <= distinct)
+            {
+                weight += 1;
+            }
+            weights[i][j] = weight;
+            weights[j][i] = weight;
+        }
+    }
+    weights
+}
+
+/// The lowercase words of a name longer than two letters, split at
+/// underscores, punctuation and camel-case humps: `fetchedAttributesHtml`
+/// and `fetched_attributes_pdf` share `fetched` and `attributes`.
+fn name_words(name: &str) -> BTreeSet<String> {
+    let mut words = BTreeSet::new();
+    let mut word = String::new();
+    let mut previous: Option<char> = None;
+    for c in name.trim_start_matches(['#', '_']).chars() {
+        let hump =
+            c.is_uppercase() && previous.is_some_and(|p| p.is_lowercase() || p.is_ascii_digit());
+        if !c.is_alphanumeric() || hump {
+            if word.chars().count() > 2 {
+                words.insert(std::mem::take(&mut word));
+            }
+            word.clear();
+        }
+        if c.is_alphanumeric() {
+            word.extend(c.to_lowercase());
+        }
+        previous = Some(c);
+    }
+    if word.chars().count() > 2 {
+        words.insert(word);
+    }
+    words
+}
+
 /// Group a test file's cases and the support code they share: cases link by
 /// their innermost suite and by the subjects and helpers they share, and a
 /// case that calls a helper links to it. Positions `0..cases.len()` are the
@@ -305,6 +417,61 @@ mod tests {
         for _ in 0..5 {
             assert_eq!(grouped(TWO_CONCERNS), first);
         }
+    }
+
+    #[test]
+    fn a_large_type_is_parted_by_its_calls_not_its_owner() {
+        let scraper = [
+            "fetched_attributes",
+            "fetched_html",
+            "fetched_pdf",
+            "canonical_target",
+        ];
+        let mut source = String::from("struct Story { title: String }\nimpl Story {\n");
+        for i in 0..9 {
+            source.push_str(&format!(
+                "    fn field{i}(&self) -> usize {{ self.title.len() + {i} }}\n"
+            ));
+        }
+        for name in scraper {
+            let calls: Vec<String> = scraper
+                .iter()
+                .filter(|other| **other != name)
+                .map(|other| format!("self.{other}()"))
+                .collect();
+            source.push_str(&format!(
+                "    fn {name}(&self) -> usize {{ {} }}\n",
+                calls.join(" + ")
+            ));
+        }
+        source.push_str("}\n");
+        let file = super::super::units::parse(Path::new("story.rs"), &source).unwrap();
+        let members: Vec<usize> = (0..file.units.len()).collect();
+        let name = |m: &usize| file.units[*m].short_name.as_str();
+        assert!(
+            groups(&file.units, &members, &file.imports)
+                .iter()
+                .any(|g| g.members.iter().any(|m| name(m) == "field0")
+                    && g.members.iter().any(|m| name(m) == scraper[0])),
+            "a shared owner links the scraper to the fields"
+        );
+        let parts = parts(&file.units, &members, &file.imports);
+        let scraping = parts
+            .iter()
+            .find(|p| p.iter().any(|m| name(m) == scraper[0]))
+            .unwrap();
+        assert_eq!(scraping.iter().map(name).collect::<Vec<_>>(), scraper);
+    }
+
+    #[test]
+    fn name_words_split_humps_underscores_and_private_marks() {
+        let words = |name: &str| name_words(name).into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            words("fetchedAttributesHtml"),
+            ["attributes", "fetched", "html"]
+        );
+        assert_eq!(words("#parse_UTF8_value"), ["parse", "utf8", "value"]);
+        assert_eq!(words("to"), Vec::<String>::new());
     }
 
     #[test]

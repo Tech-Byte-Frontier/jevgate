@@ -156,6 +156,39 @@ pub(in crate::units) fn outline_wording(
     }
 }
 
+/// A part of a long file that does a job of its own apart from the rest.
+pub(in crate::units) fn part_wording(
+    part: &crate::units::Part,
+    strength: Strength,
+    p: f64,
+) -> Wording {
+    let names: Vec<_> = part
+        .names
+        .iter()
+        .take(6)
+        .map(|n| format!("`{n}`"))
+        .collect();
+    let more = part.names.len().saturating_sub(names.len());
+    let more = if more > 0 {
+        format!(" and {more} more")
+    } else {
+        String::new()
+    };
+    let part_named = format!("{}{more} ({} lines)", names.join(", "), part.lines);
+    match strength {
+        Strength::Note => (
+            format!("{part_named} could live in a module of their own ({p:.2})."),
+            "Optional: move those members when you next change them",
+        ),
+        _ => (
+            format!(
+                "{part_named} do a job of their own apart from the rest of this file ({p:.2})."
+            ),
+            "Consider moving those members into a module of their own",
+        ),
+    }
+}
+
 /// `sites` is (within one test, owner in test code, every site in a test case).
 pub(in crate::units) fn pair_wording(
     name: &str,

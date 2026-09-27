@@ -175,6 +175,49 @@ pub fn outline_kind(tests: bool) -> Value {
     })
 }
 
+const PART_NOTE: &str = "`part` holds some members of the file with their source; `rest` lists the file's other members by signature.";
+
+/// Whether a part of a long file does a job of its own, asked of each
+/// candidate part with its source once the outline raised no finding.
+/// Asked of the whole outline, the split and the kind of file stayed "one
+/// feature" for a scraper inside a model and a diff engine inside a
+/// renderer; asked of the part itself, with its code, they stood apart.
+pub fn outline_part_own() -> Value {
+    json!({
+        "type": "noul",
+        "instructions": {
+            "question": "Does `part` do a job of its own that a reader would look for apart from the rest of the file?",
+            "note": format!("{PART_NOTE} {EVIDENCE}"),
+        },
+        "criteria": {
+            "true": "A separate piece of work, such as its own feature, layer, data table, parser, codec or algorithm, that the rest of the file only calls or does not use, and that reads on its own.",
+            "false": "One piece of the file's single job: its steps, methods or cases share the state and purpose of the rest, and reading it needs the rest of the file.",
+        },
+    })
+}
+
+/// Kinds of part that do a job of their own; every other kind serves the file's own.
+pub const OWN_JOB: &str = "own_job";
+
+/// What a candidate part of a long file is within it, asked beside
+/// `outline_part_own`: more of what the rest does (a dialect's other
+/// queries, a class's other methods) read as a job of its own on its own.
+pub fn outline_part_role() -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": "Which best describes `part` within this file?",
+            "note": format!("{PART_NOTE} {EVIDENCE}"),
+        },
+        "criteria": {
+            OWN_JOB: "A job of its own with its own vocabulary, such as a parser, a scraper, an algorithm, a set of validators, a formatter or a data table, that the rest of the file only calls or does not use.",
+            "same_kind": "More of what the rest of the file does: other methods of the same class or interface, or other handlers, queries, cases or definitions of the same kind.",
+            "support": "Small helpers, types or constants that the rest of the file uses throughout.",
+            "core": "The file's main job, which the other parts serve.",
+        },
+    })
+}
+
 /// Asked only after a finding on a file's constants, to name the constant it
 /// is about: "one of this file's constants" left a reader to search 14 of
 /// them for the three URLs holding the author's account name.

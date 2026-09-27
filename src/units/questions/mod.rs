@@ -131,6 +131,8 @@ mod tests {
             outline_module(true, &["G1".into(), "G2".into()]),
             outline_kind(false),
             outline_kind(true),
+            outline_part_own(),
+            outline_part_role(),
             duplicate_same(false),
             duplicate_same(true),
             duplicate_only_differences(),

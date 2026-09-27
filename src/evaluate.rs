@@ -218,6 +218,7 @@ impl Session<'_> {
         // Traces judge where a security concern's values come from; rechecks
         // settle uncertain units; a security check still undecided is asked
         // where its URL comes from or its output goes, and an outline its kind;
+        // a long file left without a finding is asked about its parts;
         // locate follow-ups then point split findings at a block, and a
         // located value is asked what it is. Each depends on the answers
         // before it.
@@ -227,6 +228,7 @@ impl Session<'_> {
             crate::units::rechecks,
             crate::units::settles,
             crate::units::kinds,
+            crate::units::parts,
             crate::units::locates,
             crate::units::value_kinds,
         ] {
