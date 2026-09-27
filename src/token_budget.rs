@@ -23,6 +23,43 @@ const MAX_BYTES_PER_TOKEN: f64 = 6.0;
 /// through that the provider refused as beyond its context.
 const STRUCTURED_BYTES_PER_TOKEN: f64 = 2.0;
 
+/// The budget as a run applies it to one request: the calibrated estimate,
+/// or the answer cache when it already holds that request's answer. The
+/// calibration follows the fresh requests of the last run, so a request near
+/// the limit fit in one run and not the next: two runs of one release on a
+/// pinned project differed in a file's recheck, and so in its finding. A
+/// request answered once fits from then on.
+#[derive(Clone, Copy)]
+pub struct Limits<'a> {
+    budget: &'a TokenBudget,
+    answered: &'a dyn Fn(&Value) -> bool,
+}
+
+impl<'a> Limits<'a> {
+    pub fn new(budget: &'a TokenBudget, answered: &'a dyn Fn(&Value) -> bool) -> Self {
+        Self { budget, answered }
+    }
+
+    pub fn fits(&self, request: &Value) -> bool {
+        self.budget.fits(request) || (self.answered)(request)
+    }
+
+    pub fn fits_structured(&self, request: &Value) -> bool {
+        self.budget.fits_structured(request) || (self.answered)(request)
+    }
+}
+
+#[cfg(test)]
+impl TokenBudget {
+    /// The estimate alone, for plans made without an answer cache.
+    pub fn uncached(&self) -> Limits<'_> {
+        fn never(_: &Value) -> bool {
+            false
+        }
+        Limits::new(self, &never)
+    }
+}
+
 /// The bytes-per-token ratio, calibrated from observed `usage.input_tokens` and
 /// saved in `.jevgate/`.
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]

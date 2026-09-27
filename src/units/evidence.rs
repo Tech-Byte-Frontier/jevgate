@@ -1,7 +1,7 @@
 //! Request building shared by every planner: one file's facts, the request
 //! envelope, packing, and stable identities.
 use super::{Asked, PACK_ITEMS, Questions};
-use crate::{schema::Location, token_budget::TokenBudget};
+use crate::{schema::Location, token_budget::Limits};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::Path};
@@ -19,7 +19,7 @@ pub(super) struct FileContext<'a> {
     pub source: &'a str,
     pub source_hash: &'a str,
     pub model: &'a str,
-    pub budget: &'a TokenBudget,
+    pub budget: Limits<'a>,
     /// What a web framework makes of the file, such as a Next.js route
     /// handler or Server Actions module, sent beside its path.
     pub framework: Option<String>,
