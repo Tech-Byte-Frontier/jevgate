@@ -143,6 +143,14 @@ fn recheck(file: &FileContext<'_>, id: &str, law: &Value) -> (Value, Asked) {
         "relation",
         Pass::Recheck,
     );
+    questions.ask(
+        "fixed".into(),
+        questions::law_fixed(),
+        id,
+        LAWS,
+        "fixed",
+        Pass::Recheck,
+    );
     let mut state = json!({"file": file.plain_state(), "law": law});
     if let Some(header) = header(file.source) {
         state["file"]["comment"] = json!(header);
