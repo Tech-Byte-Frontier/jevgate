@@ -391,3 +391,15 @@ fn a_value_added_to_one_run_of_functions_leaves_the_other_runs_alone() {
     assert_eq!(sizes, [4, 6, 1]);
     only_changed(&before, &after, 1);
 }
+
+#[test]
+fn a_bend_benchmark_s_values_are_its_workload() {
+    let source = "import Base\n\ndef rounds(+n: Nat, +acc: U32) -> U32:\n  match n:\n    case 0n:\n      acc\n    case 1n+p:\n      rounds(p, U32.mul(U32.add(acc, 40503), 2654435761))\n\ndef main() -> IO(Unit):\n  IO.print(U32.show(rounds(100000n, 7)))\n";
+    let asked = |path: &str| {
+        let (project, options) = project_with(&[(path, source)], &[catalog::HARDCODED_VALUES]);
+        let (_, plan) = planned(&project, &options);
+        !plan.requests.is_empty()
+    };
+    assert!(!asked("bench/hash/main.bend"));
+    assert!(asked("src/hash.bend"), "the same code outside a benchmark");
+}

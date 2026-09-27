@@ -48,10 +48,16 @@ pub(super) fn plan_file(
         plan_outline(scope, shared, &context, view, &lines, &mut file, requests);
     }
     // Example code spells its values out for the reader: sqlmodel's
-    // `docs_src` tutorials each open a `database.db` with sample heroes.
+    // `docs_src` tutorials each open a `database.db` with sample heroes. A
+    // Bend 2 benchmark's values are its workload, the sizes, seeds and
+    // ranges its C or TypeScript twin shares and its expected output pins:
+    // 70 of 82 hardcoded-value findings in Bend 2 benchmarks were wrong.
+    let benchmark = crate::analysis::bend::file(context.path)
+        && crate::analysis::clones::benchmark_code(context.path);
     if shared.enabled(catalog::HARDCODED_VALUES)
         && view.application
         && !crate::analysis::clones::example_code(context.path)
+        && !benchmark
     {
         let predicates = &shared.law_predicates;
         plan_values(

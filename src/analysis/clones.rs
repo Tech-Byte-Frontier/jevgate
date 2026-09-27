@@ -259,6 +259,14 @@ fn separate_tests(a: &SourceFile<'_>, b: &SourceFile<'_>) -> bool {
     a.path != b.path && test(a) && test(b)
 }
 
+/// Whether a file sits in a benchmark directory.
+pub(crate) fn benchmark_code(path: &Path) -> bool {
+    path.parent().is_some_and(|dir| {
+        dir.iter()
+            .any(|part| benchmark_directory(&part.to_string_lossy()))
+    })
+}
+
 fn benchmark_directory(part: &str) -> bool {
     matches!(
         part.to_ascii_lowercase().as_str(),
