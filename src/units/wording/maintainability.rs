@@ -94,21 +94,7 @@ pub(in crate::units) fn outline_wording(
     };
     let shown: Vec<String> = chosen
         .iter()
-        .map(|group| {
-            let names: Vec<_> = group
-                .names
-                .iter()
-                .take(6)
-                .map(|n| format!("`{n}`"))
-                .collect();
-            let more = group.names.len().saturating_sub(names.len());
-            let more = if more > 0 {
-                format!(" and {more} more")
-            } else {
-                String::new()
-            };
-            format!("{} ({}{more})", group.id, names.join(", "))
-        })
+        .map(|group| format!("{} ({})", group.id, listed_names(&group.names)))
         .collect();
     let detail = if shown.is_empty() {
         String::new()
@@ -156,25 +142,22 @@ pub(in crate::units) fn outline_wording(
     }
 }
 
+/// The first six of `names` in backticks, and how many more there are.
+fn listed_names(names: &[String]) -> String {
+    let shown: Vec<_> = names.iter().take(6).map(|n| format!("`{n}`")).collect();
+    match names.len().saturating_sub(shown.len()) {
+        0 => shown.join(", "),
+        more => format!("{} and {more} more", shown.join(", ")),
+    }
+}
+
 /// A part of a long file that does a job of its own apart from the rest.
 pub(in crate::units) fn part_wording(
     part: &crate::units::Part,
     strength: Strength,
     p: f64,
 ) -> Wording {
-    let names: Vec<_> = part
-        .names
-        .iter()
-        .take(6)
-        .map(|n| format!("`{n}`"))
-        .collect();
-    let more = part.names.len().saturating_sub(names.len());
-    let more = if more > 0 {
-        format!(" and {more} more")
-    } else {
-        String::new()
-    };
-    let part_named = format!("{}{more} ({} lines)", names.join(", "), part.lines);
+    let part_named = format!("{} ({} lines)", listed_names(&part.names), part.lines);
     match strength {
         Strength::Note => (
             format!("{part_named} could live in a module of their own ({p:.2})."),

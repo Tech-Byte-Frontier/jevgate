@@ -88,39 +88,13 @@ pub(in crate::units) fn organization_outcome(
     kind: Option<&Answer>,
     parts: &[PartAnswers<'_>],
 ) -> Option<Outcome> {
-    let outcome = split_outcome(benefit(split?), kind);
+    let outcome = weighed_by_kind(benefit(split?), kind, &questions::SEVERAL_KINDS);
     Some(match separable_part(parts) {
         Some((_, p)) if !matches!(outcome, Outcome::Review(_) | Outcome::Consider(_)) => {
             Outcome::Consider(p)
         }
         _ => outcome,
     })
-}
-
-fn split_outcome(outcome: Outcome, kind: Option<&Answer>) -> Outcome {
-    let (
-        Outcome::Uncertain(_) | Outcome::Consider(_) | Outcome::Review(_),
-        Some(Answer::Choice { probabilities, .. }),
-    ) = (outcome, kind)
-    else {
-        return outcome;
-    };
-    let mass: f64 = probabilities.values().sum();
-    if mass <= 0.0 {
-        return outcome;
-    }
-    let several: f64 = probabilities
-        .iter()
-        .filter(|(kind, _)| questions::SEVERAL_KINDS.contains(&kind.as_str()))
-        .map(|(_, p)| p / mass)
-        .sum();
-    if at_least(1.0 - several) {
-        Outcome::Clear
-    } else if at_least(several) && matches!(outcome, Outcome::Uncertain(_)) {
-        Outcome::Consider(several)
-    } else {
-        outcome
-    }
 }
 
 /// One candidate part's answers: whether it does a job of its own, and what

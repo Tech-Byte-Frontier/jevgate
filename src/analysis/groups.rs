@@ -64,34 +64,12 @@ fn part_weights(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -
     let n = members.len();
     let unit = |i: usize| &units[members[i]];
     let names = linking_names(units, members, imports);
-    let mut called = BTreeMap::<&str, usize>::new();
-    let mut owners = BTreeMap::<&str, usize>::new();
-    let mut words = Vec::with_capacity(n);
-    let mut spread = BTreeMap::<String, usize>::new();
-    for i in 0..n {
-        for call in &unit(i).calls {
-            *called.entry(call.as_str()).or_default() += 1;
-        }
-        if !unit(i).owner.is_empty() {
-            *owners.entry(unit(i).owner.as_str()).or_default() += 1;
-        }
-        let set = name_words(&unit(i).short_name);
-        for word in &set {
-            *spread.entry(word.clone()).or_default() += 1;
-        }
-        words.push(set);
-    }
-    let hub = |name: &str| {
-        called
-            .get(name)
-            .is_some_and(|&c| c as f64 > (n as f64 * HUB_SHARE).max(3.0))
-    };
+    let tallies = Tallies::of(units, members);
     let calls = |x: &Unit, y: &Unit| {
-        !hub(&y.short_name)
+        !tallies.hub(&y.short_name)
             && (x.calls.contains(&y.short_name)
-                || !y.owner.is_empty() && x.calls.contains(&y.owner) && !hub(&y.owner))
+                || !y.owner.is_empty() && x.calls.contains(&y.owner) && !tallies.hub(&y.owner))
     };
-    let distinct = (n as f64 * DISTINCT_WORD_SHARE).max(2.0);
     let mut weights = vec![vec![0u32; n]; n];
     for i in 0..n {
         for j in i + 1..n {
@@ -100,26 +78,75 @@ fn part_weights(units: &[Unit], members: &[usize], imports: &BTreeSet<String>) -
             if calls(a, b) || calls(b, a) {
                 weight += CALL_WEIGHT;
             }
-            if !a.owner.is_empty()
-                && a.owner == b.owner
-                && owners[a.owner.as_str()] <= PART_OWNER_MEMBERS
-            {
+            if !a.owner.is_empty() && a.owner == b.owner && !tallies.large(&a.owner) {
                 weight += OWNER_WEIGHT;
             }
-            if j == i + 1 {
-                weight += 1;
-            }
-            if words[i]
-                .intersection(&words[j])
-                .any(|w| spread[w] as f64 <= distinct)
-            {
-                weight += 1;
-            }
+            weight += u32::from(j == i + 1) + u32::from(tallies.share_word(i, j));
             weights[i][j] = weight;
             weights[j][i] = weight;
         }
     }
     weights
+}
+
+/// What the part links weigh against, counted over a file's members: how
+/// many call each name, how many each type owns, and the words of each
+/// member's name with how many names hold each word.
+struct Tallies<'u> {
+    members: usize,
+    called: BTreeMap<&'u str, usize>,
+    owners: BTreeMap<&'u str, usize>,
+    words: Vec<BTreeSet<String>>,
+    spread: BTreeMap<String, usize>,
+}
+
+impl<'u> Tallies<'u> {
+    fn of(units: &'u [Unit], members: &[usize]) -> Self {
+        let mut tallies = Tallies {
+            members: members.len(),
+            called: BTreeMap::new(),
+            owners: BTreeMap::new(),
+            words: Vec::with_capacity(members.len()),
+            spread: BTreeMap::new(),
+        };
+        for unit in members.iter().map(|&m| &units[m]) {
+            for call in &unit.calls {
+                *tallies.called.entry(call.as_str()).or_default() += 1;
+            }
+            if !unit.owner.is_empty() {
+                *tallies.owners.entry(unit.owner.as_str()).or_default() += 1;
+            }
+            let words = name_words(&unit.short_name);
+            for word in &words {
+                *tallies.spread.entry(word.clone()).or_default() += 1;
+            }
+            tallies.words.push(words);
+        }
+        tallies
+    }
+
+    /// A helper that more than `HUB_SHARE` of the members call.
+    fn hub(&self, name: &str) -> bool {
+        self.called
+            .get(name)
+            .is_some_and(|&c| c as f64 > (self.members as f64 * HUB_SHARE).max(3.0))
+    }
+
+    /// A type with more than `PART_OWNER_MEMBERS` members.
+    fn large(&self, owner: &str) -> bool {
+        self.owners
+            .get(owner)
+            .is_some_and(|&c| c > PART_OWNER_MEMBERS)
+    }
+
+    /// Whether the names of members `i` and `j` share a word that at most
+    /// `DISTINCT_WORD_SHARE` of the members' names hold.
+    fn share_word(&self, i: usize, j: usize) -> bool {
+        let distinct = (self.members as f64 * DISTINCT_WORD_SHARE).max(2.0);
+        self.words[i]
+            .intersection(&self.words[j])
+            .any(|w| self.spread[w] as f64 <= distinct)
+    }
 }
 
 /// The lowercase words of a name longer than two letters, split at

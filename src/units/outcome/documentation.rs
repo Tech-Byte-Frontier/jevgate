@@ -66,32 +66,11 @@ pub(in crate::units) fn document_outcome<'a>(
 /// split or a finding, and a collection of unrelated subjects reaching it
 /// raises an undecided split to a consider.
 pub(in crate::units) fn document_split(split: &Answer, kind: Option<&Answer>) -> Outcome {
-    let outcome = benefit(split);
-    let (
-        Outcome::Uncertain(_) | Outcome::Consider(_) | Outcome::Review(_),
-        Some(Answer::Choice { probabilities, .. }),
-    ) = (outcome, kind)
-    else {
-        return outcome;
-    };
-    let mass: f64 = probabilities.values().sum();
-    if mass <= 0.0 {
-        return outcome;
-    }
-    let several: f64 = probabilities
-        .iter()
-        .filter(|(kind, _)| {
-            crate::units::questions::SEVERAL_DOCUMENT_KINDS.contains(&kind.as_str())
-        })
-        .map(|(_, p)| p / mass)
-        .sum();
-    if at_least(1.0 - several) {
-        Outcome::Clear
-    } else if at_least(several) && matches!(outcome, Outcome::Uncertain(_)) {
-        Outcome::Consider(several)
-    } else {
-        outcome
-    }
+    weighed_by_kind(
+        benefit(split),
+        kind,
+        &crate::units::questions::SEVERAL_DOCUMENT_KINDS,
+    )
 }
 
 /// Each answered question about an instruction section with its outcome.
