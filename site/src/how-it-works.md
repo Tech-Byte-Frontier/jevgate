@@ -172,6 +172,26 @@ signatures, or one candidate pair.
    whole gets no recheck, so its undecided first answer is asked the kind
    from the outline alone; large Java classes and their test files otherwise
    stayed uncertain.
+   An application file of 400 lines or more whose outline, recheck and kind
+   raised no finding is then asked about its candidate parts, one request
+   per part: the part's members with their source, the file's other members
+   by signature, whether the part does a job of its own that a reader would
+   look for apart from the rest, and what it is within the file (a job of
+   its own, more of what the rest does, helpers the rest uses throughout, or
+   the file's main job). A part of 100 lines or more whose Noul reaches 0.65
+   and whose role leans to a job of its own raises a consider naming its
+   members. Asked of the whole outline, the split and the kind of file read
+   a URL scraper inside a Rails model and a diff engine inside a renderer as
+   one feature: of 50 long files the kind cleared, labeled from the code,
+   15 were worth splitting, and asking each part found 4 of them, each at the
+   part the labeler named, and no file to keep. The parts are the outline's
+   groups without the links a type's members share when it has more than
+   twelve (those merged every method of a large class into one group),
+   without links through a helper most members call, and with a link for
+   neighbours and for names sharing a distinctive word. Benchmarks,
+   examples, `scripts` and `docs` directories are not asked (a script runs
+   its steps top to bottom and a benchmark is often pinned by hash: 5 of 5
+   such findings were wrong), nor is a part holding `main`.
    A test left undecided on whether it re-implements the code or checks only
    its mocks is asked again with the bodies of the functions it calls and its
    file's imports, mocks and setup hooks (a part too long is left out, never
