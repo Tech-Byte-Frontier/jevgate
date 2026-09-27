@@ -110,6 +110,7 @@ fn plan_parts(file: &FileContext<'_>, parsed: &FileUnits, members: &[usize]) -> 
         .filter_map(|(part, ids)| {
             let (request, asked) = part_request(file, units, members, &part, ids);
             file.budget.fits(&request).then(|| Part {
+                questions: ids,
                 names: part.iter().map(|&m| units[m].name.clone()).collect(),
                 locations: part
                     .iter()
@@ -150,21 +151,24 @@ fn part_request(
     (own, role): (&'static str, &'static str),
 ) -> (Value, Asked) {
     let mut questions = Questions::default();
-    let body = [
-        (own, questions::outline_part_own()),
-        (role, questions::outline_part_role()),
-    ];
-    for (question, value) in body {
-        let key = if question == own { "own" } else { "role" };
-        questions.ask(
-            key.into(),
-            value,
-            ID,
-            FILE_ORGANIZATION,
-            question,
-            Pass::Locate,
-        );
-    }
+    let own_job = questions::outline_part_own();
+    questions.ask(
+        "own".into(),
+        own_job,
+        ID,
+        FILE_ORGANIZATION,
+        own,
+        Pass::Locate,
+    );
+    let kind = questions::outline_part_role();
+    questions.ask(
+        "role".into(),
+        kind,
+        ID,
+        FILE_ORGANIZATION,
+        role,
+        Pass::Locate,
+    );
     let lines: Vec<&str> = file.source.lines().collect();
     let source: Vec<String> = part
         .iter()
