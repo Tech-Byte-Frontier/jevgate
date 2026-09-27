@@ -170,3 +170,19 @@ fn a_law_s_comment_is_the_block_above_it_not_its_section_s_opening() {
         "# Sorting: every list sort returns is sorted, whatever its input."
     );
 }
+
+#[test]
+fn laws_in_a_file_of_proofs_are_lemmas_and_not_asked() {
+    let (project, options) = project_with(
+        &[
+            ("server/main.bend", MAIN),
+            (
+                "proofs/server/laws.bend",
+                &LAWS.replace("./main.bend", "../../server/main.bend"),
+            ),
+        ],
+        &[catalog::LAWS],
+    );
+    let (_, plan) = planned(&project, &options);
+    assert!(plan.requests.is_empty());
+}

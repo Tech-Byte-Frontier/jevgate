@@ -1,5 +1,5 @@
 //! Bend 2 laws: one unit per claim that quantifies over its inputs and has
-//! a comment directly above it, outside `PROOF.bend`. The law is the part of
+//! a comment directly above it, outside files of proofs. The law is the part of
 //! a specification the compiler checks and its comment the part a person
 //! reads, so Jev is asked whether the comment claims more than the law
 //! states: a promise the law leaves out is one a definition can break while
@@ -8,10 +8,11 @@
 //! signatures, documentation and short bodies.
 //!
 //! A law without `for` or `exs` checks fixed values, as a unit test does,
-//! and its comment says what the check samples; a lemma of a `PROOF.bend`
-//! is a step of a proof, whose comment says how the proof goes. On the
-//! Bend repository, the comments of both read as promising more than their
-//! laws in most answers, where none did.
+//! and its comment says what the check samples; a lemma of a file of
+//! proofs (`bend::proof_file`) is a step of a proof, whose comment says how
+//! the proof goes. On the Bend repository, the comments of both read as
+//! promising more than their laws in most answers, where none did, and 14
+//! of the 15 law findings in bend-collections' `proofs/` were wrong.
 use super::{
     Asked, Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, compact,
     identity, pack_runs, questions, unique_ids,
@@ -47,7 +48,7 @@ pub(super) fn plan(
     requests: &mut Vec<Planned>,
 ) {
     out.rules.insert(LAWS, 0);
-    if file.path.file_name().is_some_and(|n| n == "PROOF.bend") {
+    if crate::analysis::bend::proof_file(file.path) {
         return;
     }
     let claims: Vec<(usize, &Unit, String)> = units
