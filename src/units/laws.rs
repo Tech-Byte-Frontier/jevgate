@@ -217,26 +217,45 @@ fn header(source: &str) -> Option<String> {
 /// section's title above it do not.
 const MIN_WORDS: usize = 3;
 
-/// The comment lines directly above a law, without the section headings
+/// The comment block directly above a law, without the section headings
 /// among them (a title over a rule of dashes, as Base heads `# Equal` over
-/// `# -----`); none when too little prose remains.
+/// `# -----`); none when too little prose remains. A blank line ends the
+/// block: the paragraph that opens a section above it speaks of the
+/// section's laws together, and bulkhead's, which draws a restart claim
+/// from several laws, read as a promise of the one below it.
 fn comment(unit: &Unit, source: &str) -> Option<String> {
-    let above = &source[unit.span.start..declaration_start(unit, source)];
-    let lines: Vec<&str> = above
+    let above: Vec<&str> = source[unit.span.start..declaration_start(unit, source)]
         .lines()
         .map(str::trim)
+        .collect();
+    let end = above
+        .iter()
+        .rposition(|line| !line.is_empty())
+        .map_or(0, |i| i + 1);
+    let start = above[..end]
+        .iter()
+        .rposition(|line| line.is_empty())
+        .map_or(0, |i| i + 1);
+    let lines: Vec<&str> = above[start..end]
+        .iter()
+        .copied()
         .filter(|line| line.starts_with('#'))
         .collect();
     let rule = |line: &str| {
         let text = line.trim_start_matches('#').trim();
         !text.is_empty() && text.chars().all(|c| matches!(c, '-' | '=' | '#' | '*'))
     };
-    let kept: Vec<&str> = lines
+    let prose = |line: &&str| !line.trim_start_matches('#').trim().is_empty();
+    let mut kept: Vec<&str> = lines
         .iter()
         .enumerate()
         .filter(|(i, line)| !rule(line) && !lines.get(i + 1).is_some_and(|next| rule(next)))
         .map(|(_, line)| *line)
+        .skip_while(|line| !prose(line))
         .collect();
+    while kept.last().is_some_and(|line| !prose(line)) {
+        kept.pop();
+    }
     let words: usize = kept
         .iter()
         .map(|line| line.trim_start_matches('#').split_whitespace().count())
