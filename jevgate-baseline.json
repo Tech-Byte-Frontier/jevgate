@@ -1,23 +1,41 @@
 {
   "version": 1,
-  "created_at": 1790354335,
+  "created_at": 1790514454,
   "findings": [
     {
       "fingerprint": "9a142118d2e3410e9f6c85cfb48ffb6f9ca83a6a7667b7a97bf02223aeddc1ca",
       "rule": "maintainability/function-simplification",
       "path": "src/analysis/test_map.rs",
-      "line": 205,
+      "line": 208,
       "strength": "consider",
-      "message": "`visit` likely mixes separate jobs; splitting it may make it easier to understand (0.85). Lines 205\u2013315 would be most useful as their own function.",
+      "message": "`visit` likely mixes separate jobs; splitting it may make it easier to understand (0.85).",
       "reason": "wrong"
     },
     {
-      "fingerprint": "8d1c4794e0d3d8a8b55c0f4a9c6b06456c87ebbf5d88f6353be8ecabf13d1f4c",
-      "rule": "maintainability/file-organization",
-      "path": "src/units/tests/pipeline.rs",
-      "line": 6,
+      "fingerprint": "4e8f1ec95e2bfba8dc17ef300ba3a88fae0a1322781dec1759520aca633a5844",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/outcome/mod.rs",
+      "line": 346,
       "strength": "consider",
-      "message": "Some tests of this file could move to a separate test file (0.83).",
+      "message": "`law_recheck` likely mixes separate jobs; splitting it may make it easier to understand (0.82).",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "30bba567a24271430ef643e3e8e4c7c87d4ecc59a9fa81906f4666e7f580b8b0",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/plan/file.rs",
+      "line": 294,
+      "strength": "consider",
+      "message": "Some members of this file could move to a separate module (0.81). G2 (`laravel_config`, `plan_module`) would be most useful as its own module.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "a100d2c1b75c85bfed70d361281c8ba3dde35f409ede013f7ae6fec3286a20f5",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/tests/comments.rs",
+      "line": 40,
+      "strength": "consider",
+      "message": "`each_comment_is_asked_about_with_the_code_it_is_about` (src/units/tests/comments.rs:40) and `claims_that_quantify_under_a_comment_are_asked_with_their_reading_and_defs` (src/units/tests/laws.rs:34) repeat the same steps across test cases (0.86). Differences: `comments_project`\u2192`laws_project`, `comments`\u2192`laws`.",
       "reason": "wrong"
     }
   ]
