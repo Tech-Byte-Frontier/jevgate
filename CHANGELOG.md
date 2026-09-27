@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-27
+
 Bend 2 ([bendlang/bend](https://github.com/bendlang/bend) 2.0.x) is a supported language, with a rule for its laws. Every review and consider on Bend code was labeled by hand from the code, a debatable one counting as not right. On the Bend repository and 40 community projects used for tuning, 58% of reviews and 43% of considers were right (62% and 44% for the default rules, without the opt-in security and documentation groups). On 23 community projects never used for tuning, 53% of reviews were right before one change made from their labels (a split of a Bend 2 file is at most a consider) and 70% with it (74% for the default rules), and about 27% of considers, from a sample of 150 of 427; hardcoded values were the weakest rule there (26% right), and law findings were right 15 times in 23. Every request to the other languages' code is unchanged on the 117 corpus projects.
 
 - Bend 2: `.bend` files are parsed with tree-sitter-bend2. Defs, types and laws are units, named with their dots (`List.map`), and a call through an import alias (`Sort.sort` beside `import ./main.bend as Sort`) reaches the def it names; imports link files by their paths, and `import Base` links Base in the Bend repository. Jev is told Bend 2's notation beside each file's code, since a model may know Bend 1 or no Bend at all. A test is a program whose file ends in the `#|` lines its run must print, or on a test path any program that defines `main`, as bendc's `tests/X.bend` beside its `X.out`, judged whole; the `#|` lines are no comment. Proofs (a def that fills a claim or states an equality, or any def of a file of proofs: a `PROOF.bend`, a file named after what it proves such as `padding_proof.bend`, or one under a `proof` or `proofs` directory) and type-level defs are told from code: proofs are not asked to be split (the 16 such findings were wrong), neither is asked about hardcoded values, the laws of a file of proofs are lemmas and not judged, copies of proof steps are compared like other code (32 of 41 were right in a library of proofs), and only defs that perform effects (`IO`, a `do IO` block, a foreign import, a def filling an `IO` law) or join text with `++` are asked the security questions. `LAWS.bend` and `PROOF.bend` are not asked to be split, nor a Bend 2 file of fewer than 300 member lines (`min_bend_file_lines` in the decision policy; the 16 file-organization findings below it were wrong, and the 13 right ones above it), and a split of a Bend 2 file is at most a consider (14 of 43 such reviews were right), a note when its author ruled the file off into titled sections (`# ----`; 7 of 43 such findings were right, against 10 of 17 elsewhere); a benchmark's values are its workload and are not asked about (70 of 82 such findings were wrong), a `base.bend` copied from Bend's Base library is vendored, and copies between sibling benchmark programs or two tests pinned to their output are not compared.
@@ -225,7 +227,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.18.0...v0.19.0
