@@ -1119,6 +1119,7 @@ fn capped(
         || readable_value(unit, judgments)
         || same_everywhere(unit, judgments)
         || short_outline(unit)
+        || sectioned_outline(unit)
         || small_section(unit)
     {
         return at_most_note(outcome);
@@ -1412,6 +1413,17 @@ const OUTLINE_NOTE_LINES: usize = 250;
 /// scatter it; 21 of 29 on longer files were right.
 fn short_outline(unit: &UnitPlan) -> bool {
     matches!(unit.detail, Detail::Outline { .. }) && unit.lines < OUTLINE_NOTE_LINES
+}
+
+/// Section rules that show a Bend 2 file laid out in titled parts.
+const SECTIONS: usize = 2;
+
+/// A file-organization finding on a Bend 2 file its author laid out in
+/// titled sections is a note: the groups proposed from its calls rarely
+/// follow those sections, and on 41 Bend 2 projects 7 of 43 such findings
+/// were right, against 10 of 17 on files without them.
+fn sectioned_outline(unit: &UnitPlan) -> bool {
+    matches!(unit.detail, Detail::Outline { sections, .. } if sections >= SECTIONS)
 }
 
 /// The group a module Choice picks clearly, or else the two it leans toward

@@ -178,6 +178,11 @@ fn plan_outline(
         detail: Detail::Outline {
             tests,
             members: listed.len(),
+            sections: if crate::analysis::bend::file(file.path) {
+                crate::analysis::bend::section_rules(file.source)
+            } else {
+                0
+            },
             // A file too long to send whole is asked its kind from the
             // outline alone, so its undecided split is not left open.
             kind: [Some(source.clone()), None]
