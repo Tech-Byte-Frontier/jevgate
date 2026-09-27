@@ -75,6 +75,13 @@ pub(super) fn function(name: &str) -> String {
     )
 }
 
+/// A function longer than twenty lines, whose split can be a consider.
+pub(super) fn long_function(name: &str) -> String {
+    format!(
+        "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let mut largest = i32::MIN;\n    for value in values {{\n        if *value > largest {{\n            largest = *value;\n        }}\n    }}\n    let mut smallest = i32::MAX;\n    for value in values {{\n        if *value < smallest {{\n            smallest = *value;\n        }}\n    }}\n    let spread = largest - smallest;\n    let doubled = total * 2;\n    doubled + spread + 1\n}}\n"
+    )
+}
+
 /// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider,
 /// or a note where the middle says the code is fine), 2 the top (review),
 /// 3 spreads probability (uncertain), 4 leans to the top without reaching review.

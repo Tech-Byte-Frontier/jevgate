@@ -192,6 +192,20 @@ fn exposure_signal(question: &str, answer: &Answer, own: Option<Messages>, away:
     }
 }
 
+/// A Django settings module's weak settings, one level lower when the
+/// module applies only in development.
+pub(in crate::units) fn settings_module_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Option<Outcome> {
+    django_settings_outcome(get).map(|outcome| {
+        if matches!(get("dev_only").map(noul), Some(Outcome::Review(_))) {
+            lowered(outcome)
+        } else {
+            outcome
+        }
+    })
+}
+
 /// Weak settings of Django code, whose checks name its settings and
 /// decorators: a settings module assigns dozens of settings, and the
 /// presence question found development settings weak (`DEBUG = True`, any

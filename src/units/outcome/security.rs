@@ -68,3 +68,27 @@ pub(in crate::units) fn choice_mass(answer: Option<&Answer>, options: &[&str]) -
             .sum()
     })
 }
+
+/// A workflow's concerns. An undecided concern is clear when its recheck
+/// Choice rules it out: no expression holds outside text, or the job runs
+/// only the base branch's code or none.
+pub(in crate::units) fn workflows_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Option<Outcome> {
+    let settles = [
+        ("outside", "outside_source", &["none"][..]),
+        ("untrusted", "pull_request_code", &["base", "none"][..]),
+    ];
+    let asked: Vec<Outcome> = settles
+        .iter()
+        .filter_map(|(question, choice, clears)| {
+            Some(match get(question).map(noul)? {
+                Outcome::Uncertain(_) if choice_mass(get(choice), clears).is_some_and(at_least) => {
+                    Outcome::Clear
+                }
+                other => other,
+            })
+        })
+        .collect();
+    (!asked.is_empty()).then(|| strongest(&asked))
+}

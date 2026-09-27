@@ -4,7 +4,7 @@ use super::*;
 #[test]
 fn gate_fails_only_on_the_configured_results() {
     let project = Project::new();
-    project.write("lib.rs", &function("f"));
+    project.write("lib.rs", &long_function("f"));
     let mut options = args();
     // Mock level, report status, the default gate's exit code, and the gate that fails it.
     let cases = [
@@ -38,7 +38,7 @@ fn gate_fails_only_on_the_configured_results() {
 #[test]
 fn a_rule_level_fails_the_gate_only_for_that_rule() {
     let project = Project::new();
-    project.write("lib.rs", &function("f"));
+    project.write("lib.rs", &long_function("f"));
     let mut options = args();
     let mut mock = Mock {
         level: 4,
@@ -63,8 +63,8 @@ fn a_rule_level_fails_the_gate_only_for_that_rule() {
 #[test]
 fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
     let project = Project::new();
-    project.write("src/lib.rs", &function("f"));
-    project.write("scripts/tool.rs", &function("g"));
+    project.write("src/lib.rs", &long_function("f"));
+    project.write("scripts/tool.rs", &long_function("g"));
     let mut options = args();
     options.fail_on = vec![options::FailOn::Consider];
     let mut mock = Mock {
@@ -108,7 +108,7 @@ fn publish(project: &Project, report: &schema::Report) {
 #[test]
 fn baselined_findings_do_not_fail_the_gate_but_new_ones_do() {
     let project = Project::new();
-    project.write("lib.rs", &function("f"));
+    project.write("lib.rs", &long_function("f"));
     let options = args();
     let mut review = Mock {
         level: 2,

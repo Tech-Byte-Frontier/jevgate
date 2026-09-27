@@ -20,7 +20,7 @@ use crate::{
     inventory::Input,
     options::CheckArgs,
     schema::{Report, Status, Strength},
-    tests::{Mock, Project, answer, args, function, run},
+    tests::{Mock, Project, answer, args, function, long_function, run},
     token_budget::TokenBudget,
 };
 use anyhow::Result;

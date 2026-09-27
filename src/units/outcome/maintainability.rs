@@ -1,12 +1,23 @@
 //! Outcomes of the maintainability rules: functions, file organization, shared logic and hardcoded values.
 use super::*;
 
-/// The stronger of splitting and (for deeply nested functions only) flattening.
+/// Lines a function may span and still read in one look.
+const SHORT_FUNCTION_LINES: usize = 20;
+
+/// The stronger of splitting and (for deeply nested functions only)
+/// flattening. Splitting a function of 20 lines or fewer is at most a note:
+/// of 10 such considers labeled by hand, 1 was right, while the split of a
+/// function over 30 lines was right in 142 of 190.
 pub(in crate::units) fn function_outcome(
     split: Option<&Answer>,
     flatten: Option<&Answer>,
+    lines: usize,
 ) -> Option<Outcome> {
-    let mut outcomes = vec![benefit(split?)];
+    let split = match benefit(split?) {
+        Outcome::Consider(p) if lines <= SHORT_FUNCTION_LINES => Outcome::Note(p),
+        outcome => outcome,
+    };
+    let mut outcomes = vec![split];
     outcomes.extend(flatten.map(benefit));
     Some(strongest(&outcomes))
 }
@@ -60,15 +71,20 @@ pub(in crate::units) fn values_outcome<'a>(
     Some(strongest(&outcomes))
 }
 
-/// The split Score, or when it stays undecided, the kind of file: the kinds
-/// that serve one feature ruling a split out clear, the kinds that serve
-/// several reaching the threshold a consider.
+/// The split Score, weighed with the kind of file once it is asked: the
+/// kinds that serve one feature reaching the threshold clear an undecided
+/// split or a finding, and the kinds that serve several reaching it raise an
+/// undecided split to a consider. The kind is asked of a finding only when
+/// the recheck raised it from an undecided first answer.
 pub(in crate::units) fn organization_outcome(
     split: Option<&Answer>,
     kind: Option<&Answer>,
 ) -> Option<Outcome> {
     let outcome = benefit(split?);
-    let (Outcome::Uncertain(_), Some(Answer::Choice { probabilities, .. })) = (outcome, kind)
+    let (
+        Outcome::Uncertain(_) | Outcome::Consider(_) | Outcome::Review(_),
+        Some(Answer::Choice { probabilities, .. }),
+    ) = (outcome, kind)
     else {
         return Some(outcome);
     };
@@ -83,7 +99,7 @@ pub(in crate::units) fn organization_outcome(
         .sum();
     Some(if at_least(1.0 - several) {
         Outcome::Clear
-    } else if at_least(several) {
+    } else if at_least(several) && matches!(outcome, Outcome::Uncertain(_)) {
         Outcome::Consider(several)
     } else {
         outcome
@@ -112,6 +128,10 @@ pub(in crate::units) fn several_kind<'a>(
 /// Lines a copy may span and still be short: sharing it saves little.
 const SHORT_COPY_LINES: usize = 4;
 
+/// Lines a copy between test cases of different files may span and still
+/// only mirror the other file's tests.
+const MIRRORED_CASE_LINES: usize = 12;
+
 /// Repetition the behavior requires is not a concern. Copies whose every site
 /// is inside test cases are one level lower: spelling out each case is how
 /// tests are written, so a table of cases or a fixture is a style choice.
@@ -124,6 +144,11 @@ const SHORT_COPY_LINES: usize = 4;
 /// in test code outside its cases, in fixtures, helpers and setup, are at
 /// most a consider: labeled by hand on 25 projects, 13 of 19 such reviews
 /// were a level too strong, while 11 of 12 considers were right as they were.
+/// Copies of up to twelve lines between test cases in different files are
+/// notes too: tests of separate modules or rules repeat the same setup
+/// because the code they test is parallel, and a helper shared across test
+/// files would couple them. Of 57 such considers labeled by hand, 11 were
+/// right; on the held-out projects 2 of 24.
 pub(in crate::units) fn shared_outcome(
     required: Option<&Answer>,
     same: Option<&Answer>,
@@ -133,10 +158,17 @@ pub(in crate::units) fn shared_outcome(
         return Some(Outcome::Clear);
     }
     let same = score(same?);
-    let short = unit
-        .locations
-        .iter()
-        .all(|l| l.end_line + 1 - l.start_line <= SHORT_COPY_LINES);
+    let within = |lines: usize| {
+        unit.locations
+            .iter()
+            .all(|l| l.end_line + 1 - l.start_line <= lines)
+    };
+    let short = within(SHORT_COPY_LINES);
+    let mirrored = within(MIRRORED_CASE_LINES)
+        && unit
+            .locations
+            .iter()
+            .any(|l| l.path != unit.locations[0].path);
     // Examples spell a flow out on purpose, often once per variant:
     // django-styleguide shows each Google login step as a DRF API and as a
     // plain Django view.
@@ -146,7 +178,7 @@ pub(in crate::units) fn shared_outcome(
         .all(|l| crate::analysis::clones::example_code(&l.path));
     Some(match (&unit.detail, same) {
         (_, Outcome::Review(p) | Outcome::Consider(p)) if examples => Outcome::Note(p),
-        (Detail::Pair { in_cases: true, .. }, _) if short => lowered(lowered(same)),
+        (Detail::Pair { in_cases: true, .. }, _) if short || mirrored => lowered(lowered(same)),
         // Short copies in test support, such as a run of one-line assertions.
         (Detail::Pair { in_tests: true, .. }, _) if short => lowered(same),
         (Detail::Pair { in_cases: true, .. }, _) => lowered(same),

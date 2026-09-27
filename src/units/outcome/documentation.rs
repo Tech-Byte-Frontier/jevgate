@@ -19,9 +19,22 @@ pub(super) fn kind_share(answer: Option<&Answer>, kind: &str) -> Option<f64> {
     (mass > 0.0).then(|| probabilities.get(kind).copied().unwrap_or(0.0) / mass)
 }
 
+/// A stale section's or finished plan's check, a cleanup at most.
+pub(super) fn staleness_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    detail: &Detail,
+) -> Option<Outcome> {
+    let question = if matches!(detail, Detail::Plan { .. }) {
+        "plan"
+    } else {
+        "relies"
+    };
+    get(question).map(|a| stale_outcome(cleanup(noul(a)), get("role")))
+}
+
 /// An undecided staleness check, cleared when the section's missing names
 /// are clearly not a current part of the repository.
-pub(super) fn stale_outcome(outcome: Outcome, role: Option<&Answer>) -> Outcome {
+fn stale_outcome(outcome: Outcome, role: Option<&Answer>) -> Outcome {
     match outcome {
         Outcome::Uncertain(_)
             if kind_share(role, "repository").is_some_and(|share| at_least(1.0 - share)) =>
