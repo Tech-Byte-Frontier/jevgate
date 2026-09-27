@@ -212,118 +212,138 @@ fn visit(
     in_test_class: bool,
     found: &mut Vec<TestCase>,
 ) {
+    if let Some(test_class) = class_context(node, source, pytest) {
+        visit_children(node, source, pytest, test_class, found);
+        return;
+    }
+    match case(node, source, in_test_class) {
+        Visit::Case {
+            node,
+            start,
+            name,
+            ruby,
+        } => {
+            push(node, start, name, source, found);
+            if ruby {
+                ruby_context(node, source, found);
+            }
+        }
+        Visit::Leaf => {}
+        Visit::Inside => visit_children(node, source, pytest, in_test_class, found),
+    }
+}
+
+/// Whether a class's methods are tests, for a class that decides it: a
+/// JUnit 3 `TestCase` subclass, a PHPUnit test class, a Ruby class such as
+/// `class OrderTest < Minitest::Test`, and any Python class.
+fn class_context(node: Node<'_>, source: &str, pytest: bool) -> Option<bool> {
+    match node.kind() {
+        "class_declaration"
+            if crate::test_locations::junit3_class(node, source)
+                || crate::analysis::php::test_class(node, source) =>
+        {
+            Some(true)
+        }
+        "class_definition" => Some(crate::test_locations::python_test_class(
+            node, source, pytest,
+        )),
+        "class" if crate::test_locations::ruby_test_class(node, source) => Some(true),
+        _ => None,
+    }
+}
+
+/// What a node is to the walk for test cases.
+enum Visit<'a> {
+    /// A test case: the node, where it starts (a Rust test at its first
+    /// attribute), its name, and whether it is a Ruby example, which reads
+    /// the setup of its groups.
+    Case {
+        node: Node<'a>,
+        start: usize,
+        name: String,
+        ruby: bool,
+    },
+    /// A function or method that is not a test: nothing inside it is one.
+    Leaf,
+    /// Anything else: its children may hold test cases.
+    Inside,
+}
+
+fn case<'a>(node: Node<'a>, source: &str, in_test_class: bool) -> Visit<'a> {
+    let found = |node: Node<'a>, start, name| Visit::Case {
+        node,
+        start,
+        name,
+        ruby: false,
+    };
     match node.kind() {
         "function_item" => {
             let marked = crate::test_locations::preceding_attributes(node, source)
                 .iter()
                 .any(|attribute| crate::test_locations::attribute_marks_test(attribute));
             if marked {
-                push(
-                    node,
-                    attribute_start(node),
-                    name(node, source),
-                    source,
-                    found,
-                );
+                found(node, attribute_start(node), name(node, source))
+            } else {
+                Visit::Leaf
             }
-            return;
         }
         "function_declaration" if crate::test_locations::go_test_function(node, source) => {
-            push(node, node.start_byte(), name(node, source), source, found);
-            return;
+            found(node, node.start_byte(), name(node, source))
         }
-        // PHP: a test method of a PHPUnit test class.
-        "method_declaration"
-            if in_test_class && crate::analysis::php::test_method(node, source) =>
-        {
-            push(node, node.start_byte(), name(node, source), source, found);
-            return;
-        }
+        // PHP: a test method of a PHPUnit test class; C# and Java test
+        // methods; `test…` methods of a JUnit 3 class.
         "method_declaration" => {
-            if crate::test_locations::csharp_test_method(node, source)
+            let php = in_test_class && crate::analysis::php::test_method(node, source);
+            if php
+                || crate::test_locations::csharp_test_method(node, source)
                 || crate::test_locations::java_test_method(node, source)
                 || in_test_class && name(node, source).starts_with("test")
             {
-                push(node, node.start_byte(), name(node, source), source, found);
+                found(node, node.start_byte(), name(node, source))
+            } else {
+                Visit::Leaf
             }
-            return;
-        }
-        // A JUnit 3 `TestCase` subclass: its `test…` methods are tests.
-        "class_declaration" if crate::test_locations::junit3_class(node, source) => {
-            visit_children(node, source, pytest, true, found);
-            return;
         }
         "function_definition" => {
-            let test = name(node, source).starts_with("test");
             let outer = node
                 .parent()
                 .filter(|p| p.kind() == "decorated_definition")
                 .unwrap_or(node);
             let top_level = outer.parent().is_some_and(|p| p.kind() == "module");
-            if test && (top_level || in_test_class) {
-                push(outer, outer.start_byte(), name(node, source), source, found);
+            if name(node, source).starts_with("test") && (top_level || in_test_class) {
+                found(outer, outer.start_byte(), name(node, source))
+            } else {
+                Visit::Leaf
             }
-            return;
         }
-        "class_definition" => {
-            let test_class = crate::test_locations::python_test_class(node, source, pytest);
-            visit_children(node, source, pytest, test_class, found);
-            return;
-        }
-        // Ruby: `class OrderTest < Minitest::Test` holds `test_*` methods.
-        "class" if crate::test_locations::ruby_test_class(node, source) => {
-            visit_children(node, source, pytest, true, found);
-            return;
-        }
-        "method" => {
-            let name = name(node, source);
-            if in_test_class && name.starts_with("test_") {
-                push(node, node.start_byte(), name, source, found);
-                ruby_context(node, source, found);
-            }
-            return;
-        }
+        "method" if in_test_class && name(node, source).starts_with("test_") => Visit::Case {
+            node,
+            start: node.start_byte(),
+            name: name(node, source),
+            ruby: true,
+        },
+        "method" => Visit::Leaf,
         "call"
             if crate::test_locations::ruby_test_call(node, source)
                 && ruby::CASES.contains(&ruby::method(node, source)) =>
         {
-            push(
+            Visit::Case {
                 node,
-                node.start_byte(),
-                ruby_case_name(node, source),
-                source,
-                found,
-            );
-            ruby_context(node, source, found);
-            return;
-        }
-        "class_declaration" if crate::analysis::php::test_class(node, source) => {
-            visit_children(node, source, pytest, true, found);
-            return;
-        }
-        "expression_statement" => {
-            if let Some(case) = crate::analysis::php::pest_statement(node, source)
-                && !case.suite
-            {
-                push(node, node.start_byte(), case.title, source, found);
-                return;
+                start: node.start_byte(),
+                name: ruby_case_name(node, source),
+                ruby: true,
             }
         }
-        "call_expression" => {
-            if let Some(case) = javascript_case(node, source) {
-                push(
-                    statement(node),
-                    statement(node).start_byte(),
-                    case,
-                    source,
-                    found,
-                );
-                return;
-            }
-        }
-        _ => {}
+        "expression_statement" => match crate::analysis::php::pest_statement(node, source) {
+            Some(case) if !case.suite => found(node, node.start_byte(), case.title),
+            _ => Visit::Inside,
+        },
+        "call_expression" => match javascript_case(node, source) {
+            Some(title) => found(statement(node), statement(node).start_byte(), title),
+            None => Visit::Inside,
+        },
+        _ => Visit::Inside,
     }
-    visit_children(node, source, pytest, in_test_class, found);
 }
 
 fn visit_children(

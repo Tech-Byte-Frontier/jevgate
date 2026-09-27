@@ -1,15 +1,5 @@
 {
   "version": 1,
   "created_at": 1790514454,
-  "findings": [
-    {
-      "fingerprint": "9a142118d2e3410e9f6c85cfb48ffb6f9ca83a6a7667b7a97bf02223aeddc1ca",
-      "rule": "maintainability/function-simplification",
-      "path": "src/analysis/test_map.rs",
-      "line": 208,
-      "strength": "consider",
-      "message": "`visit` likely mixes separate jobs; splitting it may make it easier to understand (0.85).",
-      "reason": "wrong"
-    }
-  ]
+  "findings": []
 }
