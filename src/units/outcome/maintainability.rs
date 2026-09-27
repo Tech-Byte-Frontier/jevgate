@@ -6,8 +6,9 @@ const SHORT_FUNCTION_LINES: usize = 20;
 
 /// The stronger of splitting and (for deeply nested functions only)
 /// flattening. Splitting a function of 20 lines or fewer is at most a note:
-/// of 10 such considers labeled by hand, 1 was right, while the split of a
-/// function over 30 lines was right in 142 of 190.
+/// labeled by hand, 12 of 39 such considers were right on the projects used
+/// for tuning and 5 of 50 on 23 Bend 2 projects never used for it, most of
+/// them helpers that read in one look or dispatches over a token's cases.
 pub(in crate::units) fn function_outcome(
     split: Option<&Answer>,
     flatten: Option<&Answer>,
@@ -75,7 +76,9 @@ pub(in crate::units) fn values_outcome<'a>(
 /// kinds that serve one feature reaching the threshold clear an undecided
 /// split or a finding, and the kinds that serve several reaching it raise an
 /// undecided split to a consider. The kind is asked of a finding only when
-/// the recheck raised it from an undecided first answer.
+/// the recheck raised it from an undecided first answer: of the 18 such
+/// findings the kind cleared on the corpus, 4 were right, and one was the
+/// proposal to split JevGate's own planner of one unit per rule.
 pub(in crate::units) fn organization_outcome(
     split: Option<&Answer>,
     kind: Option<&Answer>,
@@ -147,8 +150,8 @@ const MIRRORED_CASE_LINES: usize = 12;
 /// Copies of up to twelve lines between test cases in different files are
 /// notes too: tests of separate modules or rules repeat the same setup
 /// because the code they test is parallel, and a helper shared across test
-/// files would couple them. Of 57 such considers labeled by hand, 11 were
-/// right; on the held-out projects 2 of 24.
+/// files would couple them. Of 87 such considers labeled by hand on the
+/// projects used for tuning, 30 were right; on the held-out projects 2 of 24.
 pub(in crate::units) fn shared_outcome(
     required: Option<&Answer>,
     same: Option<&Answer>,
