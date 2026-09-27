@@ -121,3 +121,34 @@ fn an_undecided_law_is_asked_what_its_comment_adds() {
     let (dimension, _) = dimension_of(report, "server/LAWS.bend", catalog::LAWS);
     assert_eq!((dimension.units.clear, dimension.units.uncertain), (2, 0));
 }
+
+#[test]
+fn a_comment_heading_several_laws_is_asked_with_all_of_them() {
+    let laws = "import Base\nimport ./main.bend as Srv\n\n# LAW: sort is sound and complete: it sorts, and it keeps every element\nlaw sort_sorted:\n  for +xs: List<&2, Nat>\n  Srv.Sorted(Srv.sort(xs))\n\nlaw sort_keeps:\n  for +xs: List<&2, Nat>\n  {Srv.sort(xs) == Srv.sort(xs) : List<&2, Nat>}\n\n# LAW: the response ends in the page\nlaw ends_in_page:\n  for +page: String\n  exs head: String\n  {head ++ page == Srv.http_response(page) : String}\n";
+    let (project, options) = project_with(
+        &[("server/main.bend", MAIN), ("server/LAWS.bend", laws)],
+        &[catalog::LAWS],
+    );
+    let (_, plan) = planned(&project, &options);
+    let asked = &plan.requests[0].request["state"]["laws"];
+    let names: Vec<&str> = asked
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["sort_sorted", "ends_in_page"]);
+    let reading = asked[0]["reading"].as_str().unwrap();
+    assert!(
+        reading.starts_with("`sort_sorted`: for every xs")
+            && reading.contains(" `sort_keeps`: for every xs"),
+        "{reading}"
+    );
+    assert!(
+        asked[0]["source"]
+            .as_str()
+            .unwrap()
+            .contains("law sort_keeps:")
+    );
+    assert!(!asked[1]["reading"].as_str().unwrap().starts_with('`'));
+}
