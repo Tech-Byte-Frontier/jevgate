@@ -1281,6 +1281,25 @@ mod tests {
     }
 
     #[test]
+    fn copies_between_two_bend_tests_are_not_candidates() {
+        let program = |output: &str| {
+            format!(
+                "import Base\n\ndef main() -> IO(Unit):\n  do IO<Unit>:\n    a : String <- IO.try(String, IO.get_env(\"HOME\"))\n    b : String <- IO.try(String, IO.get_env(\"USER\"))\n    c : String <- IO.try(String, IO.get_env(\"SHELL\"))\n    IO.print(a ++ b ++ c)\n{output}"
+            )
+        };
+        let (golden, other) = (program("\n#|ok\n"), program(""));
+        assert_eq!(
+            pairs_between(("tests/io/a.bend", &golden), ("tests/io/b.bend", &golden)),
+            0
+        );
+        assert_eq!(
+            pairs_between(("tests/io/a.bend", &other), ("tests/io/b.bend", &other)),
+            1,
+            "tests that check themselves may share a helper"
+        );
+    }
+
+    #[test]
     fn copies_in_unrelated_packages_are_not_candidates() {
         let package = |dir: &str, dependencies: &[&str]| crate::packages::Package {
             dir: dir.into(),
