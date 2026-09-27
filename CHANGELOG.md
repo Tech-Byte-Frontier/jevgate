@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-09-27
+
 - File organization: in Rust, a function another file passes by path, such as `compose::unconfirmed_units` in `follow_ups(plan, files, compose::unconfirmed_units)`, counts as used by that file, so a file's outline names the files that use each member (`used_by`). JevGate's own `compose.rs`, before it was split, listed `follow_ups.rs` as the user of 3 of its 8 follow-up selectors, and the file stayed clear; with all 8 listed, its outline is a consider (0.80). Only outlines whose members are passed by path change: on the 26 Rust projects of the corpus, 37 outline requests were asked again (under $0.01), one wrong review (a SpacetimeDB conversion module, one job laid out in sections) is a consider, one right consider (zoxide's `util.rs`, a grab bag of helpers) is a review, and two units are undecided; nothing else changed. Other languages are unchanged.
 
 ## [0.24.0] - 2026-09-27
@@ -248,7 +250,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.22.0...v0.23.0
