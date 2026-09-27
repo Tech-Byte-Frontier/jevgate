@@ -390,6 +390,18 @@ fn injection_wording(
         };
         return ((message, action), category.to_string());
     }
+    let get = |q: &str| answers.get(q).copied();
+    if strength == Strength::Note && crate::units::outcome::confined_paths(&get) {
+        return (
+            (
+                format!(
+                    "{subject} builds {noun} from a variable, but what it can hold, such as an id its type parses, likely keeps the path inside its directory."
+                ),
+                "Optional: confirm the value cannot hold `..` or a slash where it enters",
+            ),
+            category.to_string(),
+        );
+    }
     let message = match (strength, outside) {
         (Strength::Review, _) => format!(
             "{subject} places values from another party into {noun} without binding, escaping or checking them ({p:.2})."
@@ -476,6 +488,18 @@ fn exposure_wording(
             Some(crate::units::outcome::Messages::Foreign)
         );
     let decided = crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY);
+    let opted_in = category.starts_with("CWE-532") && crate::units::outcome::opted_in(&get);
+    if strength == Strength::Note && opted_in {
+        return (
+            (
+                format!(
+                    "{subject} {what} only when an operator turns on a setting meant for logging it."
+                ),
+                "Optional: keep that setting off by default and document that it logs secrets",
+            ),
+            category.to_string(),
+        );
+    }
     let message = match strength {
         // A decided finding lowered because the code runs only in
         // development or tests; its answer was not split.

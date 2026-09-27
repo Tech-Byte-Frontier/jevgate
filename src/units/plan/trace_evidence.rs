@@ -1,6 +1,7 @@
 //! Definitions across the scope that a security trace shows beside a site:
 //! enums the site names and C# constants, often declared in another file.
 use super::Scope;
+use crate::analysis::units::Unit;
 use std::collections::BTreeMap;
 
 /// An enum shown with a security trace is at most this long.
@@ -9,36 +10,11 @@ const ENUM_BYTES: usize = 1500;
 /// Enum definitions in selected files and context by name; a name defined
 /// twice is left out, since the site could mean either.
 pub(super) fn enums(scope: &Scope<'_>) -> BTreeMap<String, String> {
-    let selected = scope.owners.iter().map(|&owner| {
-        (
-            scope.inputs[owner].source.as_deref().unwrap_or(""),
-            &scope.units[&owner].units,
-        )
-    });
-    let context = scope
-        .context
-        .iter()
-        .map(|(_, source, units)| (*source, &units.units));
-    let mut found: BTreeMap<String, Option<String>> = BTreeMap::new();
-    for (source, units) in selected.chain(context) {
-        for unit in units.iter().filter(|u| !u.callable()) {
-            let text = unit.source(source);
-            let declaration = text
-                .lines()
-                .find(|l| l.contains(&unit.short_name))
-                .unwrap_or("");
-            if declaration.contains("enum ") && text.len() <= ENUM_BYTES {
-                found
-                    .entry(unit.short_name.clone())
-                    .and_modify(|d| *d = None)
-                    .or_insert_with(|| Some(text.to_string()));
-            }
-        }
-    }
-    found
-        .into_iter()
-        .filter_map(|(name, text)| Some((name, text?)))
-        .collect()
+    definitions(scope, |unit, source| {
+        let text = unit.source(source);
+        (declaration(unit, text).contains("enum ") && text.len() <= ENUM_BYTES)
+            .then(|| text.to_string())
+    })
 }
 
 /// A type shown with a path confirm is at most this long.
@@ -49,6 +25,27 @@ const TYPE_BYTES: usize = 800;
 /// attributes above them, such as a Rust derive list that says how a route
 /// parameter of that type is parsed; a name defined twice is left out.
 pub(super) fn types(scope: &Scope<'_>) -> BTreeMap<String, String> {
+    definitions(scope, |unit, source| {
+        let text = source.get(unit.span.clone())?;
+        (!declaration(unit, text).contains("enum ") && text.len() <= TYPE_BYTES)
+            .then(|| text.to_string())
+    })
+}
+
+/// The line of a definition that names it.
+fn declaration<'t>(unit: &Unit, text: &'t str) -> &'t str {
+    text.lines()
+        .find(|l| l.contains(&unit.short_name))
+        .unwrap_or("")
+}
+
+/// The definitions `shown` keeps among the types, enums and other
+/// non-callable units of selected files and context, by short name; a name
+/// defined twice is left out.
+fn definitions(
+    scope: &Scope<'_>,
+    shown: impl Fn(&Unit, &str) -> Option<String>,
+) -> BTreeMap<String, String> {
     let selected = scope.owners.iter().map(|&owner| {
         (
             scope.inputs[owner].source.as_deref().unwrap_or(""),
@@ -62,18 +59,11 @@ pub(super) fn types(scope: &Scope<'_>) -> BTreeMap<String, String> {
     let mut found: BTreeMap<String, Option<String>> = BTreeMap::new();
     for (source, units) in selected.chain(context) {
         for unit in units.iter().filter(|u| !u.callable()) {
-            let Some(text) = source.get(unit.span.clone()) else {
-                continue;
-            };
-            let declaration = text
-                .lines()
-                .find(|l| l.contains(&unit.short_name))
-                .unwrap_or("");
-            if !declaration.contains("enum ") && text.len() <= TYPE_BYTES {
+            if let Some(text) = shown(unit, source) {
                 found
                     .entry(unit.short_name.clone())
                     .and_modify(|d| *d = None)
-                    .or_insert_with(|| Some(text.to_string()));
+                    .or_insert(Some(text));
             }
         }
     }

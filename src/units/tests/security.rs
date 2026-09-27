@@ -1671,13 +1671,21 @@ fn a_path_finding_is_a_note_when_its_paths_stay_in_their_directory() {
             .findings
             .iter()
             .find(|f| f.rule == "security/injection")
-            .map(|f| f.strength)
+            .map(|f| (f.strength, f.message.clone()))
     };
-    assert_eq!(judged(choice_of("outside", &PATHS)), Some(Strength::Review));
     assert_eq!(
-        judged(choice_of("confined", &PATHS)),
-        Some(Strength::Note),
+        judged(choice_of("outside", &PATHS)).map(|f| f.0),
+        Some(Strength::Review)
+    );
+    let (strength, message) = judged(choice_of("confined", &PATHS)).unwrap();
+    assert_eq!(
+        strength,
+        Strength::Note,
         "a UUID cannot climb out of the directory"
+    );
+    assert!(
+        message.contains("likely keeps the path inside"),
+        "{message}"
     );
 }
 
@@ -1701,14 +1709,22 @@ fn a_log_line_an_operator_turns_on_to_log_tokens_is_a_note() {
         ];
         let report = run(&project, &options, &mut eval);
         options.refresh = true;
-        report.files[0].dimensions[catalog::SENSITIVE_DATA]
-            .status
-            .clone()
+        let file = &report.files[0];
+        let messages: String = file.findings.iter().map(|f| f.message.clone()).collect();
+        (
+            file.dimensions[catalog::SENSITIVE_DATA].status.clone(),
+            messages,
+        )
     };
     assert_eq!(
-        judged("debug"),
+        judged("debug").0,
         Status::Review,
         "debug level is still a log"
     );
-    assert_eq!(judged("opt_in"), Status::Note);
+    let (status, message) = judged("opt_in");
+    assert_eq!(status, Status::Note);
+    assert!(
+        message.contains("only when an operator turns on"),
+        "{message}"
+    );
 }

@@ -64,8 +64,11 @@ pub(in crate::units) fn logs_found<'a>(get: &impl Fn(&str) -> Option<&'a Answer>
 
 /// Whether the log line runs only when an operator turns on a setting whose
 /// purpose is that logging, at the threshold. The operator chose to log the
-/// value, so its log signals are at most a note.
-fn opted_in<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+/// value, so its log signals are at most a note. On the corpus it cleared
+/// vaultwarden's SSO tokens under `SSO_DEBUG_TOKENS` and pgweb's request
+/// logger, both labeled wrong; every log finding labeled right was asked it
+/// and answered normal operation or debug level.
+pub(in crate::units) fn opted_in<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
     choice_mass(get("logged_when"), &[questions::OPT_IN_LOGGING]).is_some_and(at_least)
 }
 
