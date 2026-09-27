@@ -40,7 +40,7 @@ fn each_comment_is_asked_about_with_the_code_it_is_about() {
     let (project, options) = comments_project();
     let (_, plan) = planned(&project, &options);
     assert_eq!(stages(&plan), ["comments"]);
-    let request = &plan.requests[0].request;
+    let request = first_request(&plan, "comments");
     let comments = request["state"]["comments"].as_array().unwrap();
     assert_eq!(comments.len(), 4, "the directive is left out");
     assert_eq!(

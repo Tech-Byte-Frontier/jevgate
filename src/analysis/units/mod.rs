@@ -786,33 +786,12 @@ fn push(
     }
     let Definition { outer, node, body } = definition;
     let start = leading_start(outer);
-    // Parameters and return types count as references, not only the body.
-    let mut facts = Facts::default();
-    facts.visit(node, source);
-    if kind == Kind::Type {
-        facts.calls.clear();
-    }
-    let mut refs = facts.refs;
-    refs.extend(facts.idents.intersection(&file.imports).cloned());
-    if kind == Kind::Type {
-        facts.idents.clear();
-    }
-    refs.insert(short_name.to_string());
-    if !owner.is_empty() {
-        refs.insert(owner.to_string());
-    }
+    let (facts, refs) = references(node, (short_name, owner), kind, &file.imports, source);
     let equality = equality_override(node, short_name, source);
     let literals = body
         .filter(|_| !equality && !super::literals::returns_constant(node))
         .map_or_else(Vec::new, |b| super::literals::in_node(b, source));
-    let (role, effects, joins_text) = match &file.bend {
-        Some(names) if node.kind() == "function_definition" => (
-            bend_role(node, names, source),
-            bend::effectful(node, source) || names.effects.iter().any(|n| n == short_name),
-            bend::joins_text(node, source),
-        ),
-        _ => (Role::Code, false, false),
-    };
+    let (role, effects, joins_text) = bend_facts(node, short_name, file, source);
     file.units.push(Unit {
         name: if owner.is_empty() {
             short_name.to_string()
@@ -848,6 +827,52 @@ fn push(
         statement: bend::statement(node, source),
         mentions: facts.idents,
     });
+}
+
+/// What a definition calls and mentions, and the names it references: its
+/// parameters and return type count, not only its body, as do the file's
+/// imports its code names and its own and its owner's names. A type's calls
+/// and mentions are left out.
+fn references(
+    node: Node<'_>,
+    (short_name, owner): (&str, &str),
+    kind: Kind,
+    imports: &BTreeSet<String>,
+    source: &str,
+) -> (Facts, BTreeSet<String>) {
+    let mut facts = Facts::default();
+    facts.visit(node, source);
+    if kind == Kind::Type {
+        facts.calls.clear();
+    }
+    let mut refs = std::mem::take(&mut facts.refs);
+    refs.extend(facts.idents.intersection(imports).cloned());
+    if kind == Kind::Type {
+        facts.idents.clear();
+    }
+    refs.insert(short_name.to_string());
+    if !owner.is_empty() {
+        refs.insert(owner.to_string());
+    }
+    (facts, refs)
+}
+
+/// A Bend 2 def's role, whether it performs effects and whether it joins
+/// text; code that does neither outside Bend 2.
+fn bend_facts(
+    node: Node<'_>,
+    short_name: &str,
+    file: &FileUnits,
+    source: &str,
+) -> (Role, bool, bool) {
+    match &file.bend {
+        Some(names) if node.kind() == "function_definition" => (
+            bend_role(node, names, source),
+            bend::effectful(node, source) || names.effects.iter().any(|n| n == short_name),
+            bend::joins_text(node, source),
+        ),
+        _ => (Role::Code, false, false),
+    }
 }
 
 fn bend_role(definition: Node<'_>, names: &BendNames, source: &str) -> Role {

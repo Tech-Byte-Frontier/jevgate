@@ -8,6 +8,16 @@ const LAWS: &str = "# The laws of the server: they pin http_response, its pure p
 
 const PROOF: &str = "import Base\nimport ./LAWS.bend as Laws\n\n# the head is the status line\nlaw head_is_status:\n  for +page: String\n  {Laws.Srv.http_response(page) == Laws.Srv.http_response(page) : String}\n";
 
+/// The laws asked about in `server/LAWS.bend` when it holds `laws`.
+fn asked_laws(laws: &str) -> Value {
+    let (project, options) = project_with(
+        &[("server/main.bend", MAIN), ("server/LAWS.bend", laws)],
+        &[catalog::LAWS],
+    );
+    let (_, plan) = planned(&project, &options);
+    first_request(&plan, "laws")["state"]["laws"].clone()
+}
+
 fn laws_project() -> (Project, CheckArgs) {
     project_with(
         &[
@@ -24,7 +34,7 @@ fn claims_that_quantify_under_a_comment_are_asked_with_their_reading_and_defs() 
     let (project, options) = laws_project();
     let (_, plan) = planned(&project, &options);
     assert_eq!(stages(&plan), ["laws"]);
-    let request = &plan.requests[0].request;
+    let request = first_request(&plan, "laws");
     let laws = request["state"]["laws"].as_array().unwrap();
     let names: Vec<&str> = laws.iter().map(|l| l["name"].as_str().unwrap()).collect();
     // Not the spot check, the signature, the law without a comment nor the
@@ -125,12 +135,7 @@ fn an_undecided_law_is_asked_what_its_comment_adds() {
 #[test]
 fn a_comment_heading_several_laws_is_asked_with_all_of_them() {
     let laws = "import Base\nimport ./main.bend as Srv\n\n# LAW: sort is sound and complete: it sorts, and it keeps every element\nlaw sort_sorted:\n  for +xs: List<&2, Nat>\n  Srv.Sorted(Srv.sort(xs))\n\nlaw sort_keeps:\n  for +xs: List<&2, Nat>\n  {Srv.sort(xs) == Srv.sort(xs) : List<&2, Nat>}\n\n# LAW: the response ends in the page\nlaw ends_in_page:\n  for +page: String\n  exs head: String\n  {head ++ page == Srv.http_response(page) : String}\n";
-    let (project, options) = project_with(
-        &[("server/main.bend", MAIN), ("server/LAWS.bend", laws)],
-        &[catalog::LAWS],
-    );
-    let (_, plan) = planned(&project, &options);
-    let asked = &plan.requests[0].request["state"]["laws"];
+    let asked = asked_laws(laws);
     let names: Vec<&str> = asked
         .as_array()
         .unwrap()
@@ -156,12 +161,7 @@ fn a_comment_heading_several_laws_is_asked_with_all_of_them() {
 #[test]
 fn a_law_s_comment_is_the_block_above_it_not_its_section_s_opening() {
     let laws = "import Base\nimport ./main.bend as Srv\n\n# Pages\n# =====\n#\n# The server answers every request with a page, so these laws give: a\n# client that reconnects reads the same page it read before.\n\n# LAW: the response ends in the page\nlaw ends_in_page:\n  for +page: String\n  exs head: String\n  {head ++ page == Srv.http_response(page) : String}\n\n# Sorting: every list sort returns is sorted, whatever its input.\n\nlaw sort_sorted:\n  for +xs: List<&2, Nat>\n  Srv.Sorted(Srv.sort(xs))\n";
-    let (project, options) = project_with(
-        &[("server/main.bend", MAIN), ("server/LAWS.bend", laws)],
-        &[catalog::LAWS],
-    );
-    let (_, plan) = planned(&project, &options);
-    let asked = &plan.requests[0].request["state"]["laws"];
+    let asked = asked_laws(laws);
     assert_eq!(asked[0]["comment"], "# LAW: the response ends in the page");
     // A paragraph with nothing between it and the law but a blank line is
     // the law's comment.

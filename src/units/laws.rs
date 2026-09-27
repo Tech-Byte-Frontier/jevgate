@@ -207,16 +207,21 @@ fn header(source: &str) -> Option<String> {
         .take_while(|line| line.is_empty() || line.starts_with('#') && !line.starts_with("#|"))
         .filter(|line| line.starts_with('#'))
         .collect();
+    prose(&lines)
+}
+
+/// Words a comment's prose needs to describe a law: `# solution` and a
+/// section's title above it do not.
+const MIN_WORDS: usize = 3;
+
+/// Comment lines joined, when they hold enough words to describe a law.
+fn prose(lines: &[&str]) -> Option<String> {
     let words: usize = lines
         .iter()
         .map(|line| line.trim_start_matches('#').split_whitespace().count())
         .sum();
     (words >= MIN_WORDS).then(|| lines.join("\n"))
 }
-
-/// Words a comment's prose needs to describe a law: `# solution` and a
-/// section's title above it do not.
-const MIN_WORDS: usize = 3;
 
 /// The comment block directly above a law, without the section headings
 /// among them (a title over a rule of dashes, as Base heads `# Equal` over
@@ -225,43 +230,48 @@ const MIN_WORDS: usize = 3;
 /// section's laws together, and bulkhead's, which draws a restart claim
 /// from several laws, read as a promise of the one below it.
 fn comment(unit: &Unit, source: &str) -> Option<String> {
-    let above: Vec<&str> = source[unit.span.start..declaration_start(unit, source)]
-        .lines()
-        .map(str::trim)
-        .collect();
-    let end = above
+    let above = &source[unit.span.start..declaration_start(unit, source)];
+    prose(&without_headings(&last_block(above)))
+}
+
+/// The comment lines of the last block of `above`, the lines after its last
+/// blank line.
+fn last_block(above: &str) -> Vec<&str> {
+    let lines: Vec<&str> = above.lines().map(str::trim).collect();
+    let end = lines
         .iter()
         .rposition(|line| !line.is_empty())
         .map_or(0, |i| i + 1);
-    let start = above[..end]
+    let start = lines[..end]
         .iter()
         .rposition(|line| line.is_empty())
         .map_or(0, |i| i + 1);
-    let lines: Vec<&str> = above[start..end]
+    lines[start..end]
         .iter()
         .copied()
         .filter(|line| line.starts_with('#'))
-        .collect();
+        .collect()
+}
+
+/// Comment lines without the rules of dashes and the titles over them, and
+/// without the empty lines around what is left.
+fn without_headings<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let text = |line: &str| line.trim_start_matches('#').trim().to_string();
     let rule = |line: &str| {
-        let text = line.trim_start_matches('#').trim();
+        let text = text(line);
         !text.is_empty() && text.chars().all(|c| matches!(c, '-' | '=' | '#' | '*'))
     };
-    let prose = |line: &&str| !line.trim_start_matches('#').trim().is_empty();
     let mut kept: Vec<&str> = lines
         .iter()
         .enumerate()
         .filter(|(i, line)| !rule(line) && !lines.get(i + 1).is_some_and(|next| rule(next)))
         .map(|(_, line)| *line)
-        .skip_while(|line| !prose(line))
+        .skip_while(|line| text(line).is_empty())
         .collect();
-    while kept.last().is_some_and(|line| !prose(line)) {
+    while kept.last().is_some_and(|line| text(line).is_empty()) {
         kept.pop();
     }
-    let words: usize = kept
-        .iter()
-        .map(|line| line.trim_start_matches('#').split_whitespace().count())
-        .sum();
-    (words >= MIN_WORDS).then(|| kept.join("\n"))
+    kept
 }
 
 /// The law at `at` and the laws right after it that have no comment of

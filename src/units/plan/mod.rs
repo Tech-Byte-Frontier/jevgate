@@ -34,6 +34,7 @@ use std::{
 };
 
 mod file;
+mod laws;
 mod security_units;
 mod settings_modules;
 mod shared;
