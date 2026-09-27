@@ -380,8 +380,9 @@ fn role(before: &str) -> Option<&str> {
     }
     let inner = before.strip_suffix(':')?;
     let start = inner
-        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '_'))
-        .map_or(0, |i| i + 1);
+        .char_indices()
+        .rfind(|&(_, c)| !(c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '_'))
+        .map_or(0, |(i, c)| i + c.len_utf8());
     let name = inner[start..].strip_prefix(':')?;
     (!name.is_empty()).then(|| name.rsplit(':').next().unwrap_or(name))
 }
@@ -626,6 +627,15 @@ mod tests {
         let text = "Assign :attr:`flask.Flask.json` or :py:mod:`flask.json`; edit :file:`conf/app.json` and {download}`data/seed.json`.";
         let names: Vec<String> = found(text).into_iter().map(|(n, _)| n).collect();
         assert_eq!(names, ["conf/app.json", "data/seed.json"]);
+    }
+
+    #[test]
+    fn a_colon_after_wide_text_is_not_a_role() {
+        let names: Vec<String> = found("外部 API 已移除:`conf/app.json`")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, ["conf/app.json"]);
     }
 
     #[test]

@@ -149,9 +149,9 @@ fn line_range(source: &str, start: usize, end: usize) -> SourceRange {
         .count()
         + 1;
     let end_at = end.saturating_sub(1).max(start);
-    let end_line = source[..end_at.min(source.len())]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
+    let end_line = source.as_bytes()[..end_at.min(source.len())]
+        .iter()
+        .filter(|byte| **byte == b'\n')
         .count()
         + 1;
     SourceRange {

@@ -789,6 +789,12 @@ mod tests {
     }
 
     #[test]
+    fn a_test_ending_in_a_wide_character_is_located() {
+        let source = "import pytest\n\n\ndef test_price():\n    café = 1\n    assert café\n";
+        assert_eq!(located("tests/test_price.py", source), [(4, 6)]);
+    }
+
+    #[test]
     fn phpunit_methods_and_pest_calls_are_test_cases() {
         let phpunit = "<?php\nnamespace Tests;\n\nuse PHPUnit\\Framework\\TestCase;\n\nfinal class TotalTest extends TestCase\n{\n    private function rows(): array { return [1]; }\n\n    public function testAdds(): void\n    {\n        $this->assertSame(3, total([1, 2]));\n    }\n\n    /** @test */\n    public function it_is_empty(): void\n    {\n        $this->assertSame(0, (new Summer())->total([]));\n    }\n\n    #[Test]\n    public function keeps_order(): void {}\n}\n\nclass Helper { public function testLike() {} }\n";
         assert_eq!(
