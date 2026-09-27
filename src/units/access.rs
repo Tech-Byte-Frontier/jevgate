@@ -11,7 +11,7 @@ use crate::{
     inventory::Input,
     options::CheckArgs,
     schema::Pass,
-    token_budget::TokenBudget,
+    token_budget::Limits,
 };
 use serde_json::{Value, json};
 use std::{
@@ -46,7 +46,7 @@ fn project(path: &Path) -> PathBuf {
 pub(super) fn plan(
     files: &[(usize, &Input)],
     args: &CheckArgs,
-    budget: &TokenBudget,
+    budget: Limits<'_>,
     plans: &mut BTreeMap<usize, FilePlan>,
     requests: &mut Vec<Planned>,
 ) {

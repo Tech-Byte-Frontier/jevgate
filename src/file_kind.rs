@@ -9,7 +9,7 @@ use crate::{
     options::CheckArgs,
     policy,
     schema::{FileResult, SourceRange, Status},
-    token_budget::TokenBudget,
+    token_budget::Limits,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -165,7 +165,7 @@ pub fn language(path: &Path) -> &'static str {
     }
 }
 
-pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: &TokenBudget) -> Result<Plan> {
+pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Result<Plan> {
     let format = crate::docs::format::Format::of(&input.result.path).language();
     if input.result.role == crate::inventory::INSTRUCTIONS {
         return Ok(Plan::Ready(document(
@@ -640,8 +640,8 @@ fn extension(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::Status;
     use crate::tests::{Project, args, run};
+    use crate::{schema::Status, token_budget::TokenBudget};
 
     const MIXED: &str = "fn production(value: &str) -> String {\n    value.trim().to_string()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::production;\n\n    fn helper(value: &str) -> String {\n        production(value)\n    }\n\n    #[test]\n    fn checks_production() {\n        assert_eq!(helper(\" a \"), \"a\");\n    }\n}\n";
 
@@ -657,7 +657,7 @@ mod tests {
         let input = crate::inventory::collect(options, &project.context(), &[])
             .unwrap()
             .remove(0);
-        match plan(&input, options, &TokenBudget::default()).unwrap() {
+        match plan(&input, options, TokenBudget::default().uncached()).unwrap() {
             Plan::Ready(view) => view,
             _ => panic!("expected a gate view"),
         }
@@ -736,7 +736,7 @@ mod tests {
             .unwrap()
             .remove(0);
         assert!(matches!(
-            plan(&input, &args(), &TokenBudget::default()).unwrap(),
+            plan(&input, &args(), TokenBudget::default().uncached()).unwrap(),
             Plan::Purpose(..)
         ));
         // Outside a test path, `main` is the program's entry.

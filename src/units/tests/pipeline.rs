@@ -115,7 +115,7 @@ fn packing_and_cache_identity_do_not_depend_on_token_calibration() {
         let budget = TokenBudget { bytes_per_token };
         let views = BTreeMap::from([(
             0,
-            match crate::file_kind::plan(&inputs[0], &options, &budget).unwrap() {
+            match crate::file_kind::plan(&inputs[0], &options, budget.uncached()).unwrap() {
                 crate::file_kind::Plan::Ready(view) => view,
                 _ => unreachable!(),
             },

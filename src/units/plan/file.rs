@@ -11,7 +11,7 @@ use crate::{
     file_kind::View,
     inventory::Input,
     options::CheckArgs,
-    token_budget::TokenBudget,
+    token_budget::Limits,
     units::{
         FileContext, FilePlan, Planned, comments, duplicates, functions, hardcoded, laws, outline,
         spacetimedb, test_units,
@@ -29,7 +29,7 @@ pub(super) fn plan_file(
     shared: &Shared<'_>,
     owner: usize,
     args: &CheckArgs,
-    budget: &TokenBudget,
+    budget: Limits<'_>,
     requests: &mut Vec<Planned>,
 ) -> FilePlan {
     let input = &scope.inputs[owner];
@@ -134,7 +134,7 @@ fn file_context<'a>(
     input: &'a Input,
     owner: usize,
     args: &'a CheckArgs,
-    budget: &'a TokenBudget,
+    budget: Limits<'a>,
 ) -> FileContext<'a> {
     FileContext {
         owner,
