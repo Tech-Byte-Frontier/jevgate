@@ -53,7 +53,14 @@ pub(super) fn plan_file(
         && view.application
         && !crate::analysis::clones::example_code(context.path)
     {
-        plan_values(&scope.units[&owner], &context, &lines, &mut file, requests);
+        let predicates = &shared.law_predicates;
+        plan_values(
+            &scope.units[&owner],
+            &context,
+            (&lines, predicates),
+            &mut file,
+            requests,
+        );
     }
     // Laravel's configuration files come from the framework and its
     // packages, with their documentation as comments: on two Laravel apps,
@@ -192,10 +199,12 @@ fn plan_outline(
 }
 
 /// Callables and module constants outside tests.
+/// A Bend 2 law's predicates and the defs only they call hold its samples,
+/// so their literals are not asked about.
 fn plan_values(
     parsed: &FileUnits,
     context: &FileContext<'_>,
-    lines: &[Range<usize>],
+    (lines, predicates): (&[Range<usize>], &BTreeSet<String>),
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
@@ -207,6 +216,7 @@ fn plan_values(
         .units
         .iter()
         .filter(|u| u.callable() && u.role == Role::Code && outside_tests(u.line))
+        .filter(|u| !predicates.contains(&u.name))
         .collect();
     let constants: Vec<_> = parsed
         .constants

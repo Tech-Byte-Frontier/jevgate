@@ -8,7 +8,7 @@ pub(in crate::units) fn function_wording(
     strength: Strength,
     p: f64,
     answers: &Answers<'_>,
-    block: Option<&Block>,
+    (block, bend): (Option<&Block>, bool),
 ) -> Wording {
     let reached = |question: &str| {
         answers
@@ -41,7 +41,11 @@ pub(in crate::units) fn function_wording(
         ),
         (Strength::Review, true) => (
             format!("`{name}` has nested or repeated branches that hide its main path ({p:.2})."),
-            "Flatten the control flow with guard clauses, early returns or a lookup table",
+            if bend {
+                "Flatten the matches with nested patterns, a `case _:` fallback or a helper def"
+            } else {
+                "Flatten the control flow with guard clauses, early returns or a lookup table"
+            },
         ),
         (Strength::Consider, false) => (
             format!(
@@ -55,7 +59,11 @@ pub(in crate::units) fn function_wording(
         ),
         (Strength::Consider, true) => (
             format!("`{name}` has branching that likely hides its main path ({p:.2})."),
-            "Consider guard clauses, early returns or a lookup table",
+            if bend {
+                "Consider nested patterns, a `case _:` fallback or a helper def"
+            } else {
+                "Consider guard clauses, early returns or a lookup table"
+            },
         ),
         (Strength::Note, false) => (
             format!("`{name}` reads well as it is; one block could be named as a helper."),

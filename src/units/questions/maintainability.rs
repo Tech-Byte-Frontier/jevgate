@@ -210,25 +210,46 @@ pub fn hardcoded_value(ids: &[String]) -> Value {
 /// took values with such copies: 6 right considers became notes for 17
 /// wrong ones. Told that copies win over the other kinds, it chose them for
 /// wrong considers too: 22 became notes instead of 42.
-pub fn hardcoded_value_kind() -> Value {
+///
+/// Bend 2 code has two more kinds (`bend`), since Bend has no loops and
+/// makes a recursion count a `Nat` down to prove it ends: a fuel or an
+/// array depth that only needs to be large enough, and an arbitrary mixing
+/// constant; and a one-line def that exists to name its value names it.
+/// On thirteen Bend 2 projects, the two kinds took 61 wrong hardcoded-value
+/// considers of 144 and 13 right ones of 59.
+pub fn hardcoded_value_kind(bend: bool) -> Value {
+    let mut criteria = json!({
+        "copies": "It stands for the same quantity as a copy in `elsewhere` or in this function, and the copies must change together while nothing ties them.",
+        "unexplained": "Nothing near it says what it stands for or why it has this value.",
+        "named": "The parameter, field, variable or function it goes into, or a comment beside it, says what it is.",
+        "idiom": "A common constant or idiom that reads for itself, such as a tolerance near zero, a half, a unit conversion such as 60, 1000 or 100 for percent, or a size a format fixes.",
+        "tuning": "One of many hand-tuned numbers for look, sound, motion or layout, whose exact value is a matter of taste.",
+    });
+    if bend {
+        // A one-line def is how Bend names a flag or a field offset.
+        criteria["named"] = json!(
+            "The parameter, field, variable or function it goes into, a comment beside it, or the def around it when that def exists to give it a name, such as an accessor or a flag test named for the value, says what it is."
+        );
+        criteria["bound"] = json!(
+            "A bound that only needs to be large enough, such as the fuel a recursion counts down so that it ends, or the depth of an array whose size is a power of two."
+        );
+        criteria["arbitrary"] = json!(
+            "An arbitrary constant whose exact value does not matter as long as it stays fixed, such as a hash multiplier, a salt or a random seed."
+        );
+    }
     json!({
         "type": "choice",
         "instructions": {
             "question": "What best describes `value` where `function.source` uses it?",
             "note": format!("`elsewhere` lists other lines of the file that write the same value. {EVIDENCE}"),
         },
-        "criteria": {
-            "copies": "It stands for the same quantity as a copy in `elsewhere` or in this function, and the copies must change together while nothing ties them.",
-            "unexplained": "Nothing near it says what it stands for or why it has this value.",
-            "named": "The parameter, field, variable or function it goes into, or a comment beside it, says what it is.",
-            "idiom": "A common constant or idiom that reads for itself, such as a tolerance near zero, a half, a unit conversion such as 60, 1000 or 100 for percent, or a size a format fixes.",
-            "tuning": "One of many hand-tuned numbers for look, sound, motion or layout, whose exact value is a matter of taste.",
-        },
+        "criteria": criteria,
     })
 }
 
-/// The options of `hardcoded_value_kind` under which a value reads for itself.
-pub const READABLE_VALUES: [&str; 3] = ["named", "idiom", "tuning"];
+/// The options of `hardcoded_value_kind` under which a value reads for
+/// itself; Bend 2's `bound` and `arbitrary` are offered only in its code.
+pub const READABLE_VALUES: [&str; 5] = ["named", "idiom", "tuning", "bound", "arbitrary"];
 
 /// Asked only about the value or constant an environment finding names,
 /// with the code around it: where it would differ. Labeled by hand, 39 of

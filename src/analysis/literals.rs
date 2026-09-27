@@ -88,6 +88,7 @@ fn collect(node: Node<'_>, source: &str, found: &mut Vec<Literal>) {
         || docstring(node)
         || super::ruby::required(node, source).is_some()
         || capacity_hint(node, source)
+        || bend_pattern(node)
     {
         return;
     }
@@ -108,6 +109,17 @@ fn collect(node: Node<'_>, source: &str, found: &mut Vec<Literal>) {
     for child in node.named_children(&mut cursor) {
         collect(child, source, found);
     }
+}
+
+/// A Bend 2 `case` pattern: Bend matches only literals and constructors, so
+/// `case 4294967295:` cannot name its value; on bendJVM, 7 hardcoded-value
+/// considers asked to.
+fn bend_pattern(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|clause| {
+        clause.kind() == "case_clause"
+            && clause.child_by_field_name("body") != Some(node)
+            && node.language().name() == Some("bend")
+    })
 }
 
 /// Java collection and builder types whose one number argument is an initial

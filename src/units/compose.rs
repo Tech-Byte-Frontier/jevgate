@@ -962,7 +962,8 @@ fn finding(
         Detail::Function { blocks, .. } => {
             block = located_block(unit, blocks, judgments, "block")
                 .filter(|b| !most_of(&b.location, &unit.locations));
-            function_wording(name, strength, p, answers, block)
+            let bend = crate::analysis::bend::file(&plan.path);
+            function_wording(name, strength, p, answers, (block, bend))
         }
         Detail::Outline {
             tests,
