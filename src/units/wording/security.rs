@@ -371,51 +371,16 @@ fn injection_wording(
         answers.get("origin").map(|a| origin_outcome(a)),
         Some(Outcome::Review(_))
     );
-    // A page script has no parameters: what it does not show the origin of
-    // is set by the files it includes or returned by the helpers it calls.
-    if subject == SCRIPT_SUBJECT && !outside && strength != Strength::Review {
-        let message = if strength == Strength::Consider {
-            format!(
-                "{subject} places values whose origin it does not show, such as those an included file sets or a helper returns, into {noun} without binding, escaping or checking them; outside input reaching them would make it exploitable ({p:.2})."
-            )
-        } else {
-            format!(
-                "{subject} places a value whose origin it does not show into {noun}; it may already be bound or checked, or hold only the program's own values."
-            )
-        };
-        let action = if strength == Strength::Note {
-            "Optional: bind or check the value where it enters"
-        } else {
-            action
-        };
-        return ((message, action), category.to_string());
-    }
     let get = |q: &str| answers.get(q).copied();
-    let harmless = (strength == Strength::Note)
-        .then(|| crate::units::outcome::harmless(&get))
-        .flatten();
-    let confirmed = match harmless {
-        Some("path") => Some((
-            format!(
-                "{subject} builds {noun} from a variable, but what it can hold, such as an id its type parses, likely keeps the path inside its directory."
-            ),
-            "Optional: confirm the value cannot hold `..` or a slash where it enters",
-        )),
-        Some("markup") => Some((
-            format!(
-                "{subject} places a variable into {noun}, but it was likely escaped or encoded before, so it cannot open a tag or attribute."
-            ),
-            "Optional: confirm the value is escaped on every path that reaches the markup",
-        )),
-        Some("redirect") => Some((
-            format!(
-                "{subject} redirects clients to a target built from a variable, but a fixed path or check likely keeps it on the site."
-            ),
-            "Optional: confirm no target can start with `//` or another host",
-        )),
-        _ => None,
+    let special = if subject == SCRIPT_SUBJECT && !outside && strength != Strength::Review {
+        Some(script_wording(subject, &noun, strength, p, action))
+    } else if strength == Strength::Note {
+        crate::units::outcome::harmless(&get)
+            .and_then(|kind| confirmed_wording(kind, subject, &noun))
+    } else {
+        None
     };
-    if let Some(wording) = confirmed {
+    if let Some(wording) = special {
         return (wording, category.to_string());
     }
     let message = match (strength, outside) {
@@ -441,6 +406,60 @@ fn injection_wording(
         action
     };
     ((message, action), category.to_string())
+}
+
+/// A page script's finding: it has no parameters, so what it does not show
+/// the origin of is set by the files it includes or returned by the helpers
+/// it calls.
+fn script_wording(
+    subject: &str,
+    noun: &str,
+    strength: Strength,
+    p: f64,
+    action: &'static str,
+) -> Wording {
+    if strength == Strength::Consider {
+        (
+            format!(
+                "{subject} places values whose origin it does not show, such as those an included file sets or a helper returns, into {noun} without binding, escaping or checking them; outside input reaching them would make it exploitable ({p:.2})."
+            ),
+            action,
+        )
+    } else {
+        (
+            format!(
+                "{subject} places a value whose origin it does not show into {noun}; it may already be bound or checked, or hold only the program's own values."
+            ),
+            "Optional: bind or check the value where it enters",
+        )
+    }
+}
+
+/// A note whose confirm Choice found values that can do no harm where they
+/// go: a path that stays in its directory, markup values already escaped or
+/// encoded, a redirect that stays on the site.
+fn confirmed_wording(kind: &str, subject: &str, noun: &str) -> Option<Wording> {
+    Some(match kind {
+        "path" => (
+            format!(
+                "{subject} builds {noun} from a variable, but what it can hold, such as an id its type parses, likely keeps the path inside its directory."
+            ),
+            "Optional: confirm the value cannot hold `..` or a slash where it enters",
+        ),
+        "markup" => (
+            format!(
+                "{subject} places a variable into {noun}, but it was likely escaped or encoded before, so it cannot open a tag or attribute."
+            ),
+            "Optional: confirm the value is escaped on every path that reaches the markup",
+        ),
+        "redirect" => (
+            format!(
+                "{subject} redirects clients to a target built from a variable, but a fixed path or check likely keeps it on the site."
+            ),
+            "Optional: confirm no target can start with `//` or another host",
+        ),
+        _ => return None,
+    })
 }
 
 /// Logging or error details, whichever signal is strongest.
