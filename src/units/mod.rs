@@ -73,6 +73,8 @@ pub struct GroupInfo {
 /// does a job of its own, sent only when the outline raised no finding.
 #[derive(Clone, Debug)]
 pub struct Part {
+    /// The ids its answers are recorded under, from `outline::PART_QUESTIONS`.
+    pub questions: (&'static str, &'static str),
     pub names: Vec<String>,
     pub locations: Vec<Location>,
     /// The lines of its members.

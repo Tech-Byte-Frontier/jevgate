@@ -1469,7 +1469,10 @@ fn deciding_part<'p>(answers: &Answers<'_>, parts: &'p [super::Part]) -> Option<
     if matches!(split, Some(Outcome::Review(_) | Outcome::Consider(_))) {
         return None;
     }
-    separable_part(&part_answers(&get)).and_then(|(position, _)| parts.get(position))
+    // A part too long to ask is left out of `parts`, so find it by its ids.
+    let (position, _) = separable_part(&part_answers(&get))?;
+    let ids = super::outline::PART_QUESTIONS[position];
+    parts.iter().find(|part| part.questions == ids)
 }
 
 /// A file-organization consider that says only that some members could
