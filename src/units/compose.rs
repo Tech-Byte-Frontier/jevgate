@@ -274,54 +274,58 @@ pub fn unconfirmed_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<St
 
 /// Functions whose split question raised a review or consider, and whose
 /// block has not been located yet; hardcoded-value functions raised to a
-/// review or consider whose value has not been named yet.
+/// review or consider whose value has not been named yet; and the other
+/// units whose confirm `locate_due` calls for.
 pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
         .iter()
         .filter(|u| u.presence == Presence::Judged)
         .filter(|u| answers(judgments, &u.id, Pass::Locate).is_empty())
-        .filter(|u| {
-            let (outcome, resolved) = resolved(u, judgments);
-            let raised =
-                |o: Option<Outcome>| matches!(o, Some(Outcome::Review(_) | Outcome::Consider(_)));
-            match &u.detail {
-                Detail::Values {
-                    locate: Some(_), ..
-                }
-                | Detail::Constants {
-                    locate: Some(_), ..
-                } => raised(Some(outcome)),
-                Detail::TestPair {
-                    confirm: Some(_), ..
-                } => matches!(outcome, Outcome::Review(_)),
-                // Only the internal-details check raises a test's consider.
-                Detail::Test { confirm: Some(_) } => matches!(outcome, Outcome::Consider(_)),
-                // An injection consider rests on the function's parameters
-                // unless its origin was another party.
-                Detail::Security {
-                    confirm: Some(_), ..
-                } => {
-                    matches!(outcome, Outcome::Consider(_))
-                        && !resolved
-                            .get("origin")
-                            .is_some_and(|a| matches!(origin_outcome(a), Outcome::Review(_)))
-                        && !rests_on_paths(&|q| resolved.get(q).copied())
-                }
-                Detail::Function {
-                    locate: Some(_), ..
-                } => raised(resolved.get("split").map(|a| benefit(a))),
-                Detail::Document {
-                    locate: Some(_), ..
-                } => raised(
-                    resolved
-                        .get("split")
-                        .map(|a| document_split(a, resolved.get("kind").copied())),
-                ),
-                _ => false,
-            }
-        })
+        .filter(|u| locate_due(u, judgments))
         .map(|u| u.id.clone())
         .collect()
+}
+
+/// Whether a unit's outcome calls for its locate or confirm follow-up.
+fn locate_due(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
+    let (outcome, resolved) = resolved(unit, judgments);
+    let raised = |o: Option<Outcome>| matches!(o, Some(Outcome::Review(_) | Outcome::Consider(_)));
+    match &unit.detail {
+        Detail::Values {
+            locate: Some(_), ..
+        }
+        | Detail::Constants {
+            locate: Some(_), ..
+        } => raised(Some(outcome)),
+        Detail::TestPair {
+            confirm: Some(_), ..
+        } => matches!(outcome, Outcome::Review(_)),
+        // Only the internal-details check raises a test's consider.
+        Detail::Test { confirm: Some(_) } => matches!(outcome, Outcome::Consider(_)),
+        // An injection consider rests on the function's parameters unless
+        // its origin was another party; one that rests on a path is asked
+        // what its paths can hold instead.
+        Detail::Security {
+            confirm: Some(_), ..
+        } => {
+            matches!(outcome, Outcome::Consider(_))
+                && !resolved
+                    .get("origin")
+                    .is_some_and(|a| matches!(origin_outcome(a), Outcome::Review(_)))
+                && !rests_on_paths(&|q| resolved.get(q).copied())
+        }
+        Detail::Function {
+            locate: Some(_), ..
+        } => raised(resolved.get("split").map(|a| benefit(a))),
+        Detail::Document {
+            locate: Some(_), ..
+        } => raised(
+            resolved
+                .get("split")
+                .map(|a| document_split(a, resolved.get("kind").copied())),
+        ),
+        _ => false,
+    }
 }
 
 /// Judged units whose first pass stayed undecided, or became a note from a

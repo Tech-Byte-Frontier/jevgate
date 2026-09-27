@@ -74,13 +74,19 @@ pub(in crate::units) fn rests_on_paths<'a>(get: &impl Fn(&str) -> Option<&'a Ans
     !found.is_empty() && found.iter().all(|id| *id == "path")
 }
 
-/// Whether a path finding's paths, asked after it, can hold only names that
-/// stay inside their directory, the program's own or the local user's, at
-/// the threshold: a route parameter parsed as a UUID or as Rocket's
-/// `PathBuf`, a base name or a checked id. Such a finding is a note.
-fn confined_paths<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+/// Whether a path finding's paths, asked after it, lean toward names that
+/// stay inside their directory, the program's own or the local user's: a
+/// route parameter parsed as a UUID or as Rocket's `PathBuf`, a base name or
+/// a checked id. Such a finding is a note. On the corpus, the 5 path
+/// findings labeled right (request parameters and uploaded names joined to
+/// a directory) answered another party's input at 0.96 or more, while
+/// vaultwarden's 4 wrong ones on typed Rocket route parameters leaned to
+/// confined names at 0.67 to 0.78; none reached the threshold, as a type's
+/// parsing is shown only by its derive list.
+pub(in crate::units) fn confined_paths<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
     rests_on_paths(get)
-        && choice_mass(get("paths"), &questions::CONFINED_PATHS).is_some_and(at_least)
+        && choice_mass(get("paths"), &questions::CONFINED_PATHS)
+            .is_some_and(|p| probability_at_least(p, LEADING_PROBABILITY))
 }
 
 /// Whether what a consider's values can hold, asked after it, leans toward
