@@ -323,7 +323,10 @@ fn plan_module(
 }
 
 /// Callable units: application code with the application view, and test
-/// support (not test cases) with the test view.
+/// support (not test cases) with the test view. A Bend 2 proof is left out:
+/// its steps follow the cases of what it proves, not jobs a reader could
+/// pull apart, and each function-simplification finding on one across
+/// thirteen Bend 2 projects (4 labeled) was wrong.
 fn plan_functions(
     scope: &Scope<'_>,
     context: &FileContext<'_>,
@@ -336,7 +339,7 @@ fn plan_functions(
     let judged: Vec<&Unit> = scope.units[&context.owner]
         .units
         .iter()
-        .filter(|u| u.callable())
+        .filter(|u| u.callable() && u.role != Role::Proof)
         .filter(|u| {
             if lines.iter().any(|l| u.overlaps(l)) {
                 view.tests

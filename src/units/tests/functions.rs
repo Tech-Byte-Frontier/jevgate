@@ -208,3 +208,20 @@ fn a_function_added_to_one_run_leaves_the_other_runs_alone() {
     // Packed in file order, the requests after it changed too.
     only_changed(&before, &after, 1);
 }
+
+#[test]
+fn bend_proofs_are_not_asked_to_be_split() {
+    let source = "import Base\n\nlaw count_sum:\n  for +xs: List<&2, Nat>\n  {count(xs) == count(xs) : Nat}\n\ndef count(xs: List<&2, Nat>) -> Nat:\n  match xs:\n    case []:\n      0n\n    case h <> t:\n      Nat.add(1n, count(t))\n\ndef count_sum(xs):\n  match xs:\n    case []:\n      {==}\n    case h <> t:\n      %count_sum(t) : {1n+count(t) == _ : Nat}\n      {==}\n\ndef add_zero(+x: Nat) -> {Nat.add(x, 0n) == x : Nat}:\n  match x:\n    case 0n:\n      {==}\n    case 1n+p:\n      %add_zero(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}\n      {==}\n";
+    let (project, options) = project_with(
+        &[("lib/count.bend", source)],
+        &[catalog::FUNCTION_SIMPLIFICATION],
+    );
+    let (_, plan) = planned(&project, &options);
+    let asked: Vec<&str> = plan
+        .requests
+        .iter()
+        .flat_map(|p| p.request["state"]["functions"].as_array().unwrap())
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(asked, ["count"], "the law's proof and a lemma are left out");
+}
