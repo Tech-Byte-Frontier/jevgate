@@ -234,7 +234,7 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
         // "Slightly" says the comment adds only detail: a note, as a benefit.
         catalog::LAWS => get("states")
             .map(benefit)
-            .or_else(|| get("relation").map(law_relation)),
+            .or_else(|| get("relation").map(|r| law_recheck(r, get("fixed")))),
         catalog::COMMENTS => comment_outcome(
             &get,
             matches!(
@@ -335,12 +335,25 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     }
 }
 
-/// A law recheck's Choice: a consider when the options naming a claim the
-/// law does not state hold the policy's share, clear when the others do.
-fn law_relation(answer: &Answer) -> Outcome {
-    match choice_mass(Some(answer), &questions::LAW_GAPS) {
+/// A law recheck: a consider when the Choice's options naming a claim the
+/// law does not state hold the policy's share, or when the law likely
+/// checks particular inputs its comment generalizes; clear when the
+/// Choice's other options hold the policy's share and the inputs are not
+/// particular. The particular-inputs question takes the located-part share:
+/// on thirteen Bend 2 projects the 4 laws at 0.65 or more were right (two
+/// of them at 0.72 and 0.78), and the highest below was a sanity check at
+/// 0.51.
+fn law_recheck(relation: &Answer, fixed: Option<&Answer>) -> Outcome {
+    let fixed = match fixed {
+        Some(Answer::Noul { noul, .. }) => Some(*noul),
+        _ => None,
+    };
+    let particular = fixed.is_some_and(|p| probability_at_least(p, LOCATION_PROBABILITY));
+    let general = fixed.is_none_or(|p| at_least(1.0 - p));
+    match choice_mass(Some(relation), &questions::LAW_GAPS) {
+        _ if particular => Outcome::Consider(fixed.unwrap_or_default()),
         Some(gap) if at_least(gap) => Outcome::Consider(gap),
-        Some(gap) if at_least(1.0 - gap) => Outcome::Clear,
+        Some(gap) if general && at_least(1.0 - gap) => Outcome::Clear,
         Some(gap) => Outcome::Uncertain(gap),
         None => Outcome::Missing,
     }

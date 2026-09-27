@@ -213,6 +213,38 @@ pub fn law_relation() -> Value {
     })
 }
 
+/// Whether a Bend 2 law checks particular inputs where its comment speaks
+/// of inputs in general, asked beside `law_relation`. On thirteen Bend 2
+/// projects, 11 of the 29 laws still undecided after `law_relation` claimed
+/// in their comment what the law checks for one fixed key, an empty or
+/// one-entry object or one byte, and its options did not tell them from
+/// laws that restate their comment.
+pub fn law_fixed() -> Value {
+    json!({
+        "type": "noul",
+        "instructions": {
+            "question": "Does the law in `law.source` check only particular inputs, such as one given key, an empty or one-entry structure or one number, where the comment in `law.comment` says the behavior holds for such inputs in general?",
+            "note": format!("`law.reading` reads the law in words. {EVIDENCE}"),
+        },
+        "criteria": {
+            "true": {
+                "what": "The law passes a literal or a fixed structure where the comment speaks of any key, object, list, byte or channel, so a definition that fails on other inputs passes the law.",
+                "examples": [
+                    "A law that looks up a map holding one entry under a comment saying lookups return the value of any key present",
+                    "A law that removes the only entry of a map under a comment saying removal deletes a key"
+                ]
+            },
+            "false": {
+                "what": "The law quantifies over every input the comment speaks of, or the comment itself names the particular case.",
+                "examples": [
+                    "A comment about the end-of-file marker above a law that checks that marker",
+                    "A comment marking the law as an example or a sanity check"
+                ]
+            }
+        },
+    })
+}
+
 pub fn test_several(path: &str) -> Value {
     noul(
         format!("Does the test in `{path}` check several unrelated behaviors?"),

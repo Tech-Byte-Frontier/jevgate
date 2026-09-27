@@ -67,7 +67,13 @@ pub(in crate::units) fn law_wording(
             "Check that the comment and the law say the same thing",
         );
     }
+    let fixed = matches!(
+        answers.get("fixed"),
+        Some(Answer::Noul { noul, .. })
+            if crate::policy::probability_at_least(*noul, crate::policy::LOCATION_PROBABILITY)
+    );
     let adds = match choice(answers.get("relation").copied()) {
+        _ if fixed => ": the law checks particular inputs where the comment speaks of any",
         Some(("property", _)) => ": it claims a property the law does not state",
         Some(("inputs", _)) => ": it claims the law for more inputs than the law covers",
         Some(("condition", _)) => {
