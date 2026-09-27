@@ -287,14 +287,14 @@ pub fn rules() -> Vec<Rule> {
 
 pub fn rule_version(key: &str) -> &'static str {
     match key {
-        FILE_ORGANIZATION => "19",
-        FUNCTION_SIMPLIFICATION => "14",
-        SHARED_LOGIC => "20",
+        FILE_ORGANIZATION => "20",
+        FUNCTION_SIMPLIFICATION => "15",
+        SHARED_LOGIC => "21",
         TEST_VALUE => "7",
         TEST_REDUNDANCY => "4",
         INJECTION => "10",
         SENSITIVE_DATA => "7",
-        HARDCODED_VALUES => "7",
+        HARDCODED_VALUES => "8",
         UNSAFE_SETTINGS => "6",
         AGENT_CONTEXT => "3",
         COMMENTS => "3",
