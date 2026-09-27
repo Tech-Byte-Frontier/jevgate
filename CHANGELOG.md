@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-09-27
+
 - Injection: the follow-up that asks a path finding what its paths can hold now also asks a markup finding what its values hold where they enter the markup (already escaped, percent-encoded or serialized as a URL; typed; the program's own; or raw text) and a redirect finding where its targets can lead (a fixed path such as `/admin` first keeps it on the site; `origin + next` with no slash between them does not). Leaning to harmless values, the finding is a note. On the 38 corpus projects with such findings, vaultwarden's `hibp_breach` (a username percent-encoded before the link), its admin login redirect and shiori's login redirect, all labeled wrong, are notes; the 26 markup and 6 redirect findings labeled right put at most 0.22 and 0.44 on the harmless options and stay. About $0.01 on the corpus.
 
 ## [0.23.0] - 2026-09-27
@@ -239,7 +241,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.1...HEAD
+[0.23.1]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.20.0...v0.21.0
