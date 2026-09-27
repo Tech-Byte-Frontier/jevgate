@@ -3,8 +3,8 @@
 use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, at_most_note, benefit, checks, choice, choice_mass, document_split,
-        logs_found, lowered, noul, open, origin_outcome, rests_on_paths, score, settled_checks,
+        Answers, Outcome, at_most_note, benefit, checks, choice, choice_mass, confirmable,
+        document_split, logs_found, lowered, noul, open, origin_outcome, score, settled_checks,
         several_kind, unit_outcome, value_signals,
     },
     wording::{Wording, comment_reason, comment_wording},
@@ -250,26 +250,42 @@ fn rechecked<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answer
 }
 
 /// Security units whose finding a confirm Choice of their own follows, not
-/// yet asked: an injection finding that rests on a path (what its paths can
-/// hold) and a sensitive-data finding its log checks raised (when the log
-/// line runs).
+/// yet asked: an injection finding whose one concern is a path (what its
+/// paths can hold), or markup or a redirect unless its values are asked
+/// already (what they hold, where they lead), and a sensitive-data finding
+/// its log checks raised (when the log line runs).
 pub fn unconfirmed_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
     plan.units
         .iter()
         .filter(|u| u.presence == Presence::Judged)
         .filter(|u| answers(judgments, &u.id, Pass::Locate).is_empty())
         .filter(|u| {
-            let Detail::Security { paths, logging, .. } = &u.detail else {
+            let Detail::Security {
+                checked, logging, ..
+            } = &u.detail
+            else {
                 return false;
             };
             let (outcome, resolved) = resolved(u, judgments);
             let get = |q: &str| resolved.get(q).copied();
+            let kind = confirmable(&get);
             matches!(outcome, Outcome::Review(_) | Outcome::Consider(_))
-                && (paths.is_some() && rests_on_paths(&get)
+                && (checked.is_some()
+                    && (kind == Some("path") || kind.is_some() && !values_due(outcome, &resolved))
                     || logging.is_some() && logs_found(&get))
         })
         .map(|u| u.id.clone())
         .collect()
+}
+
+/// Whether an injection outcome calls for what its values can hold: a
+/// consider that rests on the function's parameters, its origin not
+/// another party.
+fn values_due(outcome: Outcome, resolved: &Answers<'_>) -> bool {
+    matches!(outcome, Outcome::Consider(_))
+        && !resolved
+            .get("origin")
+            .is_some_and(|a| matches!(origin_outcome(a), Outcome::Review(_)))
 }
 
 /// Functions whose split question raised a review or consider, and whose
@@ -308,11 +324,8 @@ fn locate_due(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         Detail::Security {
             confirm: Some(_), ..
         } => {
-            matches!(outcome, Outcome::Consider(_))
-                && !resolved
-                    .get("origin")
-                    .is_some_and(|a| matches!(origin_outcome(a), Outcome::Review(_)))
-                && !rests_on_paths(&|q| resolved.get(q).copied())
+            values_due(outcome, &resolved)
+                && confirmable(&|q| resolved.get(q).copied()) != Some("path")
         }
         Detail::Function {
             locate: Some(_), ..

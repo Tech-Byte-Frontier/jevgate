@@ -354,8 +354,8 @@ fn push_unit(
     let confirm = (rule == INJECTION)
         .then(|| confirm(file, subject, id))
         .flatten();
-    let paths = (rule == INJECTION)
-        .then(|| confirm_paths(file, subject, id))
+    let checked = (rule == INJECTION)
+        .then(|| confirm_checks(file, subject, id))
         .flatten();
     let logging = (rule == SENSITIVE_DATA)
         .then(|| confirm_logging(file, subject, id))
@@ -380,7 +380,7 @@ fn push_unit(
             trace: trace.map(Into::into),
             settles,
             confirm: confirm.map(Into::into),
-            paths: paths.map(Into::into),
+            checked: checked.map(Into::into),
             logging: logging.map(Into::into),
             django: subject.django,
             test_path: subject.test_path,
@@ -428,7 +428,7 @@ fn send(
                     trace,
                     settles,
                     confirm,
-                    paths,
+                    checked,
                     logging,
                     ..
                 } = &mut unit.detail
@@ -436,7 +436,7 @@ fn send(
                     *trace = None;
                     settles.clear();
                     *confirm = None;
-                    *paths = None;
+                    *checked = None;
                     *logging = None;
                 }
             }
@@ -811,28 +811,28 @@ fn confirm(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
     file.budget.fits(&request).then_some((request, asked))
 }
 
-/// What the variable parts of the paths a path finding rests on can hold,
-/// asked only after such a finding: the function, the functions that call
-/// it and the project's types its parameters name.
-fn confirm_paths(
+/// What the values of a path, markup or redirect finding can hold or where
+/// they lead, asked only after a finding whose one concern is one of those;
+/// only the question of its kind is read. The function, the functions that
+/// call it and the project's types its parameters name.
+fn confirm_checks(
     file: &FileContext<'_>,
     subject: &Subject<'_>,
     id: &str,
 ) -> Option<(Value, Asked)> {
     let code = subject.code();
+    let callers = !subject.callers.is_empty();
     let mut questions = Questions::default();
-    questions.ask(
-        "paths".into(),
-        questions::injection_paths(
-            &code,
-            !subject.callers.is_empty(),
-            !subject.types.is_empty(),
+    for (question, body) in [
+        (
+            "paths",
+            questions::injection_paths(&code, callers, !subject.types.is_empty()),
         ),
-        id,
-        INJECTION,
-        "paths",
-        Pass::Locate,
-    );
+        ("markup_values", questions::markup_values(&code, callers)),
+        ("redirect_reach", questions::redirect_reach(&code, callers)),
+    ] {
+        questions.ask(question.into(), body, id, INJECTION, question, Pass::Locate);
+    }
     let mut state = with_callers(file, subject);
     if !subject.types.is_empty() {
         state["types_named_in_parameters"] = json!(subject.types);

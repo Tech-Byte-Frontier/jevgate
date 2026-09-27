@@ -267,6 +267,70 @@ pub fn injection_paths(code: &str, callers: bool, types: bool) -> Value {
 /// The options of `injection_paths` that keep a path inside its directory.
 pub const CONFINED_PATHS: [&str; 3] = ["confined", "own", "local"];
 
+/// What a markup finding's values hold where they enter the markup, asked
+/// only after a finding whose one concern is markup. vaultwarden's
+/// `hibp_breach` percent-encodes the username before it builds the link,
+/// oak's examples write a URL object whose serialization percent-encodes
+/// `<` and `>`, and a JSP page runs its own `esc()` first: the markup check
+/// reads a variable joined into HTML, whatever it was turned into before.
+pub fn markup_values(code: &str, callers: bool) -> Value {
+    let (by_callers, note) = if callers {
+        (
+            " or by the functions in `callers`",
+            format!("{CALLERS} {EVIDENCE}"),
+        )
+    } else {
+        ("", EVIDENCE.to_string())
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What do the values that `{code}` places into HTML or SVG markup hold where they enter it?"),
+            "note": note,
+        },
+        "criteria": {
+            "encoded": format!("Text already escaped for HTML, percent-encoded or serialized as a URL before it enters the markup, in this code{by_callers}, so it cannot hold `<`, `>`, `&` or quotes."),
+            "typed": "Numbers, dates, booleans or ids, or names chosen from a fixed list.",
+            "own": "Text the program writes itself or reads from its configuration.",
+            "raw": "Text as another party or a caller wrote it, which can hold `<`, `>`, `&` or quotes.",
+            "unknown": "Values whose origin or handling is not shown.",
+        },
+    })
+}
+
+/// The options of `markup_values` that cannot open a tag or attribute.
+pub const HARMLESS_MARKUP: [&str; 3] = ["encoded", "typed", "own"];
+
+/// Where a redirect finding's targets can lead, asked only after a finding
+/// whose one concern is a redirect. vaultwarden's admin login redirects to
+/// its admin path followed by the form's value, and shiori's to its login
+/// page with the current path as a query value: a fixed path before the
+/// variable keeps the target on the site, which the redirect check does not
+/// ask.
+pub fn redirect_reach(code: &str, callers: bool) -> Value {
+    let note = if callers {
+        format!("{CALLERS} {EVIDENCE}")
+    } else {
+        EVIDENCE.to_string()
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Where can the targets that `{code}` redirects clients to lead?"),
+            "note": note,
+        },
+        "criteria": {
+            "own_site": "Only to the program's own site: every target starts with a fixed path that has a single leading slash, or with the program's own origin and a slash, and variables only follow it or fill its query string.",
+            "checked": "Only where a check allows: the target is compared with an allowed list of hosts or checked to be a path on the site before the redirect.",
+            "anywhere": "Anywhere a variable says: a variable starts the target, or follows a fixed scheme and host with no slash between them, so it can name another host.",
+            "none": "It does not redirect.",
+        },
+    })
+}
+
+/// The options of `redirect_reach` that keep a redirect on the site.
+pub const OWN_SITE: [&str; 3] = ["own_site", "checked", "none"];
+
 /// When a logging finding's log line runs, asked only for a sensitive-data
 /// finding raised by its log checks. vaultwarden logs SSO tokens inside
 /// `if CONFIG.sso_debug_tokens()`, a setting off by default and documented

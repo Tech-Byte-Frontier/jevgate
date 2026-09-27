@@ -64,6 +64,10 @@ fn an_unchecked_redirect_target_is_an_open_redirect_review() {
         ("resource", noul_at(0.95)),
         ("redirect", noul_at(0.95)),
         ("origin", spread(0.0, 0.05, 0.95)),
+        (
+            "redirect_reach",
+            choice_of("anywhere", &["anywhere", "checked", "none", "own_site"]),
+        ),
     ];
     let report = run(&project, &options, &mut eval);
     let file = report

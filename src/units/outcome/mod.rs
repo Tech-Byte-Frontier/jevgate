@@ -31,7 +31,7 @@ pub(super) use exposure::{
     settings_module_outcome,
 };
 pub(super) use injection::{
-    RESOURCE_CHECKS, confined_paths, injection_outcome, origin_outcome, rests_on_paths,
+    RESOURCE_CHECKS, confirmable, harmless, injection_outcome, origin_outcome,
 };
 pub(super) use maintainability::{
     benign_key, function_outcome, organization_outcome, several_kind, shared_outcome,
