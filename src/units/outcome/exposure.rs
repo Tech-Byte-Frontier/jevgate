@@ -189,7 +189,8 @@ fn exposure_level(rule: &str, presence: &[Signal], specific: &[Signal]) -> Outco
     let noted = presence
         .iter()
         .chain(specific)
-        .filter_map(|(o, _)| matches!(o, Outcome::Note(_)).then(|| o.concern()))
+        .filter(|(o, _)| matches!(o, Outcome::Note(_)))
+        .map(|(o, _)| o.concern())
         .reduce(f64::max);
     if unnamed && !found.is_empty() {
         Outcome::Note(strongest(&found).concern())
