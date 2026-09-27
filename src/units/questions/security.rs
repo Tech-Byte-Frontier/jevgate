@@ -306,7 +306,9 @@ pub const HARMLESS_MARKUP: [&str; 3] = ["encoded", "typed", "own"];
 /// its admin path followed by the form's value, and shiori's to its login
 /// page with the current path as a query value: a fixed path before the
 /// variable keeps the target on the site, which the redirect check does not
-/// ask.
+/// ask. Offered "its own origin and a slash" without the form written out,
+/// chatbot-ui's `requestUrl.origin + next` read as staying on the site at
+/// 0.63, though `next=@evil.com` leaves it.
 pub fn redirect_reach(code: &str, callers: bool) -> Value {
     let note = if callers {
         format!("{CALLERS} {EVIDENCE}")
@@ -320,9 +322,9 @@ pub fn redirect_reach(code: &str, callers: bool) -> Value {
             "note": note,
         },
         "criteria": {
-            "own_site": "Only to the program's own site: every target starts with a fixed path that has a single leading slash, or with the program's own origin and a slash, and variables only follow it or fill its query string.",
+            "own_site": "Only to the program's own site: every target starts with a fixed path written in the code, such as `/admin` or `/login?next=`, so it begins with one slash and a path; or with the program's own origin followed by a slash written in the code; variables only follow that fixed part or fill its query string.",
             "checked": "Only where a check allows: the target is compared with an allowed list of hosts or checked to be a path on the site before the redirect.",
-            "anywhere": "Anywhere a variable says: a variable starts the target, or follows a fixed scheme and host with no slash between them, so it can name another host.",
+            "anywhere": "Anywhere a variable says: a variable starts the target, or directly follows the program's own origin or a host with no slash written between them, as in `origin + next`, where `@evil.com` or `.evil.com` in the variable names another host.",
             "none": "It does not redirect.",
         },
     })

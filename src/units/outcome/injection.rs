@@ -96,8 +96,12 @@ pub(in crate::units) fn confirmable<'a>(
 /// targets that stay on the site. Such a finding is a note. On the corpus,
 /// the 5 path findings labeled right answered another party's input at 0.96
 /// or more, while vaultwarden's 4 wrong ones on typed Rocket route
-/// parameters leaned to confined names at 0.67 to 0.78, as a type's parsing
-/// is shown only by its derive list.
+/// parameters leaned to confined names at 0.65 to 0.84, as a type's parsing
+/// is shown only by its derive list. The 26 markup findings labeled right
+/// put at most 0.22 on values that cannot open a tag, and vaultwarden's
+/// percent-encoded username 0.56; the 6 redirect findings labeled right put
+/// at most 0.44 on staying on the site, and vaultwarden's admin path and
+/// shiori's login page 0.68 and 0.58.
 pub(in crate::units) fn harmless<'a>(
     get: &impl Fn(&str) -> Option<&'a Answer>,
 ) -> Option<&'static str> {
