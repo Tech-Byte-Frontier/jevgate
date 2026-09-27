@@ -1,8 +1,15 @@
 //! Questions about security in application code: whether a function places
 //! variables into interpreted text, logs secrets or weakens a setting, and the
-//! literal checks per kind that the trace and caller rechecks ask.
+//! literal checks per kind that the trace and caller rechecks ask. `confirm`
+//! holds the Choices a finding is asked after it is raised, and `django` the
+//! checks Django code is asked in its own words.
 use super::{EVIDENCE, choose_id, deserializers::DESERIALIZE, noul, score};
 use serde_json::{Value, json};
+
+mod confirm;
+mod django;
+pub use confirm::*;
+pub use django::*;
 
 /// Whether a function places a variable into text another program runs or
 /// renders. Presence only: the trace questions decide whether it is a concern.
@@ -184,178 +191,6 @@ pub fn security_origin(code: &str, callers: bool, django: bool) -> Value {
         ],
     )
 }
-
-/// What the values of an injection consider resting on the function's
-/// parameters can hold, asked only for such a finding, with its callers.
-/// Labeled by hand, those considers were right 30 times in 81: most wrong
-/// ones placed text every caller passes as a literal, such as a Rust
-/// helper's SQL fragments, or a command-line tool's own arguments, while
-/// right ones placed names from a database others write, fetched page
-/// titles or model output. Asked where the values come from, the recheck
-/// answered "the function's parameters" at 0.9 even when its callers passed
-/// literals.
-pub fn injection_values(code: &str, callers: bool) -> Value {
-    let (fixed, note) = if callers {
-        (
-            "Only text the program fixes: literals and constants, written in this code or passed by every caller in `callers`; numbers, dates or other typed values that cannot hold markup or syntax; or names chosen from a fixed list.",
-            format!("{CALLERS} {EVIDENCE}"),
-        )
-    } else {
-        (
-            "Only text the program fixes: literals and constants written in this code; numbers, dates or other typed values that cannot hold markup or syntax; or names chosen from a fixed list.",
-            EVIDENCE.to_string(),
-        )
-    };
-    json!({
-        "type": "choice",
-        "instructions": {
-            "question": format!("What can the values that `{code}` places into a query, command, code or markup without binding or escaping them hold?"),
-            "note": note,
-        },
-        "criteria": {
-            "fixed": fixed,
-            "own": "Values the program creates or keeps for itself, such as ids it generates, the names of its own tables, files or settings, or text it wrote itself.",
-            "local": "The arguments of a command-line program, build script or code generator, typed by the person who runs it on their own machine, or text that person runs on purpose, such as a query they typed.",
-            "outside": "Text another party can set: a network request, message or uploaded file, a page or feed fetched from the network, a language model's output, or records and names other users can write, such as rows of a shared database.",
-            "unknown": "Values from parameters or calls whose origin is not shown, which may hold any of these.",
-        },
-    })
-}
-
-/// The options of `injection_values` that hold only the program's own values.
-pub const PROGRAM_VALUES: [&str; 3] = ["fixed", "own", "local"];
-
-/// What the variable parts of a path finding's paths can hold, asked only
-/// for an injection finding whose check found a path, with its callers and
-/// the definitions of the project's types its parameters name. On
-/// vaultwarden, Rocket route parameters typed `PathBuf` (which Rocket parses
-/// so they cannot climb above where they are joined) and id types whose
-/// parsing accepts only a UUID were four wrong path reviews: the path check
-/// reads a variable joined to a directory, whatever the variable can hold.
-pub fn injection_paths(code: &str, callers: bool, types: bool) -> Value {
-    let types_note = if types {
-        " `types_named_in_parameters` holds the definitions of the project's types that its parameters name, with their attributes."
-    } else {
-        ""
-    };
-    let lead = if callers {
-        format!("{CALLERS}{types_note}")
-    } else {
-        types_note.trim_start().to_string()
-    };
-    let note = if lead.is_empty() {
-        EVIDENCE.to_string()
-    } else {
-        format!("{lead} {EVIDENCE}")
-    };
-    json!({
-        "type": "choice",
-        "instructions": {
-            "question": format!("What can the variable parts of the file paths that `{code}` opens, writes or deletes hold?"),
-            "note": note,
-        },
-        "criteria": {
-            "confined": "Only names that cannot leave the directory they are joined to: numbers, UUIDs or ids that a type or the web framework parses before the function runs, names reduced to a base name or checked against a pattern, or a path parameter the framework parses so it cannot climb above where it is joined, such as a Rocket `PathBuf` route segment, which rejects hidden and encoded-slash segments and drops `..` at its start.",
-            "own": "Names the program chooses or keeps for itself, or reads from its configuration.",
-            "local": "The command line, settings or files of the person running a local program or script.",
-            "outside": "A name or path another party sets that can hold `..`, a slash or an absolute path, such as a request parameter or field read as text, an uploaded file's name or an archive entry.",
-            "unknown": "Values from parameters or calls whose origin is not shown, which may hold any of these.",
-        },
-    })
-}
-
-/// The options of `injection_paths` that keep a path inside its directory.
-pub const CONFINED_PATHS: [&str; 3] = ["confined", "own", "local"];
-
-/// What a markup finding's values hold where they enter the markup, asked
-/// only after a finding whose one concern is markup. vaultwarden's
-/// `hibp_breach` percent-encodes the username before it builds the link,
-/// oak's examples write a URL object whose serialization percent-encodes
-/// `<` and `>`, and a JSP page runs its own `esc()` first: the markup check
-/// reads a variable joined into HTML, whatever it was turned into before.
-pub fn markup_values(code: &str, callers: bool) -> Value {
-    let (by_callers, note) = if callers {
-        (
-            " or by the functions in `callers`",
-            format!("{CALLERS} {EVIDENCE}"),
-        )
-    } else {
-        ("", EVIDENCE.to_string())
-    };
-    json!({
-        "type": "choice",
-        "instructions": {
-            "question": format!("What do the values that `{code}` places into HTML or SVG markup hold where they enter it?"),
-            "note": note,
-        },
-        "criteria": {
-            "encoded": format!("Text already escaped for HTML, percent-encoded or serialized as a URL before it enters the markup, in this code{by_callers}, so it cannot hold `<`, `>`, `&` or quotes."),
-            "typed": "Numbers, dates, booleans or ids, or names chosen from a fixed list.",
-            "own": "Text the program writes itself or reads from its configuration.",
-            "raw": "Text as another party or a caller wrote it, which can hold `<`, `>`, `&` or quotes.",
-            "unknown": "Values whose origin or handling is not shown.",
-        },
-    })
-}
-
-/// The options of `markup_values` that cannot open a tag or attribute.
-pub const HARMLESS_MARKUP: [&str; 3] = ["encoded", "typed", "own"];
-
-/// Where a redirect finding's targets can lead, asked only after a finding
-/// whose one concern is a redirect. vaultwarden's admin login redirects to
-/// its admin path followed by the form's value, and shiori's to its login
-/// page with the current path as a query value: a fixed path before the
-/// variable keeps the target on the site, which the redirect check does not
-/// ask. Offered "its own origin and a slash" without the form written out,
-/// chatbot-ui's `requestUrl.origin + next` read as staying on the site at
-/// 0.63, though `next=@evil.com` leaves it.
-pub fn redirect_reach(code: &str, callers: bool) -> Value {
-    let note = if callers {
-        format!("{CALLERS} {EVIDENCE}")
-    } else {
-        EVIDENCE.to_string()
-    };
-    json!({
-        "type": "choice",
-        "instructions": {
-            "question": format!("Where can the targets that `{code}` redirects clients to lead?"),
-            "note": note,
-        },
-        "criteria": {
-            "own_site": "Only to the program's own site: every target starts with a fixed path written in the code, such as `/admin` or `/login?next=`, so it begins with one slash and a path; or with the program's own origin followed by a slash written in the code; variables only follow that fixed part or fill its query string.",
-            "checked": "Only where a check allows: the target is compared with an allowed list of hosts or checked to be a path on the site before the redirect.",
-            "anywhere": "Anywhere a variable says: a variable starts the target, or directly follows the program's own origin or a host with no slash written between them, as in `origin + next`, where `@evil.com` or `.evil.com` in the variable names another host.",
-            "none": "It does not redirect.",
-        },
-    })
-}
-
-/// The options of `redirect_reach` that keep a redirect on the site.
-pub const OWN_SITE: [&str; 3] = ["own_site", "checked", "none"];
-
-/// When a logging finding's log line runs, asked only for a sensitive-data
-/// finding raised by its log checks. vaultwarden logs SSO tokens inside
-/// `if CONFIG.sso_debug_tokens()`, a setting off by default and documented
-/// for logging them while troubleshooting: logging an identifier instead,
-/// as the finding says, would remove the feature.
-pub fn logged_when(code: &str) -> Value {
-    json!({
-        "type": "choice",
-        "instructions": {
-            "question": format!("When does `{code}` write the secret or personal value to a log?"),
-            "note": EVIDENCE,
-        },
-        "criteria": {
-            "always": "Whenever that code runs, at a level the program logs at in normal operation, such as info, warning or error.",
-            "debug": "Only at debug or trace level, which an operator may turn on to troubleshoot.",
-            "opt_in": "Only when an operator turns on a setting, off by default, whose purpose is to log these values for troubleshooting, such as an option named for logging tokens or request bodies.",
-            "none": "It writes no secret or personal value to a log.",
-        },
-    })
-}
-
-/// The option of `logged_when` for a setting whose purpose is the logging.
-pub const OPT_IN_LOGGING: &str = "opt_in";
 
 /// Asked in the sensitive-data trace: whether every error message is the
 /// program's own. It can only clear the error-detail signals; functions that
@@ -563,36 +398,6 @@ pub const UNHANDLED: [Check; 7] = [
     },
 ];
 
-const DJANGO_PATH: Check = Check {
-    id: "path",
-    question: "Does `{code}` open, write or delete a file at a path built from a variable without checking that it stays inside a directory?",
-    yes: "A path is built from a variable that can hold a name or path from outside the program, such as a request, upload, archive entry or user input, and is used without reducing it to a base name, rejecting parent-directory parts, or checking that the resolved path stays under a base directory.",
-    no: "Such paths are checked; are built from the program's own directories, such as its project root, data or cache directory, joined with names the program chooses; come from the program's configuration or the command line of the person running it; or it uses no such path.",
-    no_examples: &[
-        "A file saved through Django's storage API, such as a file field's save or default_storage.save, which keeps names inside the storage's root",
-        "Files listed from one of the program's own directories, such as its fixtures",
-    ],
-};
-
-const DJANGO_SQL: Check = Check {
-    id: "sql",
-    question: "Does `{code}` put a variable into the text of an SQL query instead of passing it as a bound parameter?",
-    yes: "A variable is joined, formatted or interpolated into SQL text that is then run, such as with %, + or an f-string passed to execute, raw, extra or RawSQL.",
-    no: "Values are passed as bound parameters, placeholders or the params argument, or through the ORM's filters; identifiers such as table and column names come from a fixed list or the database schema, or are quoted by a function that wraps them in double quotes and doubles any double quote inside; or it runs no SQL.",
-    no_examples: &[],
-};
-
-const DJANGO_MARKUP: Check = Check {
-    id: "markup",
-    question: "Does `{code}` put a variable into HTML or SVG markup without escaping it, itself or through a template it renders?",
-    yes: "A variable is joined into HTML or SVG text, marked as safe markup with mark_safe or SafeString, or passed to a template that writes it with a safe filter or with autoescaping off, without an escaping function.",
-    no: "Values go through an escaping function or a template that escapes them, or it builds no markup.",
-    no_examples: &[
-        "A template rendered with the variable in its context, when the template writes that value without a safe filter, which Django escapes",
-        "format_html or format_html_join with the variables passed as its arguments, which escapes them",
-    ],
-};
-
 /// The markup check of a function outside Django that renders a template
 /// writing values without escaping: DVNA's product search hands the
 /// request's search term to `views/app/products.ejs`, which writes it with
@@ -704,68 +509,6 @@ const TOKEN: Check = Check {
     no_examples: &[],
 };
 
-const DJANGO_HASH: Check = Check {
-    id: "hash",
-    question: "Does `{code}` hash passwords or derive keys from them with a fast or broken hash, or with few iterations?",
-    yes: "It hashes passwords or derives keys from them with MD5, SHA-1, a single round of SHA-256, or a key derivation function with few iterations, or lists such a hasher first in PASSWORD_HASHERS.",
-    no: "It uses bcrypt, scrypt, Argon2 or a key derivation function with many iterations; it hashes through Django's set_password, make_password or a form's save, whose hasher the settings choose; or it does not handle passwords.",
-    no_examples: &[],
-};
-
-const DJANGO_TLS: Check = Check {
-    id: "tls",
-    question: "Does `{code}` turn off certificate, host name or signature verification?",
-    yes: "It turns off certificate or host name checks, accepts invalid certificates or host names, or decodes a signed token such as a JWT without verifying its signature.",
-    no: "It keeps verification on, or makes no TLS connection and reads no signed token.",
-    no_examples: &[],
-};
-
-const DJANGO_CORS: Check = Check {
-    id: "cors",
-    question: "Does `{code}` set cross-origin rules that let pages from origins it does not fully check read the deployed site's responses with credentials?",
-    yes: "It allows any origin, reflects the request's origin, or matches origins loosely, such as by suffix or substring, while allowing credentials, in code or settings that the deployed site uses.",
-    no: concat!(
-        "It allows only listed origins by exact match or allows no credentials; it sets no cross-origin rules itself, ",
-        "whatever the site's settings choose; or a settings module for production that imports these settings sets it again."
-    ),
-    no_examples: &[],
-};
-
-const DJANGO_COOKIE: Check = Check {
-    id: "cookie",
-    question: "Does `{code}` set or configure a session or authentication cookie of the deployed site without the Secure or HttpOnly flag?",
-    yes: "A cookie that holds a session or token is set or configured without Secure or without HttpOnly, in code or settings that the deployed site uses.",
-    no: concat!(
-        "Such cookies have both flags, the cookie holds no session or token, or the code sets no cookie; ",
-        "or a settings module for production that imports these settings sets it again."
-    ),
-    no_examples: &[],
-};
-
-const DEBUG: Check = Check {
-    id: "debug",
-    question: "Does `{code}` turn on a web framework's debug mode or detailed error pages for the deployed site?",
-    yes: "It turns debug mode on, such as DEBUG = True, in code or settings that the deployed site uses.",
-    no: "Debug mode is off, is read from the environment with off as the default, is turned on only in settings for tests or local development, or a settings module for production that imports these settings sets it again.",
-    no_examples: &[],
-};
-
-const CSRF: Check = Check {
-    id: "csrf",
-    question: "Does `{code}` turn off protection against cross-site request forgery for requests that change data?",
-    yes: "A view or route that changes data as the user its session cookie signs in, such as their profile, password or records, is exempted from the CSRF check, such as with csrf_exempt, or the CSRF middleware or check is removed.",
-    no: "CSRF protection stays on; the exempted endpoint authenticates each request itself rather than with the session cookie, such as a webhook that verifies a signature, an API that reads a token from a header, or a form for visitors who are not signed in that asks for a password reset email or checks a reset token it is sent; it only reads data; or it sets nothing about CSRF.",
-    no_examples: &[],
-};
-
-const SECRET: Check = Check {
-    id: "literal_secret",
-    question: "Does `{code}` set a signing key, password or token that the deployed site uses to a literal written in the code?",
-    yes: "A secret key, password, token or API key that the deployed program uses is a literal in the code, including one shown as a redacted literal.",
-    no: "Secrets are read from the environment, a file or a secret store; the literal is empty or only a placeholder; it is used only in tests or local development; or a settings module for production that imports these settings sets it again.",
-    no_examples: &[],
-};
-
 /// Specific exposures, asked when the broad presence questions are not clear:
 /// a logged configuration or argument list that holds a password, and an
 /// exception's own text in a response, were left undecided by them.
@@ -801,57 +544,3 @@ pub const EXCEPTION_TO_CLIENT_FROM_CALLEES: Check = Check {
     no: "Responses carry fixed messages or codes, or messages written to explain invalid input or a missing record to the client, whether the program's own, such as the errors in `errors_created_by_functions_it_calls`, or a framework's validation and bad-request errors; details stay in server logs.",
     no_examples: &[],
 };
-
-const DJANGO_EXCEPTION_TO_CLIENT: Check = Check {
-    id: "exception_to_client",
-    question: "Does `{code}` send an exception's message, stack trace or a database error to a remote client in a response?",
-    yes: "The text of an exception it did not raise itself to explain bad input, or a stack trace, is put into the response to a request.",
-    no: "Responses carry fixed messages or codes, or only messages written to explain invalid input, such as those of Django's or a form's ValidationError; exceptions it does not catch go to the framework's error handling; details stay in server logs.",
-    no_examples: &[],
-};
-
-const ENVIRONMENT_TO_CLIENT: Check = Check {
-    id: "environment_to_client",
-    question: "Does `{code}` send the server's environment variables, settings or whole request metadata to a remote client?",
-    yes: "It puts the process environment, the application's settings, or a whole request metadata object such as Django's request.META, which holds the server's environment, into a response or a page it renders.",
-    no: "It sends only chosen fields meant for the client, such as the user's own name or a public setting, or sends no such data.",
-    no_examples: &[],
-};
-
-const DJANGO_REDIRECT: Check = Check {
-    id: "redirect",
-    question: "Does `{code}` redirect the client to a URL or path taken from a variable without checking where it leads?",
-    yes: "A URL or path that a request carries, such as a query parameter, form field, header or cookie, is passed to redirect(), HttpResponseRedirect or a Location header without checking that it is a path on the program's own site or that its host is on an allowed list.",
-    no: "The target is fixed, is a route name or built with reverse(), is one of the program's own paths with only ids or names from variables in it, is checked such as with url_has_allowed_host_and_scheme, comes from the program's configuration, or is read from a stored record rather than the request; or it does not redirect.",
-    no_examples: &[],
-};
-
-/// Checks asked of Django code in place of the common check with the same
-/// id: they name Django's raw queries (`raw`, `extra`, `RawSQL`), safe
-/// markup and templates, storage API, redirects, password hashers and
-/// validation errors, and ask cookie, CORS and verification settings about
-/// the deployed site, since settings modules that production imports and
-/// overrides were flagged when asked about the module alone.
-pub const DJANGO_VARIANTS: [Check; 9] = [
-    DJANGO_SQL,
-    DJANGO_MARKUP,
-    DJANGO_PATH,
-    DJANGO_REDIRECT,
-    DJANGO_TLS,
-    DJANGO_HASH,
-    DJANGO_CORS,
-    DJANGO_COOKIE,
-    DJANGO_EXCEPTION_TO_CLIENT,
-];
-
-/// The injection check Django code adds: request data given to a
-/// deserializer that can build any object (`pickle.loads(request.body)`).
-pub const DJANGO_UNHANDLED: [Check; 1] = [DESERIALIZE];
-
-/// The weak settings Django code adds, which its settings modules and view
-/// decorators decide: debug mode, CSRF protection and a literal secret key.
-pub const DJANGO_SETTINGS: [Check; 3] = [DEBUG, CSRF, SECRET];
-
-/// The exposure Django code adds: `request.META` or the settings, which
-/// hold the server's environment, sent to a client.
-pub const DJANGO_EXPOSURES: [Check; 1] = [ENVIRONMENT_TO_CLIENT];
