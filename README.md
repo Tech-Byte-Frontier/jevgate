@@ -9,18 +9,9 @@
 
 JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, a probability and a concrete next step, so an agent or CI job can act on it and a person can check it quickly.
 
-```text
-JevGate: consider · gate passed · 42 files · 118 API requests · 263410 input tokens · ~$0.0111
+![JevGate's terminal output on zoxide: the gate fails on 3 review findings (a function mixing separate jobs, and two sets of importers repeating the same steps), 3 consider findings (a group of file helpers that could be a module, branching that hides a main path, an unexplained 7) and optional notes on unnamed values](site/src/images/terminal.svg)
 
-Consider (2):
-  src/billing/invoices.ts:88 [maintainability/shared-logic] `createInvoice` and `createReceipt`
-    perform the same steps for the same purpose (0.93). Differences: `invoices`→`receipts`.
-    → Move the shared steps into one implementation
-  src/api/search.py:41 [security/injection] `search_orders` places its parameters into a
-    database query without binding, escaping or checking them; a caller passing outside
-    input would make it exploitable (0.88).
-    → Pass the values as bound query parameters
-```
+JevGate 0.22.0 on [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424b3f1033094ffd97da6d47585e38259), rerun from its answer cache, so it cost nothing; 9 of the 11 notes are left out.
 
 **[Documentation](https://tech-byte-frontier.github.io/jevgate/)** · [Rules](https://tech-byte-frontier.github.io/jevgate/reference/rules.html) · [Configuration](https://tech-byte-frontier.github.io/jevgate/configuration.html) · [CI](https://tech-byte-frontier.github.io/jevgate/ci.html) · [Troubleshooting](https://tech-byte-frontier.github.io/jevgate/troubleshooting.html) · [Changelog](CHANGELOG.md)
 
@@ -55,6 +46,10 @@ jevgate check --dry-run --show-requests   # see exactly what would be uploaded; 
 jevgate check --report                    # review, then open a local HTML dashboard
 jevgate baseline                          # accept today's findings; later checks fail only on new ones
 ```
+
+`jevgate check --report` writes the same findings to a local dashboard you can filter by path and classification, with each file's findings, undecided units and the answers behind them:
+
+![JevGate's HTML report on zoxide: totals for files, review and consider findings, notes and cost, then a list of files by classification, with src/util.rs open to show its review and consider findings, their next steps and one undecided unit](site/src/images/report.png)
 
 `jevgate --help` gives the workflow, exit codes, files and environment, and `jevgate check --help` explains each flag and the JSON report. Coding agents can also call JevGate as a tool through its MCP server, `jevgate mcp` ([coding agents](https://tech-byte-frontier.github.io/jevgate/coding-agents.html)).
 
