@@ -135,6 +135,33 @@ fn an_outline_too_long_for_a_recheck_is_decided_by_its_kind_alone() {
 }
 
 #[test]
+fn a_request_answered_once_fits_whatever_the_calibration() {
+    // About 79 KB: the recheck sends it whole, which the estimate fits at the
+    // default 3.0 bytes per token and not at 2.0.
+    let padding = format!("// {}\n", "x".repeat(100)).repeat(700);
+    let (project, options) = organized("lib.rs", &format!("{}{padding}", two_concerns()));
+    let first = run(&project, &options, &mut scripted(3));
+    assert_eq!(first.stages["recheck"].successful_requests, 1);
+    let context = project.context();
+    let (inputs, mut report) = crate::tests::snapshot(&project, &options);
+    let store = crate::storage::Store::open(&project.0).unwrap();
+    let mut mock = Mock::default();
+    let mut session = crate::tests::session(&options, &context, &store, &mut mock);
+    session.budget = TokenBudget {
+        bytes_per_token: 2.0,
+    };
+    session.evaluate(&inputs, &mut report).unwrap();
+    assert_eq!(mock.calls, 0, "every request comes from the cache");
+    assert_eq!(report.stages["recheck"].cache_hits, 1);
+    let status = |report: &Report| {
+        report.files[0].dimensions["file_organization"]
+            .status
+            .clone()
+    };
+    assert_eq!(status(&report), status(&first));
+}
+
+#[test]
 fn outlines_carry_member_and_file_sizes() {
     let (project, options) = rule_project(&two_concerns(), catalog::FILE_ORGANIZATION);
     let mut mock = Mock::default();

@@ -33,7 +33,7 @@ fn planned(project: &Project, options: &CheckArgs) -> (Vec<Input>, Plan) {
         .iter()
         .enumerate()
         .filter_map(
-            |(i, input)| match crate::file_kind::plan(input, options, &budget) {
+            |(i, input)| match crate::file_kind::plan(input, options, budget.uncached()) {
                 Ok(crate::file_kind::Plan::Ready(view)) => Some((i, view)),
                 _ => None,
             },
