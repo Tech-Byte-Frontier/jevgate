@@ -391,16 +391,32 @@ fn injection_wording(
         return ((message, action), category.to_string());
     }
     let get = |q: &str| answers.get(q).copied();
-    if strength == Strength::Note && crate::units::outcome::confined_paths(&get) {
-        return (
-            (
-                format!(
-                    "{subject} builds {noun} from a variable, but what it can hold, such as an id its type parses, likely keeps the path inside its directory."
-                ),
-                "Optional: confirm the value cannot hold `..` or a slash where it enters",
+    let harmless = (strength == Strength::Note)
+        .then(|| crate::units::outcome::harmless(&get))
+        .flatten();
+    let confirmed = match harmless {
+        Some("path") => Some((
+            format!(
+                "{subject} builds {noun} from a variable, but what it can hold, such as an id its type parses, likely keeps the path inside its directory."
             ),
-            category.to_string(),
-        );
+            "Optional: confirm the value cannot hold `..` or a slash where it enters",
+        )),
+        Some("markup") => Some((
+            format!(
+                "{subject} places a variable into {noun}, but it was likely escaped or encoded before, so it cannot open a tag or attribute."
+            ),
+            "Optional: confirm the value is escaped on every path that reaches the markup",
+        )),
+        Some("redirect") => Some((
+            format!(
+                "{subject} redirects clients to a target built from a variable, but a fixed path or check likely keeps it on the site."
+            ),
+            "Optional: confirm no target can start with `//` or another host",
+        )),
+        _ => None,
+    };
+    if let Some(wording) = confirmed {
+        return (wording, category.to_string());
     }
     let message = match (strength, outside) {
         (Strength::Review, _) => format!(

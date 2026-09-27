@@ -62,31 +62,50 @@ pub(in crate::units) fn injection_outcome<'a>(
     };
     Some(match by_origin(origin, &found, get) {
         Outcome::Consider(p) if program_values(get) => Outcome::Note(p),
-        Outcome::Review(p) | Outcome::Consider(p) if confined_paths(get) => Outcome::Note(p),
+        Outcome::Review(p) | Outcome::Consider(p) if harmless(get).is_some() => Outcome::Note(p),
         outcome => outcome,
     })
 }
 
-/// Whether every injection check that found a variable placed unhandled is
-/// the path check: such a finding is asked what its paths can hold.
-pub(in crate::units) fn rests_on_paths<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+/// The kinds of injection whose values a confirm Choice asks about after
+/// the finding, with its question and the options that make it a note.
+const CONFIRMED: [(&str, &str, &[&str]); 3] = [
+    ("path", "paths", &questions::CONFINED_PATHS),
+    ("markup", "markup_values", &questions::HARMLESS_MARKUP),
+    ("redirect", "redirect_reach", &questions::OWN_SITE),
+];
+
+/// The one kind of injection a finding rests on, when every check that
+/// found a variable placed unhandled is that kind and a confirm Choice asks
+/// about it.
+pub(in crate::units) fn confirmable<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Option<&'static str> {
     let found = found_injections(get);
-    !found.is_empty() && found.iter().all(|id| *id == "path")
+    let first = *found.first()?;
+    CONFIRMED
+        .iter()
+        .find(|(kind, ..)| *kind == first && found.iter().all(|id| id == kind))
+        .map(|(kind, ..)| *kind)
 }
 
-/// Whether a path finding's paths, asked after it, lean toward names that
-/// stay inside their directory, the program's own or the local user's: a
-/// route parameter parsed as a UUID or as Rocket's `PathBuf`, a base name or
-/// a checked id. Such a finding is a note. On the corpus, the 5 path
-/// findings labeled right (request parameters and uploaded names joined to
-/// a directory) answered another party's input at 0.96 or more, while
-/// vaultwarden's 4 wrong ones on typed Rocket route parameters leaned to
-/// confined names at 0.67 to 0.78; none reached the threshold, as a type's
-/// parsing is shown only by its derive list.
-pub(in crate::units) fn confined_paths<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
-    rests_on_paths(get)
-        && choice_mass(get("paths"), &questions::CONFINED_PATHS)
-            .is_some_and(|p| probability_at_least(p, LEADING_PROBABILITY))
+/// The kind of a finding whose confirm Choice leans toward values that can
+/// do no harm there: paths that stay inside their directory (a route
+/// parameter parsed as a UUID or as Rocket's `PathBuf`, a base name, a
+/// checked id), markup values already escaped or encoded, or redirect
+/// targets that stay on the site. Such a finding is a note. On the corpus,
+/// the 5 path findings labeled right answered another party's input at 0.96
+/// or more, while vaultwarden's 4 wrong ones on typed Rocket route
+/// parameters leaned to confined names at 0.67 to 0.78, as a type's parsing
+/// is shown only by its derive list.
+pub(in crate::units) fn harmless<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+) -> Option<&'static str> {
+    let kind = confirmable(get)?;
+    let (_, question, clears) = CONFIRMED.iter().find(|(k, ..)| *k == kind)?;
+    choice_mass(get(question), clears)
+        .is_some_and(|p| probability_at_least(p, LEADING_PROBABILITY))
+        .then_some(kind)
 }
 
 /// Whether what a consider's values can hold, asked after it, leans toward

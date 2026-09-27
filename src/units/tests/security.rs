@@ -460,6 +460,7 @@ fn redirects_deserializers_and_uploads_are_checked_kinds_with_their_weakness() {
             ("resource", noul_at(0.95)),
             (check, noul_at(0.95)),
             ("origin", spread(0.0, 0.05, 0.95)),
+            ("redirect_reach", choice_of("anywhere", &REACH)),
         ];
         let report = run(&project, &options, &mut eval);
         let finding = &report.files[0].findings[0];
@@ -643,6 +644,7 @@ fn php_settled(markup: &str, path_check: f64, path: &str) -> (Status, u64) {
         ("origin", spread(0.4, 0.3, 0.3)),
         ("markup_parts", choice_of(markup, &MARKUP_PARTS)),
         ("path_parts", choice_of(path, &PATH_PARTS)),
+        ("markup_values", choice_of("raw", &MARKUP_VALUES)),
     ];
     let report = run(&project, &options, &mut eval);
     (
@@ -1645,11 +1647,15 @@ fn a_path_finding_is_a_note_when_its_paths_stay_in_their_directory() {
         .iter()
         .find_map(|u| match &u.detail {
             Detail::Security {
-                paths: Some(paths), ..
-            } => Some(paths.request()),
+                checked: Some(checked),
+                ..
+            } => Some(checked.request()),
             _ => None,
         })
-        .expect("an injection unit with a path confirm");
+        .expect("an injection unit with a confirm of its checks");
+    for question in ["paths", "markup_values", "redirect_reach"] {
+        assert!(paths["questions"].get(question).is_some(), "{question}");
+    }
     assert!(
         paths["state"]["types_named_in_parameters"][0]
             .as_str()
@@ -1728,3 +1734,78 @@ fn a_log_line_an_operator_turns_on_to_log_tokens_is_a_note() {
         "{message}"
     );
 }
+
+/// A handler that percent-encodes a name before it builds a link, and one
+/// that redirects to its admin path followed by a form value.
+const ENCODED: &str = "fn breach(username: &str) -> String {\n    let name: String = form_urlencoded::byte_serialize(username.as_bytes()).collect();\n    format!(\"<a href=\\\"https://example.org/?q={name}\\\">{name}</a>\")\n}\n";
+const ADMIN: &str = "fn login(form: Form<Login>) -> Redirect {\n    let target = form.redirect.clone();\n    Redirect::to(format!(\"{}{target}\", admin_path()))\n}\n";
+
+#[test]
+fn markup_and_redirect_findings_are_notes_when_their_values_can_do_no_harm() {
+    let judged = |source: &str, check: &'static str, question: &'static str, choice: Value| {
+        let (project, options) = security_project(source);
+        let mut eval = scripted(0);
+        let presence = if check == "markup" {
+            "interpreted"
+        } else {
+            "resource"
+        };
+        eval.overrides = vec![
+            (presence, noul_at(0.95)),
+            (check, noul_at(0.95)),
+            ("origin", spread(0.0, 0.0, 1.0)),
+            (question, choice),
+        ];
+        let report = run(&project, &options, &mut eval);
+        report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.rule == "security/injection")
+            .map(|f| (f.strength, f.message.clone()))
+            .unwrap()
+    };
+    let markup = MARKUP_VALUES;
+    assert_eq!(
+        judged(
+            ENCODED,
+            "markup",
+            "markup_values",
+            choice_of("raw", &markup)
+        )
+        .0,
+        Strength::Review
+    );
+    let (strength, message) = judged(
+        ENCODED,
+        "markup",
+        "markup_values",
+        choice_of("encoded", &markup),
+    );
+    assert_eq!(strength, Strength::Note, "percent-encoded before the link");
+    assert!(message.contains("escaped or encoded before"), "{message}");
+    let reach = REACH;
+    assert_eq!(
+        judged(
+            ADMIN,
+            "redirect",
+            "redirect_reach",
+            choice_of("anywhere", &reach)
+        )
+        .0,
+        Strength::Review
+    );
+    let (strength, message) = judged(
+        ADMIN,
+        "redirect",
+        "redirect_reach",
+        choice_of("own_site", &reach),
+    );
+    assert_eq!(strength, Strength::Note, "the admin path comes first");
+    assert!(message.contains("keeps it on the site"), "{message}");
+}
+
+/// The options of the Choice on what a markup finding's values hold.
+const MARKUP_VALUES: [&str; 5] = ["encoded", "own", "raw", "typed", "unknown"];
+
+/// The options of the Choice on where a redirect finding's targets lead.
+const REACH: [&str; 4] = ["anywhere", "checked", "none", "own_site"];

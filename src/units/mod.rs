@@ -193,9 +193,10 @@ pub enum Detail {
         /// For injection, what the values it places can hold, asked only
         /// after a consider that rests on its parameters.
         confirm: Option<FollowUp>,
-        /// For injection, what the variable parts of its file paths can
-        /// hold, asked only after a finding that rests on a path.
-        paths: Option<FollowUp>,
+        /// For injection, what the values of a path, markup or redirect
+        /// finding can hold or where they lead, asked only after a finding
+        /// whose one concern is one of those.
+        checked: Option<FollowUp>,
         /// For sensitive data, when its log line runs, asked only after a
         /// finding its log checks raised.
         logging: Option<FollowUp>,

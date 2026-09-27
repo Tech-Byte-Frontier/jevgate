@@ -292,7 +292,7 @@ pub fn rule_version(key: &str) -> &'static str {
         SHARED_LOGIC => "22",
         TEST_VALUE => "7",
         TEST_REDUNDANCY => "4",
-        INJECTION => "11",
+        INJECTION => "12",
         SENSITIVE_DATA => "8",
         HARDCODED_VALUES => "8",
         UNSAFE_SETTINGS => "6",

@@ -16,7 +16,9 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
         files,
         compose::unconfirmed_units,
         |unit| match &unit.detail {
-            Detail::Security { paths, logging, .. } => paths.as_ref().or(logging.as_ref()),
+            Detail::Security {
+                checked, logging, ..
+            } => checked.as_ref().or(logging.as_ref()),
             _ => None,
         },
     );
