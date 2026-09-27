@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-27
+
 Three changes to maintainability findings, each from the findings JevGate's own release check got wrong and measured on the corpus with every changed review and consider labeled by hand (a debatable one counting as not right): considers went from 57% to 59% right on the projects used for tuning, from 47% to 51% on the held-out ones and from 24% to 28% on 23 Bend 2 projects never used for tuning; no review changed but one wrong file-organization review. The self-check's baseline is empty, down from four accepted findings. Two changes to security findings come from the reviews JevGate got wrong on vaultwarden, found while preparing a pull request to it.
 
 - Function simplification: splitting a function of 20 lines or fewer is at most a note. 12 of 39 such considers were right on the tuned projects and 5 of 50 on the blind Bend 2 ones: helpers that read in one look, a dispatch over a token's cases, proofs. Function-simplification considers went from 68% to 73% right. Nothing is asked again.
@@ -235,7 +237,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.19.0...v0.20.0
