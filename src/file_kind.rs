@@ -458,7 +458,15 @@ fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
     let original = input.source.clone().unwrap_or_default();
     let path = &input.result.path;
     let located = locate_tests(path, &original)?;
-    if located.whole_file {
+    // A Bend 2 test is a whole program, so on a test path a file that
+    // defines `main` is one test, whether it ends in the output its run
+    // must print or keeps it beside it, as bendc's `tests/X.out`. Asked their
+    // purpose, 48 of 85 such files in eight Bend 2 projects stayed
+    // unresolved and were judged as application code.
+    let bend_program = input.result.role == "test"
+        && crate::analysis::bend::file(path)
+        && crate::analysis::bend::defines_main(&original);
+    if located.whole_file || bend_program {
         return Ok(tests_prepared(path, args));
     }
     let separated = merge_ranges(located.ranges);
@@ -706,6 +714,35 @@ mod tests {
         let mut options = args();
         options.include_tests = true;
         assert!(view_of(&project, &options).tests);
+    }
+
+    #[test]
+    fn a_bend_program_on_a_test_path_is_a_test_and_its_support_is_asked() {
+        let program = "import Base\nimport ../lib/math.bend as M\n\ndef square(x: U32) -> U32:\n  (x * x : U32)\n\ndef main() -> IO(Unit):\n  IO.print(U32.show(square(M.two())))\n";
+        let project = Project::new();
+        project.write("tests/square.bend", program);
+        project.write("tests/square.out", "4\n");
+        let view = view_of(&project, &args());
+        assert_eq!(view.classification.kind, TESTS);
+        assert_eq!(view.classification.basis, "deterministic");
+        assert!(!view.application);
+        // Support code on a test path defines no `main`: its purpose is asked.
+        let project = Project::new();
+        project.write(
+            "tests/lib/math.bend",
+            "import Base\n\ndef two() -> U32:\n  2\n\ndef three() -> U32:\n  3\n",
+        );
+        let input = crate::inventory::collect(&args(), &project.context(), &[])
+            .unwrap()
+            .remove(0);
+        assert!(matches!(
+            plan(&input, &args(), &TokenBudget::default()).unwrap(),
+            Plan::Purpose(..)
+        ));
+        // Outside a test path, `main` is the program's entry.
+        let project = Project::new();
+        project.write("src/square.bend", program);
+        assert!(view_of(&project, &args()).application);
     }
 
     #[test]
