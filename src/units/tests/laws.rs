@@ -152,3 +152,21 @@ fn a_comment_heading_several_laws_is_asked_with_all_of_them() {
     );
     assert!(!asked[1]["reading"].as_str().unwrap().starts_with('`'));
 }
+
+#[test]
+fn a_law_s_comment_is_the_block_above_it_not_its_section_s_opening() {
+    let laws = "import Base\nimport ./main.bend as Srv\n\n# Pages\n# =====\n#\n# The server answers every request with a page, so these laws give: a\n# client that reconnects reads the same page it read before.\n\n# LAW: the response ends in the page\nlaw ends_in_page:\n  for +page: String\n  exs head: String\n  {head ++ page == Srv.http_response(page) : String}\n\n# Sorting: every list sort returns is sorted, whatever its input.\n\nlaw sort_sorted:\n  for +xs: List<&2, Nat>\n  Srv.Sorted(Srv.sort(xs))\n";
+    let (project, options) = project_with(
+        &[("server/main.bend", MAIN), ("server/LAWS.bend", laws)],
+        &[catalog::LAWS],
+    );
+    let (_, plan) = planned(&project, &options);
+    let asked = &plan.requests[0].request["state"]["laws"];
+    assert_eq!(asked[0]["comment"], "# LAW: the response ends in the page");
+    // A paragraph with nothing between it and the law but a blank line is
+    // the law's comment.
+    assert_eq!(
+        asked[1]["comment"],
+        "# Sorting: every list sort returns is sorted, whatever its input."
+    );
+}
