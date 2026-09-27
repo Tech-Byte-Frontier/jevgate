@@ -354,36 +354,70 @@ fn propositions(scope: &Scope<'_>) -> BTreeSet<String> {
 /// hardcoded-value considers were such samples. A def a law calls that
 /// returns data, such as the `get` of a JSON library, is the law's subject.
 fn law_predicates(scope: &Scope<'_>) -> BTreeSet<String> {
-    use crate::analysis::units::Kind;
-    let bend = |owner: &&usize| crate::analysis::bend::file(&scope.inputs[**owner].result.path);
-    let mut checked = BTreeSet::new();
-    let mut callers: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    let mut returns_bool = BTreeSet::new();
-    for owner in scope.owners.iter().filter(bend) {
-        let lines = scope.test_lines(*owner);
-        for unit in &scope.units[owner].units {
-            let test = lines.iter().any(|l| unit.overlaps(l));
-            if unit.kind == Kind::Law || test {
-                checked.extend(unit.calls.iter().map(String::as_str));
-                continue;
-            }
-            if !unit.callable() {
-                continue;
-            }
-            if unit.signature.ends_with("-> Bool") {
-                returns_bool.insert(unit.name.as_str());
-            }
-            for call in unit.calls.iter().filter(|c| **c != unit.short_name) {
-                callers.entry(call).or_default().insert(unit.name.as_str());
-            }
-        }
-    }
-    let mut predicates: BTreeSet<&str> = checked
+    let calls = LawCalls::of(scope);
+    let predicates = calls
+        .checked
         .iter()
         .copied()
-        .filter(|name| returns_bool.contains(name))
+        .filter(|name| calls.returns_bool.contains(name))
         .collect();
-    // No def outside the predicates calls one; then the defs only they call.
+    let predicates = called_only_among(predicates, &calls.callers);
+    with_defs_only_they_call(predicates, &calls.callers)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+/// What the laws and tests of a scope's Bend 2 files call, its defs that
+/// return `Bool`, and who calls each def outside laws and tests.
+struct LawCalls<'a> {
+    checked: BTreeSet<&'a str>,
+    returns_bool: BTreeSet<&'a str>,
+    callers: BTreeMap<&'a str, BTreeSet<&'a str>>,
+}
+
+impl<'a> LawCalls<'a> {
+    fn of(scope: &'a Scope<'_>) -> Self {
+        use crate::analysis::units::Kind;
+        let bend = |owner: &&usize| crate::analysis::bend::file(&scope.inputs[**owner].result.path);
+        let mut calls = Self {
+            checked: BTreeSet::new(),
+            returns_bool: BTreeSet::new(),
+            callers: BTreeMap::new(),
+        };
+        for owner in scope.owners.iter().filter(bend) {
+            let lines = scope.test_lines(*owner);
+            for unit in &scope.units[owner].units {
+                let test = lines.iter().any(|l| unit.overlaps(l));
+                if unit.kind == Kind::Law || test {
+                    calls.checked.extend(unit.calls.iter().map(String::as_str));
+                    continue;
+                }
+                if !unit.callable() {
+                    continue;
+                }
+                if unit.signature.ends_with("-> Bool") {
+                    calls.returns_bool.insert(unit.name.as_str());
+                }
+                for call in unit.calls.iter().filter(|c| **c != unit.short_name) {
+                    calls
+                        .callers
+                        .entry(call)
+                        .or_default()
+                        .insert(unit.name.as_str());
+                }
+            }
+        }
+        calls
+    }
+}
+
+/// The predicates that no def outside them calls, dropping one another
+/// until none is left to drop.
+fn called_only_among<'a>(
+    mut predicates: BTreeSet<&'a str>,
+    callers: &BTreeMap<&'a str, BTreeSet<&'a str>>,
+) -> BTreeSet<&'a str> {
     loop {
         let kept: BTreeSet<&str> = predicates
             .iter()
@@ -395,10 +429,17 @@ fn law_predicates(scope: &Scope<'_>) -> BTreeSet<String> {
             })
             .collect();
         if kept == predicates {
-            break;
+            return predicates;
         }
         predicates = kept;
     }
+}
+
+/// The predicates and the defs only they call, added until none is left.
+fn with_defs_only_they_call<'a>(
+    mut predicates: BTreeSet<&'a str>,
+    callers: &BTreeMap<&'a str, BTreeSet<&'a str>>,
+) -> BTreeSet<&'a str> {
     loop {
         let only_theirs: Vec<&str> = callers
             .iter()
@@ -408,9 +449,8 @@ fn law_predicates(scope: &Scope<'_>) -> BTreeSet<String> {
             .map(|(name, _)| *name)
             .collect();
         if only_theirs.is_empty() {
-            break;
+            return predicates;
         }
         predicates.extend(only_theirs);
     }
-    predicates.into_iter().map(str::to_string).collect()
 }
