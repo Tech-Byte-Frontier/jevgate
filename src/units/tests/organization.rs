@@ -314,3 +314,26 @@ fn short_files_are_too_small_to_split_and_never_clear() {
     assert_eq!((dimension.units.too_small, mock.calls), (1, 0));
     assert_eq!(dimension.status, Status::NotApplicable);
 }
+
+#[test]
+fn a_bend_file_is_weighed_for_a_split_only_past_its_own_floor() {
+    let defs = |count: usize| -> String {
+        let mut source = String::from("import Base\n\n");
+        for i in 0..count {
+            source.push_str(&format!(
+                "def f{i}(x: Nat) -> Nat:\n  match x:\n    case 0n:\n      1n\n    case 1n+p:\n      f{i}(p)\n\n"
+            ));
+        }
+        source
+    };
+    // 240 member lines: past the floor of other languages, not Bend's.
+    let (project, options) = organized("src/lib.bend", &defs(40));
+    let mut mock = Mock::default();
+    let report = run(&project, &options, &mut mock);
+    let dimension = &report.files[0].dimensions["file_organization"];
+    assert_eq!((dimension.units.too_small, mock.calls), (1, 0));
+    // 360 member lines are weighed.
+    let (project, options) = organized("src/lib.bend", &defs(60));
+    let (_, plan) = planned(&project, &options);
+    assert_eq!(stages(&plan), ["outline"]);
+}

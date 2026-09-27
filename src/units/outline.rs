@@ -24,6 +24,11 @@ const CALLS: usize = 12;
 const USED_BY: usize = 3;
 /// Files with fewer non-blank lines are too small to split.
 pub const MIN_FILE_LINES: usize = 100;
+/// The same for Bend 2, which writes each match arm, binding and effect on
+/// a line of its own. On 25 Bend 2 projects, the 16 file-organization
+/// findings on files with fewer member lines were all labeled wrong, and
+/// the 13 right ones were on files of 313 member lines or more.
+pub const MIN_BEND_FILE_LINES: usize = 300;
 
 /// One listed member: its name, its lines and the state sent for it.
 struct Member {
@@ -145,7 +150,12 @@ fn plan_outline(
     let (request, asked) = outline.request(file, Ask::First);
     let fits = file.budget.fits_structured(&request);
     // A short file is read in one pass; splitting it is not a maintainability gain.
-    let small = member_code_lines(file.source, &listed) < MIN_FILE_LINES;
+    let floor = if crate::analysis::bend::file(file.path) {
+        MIN_BEND_FILE_LINES
+    } else {
+        MIN_FILE_LINES
+    };
+    let small = member_code_lines(file.source, &listed) < floor;
     let judged = fits && !small;
     let first = listed.iter().map(|m| m.line).min().unwrap_or(1);
     let last = listed.iter().map(|m| m.end_line).max().unwrap_or(first);

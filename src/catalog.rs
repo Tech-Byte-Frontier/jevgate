@@ -401,6 +401,10 @@ pub fn policy() -> BTreeMap<String, f64> {
             crate::units::outline::MIN_FILE_LINES as f64,
         ),
         (
+            "min_bend_file_lines".into(),
+            crate::units::outline::MIN_BEND_FILE_LINES as f64,
+        ),
+        (
             "deep_nesting".into(),
             crate::analysis::nesting::DEEP_NESTING as f64,
         ),
