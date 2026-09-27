@@ -62,8 +62,25 @@ pub(in crate::units) fn injection_outcome<'a>(
     };
     Some(match by_origin(origin, &found, get) {
         Outcome::Consider(p) if program_values(get) => Outcome::Note(p),
+        Outcome::Review(p) | Outcome::Consider(p) if confined_paths(get) => Outcome::Note(p),
         outcome => outcome,
     })
+}
+
+/// Whether every injection check that found a variable placed unhandled is
+/// the path check: such a finding is asked what its paths can hold.
+pub(in crate::units) fn rests_on_paths<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    let found = found_injections(get);
+    !found.is_empty() && found.iter().all(|id| *id == "path")
+}
+
+/// Whether a path finding's paths, asked after it, can hold only names that
+/// stay inside their directory, the program's own or the local user's, at
+/// the threshold: a route parameter parsed as a UUID or as Rocket's
+/// `PathBuf`, a base name or a checked id. Such a finding is a note.
+fn confined_paths<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    rests_on_paths(get)
+        && choice_mass(get("paths"), &questions::CONFINED_PATHS).is_some_and(at_least)
 }
 
 /// Whether what a consider's values can hold, asked after it, leans toward

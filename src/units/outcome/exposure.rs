@@ -51,6 +51,24 @@ pub(in crate::units) fn messages<'a>(
     })
 }
 
+/// The sensitive-data signals that a function writes a value to a log.
+pub(in crate::units) const LOG_SIGNALS: [&str; 2] = ["logs_secret", "logs_object_secret"];
+
+/// Whether a log signal reached a finding: its log line is then asked when
+/// it runs.
+pub(in crate::units) fn logs_found<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    LOG_SIGNALS
+        .iter()
+        .any(|q| matches!(get(q).map(noul), Some(Outcome::Review(_))))
+}
+
+/// Whether the log line runs only when an operator turns on a setting whose
+/// purpose is that logging, at the threshold. The operator chose to log the
+/// value, so its log signals are at most a note.
+fn opted_in<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    choice_mass(get("logged_when"), &[questions::OPT_IN_LOGGING]).is_some_and(at_least)
+}
+
 /// A judged exposure answer and how far it leans toward its concern.
 type Signal = (Outcome, f64);
 
@@ -91,7 +109,18 @@ fn exposure_signals<'a>(
         .then(|| messages(get))
         .flatten();
     let away = rule == catalog::SENSITIVE_DATA && away_from_clients(get);
-    let judge = |question: &str, answer: &Answer| exposure_signal(question, answer, own, away);
+    let opted_in = rule == catalog::SENSITIVE_DATA && opted_in(get);
+    let judge = |question: &str, answer: &Answer| {
+        let signal = exposure_signal(question, answer, own, away);
+        match signal {
+            (Outcome::Review(p) | Outcome::Consider(p), lean)
+                if opted_in && LOG_SIGNALS.contains(&question) =>
+            {
+                (Outcome::Note(p), lean)
+            }
+            signal => signal,
+        }
+    };
     // A Choice asked whenever a presence signal is not clear rules it out
     // too: what a function's logs write clears an audit line that names who
     // signed in, which the presence question found as personal data.
@@ -155,10 +184,19 @@ fn exposure_level(rule: &str, presence: &[Signal], specific: &[Signal]) -> Outco
             !probability_at_least(*lean, LEADING_PROBABILITY)
                 && !matches!(o, Outcome::Review(_) | Outcome::Consider(_))
         });
+    // A signal already lowered to a note, such as a log line an operator
+    // turned on to log that value.
+    let noted = presence
+        .iter()
+        .chain(specific)
+        .filter_map(|(o, _)| matches!(o, Outcome::Note(_)).then(|| o.concern()))
+        .reduce(f64::max);
     if unnamed && !found.is_empty() {
         Outcome::Note(strongest(&found).concern())
     } else if !found.is_empty() {
         strongest(&found)
+    } else if let Some(p) = noted {
+        Outcome::Note(p)
     } else if ruled_out {
         Outcome::Clear
     } else if probability_at_least(leaning, LEADING_PROBABILITY) {

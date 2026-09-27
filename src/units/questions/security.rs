@@ -225,6 +225,72 @@ pub fn injection_values(code: &str, callers: bool) -> Value {
 /// The options of `injection_values` that hold only the program's own values.
 pub const PROGRAM_VALUES: [&str; 3] = ["fixed", "own", "local"];
 
+/// What the variable parts of a path finding's paths can hold, asked only
+/// for an injection finding whose check found a path, with its callers and
+/// the definitions of the project's types its parameters name. On
+/// vaultwarden, Rocket route parameters typed `PathBuf` (which Rocket parses
+/// so they cannot climb above where they are joined) and id types whose
+/// parsing accepts only a UUID were four wrong path reviews: the path check
+/// reads a variable joined to a directory, whatever the variable can hold.
+pub fn injection_paths(code: &str, callers: bool, types: bool) -> Value {
+    let types_note = if types {
+        " `types_named_in_parameters` holds the definitions of the project's types that its parameters name, with their attributes."
+    } else {
+        ""
+    };
+    let lead = if callers {
+        format!("{CALLERS}{types_note}")
+    } else {
+        types_note.trim_start().to_string()
+    };
+    let note = if lead.is_empty() {
+        EVIDENCE.to_string()
+    } else {
+        format!("{lead} {EVIDENCE}")
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What can the variable parts of the file paths that `{code}` opens, writes or deletes hold?"),
+            "note": note,
+        },
+        "criteria": {
+            "confined": "Only names that cannot leave the directory they are joined to: numbers, UUIDs or ids that a type or the web framework parses before the function runs, names reduced to a base name or checked against a pattern, or a path parameter the framework parses so it cannot climb above where it is joined, such as a Rocket `PathBuf` route segment, which rejects hidden and encoded-slash segments and drops `..` at its start.",
+            "own": "Names the program chooses or keeps for itself, or reads from its configuration.",
+            "local": "The command line, settings or files of the person running a local program or script.",
+            "outside": "A name or path another party sets that can hold `..`, a slash or an absolute path, such as a request parameter or field read as text, an uploaded file's name or an archive entry.",
+            "unknown": "Values from parameters or calls whose origin is not shown, which may hold any of these.",
+        },
+    })
+}
+
+/// The options of `injection_paths` that keep a path inside its directory.
+pub const CONFINED_PATHS: [&str; 3] = ["confined", "own", "local"];
+
+/// When a logging finding's log line runs, asked only for a sensitive-data
+/// finding raised by its log checks. vaultwarden logs SSO tokens inside
+/// `if CONFIG.sso_debug_tokens()`, a setting off by default and documented
+/// for logging them while troubleshooting: logging an identifier instead,
+/// as the finding says, would remove the feature.
+pub fn logged_when(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("When does `{code}` write the secret or personal value to a log?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "always": "Whenever that code runs, at a level the program logs at in normal operation, such as info, warning or error.",
+            "debug": "Only at debug or trace level, which an operator may turn on to troubleshoot.",
+            "opt_in": "Only when an operator turns on a setting, off by default, whose purpose is to log these values for troubleshooting, such as an option named for logging tokens or request bodies.",
+            "none": "It writes no secret or personal value to a log.",
+        },
+    })
+}
+
+/// The option of `logged_when` for a setting whose purpose is the logging.
+pub const OPT_IN_LOGGING: &str = "opt_in";
+
 /// Asked in the sensitive-data trace: whether every error message is the
 /// program's own. It can only clear the error-detail signals; functions that
 /// throw the program's typed errors otherwise stayed undecided, since the

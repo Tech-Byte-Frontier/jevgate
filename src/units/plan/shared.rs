@@ -2,7 +2,7 @@
 //! subjects and their sources, routes, helpers, enums, constants and hashes.
 use super::{
     Scope, java,
-    trace_evidence::{csharp_constants, enums},
+    trace_evidence::{csharp_constants, enums, types},
 };
 use crate::{
     analysis::{
@@ -45,6 +45,7 @@ pub(super) struct Shared<'a> {
     pub(super) cases: BTreeMap<PathBuf, Vec<TestCase>>,
     /// Enum definitions by name, from selected files and context, for security traces.
     pub(super) enums: BTreeMap<String, String>,
+    pub(super) types: BTreeMap<String, String>,
     /// C# constants by field name, as `Class.Field = value`, for security traces.
     pub(super) constants: BTreeMap<String, Vec<String>>,
     pub(super) hashes: BTreeMap<PathBuf, String>,
@@ -117,6 +118,7 @@ impl<'a> Shared<'a> {
             module_helpers: BTreeMap::new(),
             cases,
             enums: BTreeMap::new(),
+            types: BTreeMap::new(),
             constants: BTreeMap::new(),
             hashes: source_hashes(scope),
             teaching: false,
@@ -138,6 +140,7 @@ impl<'a> Shared<'a> {
         }
         if shared.enabled(catalog::INJECTION) {
             shared.enums = enums(scope);
+            shared.types = types(scope);
         }
         if shared.enabled(catalog::UNSAFE_SETTINGS) {
             shared.constants = csharp_constants(scope);

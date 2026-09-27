@@ -4,8 +4,8 @@ use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, at_most_note, benefit, checks, choice, choice_mass, document_split,
-        lowered, noul, open, origin_outcome, score, settled_checks, several_kind, unit_outcome,
-        value_signals,
+        logs_found, lowered, noul, open, origin_outcome, rests_on_paths, score, settled_checks,
+        several_kind, unit_outcome, value_signals,
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
@@ -249,6 +249,29 @@ fn rechecked<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answer
     (outcome, first)
 }
 
+/// Security units whose finding a confirm Choice of their own follows, not
+/// yet asked: an injection finding that rests on a path (what its paths can
+/// hold) and a sensitive-data finding its log checks raised (when the log
+/// line runs).
+pub fn unconfirmed_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    plan.units
+        .iter()
+        .filter(|u| u.presence == Presence::Judged)
+        .filter(|u| answers(judgments, &u.id, Pass::Locate).is_empty())
+        .filter(|u| {
+            let Detail::Security { paths, logging, .. } = &u.detail else {
+                return false;
+            };
+            let (outcome, resolved) = resolved(u, judgments);
+            let get = |q: &str| resolved.get(q).copied();
+            matches!(outcome, Outcome::Review(_) | Outcome::Consider(_))
+                && (paths.is_some() && rests_on_paths(&get)
+                    || logging.is_some() && logs_found(&get))
+        })
+        .map(|u| u.id.clone())
+        .collect()
+}
+
 /// Functions whose split question raised a review or consider, and whose
 /// block has not been located yet; hardcoded-value functions raised to a
 /// review or consider whose value has not been named yet.
@@ -282,6 +305,7 @@ pub fn unlocated_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<Stri
                         && !resolved
                             .get("origin")
                             .is_some_and(|a| matches!(origin_outcome(a), Outcome::Review(_)))
+                        && !rests_on_paths(&|q| resolved.get(q).copied())
                 }
                 Detail::Function {
                     locate: Some(_), ..
