@@ -20,7 +20,7 @@ use crate::{
     catalog::SENSITIVE_DATA,
     options::CheckArgs,
     schema::Pass,
-    token_budget::TokenBudget,
+    token_budget::Limits,
 };
 use classes::error_classes;
 use implemented::implemented;
@@ -39,7 +39,7 @@ pub(super) fn plan(
     scope: &Scope<'_>,
     evidence: &Evidence<'_>,
     args: &CheckArgs,
-    budget: &TokenBudget,
+    budget: Limits<'_>,
     result: &mut Plan,
 ) {
     let handlers = error_handlers(scope, evidence.links);

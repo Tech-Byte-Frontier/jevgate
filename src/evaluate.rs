@@ -3,7 +3,7 @@ use super::{
     options::CheckArgs,
     schema::{self, FileResult, Report, Status},
     storage::Store,
-    token_budget::TokenBudget,
+    token_budget::{Limits, TokenBudget},
     transport::Evaluator,
 };
 use crate::config::ConfigContext;
@@ -129,13 +129,16 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
 /// blocks) are not known yet.
 fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &mut Report) {
     let budget = &TokenBudget::load(root);
+    let answered =
+        |request: &serde_json::Value| crate::requests::answered(root, args, request).is_some();
+    let limits = Limits::new(budget, &answered);
     let mut planned = Vec::new();
     let mut views = BTreeMap::new();
     for (owner, input) in inputs.iter().enumerate() {
         if report.files[owner].status != Status::Pending {
             continue;
         }
-        match schedule(input, args, budget, &mut report.files[owner]) {
+        match schedule(input, args, limits, &mut report.files[owner]) {
             Ok(Scheduled::None) => {}
             Ok(Scheduled::Purpose(request)) => {
                 match cached_purpose(input, args, root, &request, &mut report.files[owner]) {
@@ -263,12 +266,17 @@ impl Session<'_> {
     ) {
         let mut purpose = Vec::new();
         let mut views = BTreeMap::new();
+        let root = &self.context.root;
+        let answered = |request: &serde_json::Value| {
+            crate::requests::answered(root, self.args, request).is_some()
+        };
+        let limits = Limits::new(&self.budget, &answered);
         for (owner, file) in report.files.iter_mut().enumerate() {
             if file.status != Status::Pending {
                 continue;
             }
             file.judgments.clear();
-            match schedule(&inputs[owner], self.args, &self.budget, file) {
+            match schedule(&inputs[owner], self.args, limits, file) {
                 Ok(Scheduled::None) => file.cached = false,
                 Ok(Scheduled::Purpose(request)) => {
                     file.cached = true;
@@ -551,7 +559,7 @@ fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classifi
 fn schedule(
     input: &Input,
     args: &CheckArgs,
-    budget: &TokenBudget,
+    budget: Limits<'_>,
     file: &mut FileResult,
 ) -> Result<Scheduled> {
     if file.status != Status::Pending {

@@ -24,7 +24,7 @@ use crate::{
     file_kind::View,
     inventory::Input,
     options::CheckArgs,
-    token_budget::TokenBudget,
+    token_budget::{Limits, TokenBudget},
 };
 
 use std::{
@@ -89,6 +89,9 @@ pub fn plan(
     budget: &TokenBudget,
     root: &std::path::Path,
 ) -> Plan {
+    let answered =
+        |request: &serde_json::Value| crate::requests::answered(root, args, request).is_some();
+    let budget = Limits::new(budget, &answered);
     let mut result = Plan::default();
     let scope = parsed_scope(inputs, views, &mut result.skipped);
     let mut shared = Shared::new(&scope, args);
@@ -134,7 +137,7 @@ pub fn plan(
 }
 
 /// Each GitHub Actions workflow file's jobs.
-fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: &TokenBudget, result: &mut Plan) {
+fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: Limits<'_>, result: &mut Plan) {
     for &owner in &scope.configuration {
         let input = &scope.inputs[owner];
         if input.result.role != crate::inventory::WORKFLOW {
@@ -164,7 +167,7 @@ fn plan_document(
     input: &Input,
     owner: usize,
     args: &CheckArgs,
-    budget: &TokenBudget,
+    budget: Limits<'_>,
     drift: &drift::Shared<'_>,
     requests: &mut Vec<Planned>,
 ) -> FilePlan {
