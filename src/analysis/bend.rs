@@ -142,6 +142,21 @@ pub(crate) fn proof_file(path: &Path) -> bool {
     file(path) && (named || placed)
 }
 
+/// The comment lines of a file that rule off a section: `# ----`,
+/// `# === Title ===` or `# --- IO helpers`, three dashes or equals signs
+/// or more after the `#`.
+pub(crate) fn section_rules(source: &str) -> usize {
+    source
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix('#'))
+        .filter(|text| {
+            let text = text.trim_start();
+            let rule = text.chars().take_while(|c| matches!(c, '-' | '=')).count();
+            rule >= 3
+        })
+        .count()
+}
+
 /// Whether a Bend 2 file defines `main`, the def its run starts from.
 pub(crate) fn defines_main(source: &str) -> bool {
     source.lines().any(|line| {

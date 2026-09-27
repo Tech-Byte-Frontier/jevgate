@@ -134,6 +134,9 @@ pub enum Detail {
         groups: Vec<GroupInfo>,
         /// How many members the outline lists.
         members: usize,
+        /// The section rules of a Bend 2 file (`# ----`, `# === Title ===`):
+        /// the parts its author laid it out in. Zero for other languages.
+        sections: usize,
         /// What kind of file it is, asked after a recheck that stays undecided.
         kind: Option<FollowUp>,
     },

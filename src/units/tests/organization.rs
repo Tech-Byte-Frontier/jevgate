@@ -337,3 +337,28 @@ fn a_bend_file_is_weighed_for_a_split_only_past_its_own_floor() {
     let (_, plan) = planned(&project, &options);
     assert_eq!(stages(&plan), ["outline"]);
 }
+
+#[test]
+fn a_bend_file_laid_out_in_titled_sections_is_a_note() {
+    let defs = |sectioned: bool| -> String {
+        let mut source = String::from("import Base\n\n");
+        for i in 0..60 {
+            if sectioned && i % 20 == 0 {
+                source.push_str(&format!("# ---- part {i} ----\n\n"));
+            }
+            source.push_str(&format!(
+                "def f{i}(x: Nat) -> Nat:\n  match x:\n    case 0n:\n      1n\n    case 1n+p:\n      f{i}(p)\n\n"
+            ));
+        }
+        source
+    };
+    let strength = |sectioned: bool| {
+        let (project, options) = organized("src/lib.bend", &defs(sectioned));
+        let report = run(&project, &options, &mut scripted(2));
+        report.files[0].dimensions["file_organization"]
+            .status
+            .clone()
+    };
+    assert_eq!(strength(false), Status::Review);
+    assert_eq!(strength(true), Status::Note);
+}
