@@ -88,7 +88,10 @@ signatures, or one candidate pair.
    module-level route handlers named by their registration
    (`app.post('/pages')`); member groups by average linkage; callers that
    import the file (application code only, since tests calling a group do not
-   make it a dependency); for file organization, each member's line count and
+   make it a dependency), counting a Rust function a file passes by path as
+   called (`follow_ups(plan, files, compose::unconfirmed_units)`): JevGate's
+   own `compose.rs` listed 3 of the 8 follow-up selectors only
+   `follow_ups.rs` uses; for file organization, each member's line count and
    the file's, and for a test file, its cases with their enclosing
    `describe`, class or module and the functions under test they call, grouped
    by shared suite, subject or helper. A subject that one type in scope owns

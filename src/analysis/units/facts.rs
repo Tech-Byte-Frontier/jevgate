@@ -6,6 +6,8 @@ use tree_sitter::Node;
 #[derive(Default)]
 pub(super) struct Facts {
     pub(super) calls: BTreeSet<String>,
+    /// Functions named by a path where it is not called (`parse`).
+    pub(super) paths: BTreeSet<String>,
     pub(super) refs: BTreeSet<String>,
     pub(super) idents: BTreeSet<String>,
 }
@@ -20,6 +22,9 @@ impl Facts {
                 if let Some(name) = call_name(node, source) {
                     self.calls.insert(name);
                 }
+            }
+            "scoped_identifier" => {
+                self.paths.extend(passed_path(node, source));
             }
             // Java: `repository.findById(id)`.
             "method_invocation" => {
@@ -84,6 +89,37 @@ impl Facts {
             self.visit(child, source);
         }
     }
+}
+
+/// The function a Rust path names where the path is a value, not the callee
+/// of a call: `unconfirmed_units` in
+/// `follow_ups(plan, files, compose::unconfirmed_units)` or `helper` in
+/// `.map(Self::helper)`. The name starts in lower case, since Rust names
+/// types, variants and constants in upper case (`Outcome::Clear`); a path
+/// inside a longer path or a `use` is not one.
+fn passed_path(node: Node<'_>, source: &str) -> Option<String> {
+    let parent = node.parent()?;
+    let callee = |n: Node<'_>| {
+        n.parent().is_some_and(|p| {
+            p.kind() == "call_expression" && p.child_by_field_name("function") == Some(n)
+        })
+    };
+    if callee(node)
+        || parent.kind() == "generic_function" && callee(parent)
+        || matches!(
+            parent.kind(),
+            "scoped_identifier"
+                | "use_declaration"
+                | "use_list"
+                | "scoped_use_list"
+                | "use_as_clause"
+        )
+    {
+        return None;
+    }
+    let name = text(node.child_by_field_name("name")?, source);
+    name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        .then(|| name.to_string())
 }
 
 /// A C# identifier that names a type or a member rather than a local: a

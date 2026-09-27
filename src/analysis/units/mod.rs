@@ -69,6 +69,10 @@ pub struct Unit {
     /// Errors the body creates with their message arguments, for error-detail questions.
     pub errors: Vec<super::errors::CreatedError>,
     pub calls: BTreeSet<String>,
+    /// Functions it passes by path without calling them, in Rust: a callback
+    /// named as `compose::unconfirmed_units` or `Self::helper`. A file's
+    /// callers count them as calls; nothing else reads them.
+    pub passed: BTreeSet<String>,
     /// A Java `equals(Object)` or `hashCode()` override: boilerplate whose
     /// field-by-field copies and hash multipliers are the idiom, so it offers
     /// no copies or literal values to judge.
@@ -195,6 +199,11 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         file.template_code = super::template_code::template_code(path, source);
     }
     calls_by_name(&mut file.units);
+    if path.extension().is_none_or(|e| e != "rs") {
+        for unit in &mut file.units {
+            unit.passed.clear();
+        }
+    }
     Ok(file)
 }
 
@@ -818,6 +827,7 @@ fn push(
         sites: body.map_or_else(Vec::new, |b| super::sites::in_node(b, source, file.django)),
         errors: body.map_or_else(Vec::new, |b| super::errors::created_errors(b, source)),
         calls: facts.calls,
+        passed: facts.paths,
         equality,
         routes: super::routes::spring(node, source),
         refs,

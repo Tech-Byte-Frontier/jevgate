@@ -417,7 +417,8 @@ fn callers(scope: &Scope<'_>, links: &Links, target: usize) -> BTreeMap<String, 
         let tests = scope.test_lines(owner);
         let units = scope.units[&owner].units.iter();
         for unit in units.filter(|u| !tests.iter().any(|l| u.overlaps(l))) {
-            for call in &unit.calls {
+            // A function passed by path is used like a call.
+            for call in unit.calls.iter().chain(&unit.passed) {
                 callers
                     .entry(call.clone())
                     .or_default()
