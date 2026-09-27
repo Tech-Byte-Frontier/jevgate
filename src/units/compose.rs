@@ -1124,7 +1124,7 @@ fn capped(
     {
         return at_most_note(outcome);
     }
-    if named_value_only(unit, judgments) {
+    if named_value_only(unit, judgments) || bend_outline(unit) {
         return at_most_consider(outcome);
     }
     let lower = test_path_security(unit)
@@ -1413,6 +1413,19 @@ const OUTLINE_NOTE_LINES: usize = 250;
 /// scatter it; 21 of 29 on longer files were right.
 fn short_outline(unit: &UnitPlan) -> bool {
     matches!(unit.detail, Detail::Outline { .. }) && unit.lines < OUTLINE_NOTE_LINES
+}
+
+/// A split of a Bend 2 file is at most a consider: a language that writes
+/// each match arm, binding and effect on a line of its own runs to long
+/// files, and on 64 Bend 2 projects 14 of 43 file-organization reviews were
+/// right, 8 of 13 on the 41 its floor and sections were tuned on and 6 of
+/// 30 on 23 it had never seen.
+fn bend_outline(unit: &UnitPlan) -> bool {
+    matches!(unit.detail, Detail::Outline { .. })
+        && unit
+            .locations
+            .first()
+            .is_some_and(|l| crate::analysis::bend::file(&l.path))
 }
 
 /// Section rules that show a Bend 2 file laid out in titled parts.

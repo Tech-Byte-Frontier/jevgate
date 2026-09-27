@@ -339,7 +339,7 @@ fn a_bend_file_is_weighed_for_a_split_only_past_its_own_floor() {
 }
 
 #[test]
-fn a_bend_file_laid_out_in_titled_sections_is_a_note() {
+fn a_bend_file_s_split_is_at_most_a_consider_and_a_note_in_titled_sections() {
     let defs = |sectioned: bool| -> String {
         let mut source = String::from("import Base\n\n");
         for i in 0..60 {
@@ -359,6 +359,6 @@ fn a_bend_file_laid_out_in_titled_sections_is_a_note() {
             .status
             .clone()
     };
-    assert_eq!(strength(false), Status::Review);
+    assert_eq!(strength(false), Status::Consider);
     assert_eq!(strength(true), Status::Note);
 }
