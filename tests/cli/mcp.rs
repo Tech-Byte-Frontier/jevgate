@@ -276,9 +276,11 @@ fn mcp_lists_the_repositorys_custom_questions_beside_the_rules() {
     );
     let source = listed.last().unwrap()["custom"]["source"].as_str().unwrap();
     assert!(source.ends_with("no-body-logs.toml"), "{source}");
-    let text: Value =
-        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(text, result["structuredContent"], "the text is the same JSON");
+    let text: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        text, result["structuredContent"],
+        "the text is the same JSON"
+    );
 }
 
 #[test]
