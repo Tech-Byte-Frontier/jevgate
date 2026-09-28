@@ -460,7 +460,7 @@ pub fn table(questions: &'static [crate::custom::Question]) -> String {
     }
     lines.push(String::new());
     lines.push(format!(
-        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected, and a custom question fails it at its own level. The rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
+        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected, and a custom question fails it at its own level. The rest, and every finding in a preview language such as Kotlin, are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
         crate::maturity::MIN_PERCENT_RIGHT,
         crate::maturity::MIN_LABELS,
         crate::maturity::MIN_LABELS
