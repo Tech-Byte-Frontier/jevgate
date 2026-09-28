@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jevgate": {
+      "command": "jevgate",
+      "args": ["mcp"]
+    }
+  }
+}

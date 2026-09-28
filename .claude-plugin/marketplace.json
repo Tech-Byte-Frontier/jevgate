@@ -1,0 +1,15 @@
+{
+  "name": "jevgate",
+  "owner": {
+    "name": "Tech Byte Frontier",
+    "url": "https://github.com/Tech-Byte-Frontier"
+  },
+  "description": "JevGate, the code-review gate that asks TypeSafe Jev short, typed questions about your code",
+  "plugins": [
+    {
+      "name": "jevgate",
+      "source": "./plugin",
+      "description": "Checks each edit and the end of each turn with JevGate, and adds its MCP tools and a skill for acting on findings"
+    }
+  ]
+}

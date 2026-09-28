@@ -1,0 +1,51 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'",
+            "timeout": 40,
+            "statusMessage": "JevGate is checking the edit"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'",
+            "timeout": 60,
+            "statusMessage": "JevGate is checking this turn"
+          }
+        ]
+      }
+    ]
+  }
+}

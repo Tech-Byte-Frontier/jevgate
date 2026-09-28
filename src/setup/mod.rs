@@ -7,6 +7,8 @@
 mod agents;
 mod hooks;
 mod json;
+#[cfg(test)]
+mod packages;
 mod probe;
 #[cfg(test)]
 mod tests;
