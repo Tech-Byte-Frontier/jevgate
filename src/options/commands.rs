@@ -1,6 +1,6 @@
 //! The subcommands, the baseline actions and their help text.
 use super::CheckArgs;
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 
 #[derive(Subcommand)]
 pub enum JevCommand {
@@ -111,7 +111,7 @@ pub enum JevCommand {
     /// command, such as `jevgate-check`.
     #[command(after_long_help = MAN_EXAMPLES)]
     Man {
-        /// A command: auth, check, baseline, rules, init, serve, mcp or completions
+        /// A command: auth, check, baseline, rules, init, serve, mcp, hook or completions
         command: Option<String>,
     },
     /// Run a Model Context Protocol server on stdin and stdout, for coding agents
@@ -122,6 +122,22 @@ pub enum JevCommand {
     /// command `jevgate mcp`, started in the repository.
     #[command(after_long_help = MCP_EXAMPLES)]
     Mcp,
+    /// Answer one coding-agent hook event read on stdin; always exits 0
+    ///
+    /// Configured as a hook of Claude Code, Codex, Gemini CLI, Cursor,
+    /// OpenCode, Copilot CLI or VS Code, it reads the event as JSON on stdin
+    /// and prints one JSON reply. When a turn starts, it records a snapshot of
+    /// the working tree under `.jevgate/turns/`; after each edit, it checks
+    /// the edited files and passes their findings to the agent, never
+    /// blocking; when the turn ends, it checks every file the turn changed
+    /// and blocks the agent while findings fail the gate, at most 3 times a
+    /// turn. Checks use the repository's jevgate.toml and key, like `check`.
+    ///
+    /// It always exits 0, since agents read exit 2 as a block: an outage, an
+    /// HTTP 402, a missing key or a directory outside Git never blocks the
+    /// agent, and the reply says so to the person and to the agent.
+    #[command(after_long_help = HOOK_EXAMPLES)]
+    Hook(HookArgs),
     /// Serve the latest report as read-only JSON on localhost (run alongside `check --watch`)
     ///
     /// Answers GET requests from local tools, never from a browser page:
@@ -133,6 +149,20 @@ pub enum JevCommand {
         #[arg(long, default_value_t = 47831)]
         port: u16,
     },
+}
+
+/// `hook`: the agent and the time the hook may take.
+#[derive(Args, Debug)]
+pub struct HookArgs {
+    /// The agent that runs the hook [default: detected from the event]
+    #[arg(long, value_enum)]
+    pub agent: Option<crate::hook::Agent>,
+    /// Seconds before the hook gives up and lets the agent go on [default: 10 at a session or turn start, 30 after an edit, 50 at the end of a turn]
+    ///
+    /// Keep it below the agent's own hook timeout: an agent that stops the
+    /// hook first discards its reply, so the person is not told why.
+    #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=3600))]
+    pub timeout: Option<u64>,
 }
 
 /// Why a finding was accepted into the baseline.
@@ -200,6 +230,7 @@ For agents and CI:
   jevgate check --base origin/main --format json     The full report, raw probabilities included
   jevgate check --base origin/main --format github   Annotations and a job summary on GitHub
   jevgate rules --format json                        Every rule and the question it asks
+  jevgate hook                                       Answer a coding agent's hook event read on stdin
 
 Exit codes:
   0      Gate passed, or no supported file changed since --base
@@ -275,6 +306,17 @@ Examples:
   claude mcp add jevgate -- jevgate mcp       Claude Code, in the repository
   {\"mcpServers\": {\"jevgate\": {\"command\": \"jevgate\", \"args\": [\"mcp\"]}}}
                                               Clients configured with JSON, such as Cursor";
+
+const HOOK_EXAMPLES: &str = "\
+Examples (the command each agent's hook configuration runs):
+  jevgate hook                      Claude Code, Codex, Gemini CLI, Copilot CLI: detected from the event
+  jevgate hook --agent cursor       Cursor's own hooks.json
+  jevgate hook --agent opencode     OpenCode, through JevGate's plugin
+  jevgate hook --timeout 20         Give up after 20 seconds, whatever the event
+
+Events: a session or turn start records the working tree (SessionStart, UserPromptSubmit,
+BeforeAgent, beforeSubmitPrompt); an edit is checked (PostToolUse, AfterTool, postToolUse);
+the end of a turn is checked and can be blocked (Stop, AfterAgent, stop). Others get {}.";
 
 const MAN_EXAMPLES: &str = "\
 Examples:

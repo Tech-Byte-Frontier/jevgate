@@ -33,8 +33,9 @@ pub fn isolate(command: &mut Command) -> &mut Command {
     command
 }
 
-/// Run Git in `dir`, isolated, with a fixed identity and no signing.
-pub fn run(dir: &Path, args: &[&str]) {
+/// Run Git in `dir`, isolated, with a fixed identity and no signing, and
+/// return what it printed.
+pub fn run(dir: &Path, args: &[&str]) -> String {
     let output = isolate(&mut Command::new("git"))
         .args([
             "-c",
@@ -53,4 +54,5 @@ pub fn run(dir: &Path, args: &[&str]) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8(output.stdout).unwrap()
 }

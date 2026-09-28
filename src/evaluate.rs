@@ -62,14 +62,13 @@ pub fn snapshot(
             .map(|r| r.load.clone())
             .or_else(|| crate::docs::scan(current.root).ok().map(|r| r.load));
     }
-    if let Some(base) = &args.base {
-        match crate::revision::Changes::load(current.root, base) {
-            Ok(changes) => {
-                report.base_revision = Some(changes.revision);
-                report.deleted_files = changes.deleted;
-            }
-            Err(error) => report.errors.push(error.to_string()),
+    match crate::revision::Changes::of_check(current.root, args) {
+        Some(Ok(changes)) => {
+            report.base_revision = Some(changes.revision);
+            report.deleted_files = changes.deleted;
         }
+        Some(Err(error)) => report.errors.push(error.to_string()),
+        None => {}
     }
     report.update_status();
     if args.dry_run {

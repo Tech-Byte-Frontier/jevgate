@@ -37,6 +37,17 @@ pub(crate) fn credential_path(args: &CheckArgs, context: &ConfigContext) -> std:
         .unwrap_or_else(|| context.root.join(".env"))
 }
 
+/// `args` as every check runs them: the repository's configuration, and the
+/// provider of the key the check will use, which its default model follows.
+pub(crate) fn configure(args: &mut CheckArgs, context: &ConfigContext) -> Result<()> {
+    context.configure(args)?;
+    args.provider = crate::auth::sources::planned_provider(
+        &credential_path(args, context),
+        args.env_file.is_some(),
+    );
+    Ok(())
+}
+
 /// Record a failed evaluation in the snapshot (and report) before returning the error.
 fn publish_failure(
     session: &evaluate::Session<'_>,

@@ -2,7 +2,7 @@
 //! their help text are in `commands`.
 mod commands;
 
-pub use commands::{BaselineAction, Disposition, JevCommand, OVERVIEW, RulesFormat};
+pub use commands::{BaselineAction, Disposition, HookArgs, JevCommand, OVERVIEW, RulesFormat};
 
 use clap::{Args, ValueEnum};
 use std::{collections::BTreeMap, path::PathBuf};
@@ -128,6 +128,11 @@ pub struct CheckArgs {
     /// With --base, judge each changed file whole, not only what the change touches
     #[arg(long, requires = "base", help_heading = SCOPE)]
     pub whole_files: bool,
+    /// Set by the agent hook: a snapshot of the working tree (a Git tree). The
+    /// change is then `base`, the turn's snapshot, to this one, with no merge
+    /// base: the fork point of a snapshot and HEAD is HEAD itself.
+    #[arg(skip)]
+    pub worktree_snapshot: Option<String>,
     /// Also judge tests: test value, redundancy, and shared logic among tests
     ///
     /// Without it, test files are judged only for file organization. Also set

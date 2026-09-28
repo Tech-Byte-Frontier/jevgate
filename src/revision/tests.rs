@@ -216,3 +216,137 @@ fn paths_are_diffed_in_batches_that_keep_a_renamed_files_names_together() {
         "no path, no diff of everything"
     );
 }
+
+/// A snapshot of the working tree at `root`, through a scratch index
+/// outside it.
+fn snapshot_of(project: &Project, root: &Path) -> String {
+    let index = index_file(root).unwrap();
+    snapshot(root, &index, &project.0.join(".git/jevgate-test.index")).unwrap()
+}
+
+#[test]
+fn a_snapshot_holds_untracked_files_but_not_ignored_ones_and_leaves_the_index_alone() {
+    let project = Project::new();
+    project.write(".gitignore", "*.log\n");
+    project.write("a.rs", "fn a() {}\n");
+    project.commit_all();
+    project.write("a.rs", "fn a() { 1 }\n");
+    project.git(&["add", "a.rs"]);
+    project.write("b.rs", "fn b() {}\n");
+    project.write("debug.log", "trace\n");
+    let tree = snapshot_of(&project, &project.0);
+    let files = project.git(&["ls-tree", "-r", "--name-only", &tree]);
+    assert_eq!(files, ".gitignore\na.rs\nb.rs\n");
+    assert_eq!(
+        project.git(&["status", "--porcelain"]),
+        "M  a.rs\n?? b.rs\n"
+    );
+    assert_eq!(project.git(&["stash", "list"]), "");
+    assert!(!project.0.join(".git/jevgate-test.index").exists());
+    let empty = Project::new();
+    empty.write("a.rs", "fn a() {}\n");
+    empty.git(&["init", "-q"]);
+    let tree = snapshot_of(&empty, &empty.0);
+    assert_eq!(
+        empty.git(&["ls-tree", "--name-only", &tree]),
+        "a.rs\n",
+        "no commit yet"
+    );
+}
+
+#[test]
+fn changes_between_two_snapshots_follow_the_working_tree() {
+    let project = Project::new();
+    project.write(".gitignore", "*.log\n");
+    project.write("edited.rs", "fn edited() {}\n");
+    project.write("gone.rs", "fn gone() {}\n");
+    project.write("moved.rs", &"fn moved() { let unchanged = 1; }\n".repeat(5));
+    project.commit_all();
+    project.write("scratch.rs", "fn scratch() {}\n");
+    let before = snapshot_of(&project, &project.0);
+    project.write("edited.rs", "fn edited() { 1 }\n");
+    std::fs::remove_file(project.0.join("gone.rs")).unwrap();
+    std::fs::rename(project.0.join("moved.rs"), project.0.join("renamed.rs")).unwrap();
+    project.write("scratch.rs", "fn scratch() { 2 }\n");
+    project.write("new.rs", "fn new() {}\n");
+    project.write("trace.log", "trace\n");
+    let after = snapshot_of(&project, &project.0);
+    let changes = Changes::between(&project.0, &before, &after).unwrap();
+    let path = |name: &str| PathBuf::from(name);
+    assert_eq!(
+        changes.paths,
+        BTreeMap::from([
+            (path("edited.rs"), Some(path("edited.rs"))),
+            (path("new.rs"), None),
+            (path("renamed.rs"), Some(path("moved.rs"))),
+            (path("scratch.rs"), Some(path("scratch.rs"))),
+        ]),
+        "a file untracked before the turn is edited, not new"
+    );
+    assert_eq!(changes.deleted, [path("gone.rs")]);
+    assert_eq!(changes.revision, before);
+    assert!(Changes::between(&project.0, "HEAD", &after).is_err());
+}
+
+#[test]
+fn lines_between_two_snapshots_are_the_ones_the_turn_changed() {
+    let project = Project::new();
+    project.write("src/lib.rs", LIB);
+    project.commit_all();
+    // Edited before the turn began: its lines are not the turn's.
+    let started = LIB.replace("one", "uno");
+    project.write("src/lib.rs", &started);
+    project.write("scratch.rs", LIB);
+    let before = snapshot_of(&project, &project.0);
+    project.write("src/lib.rs", &started.replace("four", "cuatro"));
+    project.write("scratch.rs", &LIB.replace("two", "dos"));
+    let after = snapshot_of(&project, &project.0);
+    let judged = ["src/lib.rs", "scratch.rs"].map(Path::new);
+    let changes = Changes::between(&project.0, &before, &after)
+        .unwrap()
+        .with_lines(&project.0, judged)
+        .unwrap();
+    let file = |name: &str| {
+        changes
+            .file(&project.0, Path::new(name), &Arc::default())
+            .unwrap()
+    };
+    assert_eq!(file("src/lib.rs").lines, lines(&[(8, 8)], &[]));
+    assert_eq!(
+        file("scratch.rs").lines,
+        lines(&[(6, 6)], &[]),
+        "a file untracked when the turn began keeps its unchanged lines"
+    );
+    assert_eq!(
+        file("src/lib.rs").before().unwrap().1,
+        started,
+        "the base version is the turn's start"
+    );
+}
+
+#[test]
+fn snapshots_of_a_root_below_the_git_top_level_are_compared_relative_to_it() {
+    let project = Project::new();
+    project.write("app/lib.rs", LIB);
+    project.write("other.rs", "fn other() {}\n");
+    project.commit_all();
+    let root = project.0.join("app");
+    let before = snapshot_of(&project, &root);
+    project.write("app/lib.rs", &LIB.replace("one", "uno"));
+    project.write("app/new.rs", "fn new() {}\n");
+    project.write("other.rs", "fn other() { 1 }\n");
+    let after = snapshot_of(&project, &root);
+    let changes = Changes::between(&root, &before, &after)
+        .unwrap()
+        .with_lines(&root, [Path::new("lib.rs")])
+        .unwrap();
+    assert_eq!(
+        changes.paths.keys().collect::<Vec<_>>(),
+        [Path::new("lib.rs"), Path::new("new.rs")]
+    );
+    let file = changes
+        .file(&root, Path::new("lib.rs"), &Arc::default())
+        .unwrap();
+    assert_eq!(file.lines, lines(&[(2, 2)], &[]));
+    assert_eq!(file.before().unwrap().1, LIB);
+}

@@ -1,6 +1,8 @@
 //! What a change against a Git revision holds: the changed and deleted
-//! files, and the lines of each file the change touched. Git never executes
-//! external diff helpers.
+//! files, and the lines of each file the change touched; and snapshots of
+//! the working tree for the agent hook's turns, whose changes are read
+//! between two snapshots. Git never executes external diff helpers.
+use crate::options::CheckArgs;
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use std::{
@@ -13,6 +15,9 @@ use std::{
 
 pub struct Changes {
     pub revision: String,
+    /// The snapshot the change runs to, from the agent hook; none for the
+    /// working tree.
+    now: Option<String>,
     /// Current path -> previous path; None denotes a new or untracked file.
     pub paths: BTreeMap<PathBuf, Option<PathBuf>>,
     pub deleted: Vec<PathBuf>,
@@ -174,7 +179,12 @@ fn git_command(root: &Path, args: &[&str]) -> Command {
 }
 
 pub(crate) fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let output = git_command(root, args).output().context("Cannot run Git")?;
+    run(git_command(root, args), args)
+}
+
+/// What `command`, Git given `args`, printed; an error when it failed.
+fn run(mut command: Command, args: &[&str]) -> Result<Vec<u8>> {
+    let output = command.output().context("Cannot run Git")?;
     ensure!(
         output.status.success(),
         "Git {} failed: {}",
@@ -190,25 +200,24 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
 
 type ChangedPaths = (BTreeMap<PathBuf, Option<PathBuf>>, Vec<PathBuf>);
 
-/// Changed paths since `revision`, each with its previous path (none when
-/// added), and deleted paths, relative to the root: a `jevgate.toml` in a
-/// subdirectory of a Git repository sees the paths below it, as
-/// `ls-files` does. Renames keep their source; conflicts stop the review.
-fn tracked_changes(root: &Path, revision: &str) -> Result<ChangedPaths> {
-    let bytes = git(
-        root,
-        &[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--find-renames",
-            "--relative",
-            "--name-status",
-            "-z",
-            revision,
-            "--",
-        ],
-    )?;
+/// Changed paths between the diff's `sides` (a revision and the working
+/// tree, or two snapshots), each with its previous path (none when added),
+/// and deleted paths, relative to the root: a `jevgate.toml` in a
+/// subdirectory of a Git repository sees the paths below it, as `ls-files`
+/// does. Renames keep their source; conflicts stop the review.
+fn tracked_changes(root: &Path, sides: &[&str]) -> Result<ChangedPaths> {
+    let mut args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--find-renames",
+        "--relative",
+        "--name-status",
+        "-z",
+    ];
+    args.extend_from_slice(sides);
+    args.push("--");
+    let bytes = git(root, &args)?;
     let mut fields = bytes.split(|b| *b == 0).filter(|s| !s.is_empty());
     let mut paths = BTreeMap::new();
     let mut deleted = Vec::new();
@@ -255,13 +264,13 @@ fn batches<'a>(groups: &[Vec<&'a str>], limit: usize) -> Vec<Vec<&'a str>> {
     batches
 }
 
-/// The lines each of `paths` changed since `revision`, when it was modified
-/// or renamed, from one `git diff -U0` read as it streams: only hunk
-/// headers and paths are kept, since a patch can run to many megabytes.
-/// Added and deleted files are left out; an added one changed throughout.
-/// `--text` gives the lines of a file `.gitattributes` marks `-diff` or
-/// `binary`, which Git would otherwise report only as changed.
-fn changed_lines(root: &Path, revision: &str, paths: &[&str]) -> Result<BTreeMap<PathBuf, Lines>> {
+/// The lines each of `paths` changed between the diff's `sides`, when it
+/// was modified or renamed, from one `git diff -U0` read as it streams:
+/// only hunk headers and paths are kept, since a patch can run to many
+/// megabytes. Added and deleted files are left out; an added one changed
+/// throughout. `--text` gives the lines of a file `.gitattributes` marks
+/// `-diff` or `binary`, which Git would otherwise report only as changed.
+fn changed_lines(root: &Path, sides: &[&str], paths: &[&str]) -> Result<BTreeMap<PathBuf, Lines>> {
     let mut args = vec![
         "diff",
         "-U0",
@@ -275,9 +284,9 @@ fn changed_lines(root: &Path, revision: &str, paths: &[&str]) -> Result<BTreeMap
         "--src-prefix=a/",
         "--dst-prefix=b/",
         "--diff-filter=MRT",
-        revision,
-        "--",
     ];
+    args.extend_from_slice(sides);
+    args.push("--");
     args.extend_from_slice(paths);
     let mut child = git_command(root, &args)
         .stdin(Stdio::null())
@@ -486,28 +495,88 @@ pub fn resolve(root: &Path, revision: &str) -> Result<String> {
     .with_context(|| {
         format!("Cannot find revision {revision}; in CI, fetch it (for example fetch-depth: 0)")
     })?;
-    let commit = commit_id(&bytes)?;
+    let commit = object_id(&bytes)?;
     let fork = git(root, &["merge-base", &commit, "HEAD"]).with_context(|| {
         format!(
             "{revision} and HEAD share no history; in a shallow clone, fetch full history (fetch-depth: 0)"
         )
     })?;
-    commit_id(&fork)
+    object_id(&fork)
 }
 
-fn commit_id(bytes: &[u8]) -> Result<String> {
-    let commit = std::str::from_utf8(bytes)?.trim();
-    ensure!(
-        [40, 64].contains(&commit.len()) && commit.bytes().all(|b| b.is_ascii_hexdigit()),
-        "Git did not resolve a commit"
-    );
-    Ok(commit.to_owned())
+/// A commit or tree ID as Git printed it (SHA-1 or SHA-256).
+fn object_id(bytes: &[u8]) -> Result<String> {
+    let id = std::str::from_utf8(bytes)?.trim();
+    ensure!(is_object_id(id), "Git did not print an object ID");
+    Ok(id.to_owned())
+}
+
+pub fn is_object_id(id: &str) -> bool {
+    [40, 64].contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The index file of the Git work tree around `root`; none outside one. It
+/// is `index` in the absolute Git directory (a linked worktree's own), since
+/// a relative one (`../.git/index` from a subdirectory) cannot be joined to
+/// a Windows root in its `\\?\` form, where `..` and `/` are not read.
+pub fn index_file(root: &Path) -> Option<PathBuf> {
+    let bytes = git(
+        root,
+        &["rev-parse", "--is-inside-work-tree", "--absolute-git-dir"],
+    )
+    .ok()?;
+    let mut lines = std::str::from_utf8(&bytes).ok()?.lines();
+    let inside = lines.next()? == "true";
+    let index = PathBuf::from(lines.next()?).join("index");
+    inside.then_some(index)
+}
+
+/// Whether the repository at `root` still holds tree `id`: a snapshot is an
+/// unreachable object, which `git gc` prunes after two weeks by default.
+pub fn has_tree(root: &Path, id: &str) -> bool {
+    is_object_id(id) && git(root, &["cat-file", "-e", &format!("{id}^{{tree}}")]).is_ok()
+}
+
+/// The working tree as a Git tree: tracked and untracked files, less ignored
+/// ones. It is written through a copy of `index` at `scratch`, so the
+/// repository's own index and stash list are never touched, and the copy's
+/// stat cache hashes only the files that changed (42-173 ms on corpus clones
+/// of 7,310 and 8,707 files).
+pub fn snapshot(root: &Path, index: &Path, scratch: &Path) -> Result<String> {
+    let _ = std::fs::remove_file(scratch);
+    // Left by a process killed while Git held it, it would stop the next
+    // process given the same ID.
+    let _ = std::fs::remove_file(scratch.with_extension("index.lock"));
+    // A repository without commits may have no index yet.
+    if let Err(error) = std::fs::copy(index, scratch)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(error).context("Cannot copy the Git index");
+    }
+    let in_scratch = |args: &[&str]| {
+        let mut git = git_command(root, args);
+        git.env("GIT_INDEX_FILE", scratch);
+        run(git, args)
+    };
+    let tree = in_scratch(&["add", "--all"]).and_then(|_| in_scratch(&["write-tree"]));
+    let _ = std::fs::remove_file(scratch);
+    object_id(&tree?)
 }
 
 impl Changes {
-    pub fn load(root: &Path, base: &str) -> Result<Self> {
+    /// The changes a check with a base reviews: since the fork point of
+    /// `--base` and HEAD, or, from the agent hook, between two snapshots.
+    pub fn of_check(root: &Path, args: &CheckArgs) -> Option<Result<Self>> {
+        let base = args.base.as_deref()?;
+        Some(match args.worktree_snapshot.as_deref() {
+            Some(now) => Self::between(root, base, now),
+            None => Self::load(root, base),
+        })
+    }
+
+    fn load(root: &Path, base: &str) -> Result<Self> {
         let revision = resolve(root, base)?;
-        let (mut paths, deleted) = tracked_changes(root, &revision)?;
+        let (mut paths, deleted) = tracked_changes(root, &[&revision])?;
         let untracked = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
         for name in untracked.split(|b| *b == 0).filter(|s| !s.is_empty()) {
             paths
@@ -516,10 +585,36 @@ impl Changes {
         }
         Ok(Self {
             revision,
+            now: None,
             paths,
             deleted,
             lines: BTreeMap::new(),
         })
+    }
+
+    /// From snapshot `base` to snapshot `now`: a file untracked in both is
+    /// new only when it did not exist at `base`.
+    fn between(root: &Path, base: &str, now: &str) -> Result<Self> {
+        ensure!(
+            is_object_id(base) && is_object_id(now),
+            "A working-tree snapshot must be a Git object ID"
+        );
+        let (paths, deleted) = tracked_changes(root, &[base, now])?;
+        Ok(Self {
+            revision: base.to_owned(),
+            now: Some(now.to_owned()),
+            paths,
+            deleted,
+            lines: BTreeMap::new(),
+        })
+    }
+
+    /// The two sides a diff of this change compares: the revision and the
+    /// working tree, or the turn's two snapshots.
+    fn sides(&self) -> Vec<&str> {
+        std::iter::once(self.revision.as_str())
+            .chain(self.now.as_deref())
+            .collect()
     }
 
     /// The same changes with the lines each of the `judged` files changed,
@@ -546,8 +641,8 @@ impl Changes {
             groups.push(names);
         }
         for batch in batches(&groups, PATHSPEC_BYTES) {
-            self.lines
-                .extend(changed_lines(root, &self.revision, &batch)?);
+            let lines = changed_lines(root, &self.sides(), &batch)?;
+            self.lines.extend(lines);
         }
         Ok(self)
     }

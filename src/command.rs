@@ -1,9 +1,10 @@
-//! Running each command: offline commands first, then the ones that read
-//! the repository's configuration; `check` runs in its own module.
+//! Running each command: offline commands and the agent hook first (the hook
+//! finds its repository from the event), then the ones that read the
+//! repository's configuration; `check` runs in its own module.
 use crate::{
     auth, baseline, cancellation, catalog, config,
     config::ConfigContext,
-    init, manual, mcp,
+    hook, init, manual, mcp,
     options::{self, JevCommand},
     output, revision, server,
 };
@@ -16,6 +17,7 @@ pub fn run(command: JevCommand) -> Result<u8> {
         JevCommand::Man { command } => manual::man(command.as_deref()).map(|()| 0),
         JevCommand::Init { force } => init(force),
         JevCommand::Mcp => mcp::run().map(|()| 0),
+        JevCommand::Hook(args) => hook::run(&args),
         command => configured(command),
     }
 }
@@ -46,15 +48,12 @@ fn configured(command: JevCommand) -> Result<u8> {
         | JevCommand::Init { .. }
         | JevCommand::Completions { .. }
         | JevCommand::Man { .. }
-        | JevCommand::Mcp => {
+        | JevCommand::Mcp
+        | JevCommand::Hook(_) => {
             unreachable!("handled before repository configuration")
         }
         JevCommand::Check(mut args) => {
-            context.configure(&mut args)?;
-            args.provider = crate::auth::sources::planned_provider(
-                &crate::check::credential_path(&args, &context),
-                args.env_file.is_some(),
-            );
+            crate::check::configure(&mut args, &context)?;
             if let Some(base) = &args.base {
                 args.base = Some(revision::resolve(&context.root, base)?);
             }

@@ -33,9 +33,9 @@ impl Project {
         }
     }
     /// Run Git in the project, with a fixed identity and no signing, apart
-    /// from the repository running the tests.
-    pub(super) fn git(&self, args: &[&str]) {
-        git::run(&self.0, args);
+    /// from the repository running the tests, and return what it printed.
+    pub(super) fn git(&self, args: &[&str]) -> String {
+        git::run(&self.0, args)
     }
     /// A Git repository holding the project's files as its first commit.
     pub(super) fn commit_all(&self) {

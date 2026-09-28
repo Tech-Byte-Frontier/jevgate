@@ -141,12 +141,10 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
     Ok(inputs)
 }
 
-/// With `--base`, what changed since the fork point with it.
+/// With `--base`, what changed since the fork point with it; in the agent
+/// hook's checks, what changed between the turn's two snapshots.
 fn load_changes(args: &CheckArgs, context: &ConfigContext) -> Result<Option<Changes>> {
-    args.base
-        .as_ref()
-        .map(|base| Changes::load(&context.root, base))
-        .transpose()
+    Changes::of_check(&context.root, args).transpose()
 }
 
 /// Record on each input what the change did to it, so only the units it

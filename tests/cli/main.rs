@@ -5,6 +5,7 @@ mod changes;
 mod gateway;
 #[path = "../support/git.rs"]
 mod git;
+mod hook;
 mod manual;
 mod mcp;
 #[path = "../support/mock_provider.rs"]

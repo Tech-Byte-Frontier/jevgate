@@ -37,6 +37,7 @@ mod file_kind;
 mod gate;
 mod github;
 mod gitlab;
+mod hook;
 mod html_report;
 mod init;
 mod inventory;
@@ -92,7 +93,13 @@ pub struct Cli {
 }
 
 fn main() -> std::process::ExitCode {
-    let result = command::run(Cli::parse().command);
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        // An agent reads exit 2 as a block: the hook answers even this.
+        Err(error) if error.use_stderr() && hook::invoked() => return hook::usage_error(&error),
+        Err(error) => error.exit(),
+    };
+    let result = command::run(cli.command);
     let code = match result {
         Ok(code) => code,
         Err(error) => {
