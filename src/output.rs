@@ -1,6 +1,6 @@
 use crate::{
     options::{CheckArgs, ColorChoice, Format},
-    schema::{FileResult, Finding, Gating, Report, Scope, Status, Strength},
+    schema::{FileResult, Finding, Gating, LeftOut, Report, Scope, Status, Strength},
 };
 use anyhow::Result;
 use std::{
@@ -16,6 +16,8 @@ const TOP_GUARDS: usize = 10;
 /// Says what guards are, after their count.
 pub(crate) const GUARDS_HEADING: &str =
     "changes to the checks around this code, for a person to look at; they never fail the gate";
+/// Units left out over syntax errors shown by default; `--verbose` shows all.
+const TOP_LEFT_OUT: usize = 10;
 
 /// `n` and a noun, plural unless `n` is one: "1 finding", "2 findings".
 pub fn count(n: usize, noun: &str) -> String {
@@ -137,6 +139,7 @@ pub(super) fn agent(
     }
     emit_guards(out, report, verbose, style)?;
     emit_summary(out, report)?;
+    emit_left_out(out, report, verbose)?;
     if let Some(load) = &report.context_load {
         emit_context_load(out, load)?;
     }
@@ -534,6 +537,49 @@ fn emit_capped(out: &mut impl Write, report: &Report) -> Result<()> {
             "{rule} left {} unasked: a question asks about at most {} units a run; narrow its paths.",
             count(n, "unit"),
             crate::units::MAX_CUSTOM_UNITS
+        )?;
+    }
+    Ok(())
+}
+
+/// The units syntax errors left out of judged files, one line each
+/// (`path:line unit: reason`), the first `TOP_LEFT_OUT` unless `verbose`.
+fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
+    let entries: Vec<(&Path, &LeftOut)> = report
+        .files
+        .iter()
+        .flat_map(|f| f.left_out.iter().map(move |l| (f.path.as_path(), l)))
+        .collect();
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let files = report.files.iter().filter(|f| !f.left_out.is_empty());
+    writeln!(
+        out,
+        "\nLeft out over syntax errors, the rest of each file judged: {} in {}.",
+        count(entries.len(), "unit"),
+        count(files.count(), "file")
+    )?;
+    let shown = if verbose { entries.len() } else { TOP_LEFT_OUT };
+    for (path, entry) in entries.iter().take(shown) {
+        let unit = match (entry.unit.as_str(), entry.end_line > entry.start_line) {
+            ("", true) => format!("lines {}-{}", entry.start_line, entry.end_line),
+            ("", false) => format!("line {}", entry.start_line),
+            (name, _) => name.to_string(),
+        };
+        writeln!(
+            out,
+            "  {}:{} {unit}: {}",
+            path.display(),
+            entry.start_line,
+            entry.reason
+        )?;
+    }
+    if entries.len() > shown {
+        writeln!(
+            out,
+            "  … {} more; --verbose lists all.",
+            entries.len() - shown
         )?;
     }
     Ok(())

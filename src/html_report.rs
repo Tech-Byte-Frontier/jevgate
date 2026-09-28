@@ -35,7 +35,7 @@ pub fn render(report: &Report) -> Result<String> {
                 .collect();
             json!({"path":file.path,"status":file.status,"cached":file.cached,"checks":checks,
             "findings":file.findings,"limitations":file.context_limitations,
-            "error":file.error,
+            "error":file.error,"left_out":file.left_out,
             "classification":file.classification.as_ref().and_then(|class| {
                 (class.reason.as_str() != file.error.as_deref().unwrap_or("")).then_some(class.reason.clone())
             })})
@@ -134,6 +134,12 @@ mod tests {
         );
         report.files[0].status = crate::schema::Status::Uncertain;
         report.files[0].error = Some("</script><script>alert('x')</script>&".into());
+        report.files[0].left_out = vec![crate::schema::LeftOut {
+            unit: "</script>".into(),
+            start_line: 1,
+            end_line: 2,
+            reason: "Syntax error at line 2.".into(),
+        }];
         let html = render(&report).unwrap();
         assert!(!html.contains("<script>alert"));
         let data = html
@@ -145,6 +151,7 @@ mod tests {
             .unwrap();
         let decoded: Value = serde_json::from_str(data).unwrap();
         assert_eq!(decoded["files"][0]["status"], "uncertain");
+        assert_eq!(decoded["files"][0]["left_out"][0]["unit"], "</script>");
         assert_eq!(
             decoded["files"][0]["error"],
             report.files[0].error.as_deref().unwrap()

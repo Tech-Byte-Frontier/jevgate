@@ -54,7 +54,7 @@ fn a_partly_broken_file_is_judged_for_its_intact_units_and_names_the_rest() {
     );
     project.write("lib.rs", &format!("{}{misread}", function("kept")));
     let mut mock = Mock::default();
-    let report = run(&project, &args(), &mut mock);
+    let mut report = run(&project, &args(), &mut mock);
     assert!(report.complete);
     let file = &report.files[0];
     assert_eq!(file.status, schema::Status::Clear);
@@ -72,6 +72,35 @@ fn a_partly_broken_file_is_judged_for_its_intact_units_and_names_the_rest() {
             .iter()
             .all(|r| !r.to_string().contains("fn broken"))
     );
+    let text = |report: &schema::Report, verbose: bool| {
+        let mut out = Vec::new();
+        crate::output::agent(&mut out, report, verbose, crate::output::Style::PLAIN).unwrap();
+        String::from_utf8(out).unwrap()
+    };
+    assert!(
+        text(&report, false).contains(
+            "\nLeft out over syntax errors, the rest of each file judged: 1 unit in 1 file.\n  lib.rs:9 broken: Syntax error at line 14.\n"
+        ),
+        "{}",
+        text(&report, false)
+    );
+    // Ten are listed; `--verbose` lists them all.
+    let entry = report.files[0].left_out[0].clone();
+    report.files[0].left_out = (1..=12)
+        .map(|line| schema::LeftOut {
+            unit: String::new(),
+            start_line: line,
+            end_line: line,
+            ..entry.clone()
+        })
+        .collect();
+    let short = text(&report, false);
+    assert!(short.contains("  lib.rs:10 line 10: ") && !short.contains("lib.rs:11 "));
+    assert!(
+        short.contains("  … 2 more; --verbose lists all.\n"),
+        "{short}"
+    );
+    assert!(text(&report, true).contains("  lib.rs:12 line 12: "));
 }
 
 #[test]
