@@ -7,8 +7,9 @@ JevGate's default output is written for coding agents as much as for people: ran
 Ask the agent to review its own change before it reports back, for example in `AGENTS.md` or `CLAUDE.md`:
 
 ```markdown
-Before finishing, run `jevgate check --base origin/main`. Fix each `review` finding;
-for a `consider`, fix it or say why the code should stay as it is.
+Before finishing, run `jevgate check --base origin/main`. Fix each finding marked
+"fails the gate". Weigh the other `review` and `consider` findings: fix one when it
+is right, or say why the code should stay as it is.
 ```
 
 `--base` limits the review to what changed since that revision, uncommitted and untracked changes included: the functions, tests and comments on changed lines, and copies where either copy changed. A check asks about and reports only what the change touches, and cached answers make reruns free. The exit code says what to do next:

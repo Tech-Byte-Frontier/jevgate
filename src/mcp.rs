@@ -18,8 +18,8 @@ const MAX_FINDINGS: usize = 50;
 
 const INSTRUCTIONS: &str = "JevGate reviews code by asking TypeSafe Jev small questions about functions, files, tests and docs. \
 Call jevgate_check with `base` (such as origin/main) to review what changed; it uses the repository's jevgate.toml and the API key `jevgate auth status` shows, and paid requests only for code the answer cache lacks. \
-Fix each `review` finding; for a `consider`, fix it or explain why the code should stay. \
-Findings marked to fail the gate (`gate: fails` in jevgate_findings) decide the exit code; by default only rules and levels measured right at least 80% of the time do, and the rest are reported. \
+Fix each finding marked to fail the gate (`gate: fails` in jevgate_findings): they decide the exit code, and by default only rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail it. \
+Weigh the other `review` and `consider` findings: fix one when it is right, or say why the code should stay. \
 Exit code 2 means the run could not finish: report it, never treat it as a pass. \
 jevgate_findings reads the last report without running anything.";
 
