@@ -39,21 +39,38 @@ impl LeftOut {
     }
 
     /// Code outside every unit holding the syntax error at `region`.
-    fn outside(region: &Range<usize>, source: &str) -> Self {
-        let line = line_of(source, region.start);
+    fn outside(region: &Range<usize>, lines: &Lines) -> Self {
+        let line = lines.line(region.start);
         Self {
             name: String::new(),
             span: region.clone(),
             line,
-            end_line: last_line(source, region),
+            end_line: lines.last_line(region),
             error_line: line,
         }
     }
 }
 
-/// The line of a span's last byte; an empty span's own line.
-fn last_line(source: &str, span: &Range<usize>) -> usize {
-    line_of(source, span.end.saturating_sub(1).max(span.start))
+/// Where each line of a file starts, to place many bytes in one pass over
+/// it: a file of 9,000 error regions took 0.7 s counting the lines before
+/// each one.
+struct Lines(Vec<usize>);
+
+impl Lines {
+    fn of(source: &str) -> Self {
+        let starts = source.match_indices('\n').map(|(at, _)| at + 1);
+        Self(std::iter::once(0).chain(starts).collect())
+    }
+
+    /// The line holding `byte`, as `line_of` counts it.
+    fn line(&self, byte: usize) -> usize {
+        self.0.partition_point(|&start| start <= byte)
+    }
+
+    /// The line of a span's last byte; an empty span's own line.
+    fn last_line(&self, span: &Range<usize>) -> usize {
+        self.line(span.end.saturating_sub(1).max(span.start))
+    }
 }
 
 /// Whether two byte ranges share a byte, counting an empty range (a token
@@ -126,11 +143,12 @@ impl FileUnits {
     /// clean parse.
     pub fn coverage(&self, source: &str) -> f64 {
         let lines: Vec<&str> = source.split('\n').collect();
+        let index = Lines::of(source);
         // Whether each line, from 1, is left out: each entry marks its own
         // lines, so a file with thousands of errors stays linear.
         let mut out = vec![false; lines.len() + 1];
         for l in self.left_out_code(source) {
-            let first = line_of(source, l.span.start);
+            let first = index.line(l.span.start);
             for mark in &mut out[first.min(l.end_line)..=l.end_line.min(lines.len())] {
                 *mark = true;
             }
@@ -152,6 +170,7 @@ impl FileUnits {
     /// inside them: a Bend 2 test is its whole program, defs included. Each
     /// is named in place of the errors it holds.
     pub fn leave_out_tests(&mut self, cases: Vec<TestCase>, source: &str) {
+        let lines = Lines::of(source);
         for case in cases {
             if self.left_out.iter().any(|l| contains(&l.span, &case.span)) {
                 continue;
@@ -163,7 +182,7 @@ impl FileUnits {
                 .iter()
                 .filter(|l| contains(&case.span, &l.span));
             let error_line = loose
-                .map(|e| line_of(source, e.start))
+                .map(|e| lines.line(e.start))
                 .chain(held.map(|l| l.error_line))
                 .min()
                 .unwrap_or(case.line);
@@ -185,14 +204,15 @@ impl FileUnits {
     /// the errors outside them joined into runs of lines, since one broken
     /// passage can hold a hundred regions.
     pub fn left_out_code(&self, source: &str) -> Vec<LeftOut> {
+        let lines = Lines::of(source);
         let mut runs: Vec<LeftOut> = Vec::new();
         for error in &self.errors {
             match runs.last_mut() {
-                Some(run) if line_of(source, error.start) <= run.end_line + 1 => {
+                Some(run) if lines.line(error.start) <= run.end_line + 1 => {
                     run.span.end = run.span.end.max(error.end);
-                    run.end_line = run.end_line.max(last_line(source, error));
+                    run.end_line = run.end_line.max(lines.last_line(error));
                 }
-                _ => runs.push(LeftOut::outside(error, source)),
+                _ => runs.push(LeftOut::outside(error, &lines)),
             }
         }
         let mut found = self.left_out.clone();
