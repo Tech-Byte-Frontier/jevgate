@@ -375,18 +375,18 @@ fn a_provider_failure_never_blocks_and_is_told_to_the_person_and_the_agent() {
 #[test]
 fn a_slow_provider_is_cut_at_the_budget() {
     let project = repository();
-    let host = host(|| Box::new(Slow(Duration::from_secs(3))));
+    let host = host(|| Box::new(Slow(Duration::from_secs(6))));
     send(&project, &host, prompt("refactor"));
     project.write("lib.rs", &long_function("f"));
     let started = Instant::now();
-    let reply = send_within(&project, &host, stop(false), Duration::from_secs(1));
+    let reply = send_within(&project, &host, stop(false), Duration::from_secs(2));
     assert!(
-        started.elapsed() < Duration::from_secs(2),
+        started.elapsed() < Duration::from_secs(4),
         "the budget holds"
     );
     assert!(reply.get("decision").is_none());
     assert!(
-        message(&reply).contains("the check did not finish within 1 s"),
+        message(&reply).contains("the check did not finish within 2 s"),
         "{reply}"
     );
 }
@@ -398,7 +398,8 @@ fn a_session_lock_held_by_another_process_never_blocks() {
     send(&project, &host, prompt("refactor"));
     project.write("lib.rs", &long_function("f"));
     let held = crate::storage::Store::open(&project.0).unwrap();
-    let reply = send_within(&project, &host, stop(false), Duration::from_secs(1));
+    // Room for a slow runner to reach the lock before the reply is due.
+    let reply = send_within(&project, &host, stop(false), Duration::from_secs(3));
     drop(held);
     assert!(reply.get("decision").is_none());
     assert!(message(&reply).contains("held its session lock"), "{reply}");

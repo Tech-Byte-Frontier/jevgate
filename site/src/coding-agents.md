@@ -32,6 +32,8 @@ A reply lists at most 10 findings and stays under 8,000 characters, which every 
 
 The hook always exits 0 and speaks through its JSON: agents read exit 2 as "block" and exit 1 as a silent error, the opposite of `check`. A missing key, an HTTP 402, an outage, a check that runs past its time, another JevGate process holding the repository's session lock, or a directory outside Git never blocks the agent, and is always said: to the person as a message, and to the agent as context (at the next prompt, when it happened at the end of a turn).
 
+The snapshots are of the working tree, so a turn's changes include any another agent or person made in the same checkout meanwhile; give parallel agents their own worktrees.
+
 The hook detects the agent from the event; `--agent` names it. It gives up after 10 s at a session or turn start, 30 s after an edit and 50 s at the end of a turn (`--timeout` sets one budget for every event); set the agent's own hook timeouts above those, as below.
 
 | Agent | Where the hooks go | Events |

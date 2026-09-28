@@ -51,7 +51,7 @@ impl<'a> Hook<'a> {
         let root = config::repository_root(&cwd);
         let index = crate::revision::index_file(&root).with_context(|| {
             format!(
-                "{} is not in a Git repository, so JevGate cannot tell what a turn changed",
+                "{} is not in a Git repository (or Git cannot run), so JevGate cannot tell what a turn changed",
                 root.display()
             )
         })?;

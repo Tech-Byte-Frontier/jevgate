@@ -45,8 +45,8 @@ Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–52
 
 `jevgate hook` never blocks the agent when a check cannot finish; it says why, as `JevGate could not check this turn: REASON. Nothing was blocked.` The reasons are the ones above, and a few of its own:
 
-**`… is not in a Git repository, so JevGate cannot tell what a turn changed`**
-: The hook compares snapshots of the working tree, which needs Git. Run `git init`, or leave the hook out of that agent's settings for directories outside Git.
+**`… is not in a Git repository (or Git cannot run), so JevGate cannot tell what a turn changed`**
+: The hook compares snapshots of the working tree, which needs Git on the `PATH`. Run `git init`, or leave the hook out of that agent's settings for directories outside Git.
 
 **`another JevGate process in this repository (a check, --watch or another hook) held its session lock`**
 : The hook waits up to 10 s for another JevGate process in the same repository, such as a `check --watch`, then lets the agent go on. Stop the watch while the agent works, or rely on the hook instead.
