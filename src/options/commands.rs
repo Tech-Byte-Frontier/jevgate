@@ -144,10 +144,11 @@ pub enum JevCommand {
     /// OpenCode, Copilot CLI or VS Code, it reads the event as JSON on stdin
     /// and prints one JSON reply. When a turn starts, it records a snapshot of
     /// the working tree under `.jevgate/turns/`; after each edit, it checks
-    /// the edited files and passes their findings to the agent, never
-    /// blocking; when the turn ends, it checks every file the turn changed
-    /// and blocks the agent while findings fail the gate, at most 3 times a
-    /// turn. Checks use the repository's jevgate.toml and key, like `check`.
+    /// what the turn changed in the edited files and passes the findings to
+    /// the agent, never blocking; when the turn ends, it checks everything
+    /// the turn changed and blocks the agent while findings fail the gate, at
+    /// most 3 times a turn. Checks judge a turn as `check --base` judges a
+    /// change, with the repository's jevgate.toml and key.
     ///
     /// It always exits 0, since agents read exit 2 as a block: an outage, an
     /// HTTP 402, a missing key or a directory outside Git never blocks the

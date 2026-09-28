@@ -7,7 +7,7 @@ description: How to act on JevGate findings. Use when JevGate reports findings a
 
 JevGate is a code-review gate. It asks TypeSafe Jev short, typed questions about units of code (a function, a file outline, a pair of copies, a test, a comment), and code composes the answers into findings. This plugin runs it at three points:
 
-- **After each edit**, the findings on the edited files arrive as context, one line each: `- path:line level rule (fails the gate): why Next: step`. A finding is given once a turn; later edits only count the ones already given.
+- **After each edit**, the findings on what the turn changed in the edited files arrive as context, one line each: `- path:line level rule (fails the gate): why Next: step`. A finding is given once a turn; later edits only count the ones already given.
 - **At the end of a turn**, while findings in what the turn changed fail the gate, JevGate keeps you working with those findings as the reason: at most 3 times a turn, and not again when nothing changed since its last block.
 - **When you ask**: the `jevgate_check` tool runs a check (`base: "HEAD"` covers your uncommitted changes), `jevgate_findings` reads the last report without running anything, and `jevgate_rules` says what each rule asks.
 
@@ -22,6 +22,8 @@ JevGate is a code-review gate. It asks TypeSafe Jev short, typed questions about
 
 - Edit `jevgate-baseline.json` or `jevgate.toml`, or run `jevgate baseline`: accepting findings is the person's decision.
 - Add `jevgate: allow(RULE)` comments, delete or skip tests, or reword code only to change the answer.
+
+Within a turn, none of these unblocks a finding: JevGate reads `jevgate.toml`, the baseline and allow comments as they were when the turn began, and reports each such edit to the person.
 
 ## When JevGate could not check
 

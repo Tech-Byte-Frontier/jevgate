@@ -55,6 +55,22 @@ impl Evaluator for Failing {
     }
 }
 
+/// A provider with a concern only about a function named `old`: a check
+/// that asks about `old` reports it, and one that does not asks nothing
+/// that finds anything.
+struct AboutOld;
+
+impl Evaluator for AboutOld {
+    fn evaluate(&mut self, request: &Value) -> anyhow::Result<Value> {
+        let level = if request.to_string().contains("fn old(") {
+            2
+        } else {
+            0
+        };
+        Ok(answer(request, level))
+    }
+}
+
 /// A provider that answers only after `0`.
 struct Slow(Duration);
 
@@ -168,11 +184,92 @@ fn a_finding_is_given_to_the_agent_once_a_turn() {
     );
     send(&project, &host, prompt("next task"));
     project.write("lib.rs", &file(3));
+    assert_eq!(
+        send(&project, &host, edit(&project, "lib.rs")),
+        json!({}),
+        "this turn changed only the comment after `f`"
+    );
+    project.write("lib.rs", &file(3).replace("spread + 1", "spread + 2"));
     let next_turn = send(&project, &host, edit(&project, "lib.rs"));
     assert!(
         context(&next_turn).contains("\n- lib.rs:1 review "),
-        "{next_turn}"
+        "a turn that changes `f` is given its finding again: {next_turn}"
     );
+}
+
+#[test]
+fn a_turn_is_judged_on_what_it_changed_not_on_the_rest_of_its_files() {
+    let project = repository();
+    let host = host(|| Box::new(AboutOld));
+    // `old` would be a review; the turn edits `f` beside it.
+    let file = |old: &str, f: &str| format!("{old}\n{f}");
+    project.write("lib.rs", &file(&long_function("old"), &function("f")));
+    project.commit_all();
+    send(&project, &host, prompt("tidy f"));
+    let tidied = function("f").replace("total * 2", "total * 3");
+    project.write("lib.rs", &file(&long_function("old"), &tidied));
+    assert_eq!(
+        send(&project, &host, edit(&project, "lib.rs")),
+        json!({}),
+        "`old` was not touched"
+    );
+    assert_eq!(send(&project, &host, stop(false)), json!({}));
+    send(&project, &host, prompt("now old"));
+    let touched = long_function("old").replace("spread + 1", "spread + 2");
+    project.write("lib.rs", &file(&touched, &tidied));
+    let edited = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited).contains("\n- lib.rs:1 review "),
+        "{edited}"
+    );
+    assert_eq!(send(&project, &host, stop(false))["decision"], "block");
+}
+
+#[test]
+fn only_findings_that_fail_the_gate_block_the_end_of_a_turn() {
+    // Answered "Yes" at 0.6, a long function is a function-simplification
+    // consider: reported, but not failing the default gate, which fails only
+    // on levels measured right on projects JevGate was never tuned on.
+    let host = host(|| {
+        Box::new(Mock {
+            level: 4,
+            ..Default::default()
+        })
+    });
+    let project = repository();
+    send(&project, &host, prompt("refactor"));
+    project.write("lib.rs", &long_function("f"));
+    let edited = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited)
+            .contains("\n- lib.rs:1 consider maintainability/function-simplification: "),
+        "{edited}"
+    );
+    let stopped = send(&project, &host, stop(false));
+    assert!(stopped.get("decision").is_none(), "{stopped}");
+    assert!(
+        message(&stopped).starts_with(
+            "JevGate: 1 consider in this turn's changes doesn't fail the quality gate."
+        ),
+        "{stopped}"
+    );
+    // A level set in jevgate.toml fails it, from the turn after the edit.
+    project.write(
+        "jevgate.toml",
+        "rules = [\"function-simplification\"]\nfail_on = [\"consider\"]\n",
+    );
+    send(&project, &host, prompt("again"));
+    project.write(
+        "lib.rs",
+        &long_function("f").replace("spread + 1", "spread + 2"),
+    );
+    let edited = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited)
+            .contains(" consider maintainability/function-simplification (fails the gate): "),
+        "{edited}"
+    );
+    assert_eq!(send(&project, &host, stop(false))["decision"], "block");
 }
 
 #[test]
