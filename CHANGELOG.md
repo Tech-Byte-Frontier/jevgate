@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- Releases publish the npm package, `@tech-byte-frontier/jevgate`, from the release workflow through npm's trusted publishing: no token, and npm shows the package's provenance. 0.30.0's was published by hand.
+
 ## [0.30.0] - 2026-09-28
 
 0.30.0 carries the five versions of the roadmap, 0.26 to 0.30, in one release. A pull request check judges only what the change touches and fails only on rules measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate hook` puts that gate in a coding agent's loop; each question's answer is cached apart and each finding says how often findings like it were right; a team's own conventions become questions that gate its code; and nine more languages are read, in preview. Each part below says what changed and how it was measured.
