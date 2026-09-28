@@ -313,3 +313,24 @@ fn a_long_document_is_asked_about_its_outline_only_when_the_change_adds_a_headin
     );
     assert_eq!(asked, only_after_adding("docs"));
 }
+
+#[test]
+fn a_pull_request_check_fails_only_on_what_the_change_touched() {
+    // Changed lines and the default gate together: every function answers
+    // review-worthy, only the touched one is judged, and its mature
+    // function-simplification review alone fails the gate.
+    let project = Project::new();
+    project.write("lib.rs", &functions_file(&NAMES, &[]));
+    project.commit_all();
+    project.write("lib.rs", &functions_file(&NAMES, &["f2"]));
+    let mut options = since("HEAD", &[catalog::FUNCTION_SIMPLIFICATION]);
+    let report = run(&project, &options, &mut scripted(2));
+    assert_eq!(report.gate.unwrap().reasons, ["1 new review finding"]);
+    assert_eq!(
+        report.files[0].findings[0].gate,
+        Some(crate::schema::Gating::Fails)
+    );
+    options.whole_files = true;
+    let whole = run(&project, &options, &mut scripted(2));
+    assert_eq!(whole.gate.unwrap().reasons, ["6 new review findings"]);
+}
