@@ -30,6 +30,33 @@ impl Project {
             config: Default::default(),
         }
     }
+    /// Run Git in the project, with a fixed identity and no signing.
+    pub(super) fn git(&self, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=JevGate test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&*self.0)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    /// A Git repository holding the project's files as its first commit.
+    pub(super) fn commit_all(&self) {
+        self.git(&["init", "-q"]);
+        self.git(&["add", "-A"]);
+        self.git(&["commit", "-qm", "base"]);
+    }
 }
 
 #[derive(Parser)]

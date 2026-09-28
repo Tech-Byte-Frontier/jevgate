@@ -44,7 +44,9 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
 type ChangedPaths = (BTreeMap<PathBuf, Option<PathBuf>>, Vec<PathBuf>);
 
 /// Changed paths since `revision`, each with its previous path (none when
-/// added), and deleted paths. Renames keep their source; conflicts stop the review.
+/// added), and deleted paths, relative to the root: a `jevgate.toml` in a
+/// subdirectory of a Git repository sees the paths below it, as
+/// `ls-files` does. Renames keep their source; conflicts stop the review.
 fn tracked_changes(root: &Path, revision: &str) -> Result<ChangedPaths> {
     let bytes = git(
         root,
@@ -53,6 +55,7 @@ fn tracked_changes(root: &Path, revision: &str) -> Result<ChangedPaths> {
             "--no-ext-diff",
             "--no-textconv",
             "--find-renames",
+            "--relative",
             "--name-status",
             "-z",
             revision,
@@ -134,3 +137,6 @@ impl Changes {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -75,23 +75,6 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
     assert_eq!(release.strength, Strength::Note, "{}", release.message);
 }
 
-fn git(project: &Project, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args([
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .current_dir(&*project.0)
-        .output()
-        .unwrap();
-    assert!(status.status.success(), "{status:?}");
-}
-
 #[test]
 fn stale_sections_and_repeated_sections_are_checked_after_the_first_pass() {
     let project = Project::new();
@@ -139,18 +122,18 @@ fn stale_sections_and_repeated_sections_are_checked_after_the_first_pass() {
 fn a_finished_plan_covers_its_section_checks() {
     let project = Project::new();
     project.write("src/old.ts", "export {}\n");
-    git(&project, &["init", "-q"]);
-    git(&project, &["add", "."]);
-    git(&project, &["commit", "-q", "-m", "one"]);
-    git(&project, &["tag", "v0.2.0"]);
+    project.git(&["init", "-q"]);
+    project.git(&["add", "."]);
+    project.git(&["commit", "-q", "-m", "one"]);
+    project.git(&["tag", "v0.2.0"]);
     std::fs::remove_file(project.0.join("src/old.ts")).unwrap();
     project.write("src/new.ts", "export {}\n");
     project.write(
         "docs/plans/v0.2.0-plan.md",
         "# v0.2.0 plan\n## Task 1\nEdit `src/old.ts` to add the handler.\n",
     );
-    git(&project, &["add", "-A"]);
-    git(&project, &["commit", "-q", "-m", "two"]);
+    project.git(&["add", "-A"]);
+    project.git(&["commit", "-q", "-m", "two"]);
     let mut options = args();
     options.rules = vec![catalog::DOC_STALENESS.into()];
     let mut eval = scripted(2);
