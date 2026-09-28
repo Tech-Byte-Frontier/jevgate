@@ -246,6 +246,23 @@ fn added_lines_leave_out_what_a_move_kept() {
     let after = "c\nb\nnew\nb\nb\n";
     assert_eq!(added_lines(before, after), BTreeSet::from([2, 4]));
     assert_eq!(added_lines("", "x\n"), BTreeSet::from([0]));
+    // A comment is kept only above the code it applied to.
+    let allow = "# jevgate: allow(function-simplification) kept flat on purpose";
+    let before = format!("{allow}\ndef legacy():\n    pass\n\ndef settle():\n    pass\n");
+    let moved = format!("def legacy():\n    pass\n\n{allow}\ndef settle():\n    pass\n");
+    assert_eq!(added_lines(&before, &moved), BTreeSet::from([3]), "moved");
+    let copied = format!("{allow}\ndef legacy():\n    pass\n\n{allow}\ndef settle():\n    pass\n");
+    assert_eq!(
+        added_lines(&before, &copied),
+        BTreeSet::from([4]),
+        "the copy above other code, not the original"
+    );
+    let decorated = format!("@pytest.mark.skip\n{allow}\ndef legacy():\n    pass\n");
+    assert_eq!(
+        added_lines(&before, &decorated),
+        BTreeSet::from([0]),
+        "an annotation between them keeps what the comment applies to"
+    );
 }
 
 #[test]

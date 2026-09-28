@@ -62,6 +62,44 @@ fn an_allow_comment_added_in_the_turn_does_not_let_the_agent_stop() {
 }
 
 #[test]
+fn an_allow_comment_moved_or_copied_in_the_turn_does_not_let_the_agent_stop() {
+    let allow = "// jevgate: allow(function-simplification) kept flat on purpose\n";
+    for (edited, line) in [
+        (
+            format!("{}{allow}{}", function("legacy"), long_function("f")),
+            9,
+        ),
+        (
+            format!("{allow}{}{allow}{}", function("legacy"), long_function("f")),
+            10,
+        ),
+    ] {
+        let project = repository();
+        let host = reviewing();
+        project.write(
+            "lib.rs",
+            &format!("{allow}{}{}", function("legacy"), function("f")),
+        );
+        project.git(&["commit", "-qam", "an accepted function"]);
+        send(&project, &host, prompt("grow f"));
+        project.write("lib.rs", &edited);
+        let blocked = send(&project, &host, stop(false));
+        assert_eq!(blocked["decision"], "block", "{blocked}");
+        assert!(
+            reason(&blocked).contains(&format!(
+                "- lib.rs:{} review maintainability/function-simplification (fails the gate; accepted this turn): ",
+                line + 1
+            )),
+            "{blocked}"
+        );
+        assert!(
+            message(&blocked).contains(&format!("lib.rs:{line} accepts a finding")),
+            "the guard is on the comment that accepts now: {blocked}"
+        );
+    }
+}
+
+#[test]
 fn a_baseline_written_in_the_turn_does_not_let_the_agent_stop() {
     let project = repository();
     let host = reviewing();

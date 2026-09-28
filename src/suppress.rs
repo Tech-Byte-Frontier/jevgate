@@ -87,7 +87,7 @@ fn allow_for(
 
 /// A comment, attribute or decorator line, which may sit between an allow
 /// comment and the code it is about.
-fn annotation(line: &str) -> bool {
+pub(crate) fn annotation(line: &str) -> bool {
     let line = line.trim_start();
     ["//", "#", "/*", "*", "--", "<!--", "@", "["]
         .iter()

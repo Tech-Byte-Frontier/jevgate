@@ -93,17 +93,22 @@ fn lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
     })
 }
 
-/// The lines of `after` (0-based) whose trimmed text `before` does not hold
-/// as often: added or rewritten lines, not ones a move or rename kept.
+/// The lines of `after` (0-based) that `before` does not hold as often:
+/// added or rewritten lines, not ones a move or rename kept. A comment or
+/// attribute line is counted with the line it applies to, the first below
+/// it that is neither, as an allow comment, a skip decorator or a
+/// next-line suppression reads it: one moved above other code, or copied
+/// there, applies to code it did not before, so it is added, and the
+/// original a copy leaves in place is not.
 pub(super) fn added_lines(before: &str, after: &str) -> BTreeSet<usize> {
-    let mut kept: BTreeMap<&str, usize> = BTreeMap::new();
-    for line in before.lines() {
-        *kept.entry(line.trim()).or_default() += 1;
+    let mut kept: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    for identity in identities(before) {
+        *kept.entry(identity).or_default() += 1;
     }
-    after
-        .lines()
+    identities(after)
+        .into_iter()
         .enumerate()
-        .filter(|(_, line)| match kept.get_mut(line.trim()) {
+        .filter(|(_, identity)| match kept.get_mut(identity) {
             Some(n) if *n > 0 => {
                 *n -= 1;
                 false
@@ -112,4 +117,21 @@ pub(super) fn added_lines(before: &str, after: &str) -> BTreeSet<usize> {
         })
         .map(|(at, _)| at)
         .collect()
+}
+
+/// Each line of `text`, trimmed, with the trimmed line it applies to when
+/// it is a comment or attribute line, else empty.
+fn identities(text: &str) -> Vec<(&str, &str)> {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let mut target = "";
+    let mut identities = vec![("", ""); lines.len()];
+    for (at, line) in lines.iter().enumerate().rev() {
+        if crate::suppress::annotation(line) {
+            identities[at] = (line, target);
+        } else {
+            identities[at] = (line, "");
+            target = line;
+        }
+    }
+    identities
 }
