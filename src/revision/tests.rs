@@ -84,6 +84,24 @@ fn a_patch_gives_each_files_changed_lines_and_removals() {
 }
 
 #[test]
+fn paths_for_git_variables_drop_the_windows_verbatim_prefix() {
+    let plain = |path: &str| for_git(Path::new(path)).to_string_lossy().into_owned();
+    assert_eq!(
+        plain(r"\\?\C:\Temp\repo\.jevgate\turns\a.index"),
+        r"C:\Temp\repo\.jevgate\turns\a.index"
+    );
+    assert_eq!(
+        plain(r"\\?\UNC\server\share\repo\a.index"),
+        r"\\server\share\repo\a.index"
+    );
+    assert_eq!(
+        plain("/tmp/repo/.jevgate/turns/a.index"),
+        "/tmp/repo/.jevgate/turns/a.index"
+    );
+    assert_eq!(plain(r"C:\Temp\a.index"), r"C:\Temp\a.index");
+}
+
+#[test]
 fn a_change_touches_the_spans_holding_its_lines_or_its_removals() {
     let change = lines(&[(10, 12)], &[removal(20, None, false)]);
     assert!(change.touch(12, 15) && change.touch(1, 10) && change.touch(11, 11));

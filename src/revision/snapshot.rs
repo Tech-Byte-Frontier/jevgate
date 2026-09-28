@@ -272,7 +272,7 @@ impl Snapshot<'_> {
         );
         let mut child = super::git_in(self.root)
             .args(args)
-            .env("GIT_INDEX_FILE", self.scratch)
+            .env("GIT_INDEX_FILE", super::for_git(self.scratch))
             .env_remove("GIT_LITERAL_PATHSPECS")
             .stdin(if input.is_some() {
                 Stdio::piped()

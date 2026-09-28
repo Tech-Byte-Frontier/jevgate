@@ -226,6 +226,22 @@ pub(crate) fn git_in(root: &Path) -> Command {
     command
 }
 
+/// `path` as Git for Windows reads it in a variable such as
+/// `GIT_INDEX_FILE`. A canonical Windows path has the verbatim form
+/// `\\?\C:\…` (or `\\?\UNC\server\share\…`), beside which Git cannot create
+/// a lock file ("Invalid argument"), so every hook snapshot on Windows
+/// failed; the plain form names the same file. Other paths are unchanged.
+pub(crate) fn for_git(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(share) => PathBuf::from(format!(r"\\{share}")),
+            None => PathBuf::from(rest),
+        },
+        None => path.to_path_buf(),
+    }
+}
+
 /// Git in `root` with `args`, as [`git_in`], taking pathspecs literally.
 fn git_command(root: &Path, args: &[&str]) -> Command {
     let mut command = git_in(root);
