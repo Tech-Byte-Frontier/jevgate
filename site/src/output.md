@@ -6,7 +6,7 @@
 | `json` | The full report: every file, finding, raw answer and probability, gate and usage |
 | `jsonl` | One compact report per line; one per evaluation with `--watch` |
 | `github` | GitHub Actions annotations and job summary, then the agent text |
-| `sarif` | A SARIF 2.1.0 log for [GitHub code scanning](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github) and other SARIF readers: the findings the annotations show, `error` when they fail the gate, with how the gate counted each as its `gate` property and how often its rule and level were right as `precision` |
+| `sarif` | A SARIF 2.1.0 log for [GitHub code scanning](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github) and other SARIF readers: the findings the annotations show, `error` when they fail the gate, with how the gate counted each as its `gate` property and how often its rule and level were right as `precision`; each rule's help links its page on this site |
 | `gitlab` | A [GitLab Code Quality](https://docs.gitlab.com/ci/testing/code_quality/) report for merge requests: the same findings, `major` when they fail the gate and `minor` otherwise |
 
 Agent output is colored on a terminal; `--color never`, or `NO_COLOR` set to any value, turns it off, and `--color always` or `CLICOLOR_FORCE` turns it on for pipes and logs.

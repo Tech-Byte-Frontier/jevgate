@@ -20,6 +20,17 @@ pub struct Rule {
     pub thresholds_validated: bool,
 }
 
+/// The documentation site, published from `site/` with each release.
+pub const SITE: &str = "https://tech-byte-frontier.github.io/jevgate/";
+
+impl Rule {
+    /// The rule's page on the site, `site/src/rules/<ID>.md`: what it looks
+    /// at, how often it was right, and findings it got wrong.
+    pub fn page(&self) -> String {
+        format!("{SITE}rules/{}.html", self.id)
+    }
+}
+
 pub const FILE_ORGANIZATION: &str = "file_organization";
 pub const FUNCTION_SIMPLIFICATION: &str = "function_simplification";
 pub const SHARED_LOGIC: &str = "shared_logic";
@@ -433,7 +444,7 @@ pub fn policy() -> BTreeMap<String, f64> {
 /// One line per rule: ID, whether it runs by default, whether it needs
 /// `--include-tests`, the levels that fail the default gate, how often its
 /// reviews and considers were right on unseen projects, and its question;
-/// what the columns mean, groups and selection follow.
+/// what the columns mean, groups, selection and the site's pages follow.
 pub fn table() -> String {
     let rules = rules();
     let width = rules.iter().map(|r| r.id.len()).max().unwrap_or(0);
@@ -453,6 +464,9 @@ pub fn table() -> String {
         groups().join(", ")
     ));
     lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests. --fail-on and [rules] levels replace the default gate.".into());
+    lines.push(format!(
+        "How the shares are measured: {SITE}accuracy.html; each rule's page, with findings it got wrong: {SITE}rules/RULE.html."
+    ));
     lines.join("\n")
 }
 
@@ -531,6 +545,10 @@ mod tests {
                 rule.id
             );
         }
+        assert_eq!(
+            find("shared-logic").unwrap().page(),
+            "https://tech-byte-frontier.github.io/jevgate/rules/maintainability/shared-logic.html"
+        );
     }
 
     #[test]

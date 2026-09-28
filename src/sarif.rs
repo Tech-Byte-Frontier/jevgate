@@ -73,16 +73,24 @@ fn document(report: &Report, shown: &[(&Path, &Finding)]) -> Value {
     })
 }
 
-/// A rule's reporting descriptor: its question as the description, and its
-/// group as a tag; code scanning lists rules tagged `security` as security alerts.
+/// A rule's reporting descriptor: its question as the description, its group
+/// as a tag (code scanning lists rules tagged `security` as security alerts),
+/// and its page on the site. Code scanning shows `help` beside each alert, the
+/// Markdown form when there is one, and not `helpUri`, so the help ends with
+/// the page too.
 fn rule(rule: &catalog::Rule) -> Value {
+    const PAGE: &str = "How often it was right, and findings it got wrong";
+    let (question, acceptable, page) = (rule.inspection, rule.acceptable_example, rule.page());
     json!({
         "id": rule.id,
         "name": rule.key,
         "shortDescription": {"text": title(rule.id)},
-        "fullDescription": {"text": rule.inspection},
-        "help": {"text": format!("{}\n\nAcceptable: {}", rule.inspection, rule.acceptable_example)},
-        "helpUri": format!("{HOME}#what-it-finds"),
+        "fullDescription": {"text": question},
+        "help": {
+            "text": format!("{question}\n\nAcceptable: {acceptable}\n\n{PAGE}: {page}"),
+            "markdown": format!("{question}\n\n**Acceptable:** {acceptable}\n\n[{PAGE}]({page})"),
+        },
+        "helpUri": page,
         "properties": {"tags": [rule.group]},
     })
 }
@@ -222,18 +230,41 @@ mod tests {
         assert!(first["partialFingerprints"]["jevgateFingerprint/v1"].is_string());
     }
 
-    #[test]
-    fn security_rules_are_tagged_for_code_scanning() {
-        let args = crate::tests::args();
-        let log = document(&report(&args), &[]);
+    /// The reporting descriptor of rule `id` in a log without results.
+    fn descriptor(id: &str) -> Value {
+        let log = document(&report(&crate::tests::args()), &[]);
+        assert_eq!(log["runs"][0]["results"], json!([]));
         let rules = log["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .unwrap();
-        let injection = rules
-            .iter()
-            .find(|r| r["id"] == "security/injection")
-            .unwrap();
+        rules.iter().find(|r| r["id"] == id).unwrap().clone()
+    }
+
+    #[test]
+    fn security_rules_are_tagged_for_code_scanning() {
+        let injection = descriptor("security/injection");
         assert_eq!(injection["properties"]["tags"], json!(["security"]));
-        assert_eq!(log["runs"][0]["results"], json!([]));
+    }
+
+    #[test]
+    fn a_rules_help_links_its_page_where_code_scanning_shows_it() {
+        let rule = descriptor("tests/value");
+        let page = "https://tech-byte-frontier.github.io/jevgate/rules/tests/value.html";
+        assert_eq!(rule["helpUri"], page);
+        let text = rule["help"]["text"].as_str().unwrap();
+        assert!(
+            text.starts_with("Does the test check only its mocks"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with(&format!("findings it got wrong: {page}")),
+            "{text}"
+        );
+        let markdown = rule["help"]["markdown"].as_str().unwrap();
+        assert!(
+            markdown.contains("\n\n**Acceptable:** A test that checks"),
+            "{markdown}"
+        );
+        assert!(markdown.ends_with(&format!("]({page})")), "{markdown}");
     }
 }

@@ -96,6 +96,13 @@ fn rules_table_names_rules_groups_and_opt_in_rules() {
         "maintainability/hardcoded-values opt-in - 13% of 8 17% of 29"
     );
     assert!(table.contains("BLOCKS: the levels that fail the check by default"));
+    assert!(
+        table.ends_with(
+            "How the shares are measured: https://tech-byte-frontier.github.io/jevgate/accuracy.html; \
+             each rule's page, with findings it got wrong: https://tech-byte-frontier.github.io/jevgate/rules/RULE.html.\n"
+        ),
+        "{table}"
+    );
 }
 
 #[test]
