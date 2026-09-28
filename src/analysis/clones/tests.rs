@@ -689,10 +689,11 @@ fn bash_copies_pair_only_between_scripts_one_reads_into_the_other() {
     // One reads the other in, or both read in a script of the project.
     assert_eq!(found(&[("setup.sh", &alone), ("upgrade.sh", &reader)]), 1);
     let common = script("source lib/common.sh\n");
+    let through = script("common=\"$(dirname \"$0\")/lib/common.sh\"\n. \"${common}\"\n");
     assert_eq!(
         found(&[
             ("a.sh", &common),
-            ("b.sh", &common),
+            ("b.sh", &through),
             ("lib/common.sh", "#!/bin/bash\nlog() { echo \"$1\"; }\n"),
         ]),
         1
