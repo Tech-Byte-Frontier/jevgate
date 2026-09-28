@@ -764,6 +764,36 @@ fn an_invalid_configuration_never_blocks() {
     assert!(message(&reply).contains("no-such-rule"), "{reply}");
 }
 
+#[test]
+fn a_turn_that_began_with_a_broken_configuration_is_not_carried_into_the_next() {
+    let project = repository();
+    let host = reviewing();
+    for broken in ["rules = [\"no-such-rule\"]\n", "rules = [\n"] {
+        project.write("jevgate.toml", broken);
+        send(&project, &host, prompt("refactor"));
+        project.write("lib.rs", &long_function("f"));
+        let unchecked = send(&project, &host, stop(false));
+        assert!(unchecked.get("decision").is_none(), "{unchecked}");
+        assert!(
+            message(&unchecked).starts_with("JevGate could not check this turn: ")
+                && message(&unchecked).contains("this turn's changes stay unchecked"),
+            "{unchecked}"
+        );
+        // The person fixes jevgate.toml; the next turn is checked from here.
+        project.write("jevgate.toml", "rules = [\"function-simplification\"]\n");
+        let next = send(&project, &host, prompt("go on"));
+        assert!(
+            context(&next).starts_with("JevGate could not check the last turn's changes ("),
+            "{next}"
+        );
+        project.write("lib.rs", &long_function("g"));
+        let blocked = send(&project, &host, stop(false));
+        assert_eq!(blocked["decision"], "block", "{broken}: {blocked}");
+        project.write("lib.rs", &function("f"));
+        send(&project, &host, stop(true));
+    }
+}
+
 /// Not on Windows, whose debug builds take larger stack frames; the stack
 /// matters most where `jevgate check` has a main thread's 8 MiB.
 #[cfg(not(windows))]

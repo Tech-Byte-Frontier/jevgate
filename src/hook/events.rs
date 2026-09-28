@@ -232,7 +232,7 @@ impl<'a> Hook<'a> {
             paths: files,
         }) {
             Ok(checked) => checked,
-            Err(reason) => return failed(self.event, &named, &reason),
+            Err(unfinished) => return failed(self.event, &named, &unfinished.reason),
         };
         let Some(mut turn) = turn else {
             let undecided: Vec<_> = checked.undecided.iter().collect();
@@ -297,7 +297,10 @@ impl<'a> Hook<'a> {
         };
         match self.turn_findings(&turn, &now) {
             Ok(checked) => self.decide(turn, now, checked),
-            Err(reason) => self.unchecked(turn, &reason),
+            Err(unfinished) if unfinished.start_unreadable => {
+                self.unreadable_start(now, &unfinished.reason)
+            }
+            Err(unfinished) => self.unchecked(turn, &unfinished.reason),
         }
     }
 
@@ -312,7 +315,7 @@ impl<'a> Hook<'a> {
     }
 
     /// The findings and guards in what changed from the turn's start to `now`.
-    fn turn_findings(&self, turn: &Turn, now: &str) -> Result<Checked, String> {
+    fn turn_findings(&self, turn: &Turn, now: &str) -> Result<Checked, review::Unfinished> {
         if now == turn.tree {
             return Ok(Checked::default());
         }
@@ -394,6 +397,20 @@ impl<'a> Hook<'a> {
         }
     }
 
+    /// A stop whose turn began with a configuration that does not load, such
+    /// as a jevgate.toml the person broke: every check from that start fails
+    /// the same way, so the next turn begins now, where the configuration
+    /// may load again, and this turn's changes stay unchecked. The person is
+    /// told now, and the agent at its next event.
+    fn unreadable_start(&self, now: String, reason: &str) -> Reply {
+        let notice = Some(text::unreadable_start_agent(reason));
+        let _ = turn::save(&self.root, &Turn::begin(&self.event.session, now, notice));
+        Reply {
+            user: Some(text::unreadable_start_user(reason)),
+            ..Reply::default()
+        }
+    }
+
     /// A stop that could not be checked: the person is told now, and the
     /// agent at the next event that carries context. The turn keeps its
     /// start, and the next turn begins there too, so the next check still
@@ -411,7 +428,7 @@ impl<'a> Hook<'a> {
     /// Run one check in the repository: without asking the provider while
     /// the hook waits out its failure, and waiting one out when the check
     /// meets it.
-    fn check(&self, scope: review::Scope) -> Result<Checked, String> {
+    fn check(&self, scope: review::Scope) -> Result<Checked, review::Unfinished> {
         let place = review::Place {
             cwd: self.cwd.clone(),
             root: self.root.clone(),
@@ -430,10 +447,10 @@ impl<'a> Hook<'a> {
                 Ok(checked)
             }
             Err(unfinished) => {
-                if let Some(failure) = unfinished.outage.filter(|_| waiting.is_none()) {
-                    outage::record(&self.root, &failure);
+                if let Some(failure) = unfinished.outage.as_ref().filter(|_| waiting.is_none()) {
+                    outage::record(&self.root, failure);
                 }
-                Err(unfinished.reason)
+                Err(unfinished)
             }
         }
     }

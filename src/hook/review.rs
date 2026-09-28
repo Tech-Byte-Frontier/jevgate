@@ -74,6 +74,20 @@ impl Asking {
 pub(super) struct Unfinished {
     pub reason: String,
     pub outage: Option<String>,
+    /// The configuration of the turn's start did not load. Every check of
+    /// the turn reads it, so checking these changes later from the same
+    /// start would fail the same way.
+    pub start_unreadable: bool,
+}
+
+impl Unfinished {
+    fn new(reason: String) -> Self {
+        Self {
+            reason,
+            outage: None,
+            start_unreadable: false,
+        }
+    }
 }
 
 /// What one hook check covers.
@@ -189,43 +203,49 @@ pub(super) fn check(
     let worker = std::thread::Builder::new()
         .stack_size(WORKER_STACK)
         .spawn(move || {
-            let checked = context(&place, &scope)
-                .and_then(|context| run(context, scope, (&asking, &watching), lock_until));
-            let _ = sender.send(checked.map_err(|e| format!("{e:#}")));
+            // Within a turn, the configuration is the turn start's: when it
+            // does not load, no later check from that start can run.
+            let within_turn = scope.trees.is_some();
+            let configured = context(&place, &scope)
+                .and_then(|context| arguments(&context, scope).map(|args| (context, args)));
+            let checked = match configured {
+                Ok((context, args)) => run(context, args, (&asking, &watching), lock_until)
+                    .map_err(|e| (format!("{e:#}"), false)),
+                Err(e) => Err((format!("{e:#}"), within_turn)),
+            };
+            let _ = sender.send(checked);
         });
     if let Err(error) = worker {
-        return Err(Unfinished {
-            reason: format!("the check could not start ({error})"),
-            outage: None,
-        });
+        return Err(Unfinished::new(format!(
+            "the check could not start ({error})"
+        )));
     }
     let waited = (deadline.saturating_duration_since(started).as_millis() + 500) / 1000;
     match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
         Ok(Ok(checked)) => Ok(checked),
-        Ok(Err(reason)) => Err(Unfinished {
+        Ok(Err((reason, start_unreadable))) => Err(Unfinished {
             reason,
             outage: watch.failure(),
+            start_unreadable,
         }),
         Err(mpsc::RecvTimeoutError::Timeout) => Err(match watch.failure() {
             Some(failure) => Unfinished {
-                reason: format!("{failure}; the check did not finish within {waited} s"),
-                outage: Some(failure),
+                outage: Some(failure.clone()),
+                ..Unfinished::new(format!(
+                    "{failure}; the check did not finish within {waited} s"
+                ))
             },
             None if watch.silent() => Unfinished {
-                reason: format!("the provider did not answer within {waited} s"),
                 outage: Some(format!("no answer within {waited} s")),
+                ..Unfinished::new(format!("the provider did not answer within {waited} s"))
             },
-            None => Unfinished {
-                reason: format!(
-                    "the check did not finish within {waited} s (answers received so far are cached)"
-                ),
-                outage: None,
-            },
+            None => Unfinished::new(format!(
+                "the check did not finish within {waited} s (answers received so far are cached)"
+            )),
         }),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(Unfinished {
-            reason: "the check stopped unexpectedly".into(),
-            outage: None,
-        }),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(Unfinished::new("the check stopped unexpectedly".into()))
+        }
     }
 }
 
@@ -244,14 +264,13 @@ fn context(place: &Place, scope: &Scope) -> Result<ConfigContext> {
 }
 
 /// The check itself: what `jevgate check` does with the repository's
-/// configuration, less the output.
+/// configuration and `args`, less the output.
 fn run(
     context: ConfigContext,
-    scope: Scope,
+    args: CheckArgs,
     (asking, watch): (&Asking, &Watch),
     lock_until: Instant,
 ) -> Result<Checked> {
-    let args = arguments(&context, scope)?;
     let paths = inventory::scope(&args, &context)?;
     let inputs = inventory::collect(&args, &context, &paths)?;
     if inputs.is_empty() {

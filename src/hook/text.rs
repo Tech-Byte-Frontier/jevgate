@@ -432,6 +432,25 @@ pub(super) fn unchecked_turn(why: &str) -> String {
     )
 }
 
+/// What the person is told when a turn's start holds a configuration that
+/// does not load: its changes stay unchecked, and the next turn starts
+/// where this one ended.
+pub(super) fn unreadable_start_user(why: &str) -> String {
+    format!(
+        "JevGate could not check this turn: {}. Nothing was blocked, and this turn's changes stay unchecked; JevGate checks the next turn from where this one ended, once its configuration loads.",
+        reason(why)
+    )
+}
+
+/// What the agent is told at its next event about a turn whose start held
+/// a configuration that does not load.
+pub(super) fn unreadable_start_agent(why: &str) -> String {
+    format!(
+        "JevGate could not check the last turn's changes ({}), so they were not reviewed; this is not a pass.",
+        reason(why)
+    )
+}
+
 /// What the agent is told when `what` could not be checked.
 pub(super) fn failed_agent(what: &str, why: &str) -> String {
     format!(
