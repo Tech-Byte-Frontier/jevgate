@@ -294,8 +294,10 @@ pub(crate) fn failing_first(report: &Report) -> Vec<(&Path, &Finding)> {
 }
 
 /// Every review, then the top considers (all with `verbose`), those that
-/// fail the gate first. Notes are listed only with `verbose`; otherwise just
-/// counted.
+/// fail the gate first, then the notes of custom questions: a team keeps a
+/// question a note while it tries it, so each is a yes to read, not code
+/// that reads well. Other notes are listed only with `verbose`; otherwise
+/// just counted.
 fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: Style) -> Result<()> {
     let findings = failing_first(report);
     let of = |strength: Strength| -> Vec<(&Path, &Finding)> {
@@ -305,17 +307,20 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: St
             .copied()
             .collect()
     };
-    let (review, consider, notes) = (
-        of(Strength::Review),
-        of(Strength::Consider),
-        of(Strength::Note),
-    );
+    let (review, consider) = (of(Strength::Review), of(Strength::Consider));
+    let (custom, notes): (Vec<_>, Vec<_>) = of(Strength::Note)
+        .into_iter()
+        .partition(|(_, f)| crate::catalog::custom(&f.rule));
     if !review.is_empty() {
         let heading = format!("Review ({}):", review.len());
         emit_section(out, &heading, BOLD_RED, &review, style)?;
     }
     if !consider.is_empty() {
         emit_considers(out, &consider, verbose, style)?;
+    }
+    if !custom.is_empty() {
+        let heading = format!("Notes from custom questions ({}):", custom.len());
+        emit_section(out, &heading, BOLD, &custom, style)?;
     }
     if notes.is_empty() {
         return Ok(());

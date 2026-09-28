@@ -87,7 +87,7 @@ Three questions written from the instruction files of open-source projects, aske
 - ky's `AGENTS.md` says "Do not add special handling for `null`". The guidance named the `null` checks the platform forces (`Headers.get()` returns `null`; `typeof value === 'object'` holds for it) as fine. Of 103 functions, none reached 0.80 and 85 were clear; as a `hunk` question over its last 20 commits, 88 of 91 hunks were clear and none was a finding. A change adding a function that gives `null` a meaning of its own failed the gate at 0.92, as a function and as a hunk, and passed once fixed.
 - bakerydemo's `AGENTS.md` prefers CSS `light-dark()` and `color-scheme` to a custom theme system. Its guidance named a `[data-theme='dark']` block that sets the palette again as a violation, and the question found exactly that in `main.css`, at 0.94. The project added that block the same day as the instruction, so its authors likely meant it for new theming work: the guidance, not the model, made this finding.
 
-Start a new question as a `note`, or with `--fail-on custom/<id>=report`, run it on the code and on a change that breaks the rule, and raise its level once its findings are right. Give it a failing and a passing example from your own code first, below, and keep `jevgate rules test` passing while you write its guidance.
+Start a new question as a `note`, whose findings are listed after the considers and never fail the gate, or with `--fail-on custom/<id>=report`; run it on the code and on a change that breaks the rule, and raise its level once its findings are right. Give it a failing and a passing example from your own code first, below, and keep `jevgate rules test` passing while you write its guidance.
 
 ## Examples and `jevgate rules test`
 

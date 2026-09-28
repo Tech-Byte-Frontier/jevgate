@@ -201,6 +201,14 @@ fn a_review_question_fails_the_gate_and_a_note_question_never_does() {
         Strength::Note
     );
     assert_eq!(crate::gate::exit_code(&report), 0);
+    let mut out = Vec::new();
+    crate::output::agent(&mut out, &report, false, crate::output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("Notes from custom questions (1):\n  lib.rs:1 [custom/body-logs] `charge`"),
+        "a question tried as a note shows its findings without --verbose: {text}"
+    );
+    assert!(!text.contains("reads well as it is"), "{text}");
     let advisory = configured(&format!("fail_on = [\"none\"]\n{BODY_LOGS}"), &["custom"]);
     let report = run(&project, &advisory, &mut Custom { yes: 0.95 });
     assert_eq!(crate::gate::exit_code(&report), 0);
