@@ -46,6 +46,8 @@ Every mistake is an error that names the question and its file. In `jevgate.toml
 
 A `hunk` question without `--base`, and a `test` question without `--include-tests`, are not asked, and the check says so on stderr.
 
+With `--base`, a check asks only about what the change touched, as it does for the built-in rules: the functions, tests, comments and sections on lines the change added or modified, or removed lines between, and a whole file only when the change touched some line of it. Every hunk is part of the change, including one that only removes lines. A new or untracked file is judged whole, and `--whole-files` asks about every unit of the changed files.
+
 ## How it is asked
 
 Each request tells Jev what the unit is, as the built-in requests do: the file's path and language, and the unit's literal place in the request, as in "For the function in `functions[2].source`: Does this function write a request body, or a field of one, to a log?". Background and guidance go beside the question as labeled keys. `jevgate check --dry-run --show-requests` prints every request without sending anything.
@@ -158,7 +160,7 @@ Beside the built-in questions a unit adds only its question: about 90 tokens for
 | Alone (`--rule custom`) | 1,560 | 1.48 million | $0.06 |
 | Beside the default rules | 889 of its own | 1.83 million once, when it is added | $0.08 |
 
-Beside the default rules, 1,792 functions rode in function-simplification requests; the rest, mostly functions of fewer than five body lines, which the split question skips, were asked on their own. With `--base`, only the changed files are asked, and reruns are answered from the cache for free.
+Beside the default rules, 1,792 functions rode in function-simplification requests; the rest, mostly functions of fewer than five body lines, which the split question skips, were asked on their own. With `--base`, only the units a change touched are asked, and reruns are answered from the cache for free.
 
 `jevgate rules test` asks one request per example, or per eight of its units: about 280 tokens beyond the example's text and the question. The 23 examples above took 29,258 input tokens ($0.0012), and each rerun from the cache none.
 

@@ -334,3 +334,72 @@ fn a_pull_request_check_fails_only_on_what_the_change_touched() {
     let whole = run(&project, &options, &mut scripted(2));
     assert_eq!(whole.gate.unwrap().reasons, ["6 new review findings"]);
 }
+
+const BODY_LOGS: &str = r#"
+[[question]]
+id = "body-logs"
+question = "Does this function write a request body to a log?"
+unit = "function"
+"#;
+
+#[test]
+fn a_custom_question_asks_only_about_the_units_a_change_touched() {
+    let project = Project::new();
+    project.write("lib.rs", &functions_file(&NAMES, &[]));
+    project.commit_all();
+    project.write("lib.rs", &functions_file(&NAMES, &["f2"]));
+    let mut alone = super::custom::configured(BODY_LOGS, &["custom"]);
+    alone.base = Some("HEAD".into());
+    let (_, plan) = planned(&project, &alone);
+    assert_eq!(packed(&plan, "custom"), [["f2"]]);
+    let units: Vec<&str> = plan.files[&0].units.iter().map(|u| &*u.name).collect();
+    assert_eq!(units, ["f2"], "the others are neither asked nor counted");
+    let mut riding = super::custom::configured(BODY_LOGS, &["default", "custom"]);
+    riding.base = Some("HEAD".into());
+    let (_, plan) = planned(&project, &riding);
+    let custom: Vec<&Planned> = plan
+        .requests
+        .iter()
+        .filter(|p| p.request["questions"].to_string().contains("custom_"))
+        .collect();
+    assert_eq!(custom.len(), 1, "it rides beside function simplification");
+    assert_eq!(custom[0].request["state"]["functions"][0]["name"], "f2");
+    alone.whole_files = true;
+    let (_, plan) = planned(&project, &alone);
+    assert_eq!(packed(&plan, "custom").concat(), NAMES);
+}
+
+#[test]
+fn a_hunk_question_asks_about_a_change_that_only_removes_lines() {
+    let toml = r#"
+[[question]]
+id = "kept-totals"
+question = "Does this change drop a running total?"
+unit = "hunk"
+"#;
+    let project = Project::new();
+    project.write("lib.rs", &functions_file(&NAMES, &[]));
+    project.commit_all();
+    let removed: String = NAMES
+        .iter()
+        .map(|&name| match name {
+            "f2" => function(name).replace("    let mut total = 0;\n", ""),
+            _ => function(name),
+        })
+        .collect();
+    project.write("lib.rs", &removed);
+    let mut options = super::custom::configured(toml, &["custom"]);
+    options.base = Some("HEAD".into());
+    let (_, plan) = planned(&project, &options);
+    let hunks: Vec<(usize, usize)> = plan.files[&0]
+        .units
+        .iter()
+        .map(|u| (u.locations[0].start_line, u.locations[0].end_line))
+        .collect();
+    assert_eq!(
+        hunks,
+        [(18, 18)],
+        "a removal sits at the line after it, outside the lines left"
+    );
+    assert_eq!(plan.requests.len(), 1);
+}

@@ -1,7 +1,8 @@
 //! Custom questions' units and requests. A selected question that applies
 //! to a file gets one unit per function, test, comment, documentation
 //! section or changed hunk of it, or one for the whole file, as its `unit`
-//! says. A unit whose evidence a built-in first-pass request of the file
+//! says; with `--base` judging what a change touched, only the units it
+//! touched. A unit whose evidence a built-in first-pass request of the file
 //! already sends is asked there (`ride`); the others are asked in requests
 //! of their own, packed as the built-in stage packs the same units. Its
 //! examples are asked as those own requests ask (`examples`).
@@ -156,13 +157,14 @@ impl Planner {
                     None => continue,
                 },
             };
+            let judged = judged(file, question.unit, found);
             let room = MAX_UNITS - self.asked.get(question.rule.as_str()).copied().unwrap_or(0);
-            let taken = found.len().min(room);
-            *out.rules.entry(&question.rule).or_default() += found.len() - taken;
+            let taken = judged.len().min(room);
+            *out.rules.entry(&question.rule).or_default() += judged.len() - taken;
             out.questions.push(question);
             *self.asked.entry(&question.rule).or_default() += taken;
-            for (index, item) in found.iter().enumerate().take(taken) {
-                out.units.push(unit(question, item));
+            for index in judged.into_iter().take(taken) {
+                out.units.push(unit(question, &found[index]));
                 asks.entry(question.unit).or_default().push(Ask {
                     unit: out.units.len() - 1,
                     item: index,
@@ -221,6 +223,17 @@ fn applies(question: &Question, offered: &Offered<'_>, path: &Path) -> bool {
         }
 }
 
+/// The items of `kind` a check asks about, by index: all of a file judged
+/// whole, and with `--base` judging what the change touched, those on lines
+/// it touched, as for the built-in rules, so the others are neither paid
+/// for nor counted against the cap. Every hunk is the change itself.
+fn judged(file: &FileContext<'_>, kind: Kind, items: &[Item]) -> Vec<usize> {
+    let touched = |item: &Item| file.judges(item.location.start_line, item.location.end_line);
+    (0..items.len())
+        .filter(|&at| kind == Kind::Hunk || touched(&items[at]))
+        .collect()
+}
+
 /// The unit `question` asks about `item`.
 fn unit(question: &'static Question, item: &Item) -> UnitPlan {
     UnitPlan {
@@ -259,6 +272,7 @@ fn standalone(
         .collect();
     let packs = match kind {
         Kind::Test | Kind::File => pack(entries, TEST_PACK_ITEMS, |(item, _)| &item.state),
+        // Only the units a check judges were asked, so every entry is kept.
         _ => pack_runs(
             entries,
             |(item, _)| item.run.as_str(),
