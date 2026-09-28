@@ -209,8 +209,8 @@ const DEPENDENCY_FIELDS: &[&str] = &[
     "optionalDependencies",
 ];
 
-/// Scripts and dependencies of every tracked `package.json`, and targets of
-/// every tracked Makefile or justfile.
+/// Scripts, binaries and dependencies of every tracked `package.json`, and
+/// targets of every tracked Makefile or justfile.
 pub fn scripts(root: &Path, history: &super::history::History) -> BTreeSet<String> {
     let mut scripts = BTreeSet::new();
     for path in &history.tracked {
@@ -225,6 +225,17 @@ pub fn scripts(root: &Path, history: &super::history::History) -> BTreeSet<Strin
                 };
                 if let Some(declared) = package["scripts"].as_object() {
                     scripts.extend(declared.keys().cloned());
+                }
+                // A workspace package's own binaries run the same way, such as
+                // n8n's `pnpm n8n-generate-translations` from its core package.
+                match &package["bin"] {
+                    Value::Object(bins) => scripts.extend(bins.keys().cloned()),
+                    Value::String(_) => {
+                        if let Some(name) = package["name"].as_str() {
+                            scripts.insert(name.rsplit('/').next().unwrap_or(name).to_string());
+                        }
+                    }
+                    _ => {}
                 }
                 // `pnpm tsx` and `yarn eslint` run a dependency's binary,
                 // usually named after its package.
@@ -393,21 +404,45 @@ mod tests {
     }
 
     #[test]
-    fn scripts_include_the_binaries_dependencies_bring() {
+    fn scripts_include_the_binaries_packages_declare_or_dependencies_bring() {
         let project = crate::tests::Project::new();
         project.write(
             "examples/app/package.json",
             r#"{"scripts":{"dev":"vite"},"devDependencies":{"tsx":"4","@biomejs/biome":"1"}}"#,
         );
         project.write("justfile", "check:\n\tcargo check\n");
+        project.write(
+            "packages/core/package.json",
+            r#"{"name":"n8n-core","bin":{"n8n-generate-translations":"./bin/generate-translations"}}"#,
+        );
+        project.write(
+            "packages/cli/package.json",
+            r#"{"name":"@acme/tool","bin":"./cli.js"}"#,
+        );
         let history = crate::docs::history::History {
-            tracked: ["examples/app/package.json", "justfile"]
-                .into_iter()
-                .map(PathBuf::from)
-                .collect(),
+            tracked: [
+                "examples/app/package.json",
+                "justfile",
+                "packages/core/package.json",
+                "packages/cli/package.json",
+            ]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
             ..Default::default()
         };
         let found: Vec<String> = scripts(&project.0, &history).into_iter().collect();
-        assert_eq!(found, ["@biomejs/biome", "biome", "check", "dev", "tsx"]);
+        assert_eq!(
+            found,
+            [
+                "@biomejs/biome",
+                "biome",
+                "check",
+                "dev",
+                "n8n-generate-translations",
+                "tool",
+                "tsx"
+            ]
+        );
     }
 }
