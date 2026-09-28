@@ -65,6 +65,48 @@ fn base_reviews_changes_since_the_fork_point_like_a_pull_request() {
 }
 
 #[test]
+fn base_judges_changed_lines_unless_whole_files_is_given() {
+    let project = Project::new();
+    let source = format!("{JUDGED_RS}{}", JUDGED_RS.replace("fn f(", "fn g("));
+    std::fs::write(project.0.join("lib.rs"), &source).unwrap();
+    git(&project, &["init", "-q"]);
+    git(&project, &["add", "lib.rs"]);
+    git(&project, &["commit", "-qm", "baseline"]);
+    std::fs::write(project.0.join("lib.rs"), source.replacen("+ 1", "+ 2", 1)).unwrap();
+    // `f` and `g` share a pack; the change touched `f` alone.
+    let functions = |flags: &[&str]| {
+        let mut arguments = vec!["--base", "HEAD", "--show-requests"];
+        arguments.extend_from_slice(flags);
+        let report = dry_run(&project, &arguments);
+        let names: Vec<String> = report["initial_requests"][0]["state"]["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap().to_string())
+            .collect();
+        (report["scope"].clone(), names)
+    };
+    assert_eq!(
+        functions(&[]),
+        (serde_json::json!("changed-lines"), vec!["f".to_string()])
+    );
+    assert_eq!(
+        functions(&["--whole-files"]),
+        (
+            serde_json::json!("whole-files"),
+            vec!["f".to_string(), "g".to_string()]
+        )
+    );
+    let usage = project
+        .command()
+        .args(["check", "--whole-files", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(usage.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&usage.stderr).contains("--base"));
+}
+
+#[test]
 fn a_config_file_given_by_path_replaces_the_repository_one() {
     let project = Project::new();
     std::fs::write(

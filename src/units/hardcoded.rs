@@ -68,11 +68,13 @@ pub(super) fn plan(
     }
     // Runs end after the names of the functions holding the values, so a
     // value added or removed re-asks only its function's run.
-    for group in pack_runs(
+    let packs = pack_runs(
         items,
         |(_, _, state)| state["name"].as_str().unwrap_or_default(),
         |(_, _, state)| state,
-    ) {
+        |(index, _, _)| file.judges_unit(&out.units[*index]),
+    );
+    for group in packs {
         send_or_split(file, group, out, requests);
     }
     if !constants.is_empty() {

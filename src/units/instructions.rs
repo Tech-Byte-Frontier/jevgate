@@ -80,11 +80,13 @@ pub(super) fn plan(
     // Runs end after headings, never after a unit's name, which names a
     // long section's blocks by line: a section added, removed or edited
     // re-asks only its own run, and blocks of one section stay together.
-    for group in pack_runs(
+    let packs = pack_runs(
         items,
         |(_, _, state)| state["heading"].as_str().unwrap_or_default(),
         |(_, _, state)| state,
-    ) {
+        |(index, _, _)| file.judges_unit(&out.units[*index]),
+    );
+    for group in packs {
         send_or_split(file, &evidence, group, out, requests);
     }
 }

@@ -14,8 +14,8 @@ pub(super) struct Scope<'a> {
 }
 
 use super::{
-    FileContext, FilePlan, Plan, Planned, access, documents, drift, handlers, instructions,
-    workflows,
+    Detail, FileContext, FilePlan, Plan, Planned, UnitPlan, access, documents, drift, handlers,
+    instructions, workflows,
 };
 
 use crate::{
@@ -133,7 +133,57 @@ pub fn plan(
         );
         result.files.insert(owner, file);
     }
+    keep_changed(inputs, &mut result);
     result
+}
+
+/// With `--base` judging what a change touched, drop the units it did not
+/// touch and the requests asking only about them, so they are neither paid
+/// for nor reported. A unit stays when one of its locations lies on lines
+/// the change touched in that location's file: a copy pair stays when
+/// either copy changed, and a copy in a file the check did not select is
+/// unchanged. Units of a file judged whole all stay.
+fn keep_changed(inputs: &[Input], plan: &mut Plan) {
+    let changes: BTreeMap<&Path, Option<&crate::revision::FileChange>> = inputs
+        .iter()
+        .map(|input| (input.result.path.as_path(), input.changed.as_ref()))
+        .collect();
+    let touched = |location: &crate::schema::Location| match changes.get(location.path.as_path()) {
+        Some(Some(change)) => change.lines.touch(location.start_line, location.end_line),
+        Some(None) => true,
+        None => false,
+    };
+    let mut kept = BTreeMap::<usize, std::collections::BTreeSet<String>>::new();
+    for (&owner, file) in &mut plan.files {
+        if inputs[owner].changed.is_none() {
+            continue;
+        }
+        file.units
+            .retain(|unit| chosen_when_planned(unit) || unit.locations.iter().any(touched));
+        kept.insert(owner, file.units.iter().map(|u| u.id.clone()).collect());
+    }
+    plan.requests.retain(|request| {
+        kept.get(&request.owner).is_none_or(|ids| {
+            request
+                .asked
+                .questions
+                .iter()
+                .any(|question| ids.contains(&question.unit))
+        })
+    });
+}
+
+/// Units whose planner already chose them by what the change did: an
+/// outline or a document's outline by the members it added, a stale section
+/// and a finished-plan question by the paths it removed.
+fn chosen_when_planned(unit: &UnitPlan) -> bool {
+    matches!(
+        unit.detail,
+        Detail::Outline { .. }
+            | Detail::Document { .. }
+            | Detail::Stale { .. }
+            | Detail::Plan { .. }
+    )
 }
 
 /// Each GitHub Actions workflow file's jobs.
@@ -157,6 +207,7 @@ fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: Limits<'_>, resul
             budget,
             project: args.project.as_deref(),
             framework: None,
+            changed: input.changed.as_ref(),
         };
         workflows::plan(&context, &mut file, &mut result.requests);
         result.files.insert(owner, file);
@@ -189,6 +240,7 @@ fn plan_document(
         budget,
         project: args.project.as_deref(),
         framework: None,
+        changed: input.changed.as_ref(),
     };
     if input.result.role == crate::inventory::DOCS {
         if args.enabled(catalog::LARGE_DOCS) {

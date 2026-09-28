@@ -85,6 +85,11 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         quick: args.quick,
         base_revision: args.base.clone(),
         deleted_files: Vec::new(),
+        scope: if args.changed_lines() {
+            schema::Scope::ChangedLines
+        } else {
+            schema::Scope::WholeFiles
+        },
         schema_version: schema::SCHEMA_VERSION,
         command: "check".into(),
         rubric_version: schema::RUBRIC.into(),

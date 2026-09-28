@@ -11,7 +11,7 @@ Before finishing, run `jevgate check --base origin/main`. Fix each `review` find
 for a `consider`, fix it or say why the code should stay as it is.
 ```
 
-`--base` limits the review to the files changed since that revision, plus uncommitted and untracked files, so a check costs only what the change touches, and cached answers make reruns free. The exit code says what to do next:
+`--base` limits the review to what changed since that revision, uncommitted and untracked changes included: the functions, tests and comments on changed lines, and copies where either copy changed. A check asks about and reports only what the change touches, and cached answers make reruns free. The exit code says what to do next:
 
 | Exit code | Meaning for the agent |
 |---|---|
@@ -35,7 +35,7 @@ The second form is for clients configured with JSON, such as Cursor. The server 
 
 | Tool | What it does |
 |---|---|
-| `jevgate_check` | Runs `jevgate check` in the repository with `base`, `paths`, `rules`, `include_tests`, `dry_run` or `verbose`, and returns the ranked findings. An incomplete run (exit 2) is a tool error, never a pass |
+| `jevgate_check` | Runs `jevgate check` in the repository with `base`, `whole_files`, `paths`, `rules`, `include_tests`, `dry_run` or `verbose`, and returns the ranked findings. An incomplete run (exit 2) is a tool error, never a pass |
 | `jevgate_findings` | Reads the last report's findings, optionally under one path, without running anything |
 | `jevgate_rules` | Lists every rule with the question it asks |
 

@@ -16,7 +16,7 @@ jevgate check --rule default --rule security      # add the security group
 jevgate check --rule documentation                # agent instruction files, project docs and code comments
 jevgate check --rule comments                     # only code comments
 jevgate check --include-tests                     # also judge tests
-jevgate check --base origin/main --format json    # changed files only, for agents and scripts
+jevgate check --base origin/main --format json    # only what changed, for agents and scripts
 jevgate check --watch                             # re-check on save
 jevgate baseline --merge                          # after a --base or path check: accept its findings, keep the rest
 jevgate baseline mark wrong src/api/search.ts:41  # record why an accepted finding was accepted

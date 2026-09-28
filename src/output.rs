@@ -1,6 +1,6 @@
 use crate::{
     options::{CheckArgs, ColorChoice, Format},
-    schema::{FileResult, Finding, Gating, Report, Status, Strength},
+    schema::{FileResult, Finding, Gating, Report, Scope, Status, Strength},
 };
 use anyhow::Result;
 use std::{
@@ -153,8 +153,9 @@ pub(crate) fn headline(report: &Report) -> String {
         let tokens: u64 = stages.map(|s| s.planned_tokens).sum();
         let cost = cost(crate::model::usd(&report.requested_model, tokens));
         return format!(
-            "JevGate: dry run · {} files · {planned} first-pass requests, {cached} answered by the cache · ~{tokens} new input tokens{cost}; follow-ups depend on the answers",
-            report.files.len()
+            "JevGate: dry run · {} files{} · {planned} first-pass requests, {cached} answered by the cache · ~{tokens} new input tokens{cost}; follow-ups depend on the answers",
+            report.files.len(),
+            since(report)
         );
     }
     let gate = match &report.gate {
@@ -164,9 +165,10 @@ pub(crate) fn headline(report: &Report) -> String {
     };
     let cost = cost(report.estimated_usd);
     format!(
-        "JevGate: {} · {gate} · {} files · {} API requests{} · {} input tokens{cost}",
+        "JevGate: {} · {gate} · {} files{} · {} API requests{} · {} input tokens{cost}",
         report.status,
         report.files.len(),
+        since(report),
         report.api_requests,
         via(report),
         report.paid_input_tokens
@@ -181,6 +183,25 @@ fn via(report: &Report) -> String {
         .map_or(String::new(), |provider| {
             format!(" via {}", provider.service().label)
         })
+}
+
+/// Characters of a commit id shown, as Git abbreviates it.
+const SHORT_COMMIT: usize = 7;
+
+/// With a base revision, what the check judged since it: ` · changed lines
+/// since 1a2b3c4` or ` · whole files changed since 1a2b3c4`.
+fn since(report: &Report) -> String {
+    let Some(base) = &report.base_revision else {
+        return String::new();
+    };
+    let judged = match report.scope {
+        Scope::ChangedLines => "changed lines",
+        Scope::WholeFiles => "whole files changed",
+    };
+    format!(
+        " · {judged} since {}",
+        base.get(..SHORT_COMMIT).unwrap_or(base)
+    )
 }
 
 /// The headline, green when the gate passed and red when it failed, then run errors.

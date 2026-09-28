@@ -75,7 +75,7 @@ jobs:
           version: 0.25.0
 ```
 
-It reviews only the changed files, annotates each finding on its line and writes a job summary; unchanged code is answered from the cache for free. [Continuous integration](https://tech-byte-frontier.github.io/jevgate/ci.html) covers pre-commit, other CI systems, pull requests from forks, budgets and a gate policy the change cannot edit.
+It reviews only what the pull request changed (the functions, tests and comments on changed lines, and copies where either copy changed), annotates each finding on its line and writes a job summary; unchanged code is answered from the cache for free. [Continuous integration](https://tech-byte-frontier.github.io/jevgate/ci.html) covers pre-commit, other CI systems, pull requests from forks, budgets and a gate policy the change cannot edit.
 
 ## Output and exit codes
 

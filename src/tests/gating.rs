@@ -169,6 +169,36 @@ fn a_merged_baseline_keeps_accepted_findings_for_files_the_check_did_not_cover()
 }
 
 #[test]
+fn a_merged_baseline_after_a_check_of_changed_lines_keeps_the_rest_of_its_files() {
+    let project = Project::new();
+    let source = format!("{}{}", function("a"), function("b"));
+    project.write("lib.rs", &source);
+    let mut options = args();
+    let mut review = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    publish(&project, &run(&project, &options, &mut review));
+    assert_eq!(
+        baseline::write(&project.0, false, None).unwrap().accepted,
+        2
+    );
+    project.commit_all();
+    // The change touches `a` alone: `b`'s accepted finding was not judged.
+    project.write("lib.rs", &source.replacen("doubled + 1", "doubled + 2", 1));
+    options.base = Some("HEAD".into());
+    let report = run(&project, &options, &mut review);
+    assert_eq!(report.scope, schema::Scope::ChangedLines);
+    publish(&project, &report);
+    let merged = baseline::write(&project.0, true, None).unwrap();
+    assert_eq!((merged.accepted, merged.kept), (1, 2));
+    options.base = None;
+    let report = run(&project, &options, &mut review);
+    assert!(report.files[0].findings.iter().all(|f| f.baselined));
+    assert_eq!(gate::exit_code(&report), 0);
+}
+
+#[test]
 fn baseline_reasons_are_marked_counted_and_kept_across_rewrites() {
     use options::Disposition::{Later, Wrong};
     let project = two_files();

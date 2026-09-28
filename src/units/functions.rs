@@ -60,11 +60,13 @@ pub(super) fn plan(
     }
     // Runs end after names, so a function added, removed or resized
     // re-asks only its own run.
-    for group in pack_runs(
+    let packs = pack_runs(
         judged,
         |item| item.state["name"].as_str().unwrap_or_default(),
         |item| &item.state,
-    ) {
+        |item| file.judges_unit(&out.units[item.index]),
+    );
+    for group in packs {
         let (request, asked) = build(file, &group, None);
         if file.budget.fits(&request) {
             requests.push(Planned {

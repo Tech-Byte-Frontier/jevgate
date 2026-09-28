@@ -60,6 +60,7 @@ pub(super) fn plan(
                 input.source.as_deref().unwrap_or(""),
                 input.package.as_ref(),
             ),
+            changed: input.changed.as_ref(),
         };
         if let Some(file) = result.files.get_mut(&handler.owner) {
             let django = scope.units[&handler.owner].django;

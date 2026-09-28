@@ -50,6 +50,10 @@ By default only the rules and levels measured right at least 80% of the time on 
 
 Accept it with `jevgate baseline`, and record why with `jevgate baseline mark wrong PATH:LINE`; `jevgate baseline stats` counts each rule's mistaken findings. Reporting it with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml), with the finding from `.jevgate/latest.json` and a small piece of the code, is how the rules improve.
 
+## A `--base` check leaves out a finding
+
+With `--base`, only what the change touches is asked about and reported: units on changed lines, copies where either copy changed, a file's outline when the change adds members, and documents naming a path it removed. A finding elsewhere in a changed file comes back with `--whole-files`, or in a check without `--base`. The report's `scope` says which a check used.
+
 ## A file is skipped
 
 Skipped files are listed with the reason: generated, vendored or minified code, migrations, an unsupported language, syntax errors, a parser that did not finish within 10 seconds, Bend 1 code (JevGate reads Bend 2), or a path outside the upload patterns. `generated`, `tests` and the upload patterns in `jevgate.toml` change what is selected. A file larger than `max_file_bytes` is not skipped but reported as `needs-context`, never truncated, and so is a unit whose request the provider refuses as beyond the model's context.

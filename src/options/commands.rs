@@ -57,7 +57,9 @@ pub enum JevCommand {
         /// Without it, the file is replaced, so after a `--base` or path-limited
         /// check the findings accepted for every other file are dropped. With it,
         /// entries for files the check covered, or that were deleted, are replaced
-        /// by what the check found, and the rest are kept.
+        /// by what the check found, and the rest are kept. A `--base` check that
+        /// judged only what its change touched covers only the deleted files:
+        /// the other entries of the files it checked stay.
         #[arg(long)]
         merge: bool,
         /// Record this reason on findings accepted now without one
@@ -193,7 +195,7 @@ Workflow:
   jevgate baseline mark wrong PATH[:LINE]   Record why a finding was accepted; `baseline stats` counts them
 
 For agents and CI:
-  jevgate check --base origin/main                   Only files changed since a revision
+  jevgate check --base origin/main                   Only what changed since a revision
   jevgate check --base origin/main --format json     The full report, raw probabilities included
   jevgate check --base origin/main --format github   Annotations and a job summary on GitHub
   jevgate rules --format json                        Every rule and the question it asks
@@ -230,7 +232,8 @@ const CHECK_EXAMPLES: &str = "\
 Examples:
   jevgate check                                    Discovered application source, default rules
   jevgate check src/billing --verbose              One directory, with notes and per-file detail
-  jevgate check --base origin/main --format json   Changed files only, machine-readable
+  jevgate check --base origin/main --format json   Only what changed, machine-readable
+  jevgate check --base origin/main --whole-files   Every unit of each changed file
   jevgate check --rule default --rule security     Add the opt-in security group
   jevgate check --rule documentation               Agent instruction files, project docs and code comments
   jevgate check --rule comments                    Only code comments: repeated code, filler, narrated edits
@@ -243,6 +246,7 @@ Examples:
 
 Reading the JSON report (--format json or .jevgate/latest.json):
   complete           false when any selected file was not judged; the exit code is then 2
+  scope              whole-files, or changed-lines when --base judged what changed
   gate               passed, reasons, new_findings, baselined_findings
   fail_on            the gate levels; fail_on_mature says what `mature` stands for
   files[].status     clear, note, consider, review, uncertain, needs-context,

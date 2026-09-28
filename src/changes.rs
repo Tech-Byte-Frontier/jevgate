@@ -1,5 +1,5 @@
 //! Finding lineage between snapshots, by fingerprint: introduced, persistent or resolved.
-use crate::schema::{Change, Report, Status};
+use crate::schema::{Change, Report, Scope, Status};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -75,15 +75,20 @@ fn lineage(previous: &Report, report: &Report) -> Vec<Change> {
         if current.contains(fingerprint) {
             continue;
         }
-        let (state, reason) = if comparable && judged.contains(path) {
-            (
-                "resolved",
-                "The finding no longer triggers; correctness is not certified",
-            )
-        } else {
+        let (state, reason) = if !comparable || !judged.contains(path) {
             (
                 "non-comparable",
                 "The file was not judged in this snapshot, or rubric or model changed",
+            )
+        } else if report.scope == Scope::ChangedLines {
+            (
+                "non-comparable",
+                "Only what the change touched was judged in this snapshot",
+            )
+        } else {
+            (
+                "resolved",
+                "The finding no longer triggers; correctness is not certified",
             )
         };
         changes.push(change(rule, path, fingerprint, generation, state, reason));

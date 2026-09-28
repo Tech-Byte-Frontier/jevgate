@@ -217,6 +217,19 @@ pub struct StageMetrics {
     pub evidence_bytes: u64,
 }
 
+/// What a check judged of its files.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Scope {
+    /// Every unit of each selected file.
+    #[default]
+    WholeFiles,
+    /// With a base revision, only what the change touched: units on changed
+    /// lines, copies where either copy changed, outlines the change added
+    /// members to, and documents naming a path it removed.
+    ChangedLines,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     #[serde(default)]
@@ -225,6 +238,8 @@ pub struct Report {
     pub base_revision: Option<String>,
     #[serde(default)]
     pub deleted_files: Vec<PathBuf>,
+    #[serde(default)]
+    pub scope: Scope,
     pub schema_version: u32,
     pub command: String,
     pub rubric_version: String,

@@ -50,6 +50,7 @@ function p(parent,text,cls){if(text)parent.append(el('p',text,cls))}
 p($('meta'),new Date(data.generated_at*1000).toLocaleString());
 p($('meta'),'Generation '+data.generation+' / '+data.model);
 p($('meta'),data.refresh?'Auto-refresh every 4 seconds':'Saved snapshot');
+if(data.base)p($('meta'),(data.scope==='changed-lines'?'Changed lines':'Whole files changed')+' since '+data.base.slice(0,7));
 // Alert only on failure: a settled run that is incomplete, or a failed gate.
 // Run errors are listed separately.
 const failures=[];if(data.settled&&!data.complete)failures.push('Review execution incomplete.');if(data.gate&&!data.gate.passed)failures.push('Gate failed: '+data.gate.reasons.join('; ')+' (fail on '+data.fail_on.join(', ')+').');

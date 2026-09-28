@@ -2,7 +2,7 @@
 //! why findings were accepted, and counting those reasons per rule.
 use crate::{
     options::Disposition,
-    schema::{Report, Strength},
+    schema::{Report, Scope, Strength},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -76,7 +76,9 @@ pub struct Written {
 /// Accept every finding of the last complete check. No source is read or sent.
 /// With `merge`, earlier entries stay for files the check did not cover, such
 /// as unchanged files of a `--base` run; entries for checked or deleted files
-/// are replaced by what the check found. A finding accepted before keeps its
+/// are replaced by what the check found. A check of changed lines judged only
+/// what its change touched, so the entries of the files it checked stay too,
+/// and only deleted files' entries go. A finding accepted before keeps its
 /// reason; the others get `reason`.
 pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Written> {
     let report = crate::storage::read_latest(root)
@@ -121,9 +123,11 @@ pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Wr
         }
     }
     if merge && let Some(previous) = previous {
+        let whole = report.scope == Scope::WholeFiles;
         let covered: BTreeSet<&Path> = report
             .files
             .iter()
+            .filter(|_| whole)
             .map(|f| f.path.as_path())
             .chain(report.deleted_files.iter().map(|p| p.as_path()))
             .collect();

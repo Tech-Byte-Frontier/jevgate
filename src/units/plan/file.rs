@@ -165,10 +165,13 @@ fn file_context<'a>(
                 .or_else(|| crate::units::client_app::describe(input.package.as_ref()))
                 .map(str::to_string)
             }),
+        changed: input.changed.as_ref(),
     }
 }
 
 /// An application file's members outside tests, or a test file's cases.
+/// With a change judged, the outline is asked only when the change adds a
+/// member: editing a body leaves the file's layout as it was.
 fn plan_outline(
     scope: &Scope<'_>,
     shared: &Shared<'_>,
@@ -182,13 +185,16 @@ fn plan_outline(
     if crate::analysis::bend::law_file(context.path) {
         return;
     }
+    let units = &scope.units[&owner].units;
     if view.application {
-        let units = &scope.units[&owner].units;
         let members: Vec<usize> = (0..units.len())
             .filter(|&i| !lines.iter().any(|l| units[i].overlaps(l)))
             .collect();
         file.rules.insert(catalog::FILE_ORGANIZATION, 0);
-        if members.len() >= 2 {
+        let listed = members
+            .iter()
+            .map(|&i| (units[i].name.as_str(), units[i].line));
+        if members.len() >= 2 && context.adds(listed, unit_names) {
             let callers = callers(scope, &shared.links, owner);
             let parsed = &scope.units[&owner];
             outline::plan(context, parsed, &members, &callers, file, requests);
@@ -196,6 +202,13 @@ fn plan_outline(
     } else if view.classification.kind == crate::file_kind::TESTS {
         file.rules.insert(catalog::FILE_ORGANIZATION, 0);
         let mut cases = test_map::cases(context.path, context.source).unwrap_or_default();
+        let listed = cases
+            .iter()
+            .map(|c| (c.name.as_str(), c.line))
+            .chain(units.iter().map(|u| (u.name.as_str(), u.line)));
+        if !context.adds(listed, test_names) {
+            return;
+        }
         shared.link_routes(&mut cases);
         test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
         if java(context.path) {
@@ -203,6 +216,21 @@ fn plan_outline(
         }
         outline::plan_tests(context, &scope.units[&owner], &cases, file, requests);
     }
+}
+
+/// The names of the units of a file's base version.
+fn unit_names(path: &Path, source: &str) -> BTreeSet<String> {
+    crate::analysis::units::parse(path, source)
+        .map(|parsed| parsed.units.into_iter().map(|u| u.name).collect())
+        .unwrap_or_default()
+}
+
+/// The names of the units and test cases of a test file's base version.
+fn test_names(path: &Path, source: &str) -> BTreeSet<String> {
+    let mut names = unit_names(path, source);
+    let cases = test_map::cases(path, source).unwrap_or_default();
+    names.extend(cases.into_iter().map(|case| case.name));
+    names
 }
 
 /// Callables and module constants outside tests.
@@ -225,10 +253,11 @@ fn plan_values(
         .filter(|u| u.callable() && u.role == Role::Code && outside_tests(u.line))
         .filter(|u| !predicates.contains(&u.name))
         .collect();
+    // With a change judged, only the constants on its lines are asked.
     let constants: Vec<_> = parsed
         .constants
         .iter()
-        .filter(|c| outside_tests(c.line))
+        .filter(|c| outside_tests(c.line) && context.judges(c.line, c.end_line))
         .cloned()
         .collect();
     hardcoded::plan(context, &units, &constants, file, requests);

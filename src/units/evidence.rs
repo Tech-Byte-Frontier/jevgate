@@ -26,9 +26,41 @@ pub(super) struct FileContext<'a> {
     /// The opening of the repository's README, sent only with the question
     /// who reads a program's error text.
     pub project: Option<&'a str>,
+    /// With `--base` judging what the change touched, what it did to this
+    /// file; none when the whole file is judged.
+    pub changed: Option<&'a crate::revision::FileChange>,
 }
 
 impl FileContext<'_> {
+    /// Whether lines `start..=end` of this file are judged: the whole file
+    /// is, or the change touched them.
+    pub(super) fn judges(&self, start: usize, end: usize) -> bool {
+        self.changed
+            .is_none_or(|change| change.lines.touch(start, end))
+    }
+
+    /// Whether a unit of this file is judged: one of its locations here is.
+    pub(super) fn judges_unit(&self, unit: &super::UnitPlan) -> bool {
+        self.changed.is_none()
+            || unit
+                .locations
+                .iter()
+                .any(|l| l.path == self.path && self.judges(l.start_line, l.end_line))
+    }
+
+    /// Whether a rule about the whole file is asked: the whole file is
+    /// judged, or the change adds one of `members` (the names the rule weighs
+    /// and the lines they start on), which `known` lists for the file's base
+    /// version.
+    pub(super) fn adds<'n>(
+        &self,
+        members: impl Iterator<Item = (&'n str, usize)>,
+        known: impl FnOnce(&Path, &str) -> std::collections::BTreeSet<String>,
+    ) -> bool {
+        self.changed
+            .is_none_or(|change| change.adds(members, known))
+    }
+
     pub(super) fn location(
         &self,
         start_line: usize,
@@ -168,10 +200,17 @@ const RUN_ENDS: u8 = 4;
 /// only its own run. Packed greedily in file order, one such edit shifted
 /// every later pack of the file and none of them hit the cache; packing
 /// each key alone kept the others too, but doubled to quadrupled requests.
+///
+/// Only the items `kept` selects are packed, within runs that end where
+/// they end for every item of the file: when `--base` judges only what a
+/// change touched, the changed functions of one run share a pack, and a
+/// later push that changes another function of the run adds it to that
+/// pack, which is asked again whole.
 pub(super) fn pack_runs<T>(
     items: Vec<T>,
     key: impl Fn(&T) -> &str,
     state: impl Fn(&T) -> &Value,
+    kept: impl Fn(&T) -> bool,
 ) -> Vec<Vec<T>> {
     let ends: Vec<bool> = items
         .iter()
@@ -185,7 +224,9 @@ pub(super) fn pack_runs<T>(
     let mut packs = Vec::new();
     let mut run = Vec::new();
     for (item, end) in items.into_iter().zip(ends) {
-        run.push(item);
+        if kept(&item) {
+            run.push(item);
+        }
         if end {
             packs.extend(pack(std::mem::take(&mut run), PACK_ITEMS, &state));
         }

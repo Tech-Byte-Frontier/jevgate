@@ -6,14 +6,15 @@ use super::{
     options::CheckArgs,
     schema::{FileResult, Status, hash},
 };
-use crate::{boundary::Boundary, config::ConfigContext, discovery};
+use crate::{boundary::Boundary, config::ConfigContext, discovery, revision::Changes};
 use anyhow::{Context, Result, ensure};
 use django::{select_settings, unescaped_templates};
 use documents::{add_documents, load_document};
 use spacetimedb::{keep_module_packages, spacetimedb_package};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[derive(Clone)]
@@ -35,6 +36,10 @@ pub struct Input {
     /// For a Python file, with injection judged: the Django templates it
     /// names that write values without escaping them.
     pub templates: Vec<crate::analysis::django::Template>,
+    /// With `--base` judging what the change touched, what it did to this
+    /// file; none when the file is judged whole: without a base, with
+    /// `--whole-files`, or for a file the change added.
+    pub changed: Option<crate::revision::FileChange>,
 }
 
 /// A SpacetimeDB module's package: the directory of the `package.json` that
@@ -79,11 +84,12 @@ pub(crate) fn walker(root: &std::path::Path) -> ignore::Walk {
 }
 
 pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> Result<Vec<Input>> {
-    let changes = args
-        .base
+    let changes = load_changes(args, context)?;
+    // The paths a change removed, when only what it touched is judged.
+    let removed = changes
         .as_ref()
-        .map(|b| crate::revision::Changes::load(&context.root, b))
-        .transpose()?;
+        .filter(|_| args.changed_lines())
+        .map(|c| Arc::new(c.removed(&context.root)));
     let extra = super::context::collect(args, context)?;
     let boundary = Boundary::new(&context.config)?;
     let in_scope = |relative: &Path| {
@@ -113,7 +119,12 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
         unescaped_templates(context, &boundary, &mut inputs);
     }
     if args.documentation() {
-        add_documents(args, context, &boundary, &selected, &mut inputs)?;
+        // A document the change left alone is judged for the paths it removed.
+        let broken = removed
+            .as_ref()
+            .filter(|r| !r.is_empty() && args.enabled(crate::catalog::DOC_STALENESS))
+            .map(|r| (&in_scope as &dyn Fn(&Path) -> bool, r));
+        add_documents(args, context, &boundary, (&selected, broken), &mut inputs)?;
     }
     // SQL is also a source extension, so the code rules' walk may have listed
     // the file already; the configuration rule's role replaces that entry.
@@ -124,7 +135,38 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
             None => inputs.push(input),
         }
     }
+    if let (Some(changes), Some(removed)) = (&changes, &removed) {
+        mark_changes(&mut inputs, changes, &context.root, removed);
+    }
     Ok(inputs)
+}
+
+/// With `--base`, what changed since the fork point with it, with the lines
+/// of each file the change touched when only those are judged.
+fn load_changes(args: &CheckArgs, context: &ConfigContext) -> Result<Option<Changes>> {
+    let Some(base) = &args.base else {
+        return Ok(None);
+    };
+    let changes = Changes::load(&context.root, base)?;
+    Ok(Some(if args.changed_lines() {
+        changes.with_lines(&context.root)?
+    } else {
+        changes
+    }))
+}
+
+/// Record on each input what the change did to it, so only the units it
+/// touched are judged; a file it added stays whole, and a document it left
+/// alone keeps the mark it was selected with.
+fn mark_changes(
+    inputs: &mut [Input],
+    changes: &Changes,
+    root: &Path,
+    removed: &Arc<BTreeSet<PathBuf>>,
+) {
+    for input in inputs.iter_mut().filter(|i| i.changed.is_none()) {
+        input.changed = changes.file(root, &input.result.path, removed);
+    }
 }
 
 /// Application source and tests in scope, with their roles.
@@ -312,6 +354,7 @@ fn source_input(
         package: crate::packages::package(&context.root, relative),
         settings_selected_by: Vec::new(),
         templates: Vec::new(),
+        changed: None,
     }
 }
 
@@ -409,6 +452,7 @@ fn bare_input(result: FileResult) -> Input {
         package: None,
         settings_selected_by: Vec::new(),
         templates: Vec::new(),
+        changed: None,
     }
 }
 
@@ -497,6 +541,7 @@ pub fn fingerprint(inputs: &[Input]) -> String {
                 &i.result.context_complete,
                 &i.result.context_limitations,
                 &i.result.error,
+                i.changed.as_ref().map(|c| &c.lines),
             )
         })
         .collect();

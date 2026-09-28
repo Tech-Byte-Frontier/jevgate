@@ -58,7 +58,8 @@ pub fn render(report: &Report) -> Result<String> {
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
         "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
         "fail_on_mature":report.fail_on_mature,
-        "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules,
+        "errors":report.errors,"deleted":report.deleted_files,"base":report.base_revision,
+        "scope":report.scope,"files":files,"rules":rules,
         "selected":report.rules,"partial":partial});
     // Even a filename or analyzer message may contain </script>. Never let data
     // terminate the JSON element, and insert all displayed strings with textContent.
@@ -161,6 +162,7 @@ mod tests {
             decoded["rules"][1]["maturity"]["review"]["unseen"],
             serde_json::json!({"right": 20, "labeled": 23})
         );
+        assert_eq!(decoded["scope"], "whole-files");
         assert!(!html.contains("id=\"root\""));
         assert_eq!(batch_cost(&report).unwrap()["estimated_usd"], 0.0);
         report.estimated_usd = Some(0.042);

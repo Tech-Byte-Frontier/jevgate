@@ -70,13 +70,16 @@ fn a_run_ends_after_the_last_item_of_a_key_that_ends_runs() {
     // `count` ends a run; `total` and `other` do not.
     let state = json!({});
     let items = vec!["total", "count", "count", "other", "total"];
-    let packs = pack_runs(items, |key| *key, |_| &state);
+    let packs = pack_runs(items.clone(), |key| *key, |_| &state, |_| true);
     assert_eq!(
         packs,
         [vec!["total", "count", "count"], vec!["other", "total"]]
     );
+    // Items left out still end runs where they end for the whole file.
+    let packs = pack_runs(items, |key| *key, |_| &state, |key| *key != "count");
+    assert_eq!(packs, [vec!["total"], vec!["other", "total"]]);
     let long: Vec<&str> = (0..10).map(|_| "total").collect();
-    let packs = pack_runs(long, |key| *key, |_| &state);
+    let packs = pack_runs(long, |key| *key, |_| &state, |_| true);
     assert_eq!(
         packs.iter().map(Vec::len).collect::<Vec<_>>(),
         [PACK_ITEMS, 2]

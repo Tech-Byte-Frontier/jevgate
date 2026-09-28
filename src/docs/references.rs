@@ -98,6 +98,16 @@ const BUILTIN: &[&str] = &[
     "recursive",
 ];
 
+/// Whether `name`, as a document in `base` writes it, is one of `paths`:
+/// read from the repository root or from the document's directory, as the
+/// missing names are.
+pub fn names_one_of(base: &Path, name: &str, paths: &BTreeSet<PathBuf>) -> bool {
+    let trimmed = name.trim_end_matches('/');
+    [normal(Path::new(trimmed)), normal(&base.join(trimmed))]
+        .iter()
+        .any(|path| paths.contains(path))
+}
+
 /// Everything `text`, a section of `doc`, names that the repository lacks.
 pub fn missing(
     root: &Path,

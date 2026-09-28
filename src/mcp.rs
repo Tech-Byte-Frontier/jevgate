@@ -142,6 +142,7 @@ fn check_arguments(arguments: &Value) -> Result<Vec<String>> {
         args.push(format!("--rule={rule}"));
     }
     for (flag, name) in [
+        ("--whole-files", "whole_files"),
         ("--include-tests", "include_tests"),
         ("--dry-run", "dry_run"),
         ("--verbose", "verbose"),
@@ -228,7 +229,8 @@ fn tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "base": {"type": "string", "description": "Review only files changed since this Git revision, such as origin/main"},
+                    "base": {"type": "string", "description": "Review only what changed since this Git revision, such as origin/main: the functions, tests and comments on changed lines, and copies where either copy changed"},
+                    "whole_files": {"type": "boolean", "description": "With base, judge each changed file whole instead of only what the change touched"},
                     "paths": {"type": "array", "items": {"type": "string"}, "description": "Files or directories to review instead of the discovered source"},
                     "rules": {"type": "array", "items": {"type": "string"}, "description": "Rule IDs, names, keys or groups, such as security or file-organization; replaces the configured selection"},
                     "include_tests": {"type": "boolean", "description": "Also judge tests"},
@@ -325,6 +327,7 @@ mod tests {
             "base": "--config=/etc/passwd",
             "rules": ["security"],
             "paths": ["--refresh", "src"],
+            "whole_files": true,
             "dry_run": true,
         }))
         .unwrap();
@@ -336,6 +339,7 @@ mod tests {
                 "--color=never",
                 "--base=--config=/etc/passwd",
                 "--rule=security",
+                "--whole-files",
                 "--dry-run",
                 "--",
                 "--refresh",

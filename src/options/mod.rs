@@ -112,14 +112,22 @@ pub struct CheckArgs {
     /// and vendored files are classified and skipped with a reason.
     /// `upload_allow`/`upload_deny` in jevgate.toml still bound what is sent.
     pub paths: Vec<PathBuf>,
-    /// Review only files changed against this Git revision (commit, branch or tag)
+    /// Review only what changed against this Git revision (commit, branch or tag)
     ///
-    /// Includes committed, staged, unstaged and untracked changes. Deleted
-    /// files are listed in the report. The revision must exist locally: in CI,
+    /// Compares with the fork point, as a pull request diff does, and includes
+    /// committed, staged, unstaged and untracked changes. Only what the change
+    /// touches is asked about and reported: functions, tests, comments and
+    /// values on changed lines, copies where either copy changed, a file's
+    /// outline when the change adds members to it, and documents naming a
+    /// path it deleted or renamed. A new file is judged whole. Deleted files
+    /// are listed in the report. The revision must exist locally: in CI,
     /// check out with full history (for example `fetch-depth: 0`). When no
     /// supported file changed, the run is complete and exits 0.
     #[arg(long, value_name = "REVISION", help_heading = SCOPE)]
     pub base: Option<String>,
+    /// With --base, judge each changed file whole, not only what the change touches
+    #[arg(long, requires = "base", help_heading = SCOPE)]
+    pub whole_files: bool,
     /// Also judge tests: test value, redundancy, and shared logic among tests
     ///
     /// Without it, test files are judged only for file organization. Also set
@@ -322,6 +330,11 @@ impl CheckArgs {
     /// Whether rule `key` judges application source.
     pub fn code_rules_include(&self, key: &str) -> bool {
         !crate::catalog::DOCUMENTATION.contains(&key) && key != crate::catalog::WORKFLOWS
+    }
+
+    /// Whether a `--base` check judges only what its change touches.
+    pub fn changed_lines(&self) -> bool {
+        self.base.is_some() && !self.whole_files
     }
 
     /// Whether any documentation rule is selected, so instruction files are found.

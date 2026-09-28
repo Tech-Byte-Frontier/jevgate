@@ -86,6 +86,7 @@ pub(super) fn plan(
                 budget,
                 project: args.project.as_deref(),
                 framework: None,
+                changed: input.changed.as_ref(),
             }
         };
         let mut push = |owner: usize, unit: Unit| {

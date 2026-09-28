@@ -150,6 +150,22 @@ signatures, or one candidate pair.
    a full pass but saved a half to two thirds as much per edit, and left
    whole files in one run (`clones.rs`, `literals.rs`); one in four
    overtakes it after 31 to 40 edits.
+   With `--base`, only what the change touched is asked: units whose lines
+   it added or modified, or removed lines inside; copies where either copy
+   changed; a file's outline, or a large document's, only when the change
+   adds a member or heading its base version lacks; and a document it left
+   alone only in a section that names a path it deleted or renamed. The
+   touched functions of one run share a pack, in runs that end where they
+   end for the whole file, so no other pack is sent. A later push that
+   changes another function of the run adds it to that pack, which is asked
+   again whole: on 16 corpus projects whose last two commits edit the same
+   file, the second push re-asked 93 units the first had asked, in 45 of
+   its 575 new packs and 1% of the bytes it sent (judging whole files, 363
+   units in 129 of 759 packs, 3%). A unit asked beside other functions can
+   answer differently: of 11,693 first-pass answers about the same units on
+   the corpus's last commits, 88% were the same as with whole-file packs,
+   the others moved 0.03 on average, and 36 crossed 0.50 or 0.80 (13 up, 23
+   down), which made three function-simplification considers notes.
    Tests are sent one per request, because unrelated
    tests in the same state left more answers undecided. State uses literal paths
    such as `functions[2].source`; group IDs are Choice options. Stage and freshness

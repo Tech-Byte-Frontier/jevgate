@@ -60,7 +60,7 @@ pub(super) fn plan(
         .iter()
         .map(|rule| unique_ids(prefix(rule), judged.iter().map(|s| s.name.as_str())))
         .collect();
-    let mut items = Vec::new();
+    let mut items: Vec<Item> = Vec::new();
     for (index, subject) in judged.iter().enumerate() {
         let units = rules
             .iter()
@@ -71,11 +71,17 @@ pub(super) fn plan(
     }
     // Runs end after subjects' names, so a function added, removed or
     // resized re-asks only its own run.
-    for group in pack_runs(
+    let packs = pack_runs(
         items,
         |(_, state)| state["name"].as_str().unwrap_or_default(),
         |(_, state)| state,
-    ) {
+        |(units, _)| {
+            units
+                .iter()
+                .any(|(_, index, _)| file.judges_unit(&out.units[*index]))
+        },
+    );
+    for group in packs {
         send(file, group, "functions", django, out, requests);
     }
     if let Some(setup) = setup.filter(|s| !s.sites.is_empty())
