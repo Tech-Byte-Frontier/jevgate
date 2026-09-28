@@ -73,6 +73,25 @@ pub struct Written {
     pub kept: usize,
 }
 
+/// The last check, when its findings can make a baseline: it finished, and
+/// it covered the repository unless `merge` keeps the files it did not.
+fn last_check(root: &Path, merge: bool) -> Result<Report> {
+    let report = crate::storage::read_latest(root)
+        .context("No compatible .jevgate/latest.json; run jevgate check first")?;
+    ensure!(
+        report.complete && !report.dry_run,
+        "The last check was incomplete; rerun it before writing a baseline"
+    );
+    // A coding agent's hook checks a few files at a time; replacing the
+    // baseline with them would drop what was accepted for every other file.
+    ensure!(
+        merge || report.command != crate::hook::REPORT_COMMAND,
+        "The last check was the agent hook's, of {}; run jevgate check first, or accept its findings with --merge, which keeps the rest",
+        crate::output::count(report.files.len(), "file")
+    );
+    Ok(report)
+}
+
 /// Accept every finding of the last complete check. No source is read or sent.
 /// With `merge`, earlier entries stay for files the check did not cover, such
 /// as unchanged files of a `--base` run; entries for checked or deleted files
@@ -81,12 +100,7 @@ pub struct Written {
 /// and only deleted files' entries go. A finding accepted before keeps its
 /// reason; the others get `reason`.
 pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Written> {
-    let report = crate::storage::read_latest(root)
-        .context("No compatible .jevgate/latest.json; run jevgate check first")?;
-    ensure!(
-        report.complete && !report.dry_run,
-        "The last check was incomplete; rerun it before writing a baseline"
-    );
+    let report = last_check(root, merge)?;
     let mut findings = to_accept(&report, reason);
     let accepted = findings.len();
     let previous = read_baseline(root)?;

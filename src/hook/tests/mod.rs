@@ -130,6 +130,24 @@ fn an_edit_gets_its_findings_as_context_and_never_blocks() {
 }
 
 #[test]
+fn a_baseline_is_not_replaced_by_the_few_files_a_hook_checked() {
+    let project = repository();
+    let host = reviewing();
+    send(&project, &host, prompt("refactor"));
+    project.write("lib.rs", &long_function("f"));
+    send(&project, &host, edit(&project, "lib.rs"));
+    let Err(error) = crate::baseline::write(&project.0, false, None) else {
+        panic!("a hook's check replaced the baseline");
+    };
+    assert_eq!(
+        error.to_string(),
+        "The last check was the agent hook's, of 1 file; run jevgate check first, or accept its findings with --merge, which keeps the rest"
+    );
+    let merged = crate::baseline::write(&project.0, true, None).unwrap();
+    assert_eq!(merged.accepted, 1);
+}
+
+#[test]
 fn a_finding_is_given_to_the_agent_once_a_turn() {
     let project = repository();
     let host = reviewing();

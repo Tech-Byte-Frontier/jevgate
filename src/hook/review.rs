@@ -21,6 +21,9 @@ use std::{
 /// check, `--watch` or a hook of a parallel edit) to release the session lock.
 const LOCK_WAIT: Duration = Duration::from_secs(10);
 const LOCK_POLL: Duration = Duration::from_millis(100);
+/// The `command` of the reports the hook's checks publish: a few files a
+/// turn changed, which `baseline` must not take for the repository's.
+pub(crate) const REPORT_COMMAND: &str = "hook";
 
 /// Builds the evaluator a check asks: the provider in production, a script
 /// in tests.
@@ -90,6 +93,7 @@ fn run(
     }
     let store = open_store(&context.root, lock_until)?;
     let (previous, mut report) = check::first_snapshot(&args, context, &inputs);
+    report.command = REPORT_COMMAND.into();
     let mut evaluator = evaluators(&args, context)?;
     let mut session = check::session(&args, context, &store, evaluator.as_mut());
     check::judge(&mut session, &inputs, previous.as_ref(), &mut report)?;

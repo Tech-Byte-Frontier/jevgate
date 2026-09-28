@@ -15,6 +15,7 @@ mod text;
 mod turn;
 
 pub use agents::Agent;
+pub(crate) use review::REPORT_COMMAND;
 
 use crate::transport;
 use agents::{Event, Kind, Reply};
