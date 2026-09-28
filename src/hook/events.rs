@@ -319,10 +319,11 @@ impl<'a> Hook<'a> {
     }
 }
 
-/// `files` relative to `root`, as the agent and the person read them.
+/// `files` relative to `root`, as the agent and the person read them: with
+/// `/` on every platform, as the finding lines name them.
 fn relative(root: &Path, files: &[PathBuf]) -> Vec<PathBuf> {
     files
         .iter()
-        .map(|file| file.strip_prefix(root).unwrap_or(file).to_path_buf())
+        .map(|file| crate::discovery::relative(file, root).unwrap_or_else(|_| file.clone()))
         .collect()
 }
