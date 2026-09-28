@@ -2,7 +2,7 @@
 //! their help text are in `commands`.
 mod commands;
 
-pub use commands::{BaselineAction, Disposition, HookArgs, JevCommand, OVERVIEW, RulesFormat};
+pub use commands::{BaselineAction, Disposition, JevCommand, OVERVIEW, RulesFormat};
 
 use clap::{Args, ValueEnum};
 use std::{collections::BTreeMap, path::PathBuf};

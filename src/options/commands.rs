@@ -1,6 +1,6 @@
 //! The subcommands, the baseline actions and their help text.
 use super::CheckArgs;
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Subcommand, ValueEnum};
 
 #[derive(Subcommand)]
 pub enum JevCommand {
@@ -137,7 +137,7 @@ pub enum JevCommand {
     /// HTTP 402, a missing key or a directory outside Git never blocks the
     /// agent, and the reply says so to the person and to the agent.
     #[command(after_long_help = HOOK_EXAMPLES)]
-    Hook(HookArgs),
+    Hook(crate::hook::HookArgs),
     /// Serve the latest report as read-only JSON on localhost (run alongside `check --watch`)
     ///
     /// Answers GET requests from local tools, never from a browser page:
@@ -149,20 +149,6 @@ pub enum JevCommand {
         #[arg(long, default_value_t = 47831)]
         port: u16,
     },
-}
-
-/// `hook`: the agent and the time the hook may take.
-#[derive(Args, Debug)]
-pub struct HookArgs {
-    /// The agent that runs the hook [default: detected from the event]
-    #[arg(long, value_enum)]
-    pub agent: Option<crate::hook::Agent>,
-    /// Seconds before the hook gives up and lets the agent go on [default: 10 at a session or turn start, 30 after an edit, 50 at the end of a turn]
-    ///
-    /// Keep it below the agent's own hook timeout: an agent that stops the
-    /// hook first discards its reply, so the person is not told why.
-    #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=3600))]
-    pub timeout: Option<u64>,
 }
 
 /// Why a finding was accepted into the baseline.

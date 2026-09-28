@@ -5,7 +5,8 @@
 use super::{
     Host,
     agents::{self, Event, Kind, Reply},
-    review, text,
+    review::{self, Flagged},
+    text,
     turn::{self, Turn},
 };
 use crate::config;
@@ -190,36 +191,51 @@ impl<'a> Hook<'a> {
         self.context(turn, context)
     }
 
-    /// Check what changed since the turn began, and block while findings
-    /// fail the gate: at most three times a turn, and not again when nothing
-    /// changed since the last block.
+    /// Check what changed since the turn began, then decide whether the
+    /// agent may stop.
     fn stop(&self) -> Reply {
         if !self.event.completed {
             return Reply::default();
         }
         let Some(turn) = self.load() else {
-            let reply = self.begin(None);
-            return Reply {
-                user: reply.user.or(Some(text::UNCHECKED_TURN.into())),
-                ..reply
-            };
+            return self.first_stop();
         };
-        let blocks = if self.event.continued { turn.blocks } else { 0 };
         let now = match self.snapshot() {
             Ok(now) => now,
             Err(error) => return self.unchecked(turn, &format!("{error:#}")),
         };
-        let found = if now == turn.tree {
-            Vec::new()
-        } else {
-            match self.check(review::Scope {
-                trees: Some((turn.tree.clone(), now.clone())),
-                paths: Vec::new(),
-            }) {
-                Ok(found) => found,
-                Err(reason) => return self.unchecked(turn, &reason),
-            }
-        };
+        match self.turn_findings(&turn, &now) {
+            Ok(found) => self.decide(turn, now, found),
+            Err(reason) => self.unchecked(turn, &reason),
+        }
+    }
+
+    /// A stop with no record of the turn's start: one is recorded, so the
+    /// next turn is checked, and the person is told this one was not.
+    fn first_stop(&self) -> Reply {
+        let reply = self.begin(None);
+        Reply {
+            user: reply.user.or(Some(text::UNCHECKED_TURN.into())),
+            ..reply
+        }
+    }
+
+    /// The findings in what changed from the turn's start to `now`.
+    fn turn_findings(&self, turn: &Turn, now: &str) -> Result<Vec<Flagged>, String> {
+        if now == turn.tree {
+            return Ok(Vec::new());
+        }
+        self.check(review::Scope {
+            trees: Some((turn.tree.clone(), now.to_string())),
+            paths: Vec::new(),
+        })
+    }
+
+    /// Block while findings fail the gate: at most three times a turn, and
+    /// not again when nothing changed since the last block. A stop that is
+    /// not blocked ends the turn.
+    fn decide(&self, turn: Turn, now: String, found: Vec<Flagged>) -> Reply {
+        let blocks = if self.event.continued { turn.blocks } else { 0 };
         let (failing, advisory): (Vec<_>, Vec<_>) = found.into_iter().partition(|f| f.fails);
         let user = if failing.is_empty() {
             text::passed(blocks > 0, &advisory)
@@ -244,7 +260,7 @@ impl<'a> Hook<'a> {
 
     /// Block the stop with `failing`, recording the block. A block that
     /// cannot be recorded is not made, so the cap always holds.
-    fn block(&self, mut turn: Turn, failing: &[review::Flagged], block: u32, now: String) -> Reply {
+    fn block(&self, mut turn: Turn, failing: &[Flagged], block: u32, now: String) -> Reply {
         let reason = text::block_reason(failing, block);
         turn.blocks = block;
         turn.block_line = reason.lines().next().map(str::to_string);
@@ -272,7 +288,7 @@ impl<'a> Hook<'a> {
     }
 
     /// Run one check with the repository's configuration.
-    fn check(&self, scope: review::Scope) -> std::result::Result<Vec<review::Flagged>, String> {
+    fn check(&self, scope: review::Scope) -> Result<Vec<Flagged>, String> {
         let context = config::ConfigContext::discover_in(&self.cwd, None)
             .map_err(|error| format!("{error:#}"))?;
         review::check(

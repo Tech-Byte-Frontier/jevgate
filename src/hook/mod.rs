@@ -16,7 +16,7 @@ mod turn;
 
 pub use agents::Agent;
 
-use crate::{options::HookArgs, transport};
+use crate::transport;
 use agents::{Event, Kind, Reply};
 use anyhow::{Result, bail};
 use events::{Hook, failed};
@@ -34,6 +34,20 @@ use std::{
 const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 /// Kept from the budget to write the reply.
 const REPLY_MARGIN: Duration = Duration::from_millis(250);
+
+/// `jevgate hook`'s arguments: the agent and the time the hook may take.
+#[derive(clap::Args, Debug)]
+pub struct HookArgs {
+    /// The agent that runs the hook [default: detected from the event]
+    #[arg(long, value_enum)]
+    pub agent: Option<Agent>,
+    /// Seconds before the hook gives up and lets the agent go on [default: 10 at a session or turn start, 30 after an edit, 50 at the end of a turn]
+    ///
+    /// Keep it below the agent's own hook timeout: an agent that stops the
+    /// hook first discards its reply, so the person is not told why.
+    #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=3600))]
+    pub timeout: Option<u64>,
+}
 
 /// How the hook runs: the agent when not detected, and its time budget.
 #[derive(Clone, Copy, Debug, Default)]
