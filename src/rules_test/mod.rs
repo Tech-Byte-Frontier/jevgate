@@ -11,7 +11,6 @@ use crate::{
     catalog,
     config::ConfigContext,
     custom::{Example, Question},
-    evaluate::Session,
     options::{CheckArgs, RulesTestArgs},
     schema::Answer,
     storage::Store,
@@ -68,7 +67,7 @@ fn examine(
     let usage = if args.dry_run {
         Usage::planned(Estimate::of(&requests, &budget, &unanswered))
     } else {
-        ask(&mut cases, &requests, (args, context), (budget, evaluator))?
+        ask(&mut cases, &requests, (args, context), evaluator)?
     };
     Ok(Report::new(&cases, untested, args, usage))
 }
@@ -156,23 +155,13 @@ fn ask(
     cases: &mut [Case],
     requests: &[Planned],
     (args, context): (&CheckArgs, &ConfigContext),
-    (budget, evaluator): (TokenBudget, &mut dyn Evaluator),
+    evaluator: &mut dyn Evaluator,
 ) -> Result<Usage> {
     if requests.is_empty() {
         return Ok(Usage::default());
     }
     let store = Store::open(&context.root)?;
-    let mut session = Session {
-        args,
-        context,
-        store: &store,
-        evaluator,
-        requests: 0,
-        paid: Default::default(),
-        budget,
-        observed: (0, 0),
-        answered: Default::default(),
-    };
+    let mut session = crate::check::session(args, context, &store, evaluator);
     let bodies: Vec<&Value> = requests.iter().map(|p| &p.request).collect();
     for (planned, receipt) in requests.iter().zip(session.queries(&bodies)) {
         let case = &mut cases[planned.owner];
