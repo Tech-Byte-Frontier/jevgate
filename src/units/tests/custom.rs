@@ -470,10 +470,22 @@ paths = ["**/*.rs", "**/*.kt"]
             .starts_with("`hunks[0].diff` is a unified diff")
     );
     options.base = None;
-    let (_, plan) = planned(&project, &options);
+    let (inputs, plan) = planned(&project, &options);
     assert!(
         plan.requests.is_empty(),
         "without --base there is no hunk to ask about"
+    );
+    assert!(
+        plan.skipped
+            .values()
+            .any(|reason| reason.starts_with("No Kotlin parser")),
+        "a file it cannot parse stays skipped with its reason"
+    );
+    assert!(
+        inputs
+            .iter()
+            .all(|i| i.result.role != crate::inventory::TEXT),
+        "no file is read for it"
     );
 }
 

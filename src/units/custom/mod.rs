@@ -90,12 +90,13 @@ impl Planner {
         }
     }
 
-    /// Whether a `file` or `hunk` question reads `path`, so a source file
-    /// JevGate cannot parse is still asked about.
+    /// Whether a `file` question, or a `hunk` question with `--base`, reads
+    /// `path`, so a source file JevGate cannot parse is still asked about.
     pub(super) fn reads_text(&self, path: &Path) -> bool {
-        self.questions
-            .iter()
-            .any(|q| matches!(q.unit, Kind::File | Kind::Hunk) && q.applies_to(path))
+        self.questions.iter().any(|q| {
+            let asked = q.unit == Kind::File || q.unit == Kind::Hunk && self.changes.is_some();
+            asked && q.applies_to(path)
+        })
     }
 
     /// A parsed code file's units, after its built-in planners planned

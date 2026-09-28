@@ -15,7 +15,11 @@ pub(super) fn add_texts(
     changes: Option<&crate::revision::Changes>,
     inputs: &mut Vec<Input>,
 ) -> Result<()> {
-    let naming: Vec<_> = args.custom().filter(|q| q.names_files()).collect();
+    // A hunk question asks nothing without `--base`, so it reads no file.
+    let naming: Vec<_> = args
+        .custom()
+        .filter(|q| q.names_files() && (q.unit == crate::custom::Kind::File || args.base.is_some()))
+        .collect();
     if naming.is_empty() {
         return Ok(());
     }
