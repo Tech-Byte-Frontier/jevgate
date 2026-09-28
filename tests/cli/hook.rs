@@ -3,39 +3,6 @@
 use super::*;
 use mock_provider::{MockProvider, Reply, answer};
 use serde_json::json;
-use std::io::Write;
-
-/// Run `jevgate hook ARGS`, started by `command`, with `event` on stdin; its
-/// reply, its stderr, and that it exited 0.
-fn hook(mut command: Command, args: &[&str], event: &str) -> (serde_json::Value, String) {
-    let mut child = command
-        .arg("hook")
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(event.as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    assert_eq!(output.status.code(), Some(0), "{stderr}");
-    let reply = serde_json::from_slice(&output.stdout).unwrap();
-    (reply, stderr)
-}
-
-/// A Claude Code event of one session in `project`.
-fn event(project: &Project, fields: serde_json::Value) -> String {
-    let mut event = fields;
-    event["session_id"] = "cli-session".into();
-    event["cwd"] = project.0.to_str().unwrap().into();
-    event.to_string()
-}
 
 /// The reply of `jevgate hook` to a Claude Code event of `project`, its
 /// checks asking `provider` with `key`.
@@ -45,7 +12,12 @@ fn hook_asking(
     key: &str,
     fields: serde_json::Value,
 ) -> serde_json::Value {
-    hook(project.asking(provider, key), &[], &event(project, fields)).0
+    hook(
+        project.asking(provider, key),
+        &[],
+        &hook_event(project, fields),
+    )
+    .0
 }
 
 #[test]
@@ -73,14 +45,14 @@ fn without_a_key_every_event_passes_and_says_why() {
     let project = Project::committed();
     let start = serde_json::json!({"hook_event_name": "UserPromptSubmit", "prompt": "go"});
     assert_eq!(
-        hook(project.command(), &[], &event(&project, start)).0["hookSpecificOutput"]["additionalContext"],
+        hook(project.command(), &[], &hook_event(&project, start)).0["hookSpecificOutput"]["additionalContext"],
         RUNNING,
         "a session's first turn says the hooks run"
     );
     std::fs::write(project.0.join("lib.rs"), JUDGED_RS.replace("+ 1", "+ 2")).unwrap();
     let edit = serde_json::json!({"hook_event_name": "PostToolUse", "tool_name": "Edit",
         "tool_input": {"file_path": project.0.join("lib.rs")}});
-    let (edited, _) = hook(project.command(), &[], &event(&project, edit));
+    let (edited, _) = hook(project.command(), &[], &hook_event(&project, edit));
     let context = edited["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
@@ -89,7 +61,7 @@ fn without_a_key_every_event_passes_and_says_why() {
         "{context}"
     );
     let stop = serde_json::json!({"hook_event_name": "Stop", "stop_hook_active": false});
-    let (stopped, _) = hook(project.command(), &[], &event(&project, stop));
+    let (stopped, _) = hook(project.command(), &[], &hook_event(&project, stop));
     assert!(stopped.get("decision").is_none(), "{stopped}");
     assert!(
         stopped["systemMessage"]
@@ -149,7 +121,7 @@ fn cursor_is_answered_in_its_own_fields_and_the_person_on_stderr() {
     let (reply, stderr) = hook(
         project.command(),
         &["--agent", "cursor"],
-        &event(&project, start),
+        &hook_event(&project, start),
     );
     assert_eq!(reply, serde_json::json!({"continue": true}));
     assert!(stderr.contains("is not in a Git repository"), "{stderr}");

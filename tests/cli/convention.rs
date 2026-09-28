@@ -1,8 +1,8 @@
 //! A team's convention through the whole cycle, as 0.29's done-when asks:
 //! proposed from its AGENTS.md line, edited and accepted by a person, its
-//! examples passing `rules test`, and a pull request check failing on a
-//! change that breaks it and passing once the change is fixed. The Stop
-//! hook's side of the done-when needs 0.27's `jevgate hook`.
+//! examples passing `rules test`, a pull request check failing on a change
+//! that breaks it and passing once the change is fixed, and 0.27's agent
+//! hook blocking the end of a turn that breaks it until the agent fixes it.
 use super::*;
 use mock_provider::{MockProvider, Reply, answer};
 use serde_json::{Value, json};
@@ -84,7 +84,7 @@ fn chosen(question: &Value, option: &str) -> Value {
 }
 
 #[test]
-fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request() {
+fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request_and_a_turn() {
     let project = Project::new();
     std::fs::write(project.0.join("AGENTS.md"), AGENTS).unwrap();
     std::fs::create_dir(project.0.join("src")).unwrap();
@@ -181,4 +181,33 @@ fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request() {
     let (code, text) = jevgate(&["check", "--base", "HEAD"]);
     assert_eq!(code, Some(0), "{text}");
     assert!(!text.contains(rule), "{text}");
+
+    // The same question in the agent's loop: a turn that breaks it is kept
+    // working at its end until the agent fixes it.
+    let send = |fields| {
+        let command = project.asking(&provider, "key");
+        hook(command, &[], &hook_event(&project, fields)).0
+    };
+    send(json!({"hook_event_name": "UserPromptSubmit", "prompt": "log each charge"}));
+    std::fs::write(
+        project.0.join("src/lib.rs"),
+        format!("{JUDGED_RS}{BREAKING}"),
+    )
+    .unwrap();
+    let blocked = send(json!({"hook_event_name": "Stop", "stop_hook_active": false}));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+    let reason = blocked["reason"].as_str().unwrap();
+    assert!(
+        reason.contains(&format!(
+            "\n- src/lib.rs:9 review {rule} (fails the gate): `charge`: Does this function break the project rule \"Never log request bodies.\" (AGENTS.md:3)? Yes. Not yet measured."
+        )),
+        "{reason}"
+    );
+    std::fs::write(project.0.join("src/lib.rs"), format!("{JUDGED_RS}{fixed}")).unwrap();
+    let passed = send(json!({"hook_event_name": "Stop", "stop_hook_active": true}));
+    assert!(passed.get("decision").is_none(), "{passed}");
+    assert_eq!(
+        passed["systemMessage"],
+        "JevGate: the findings that blocked this turn are fixed."
+    );
 }
