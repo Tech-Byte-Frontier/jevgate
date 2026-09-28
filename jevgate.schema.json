@@ -268,8 +268,8 @@
       "type": "integer"
     },
     "concurrency": {
-      "description": "Ceiling on simultaneous requests (1-8). Default: 6.",
-      "maximum": 8,
+      "description": "Ceiling on simultaneous requests (1-6). Default: 6.",
+      "maximum": 6,
       "minimum": 1,
       "type": "integer"
     },

@@ -34,7 +34,7 @@ rules = { security = "consider" }        # except these
 | `model` | `jev-1.13.0` | TypeSafe model; a pinned version keeps results repeatable |
 | `cache_ttl_secs` | `3600` | Cache lifetime for an alias: a model name without an `x.y.z` version, such as `jev-latest` or `jev-1.13`. Pinned versions such as `jev-1.13.0` never expire |
 | `max_requests` | unlimited | Ceiling on API attempts per invocation |
-| `concurrency` | `6` | Ceiling on simultaneous requests (1–8) |
+| `concurrency` | `6` | Ceiling on simultaneous requests (1–6). Requests also start at least 50 ms apart, TypeSafe's limit of 1,200 a minute |
 | `max_file_bytes` | `262144` | Files larger than this are reported as needs-context, never truncated; generated and vendored files are skipped instead |
 | `max_context_bytes` | `32768` | Ceiling on context bytes per request |
 

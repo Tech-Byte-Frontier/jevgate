@@ -15,9 +15,11 @@ fn failed(status: u16, body: Option<&str>, pause: Option<u64>) -> ProviderError 
     provider_error(&TYPESAFE, failure)
 }
 
+/// Retries and starts without the production pauses.
 fn fast() -> ProviderAccess {
     ProviderAccess {
         backoff: Duration::from_millis(1),
+        interval: Duration::ZERO,
         ..Default::default()
     }
 }
@@ -513,5 +515,72 @@ fn a_failure_names_its_request_id_and_invalid_fields_but_never_the_provider_text
     assert_eq!(
         error.to_string(),
         "TypeSafe HTTP 422 (invalid request: body.questions.q.criteria missing); request was not retried; request id req_9"
+    );
+}
+
+#[test]
+fn requests_start_an_interval_apart_across_workers() {
+    assert_eq!(REQUEST_INTERVAL * 1200, Duration::from_secs(60));
+    let access = ProviderAccess {
+        interval: Duration::from_millis(20),
+        ..fast()
+    };
+    let requests: Vec<Value> = (0..6).map(|i| json!({"index": i})).collect();
+    let batch: Vec<&Value> = requests.iter().collect();
+    let starts = Mutex::new(Vec::new());
+    let before = Instant::now();
+    access.evaluate_queue(
+        &batch,
+        MAX_WORKERS,
+        &|_| Ok(()),
+        |request| {
+            starts.lock().unwrap().push(Instant::now());
+            Ok(request.clone())
+        },
+        &mut |_, outcome| assert!(outcome.result.is_ok()),
+    );
+    let mut starts = starts.into_inner().unwrap();
+    starts.sort();
+    for (i, start) in starts.iter().enumerate() {
+        assert!(
+            start.duration_since(before) >= access.interval * i as u32,
+            "{i}"
+        );
+    }
+}
+
+/// Workers a queue may run at once.
+const MAX_WORKERS: usize = crate::options::MAX_CONCURRENCY as usize;
+
+#[test]
+fn a_slow_answer_times_out_and_is_sent_once_more() {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&calls);
+    let (provider, endpoint) = mock(move |received| {
+        let mut reply = answered(received);
+        if counter.fetch_add(1, Ordering::Relaxed) == 0 {
+            reply.delay = Duration::from_secs(2);
+        }
+        reply
+    });
+    let (agent, request, start) = (
+        agent(Duration::from_millis(300)),
+        question(),
+        Instant::now(),
+    );
+    let mut last = None;
+    fast().evaluate_queue(
+        &[&request],
+        1,
+        &|_| Ok(()),
+        |request| send(&agent, &endpoint, "k", request),
+        &mut |_, outcome| last = Some(outcome),
+    );
+    let outcome = last.unwrap();
+    assert!(outcome.result.is_ok(), "{:?}", outcome.result.err());
+    assert_eq!((outcome.retries, provider.received().len()), (1, 2));
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "the attempt gave up at its timeout"
     );
 }

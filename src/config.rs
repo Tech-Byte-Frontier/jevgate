@@ -27,7 +27,7 @@ pub struct Config {
     pub rules: Rules,
     /// Ceiling on API attempts per invocation; flags can only lower it. Default: unlimited.
     pub max_requests: Option<u32>,
-    /// Ceiling on simultaneous requests (1-8). Default: 6.
+    /// Ceiling on simultaneous requests (1-6). Default: 6.
     pub concurrency: Option<u32>,
     /// Files larger than this are reported as needs-context, never truncated. Default: 262144.
     pub max_file_bytes: Option<u64>,
@@ -622,5 +622,17 @@ mod tests {
         assert!(configured("", &["securty"], &[]).is_err());
         assert!(configured("[rules]\nmaintainability = \"sometimes\"\n", &[], &[]).is_err());
         assert!(configured("[rules]\nnothing = \"review\"\n", &[], &[]).is_err());
+    }
+
+    #[test]
+    fn concurrency_is_at_most_six_and_the_file_can_only_lower_it() {
+        assert_eq!(configured("", &[], &[]).unwrap().concurrency, 6);
+        assert_eq!(
+            configured("concurrency = 2", &[], &[]).unwrap().concurrency,
+            2
+        );
+        for invalid in ["concurrency = 0", "concurrency = 7", "concurrency = 8"] {
+            assert!(configured(invalid, &[], &[]).is_err(), "{invalid}");
+        }
     }
 }

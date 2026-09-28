@@ -21,8 +21,13 @@ const ATTEMPTS: u32 = 4;
 const INTERRUPTED_ATTEMPTS: u32 = 2;
 /// Longest provider-requested pause that is honored before a retry.
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
-/// How long one attempt may take, from connecting to reading the answer.
-const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long one attempt may take, from connecting to reading the answer. A
+/// request takes about 0.3 s and TypeSafe's SDKs wait 10 s per attempt; one
+/// that has not answered in 20 s is sent again once, rather than holding a
+/// worker for a minute.
+const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(20);
+/// Requests start at least this far apart: 1,200 a minute, TypeSafe's limit.
+const REQUEST_INTERVAL: Duration = Duration::from_millis(50);
 
 pub trait Evaluator {
     /// A new snapshot may retry after account access has been restored.
@@ -247,6 +252,10 @@ struct ProviderAccess {
     edge_blocks: AtomicU16,
     cooldown: Mutex<Option<Instant>>,
     backoff: Duration,
+    /// The earliest time the next request may start, so that every worker's
+    /// sends together stay `interval` apart.
+    next_start: Mutex<Instant>,
+    interval: Duration,
     /// The provider the requests go to, named in the messages.
     service: &'static Service,
 }
@@ -259,6 +268,8 @@ impl Default for ProviderAccess {
             edge_blocks: AtomicU16::new(0),
             cooldown: Mutex::new(None),
             backoff: FIRST_BACKOFF,
+            next_start: Mutex::new(Instant::now()),
+            interval: REQUEST_INTERVAL,
             service: &TYPESAFE,
         }
     }
@@ -335,6 +346,19 @@ impl ProviderAccess {
         }
     }
 
+    /// Take the next start time, `interval` after the one before, and sleep until it.
+    fn pace(&self) {
+        let start = {
+            let mut next = self.next_start.lock().unwrap();
+            let start = (*next).max(Instant::now());
+            *next = start + self.interval;
+            start
+        };
+        if let Some(remaining) = start.checked_duration_since(Instant::now()) {
+            std::thread::sleep(remaining);
+        }
+    }
+
     /// Exponential backoff with deterministic jitter, so reruns are reproducible
     /// while concurrent requests still spread out.
     fn backoff(&self, index: usize, retry: u32) -> Duration {
@@ -353,8 +377,14 @@ impl ProviderAccess {
         let mut retry = 0;
         loop {
             self.wait();
+            self.pace();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| send(request)))
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("TypeSafe request worker failed")));
+                .unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "{} request worker failed",
+                        self.service.label
+                    ))
+                });
             self.observe(&result);
             let Some((delay, attempts)) = result.as_ref().err().and_then(retry_delay) else {
                 return (result, retry);
