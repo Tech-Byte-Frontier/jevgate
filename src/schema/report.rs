@@ -234,12 +234,19 @@ pub struct StageMetrics {
     pub elapsed_ms: u64,
     pub service_ms: u64,
     pub queue_wait_ms: u64,
-    /// Estimated input tokens of the planned requests the cache does not answer.
+    /// Estimated input tokens of what the planned requests send: the questions
+    /// the cache does not answer, with their state.
     #[serde(default)]
     pub planned_tokens: u64,
     /// Planned requests a dry run found answered in the cache; they cost nothing.
     #[serde(default)]
     pub planned_cached: u64,
+    /// The questions of the planned requests, and those the cache answers: a
+    /// request is sent with only the others.
+    #[serde(default)]
+    pub planned_questions: u64,
+    #[serde(default)]
+    pub planned_cached_questions: u64,
     pub successful_requests: u64,
     pub failed_attempts: u64,
     /// Extra sends after rate limits, overload or connection failures.
@@ -248,6 +255,12 @@ pub struct StageMetrics {
     pub cache_hits: u64,
     pub cached_judgments: u64,
     pub evaluated_judgments: u64,
+    /// The questions sent, and those the cache answered, in the requests
+    /// answered: a request sends only the questions the cache lacks.
+    #[serde(default)]
+    pub asked_questions: u64,
+    #[serde(default)]
+    pub cached_questions: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub evidence_bytes: u64,

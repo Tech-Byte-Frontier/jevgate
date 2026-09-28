@@ -23,29 +23,34 @@ const MAX_BYTES_PER_TOKEN: f64 = 6.0;
 /// through that the provider refused as beyond its context.
 const STRUCTURED_BYTES_PER_TOKEN: f64 = 2.0;
 
-/// The budget as a run applies it to one request: the calibrated estimate,
-/// or the answer cache when it already holds that request's answer. The
-/// calibration follows the fresh requests of the last run, so a request near
-/// the limit fit in one run and not the next: two runs of one release on a
-/// pinned project differed in a file's recheck, and so in its finding. A
-/// request answered once fits from then on.
+/// The budget as a run applies it to one request: the calibrated estimate of
+/// what a run would send of it, the questions the answer cache does not
+/// answer with their state. The calibration follows the fresh requests of the
+/// last run, so a request near the limit fit in one run and not the next: two
+/// runs of one release on a pinned project differed in a file's recheck, and
+/// so in its finding. A request answered once fits from then on, and one
+/// whose questions are partly answered is judged by the rest.
 #[derive(Clone, Copy)]
 pub struct Limits<'a> {
     budget: &'a TokenBudget,
-    answered: &'a dyn Fn(&Value) -> bool,
+    /// The request with only its unanswered questions; none when the cache
+    /// answers them all.
+    unanswered: &'a dyn Fn(&Value) -> Option<Value>,
 }
 
 impl<'a> Limits<'a> {
-    pub fn new(budget: &'a TokenBudget, answered: &'a dyn Fn(&Value) -> bool) -> Self {
-        Self { budget, answered }
+    pub fn new(budget: &'a TokenBudget, unanswered: &'a dyn Fn(&Value) -> Option<Value>) -> Self {
+        Self { budget, unanswered }
     }
 
     pub fn fits(&self, request: &Value) -> bool {
-        self.budget.fits(request) || (self.answered)(request)
+        self.budget.fits(request)
+            || (self.unanswered)(request).is_none_or(|sent| self.budget.fits(&sent))
     }
 
     pub fn fits_structured(&self, request: &Value) -> bool {
-        self.budget.fits_structured(request) || (self.answered)(request)
+        self.budget.fits_structured(request)
+            || (self.unanswered)(request).is_none_or(|sent| self.budget.fits_structured(&sent))
     }
 }
 
@@ -53,10 +58,10 @@ impl<'a> Limits<'a> {
 impl TokenBudget {
     /// The estimate alone, for plans made without an answer cache.
     pub fn uncached(&self) -> Limits<'_> {
-        fn never(_: &Value) -> bool {
-            false
+        fn everything(request: &Value) -> Option<Value> {
+            Some(request.clone())
         }
-        Limits::new(self, &never)
+        Limits::new(self, &everything)
     }
 }
 
@@ -138,5 +143,33 @@ impl TokenBudget {
             .unwrap_or(0) as f64;
         (self.tokens_of(&provider) as f64) <= TOTAL_TOKENS * MARGIN
             && state + longest <= STATE_TOKENS * MARGIN
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_request_fits_when_what_it_would_send_fits() {
+        // About 60,000 tokens at 3 bytes a token: past the limit whole, while
+        // its state with one question is about 21,000.
+        let question = json!({"type": "noul", "instructions": {"question": "x".repeat(3_000)}});
+        let questions: serde_json::Map<String, Value> = (0..40)
+            .map(|i| (format!("q{i}"), question.clone()))
+            .collect();
+        let request =
+            json!({"model": "m", "state": {"source": "y".repeat(60_000)}, "questions": questions});
+        let budget = TokenBudget::default();
+        assert!(!budget.uncached().fits(&request));
+        let one_left = |request: &Value| {
+            let mut sent = request.clone();
+            sent["questions"] = json!({"q0": request["questions"]["q0"]});
+            Some(sent)
+        };
+        assert!(Limits::new(&budget, &one_left).fits(&request));
+        let answered = |_: &Value| None;
+        assert!(Limits::new(&budget, &answered).fits(&request));
     }
 }

@@ -182,7 +182,7 @@ fn packing_and_cache_identity_do_not_depend_on_token_calibration() {
         plan(&inputs, &views, &options, &budget, &project.0)
             .requests
             .iter()
-            .map(|p| crate::requests::judgment_key(&p.request))
+            .map(|p| crate::requests::provider_request(&p.request).into_owned())
             .collect::<Vec<_>>()
     };
     assert_eq!(keys(2.0), keys(6.0));

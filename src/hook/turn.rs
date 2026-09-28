@@ -140,7 +140,11 @@ pub(super) fn load(root: &Path, session: &str) -> Option<Turn> {
 
 pub(super) fn save(root: &Path, turn: &Turn) -> Result<()> {
     let path = directory(root)?.join(format!("{}.json", file_name(&turn.session)));
-    storage::atomic(&path, &serde_json::to_vec(turn)?)
+    storage::atomic(
+        &path,
+        &serde_json::to_vec(turn)?,
+        storage::Durability::Synced,
+    )
 }
 
 /// The working tree now, as a Git tree, starting from the repository's Git

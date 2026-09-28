@@ -249,7 +249,7 @@ Exit codes:
 Files (at the repository root):
   jevgate.toml            Configuration; `jevgate init` writes a commented one
   jevgate-baseline.json   Accepted findings; commit it
-  .jevgate/cache/         Answers by request hash; safe to restore and save in CI
+  .jevgate/cache/         Answers by state and question; safe to restore and save in CI
   .jevgate/latest.json    The last report, the same JSON as --format json
   .jevgate/report.html    HTML dashboard, with --report
 

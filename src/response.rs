@@ -1,4 +1,5 @@
-//! Validation of provider responses against the request, and the cached form of an answer.
+//! Validation of provider responses and cached answers against the request, and
+//! the fields of an answer the cache keeps.
 use anyhow::{Context, Result, ensure};
 use serde_json::{Map, Value};
 
@@ -14,23 +15,20 @@ const MAX_REPORTED_TOKENS: u64 = 1_000_000_000;
 /// required: a gateway need not pass TypeSafe's through, and such an answer
 /// counts as unmetered rather than as free.
 pub fn validate(response: &Value, request: &Value) -> Result<()> {
-    validate_model(response, request)?;
+    validate_model(
+        response["model"]
+            .as_str()
+            .context("Missing model identity")?,
+        request,
+    )?;
     let answers = response["answers"].as_object().context("Missing answers")?;
     let questions = request["questions"]
         .as_object()
         .context("Missing questions")?;
     ensure!(answers.len() == questions.len(), "Missing or extra answers");
     for (name, question) in questions {
-        let answer = &response["answers"][name];
-        ensure!(
-            answer["type"] == question["type"],
-            "Wrong answer type for {name}"
-        );
-        if question["type"] == "noul" {
-            probability(&answer["noul"])?;
-        } else {
-            validate_distribution(answer, question)?;
-        }
+        validate_answer(&response["answers"][name], question)
+            .with_context(|| format!("Invalid answer for {name}"))?;
     }
     Ok(())
 }
@@ -51,14 +49,23 @@ fn token_count(response: &Value, field: &str) -> Option<u64> {
         .filter(|n| *n <= MAX_REPORTED_TOKENS)
 }
 
+/// One typed answer to `question`: its type, and a probability or a
+/// distribution over exactly the question's options.
+pub fn validate_answer(answer: &Value, question: &Value) -> Result<()> {
+    ensure!(answer["type"] == question["type"], "Wrong answer type");
+    if question["type"] == "noul" {
+        probability(&answer["noul"])?;
+        Ok(())
+    } else {
+        validate_distribution(answer, question)
+    }
+}
+
 /// A well-formed model name; when a pinned version was requested, that
 /// version, with or without a gateway's namespace (`typesafe-ai/jev-1.13.0`
 /// asked, `jev-1.13.0` answered). An alias answers with whatever version it
 /// points to.
-fn validate_model(response: &Value, request: &Value) -> Result<()> {
-    let model = response["model"]
-        .as_str()
-        .context("Missing model identity")?;
+pub fn validate_model(model: &str, request: &Value) -> Result<()> {
     ensure!(crate::model::valid_name(model), "Invalid model identity");
     if let Some(requested) = request["model"]
         .as_str()
@@ -163,28 +170,10 @@ fn validate_choice(answer: &Value, probabilities: &Map<String, Value>) -> Result
     Ok(())
 }
 
-/// The cached form of a validated response: its model, the typed answers and,
-/// when it reported them, its usage and the provider's request id.
-pub fn cache_value(response: &Value, request: &Value) -> Value {
-    let mut answers = serde_json::Map::new();
-    for (key, question) in request["questions"].as_object().unwrap() {
-        let kind = question["type"].as_str().unwrap();
-        answers.insert(key.clone(), typed_fields(&response["answers"][key], kind));
-    }
-    let mut value = serde_json::json!({"model": response["model"], "answers": answers});
-    if let Some(input) = input_tokens(response) {
-        value["usage"] =
-            serde_json::json!({"input_tokens": input, "output_tokens": output_tokens(response)});
-    }
-    if let Some(id) = crate::response_headers::request_id(response["request_id"].as_str()) {
-        value["request_id"] = Value::String(id);
-    }
-    value
-}
-
-/// Only the fields a typed answer defines; anything else the provider sent is dropped.
-fn typed_fields(answer: &Value, kind: &str) -> Value {
-    let fields: &[&str] = match kind {
+/// Only the fields a typed answer to `question` defines, as the cache keeps
+/// it; anything else the provider sent is dropped.
+pub fn typed_fields(answer: &Value, question: &Value) -> Value {
+    let fields: &[&str] = match question["type"].as_str().unwrap_or_default() {
         "score" => &["type", "score", "confidence", "probabilities"],
         "choice" => &["type", "choice", "confidence", "probabilities"],
         _ => &["type", "noul"],
@@ -243,14 +232,9 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_without_usage_is_accepted_as_unmetered_and_cached_without_it() {
+    fn an_answer_without_usage_is_accepted_as_unmetered() {
         let (request, mut response) = exchange("typesafe-ai/jev", "typesafe-ai/jev");
         assert_eq!(input_tokens(&response), Some(10));
-        let cached = cache_value(&response, &request);
-        assert_eq!(
-            cached["usage"],
-            json!({"input_tokens": 10, "output_tokens": 1})
-        );
         for usage in [
             Value::Null,
             json!({"inputTokens": 10}),
@@ -259,8 +243,6 @@ mod tests {
             response["usage"] = usage;
             assert!(validate(&response, &request).is_ok(), "{response}");
             assert_eq!(input_tokens(&response), None);
-            assert!(cache_value(&response, &request).get("usage").is_none());
-            assert!(validate(&cache_value(&response, &request), &request).is_ok());
         }
     }
 }

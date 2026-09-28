@@ -158,6 +158,12 @@ fn mcp_returns_structured_results_and_reports_a_checks_progress() {
         dry["structuredContent"]["planned"]["cached"], cached,
         "every request is answered by the cache"
     );
+    let planned = &dry["structuredContent"]["planned"];
+    assert!(planned["questions"].as_u64().unwrap() >= cached as u64);
+    assert_eq!(
+        planned["cached_questions"], planned["questions"],
+        "and so is every question"
+    );
     let text = dry["content"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("JevGate: dry run · 1 files"), "{text}");
     assert!(text.ends_with("(dry run: nothing was sent)"));

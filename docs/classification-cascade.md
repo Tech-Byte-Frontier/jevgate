@@ -152,6 +152,16 @@ signatures, or one candidate pair.
    tests in the same state left more answers undecided. State uses literal paths
    such as `functions[2].source`; group IDs are Choice options. Stage and freshness
    hashes stay in local `jevgate` metadata that is not uploaded.
+   Each answer is cached by the state it is about, with the rubric and the
+   model, and by its question, in one file per state under
+   `.jevgate/cache/answers/`; a request sends only the questions that file
+   lacks, so a reworded or added question is asked alone, where a key on the
+   whole request asked every question beside it again. Jev answers the
+   questions of a request independently: sent whole and one question at a
+   time, five times each, 51 questions of nine requests (one per first-pass
+   stage) moved 0.005 on average, within their own spread across sends
+   (0.007). An earlier version's entry for a whole request still answers it
+   while it is unchanged, and its answers are copied into the state's file.
 4. **Follow-ups.** One recheck per uncertain unit, with callee signatures, the
    enclosing functions or the file's application source; a decisive recheck
    replaces the first answer and both are kept. A hardcoded-value unit is asked
@@ -724,6 +734,7 @@ signatures, or one candidate pair.
   uploaded state or questions.
 - Preserve raw answers, uncertainty and needs-context outcomes.
 - Version question wording (`units::questions::VERSION`) and composition
-  (`schema::COMPOSITION`); question changes invalidate the cache by content.
+  (`schema::COMPOSITION`); a changed question re-asks only itself, since the
+  cache keeps each question's answer apart.
 - Validate on small frozen sets through the CLI; keep results in ignored
   `.jevgate/evaluation/`.

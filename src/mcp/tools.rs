@@ -106,9 +106,9 @@ fn result_schema() -> Value {
             },
             "planned": {
                 "type": "object",
-                "description": "A dry run's first-pass requests, those the cache answers, and the new input tokens and dollars of the rest",
-                "properties": {"requests": count, "cached": count, "tokens": count, "usd": {"type": "number"}},
-                "required": ["requests", "cached", "tokens"],
+                "description": "A dry run's first-pass requests and their questions, those the cache answers, and the new input tokens and dollars of what the rest send: a request sends only the questions the cache lacks",
+                "properties": {"requests": count, "cached": count, "questions": count, "cached_questions": count, "tokens": count, "usd": {"type": "number"}},
+                "required": ["requests", "cached", "questions", "cached_questions", "tokens"],
             },
             "findings": {"type": "array", "items": finding_schema()},
             "total_findings": count,

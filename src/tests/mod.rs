@@ -1,11 +1,13 @@
 //! The test harness (projects, scripted answers, runs) and whole-run tests;
-//! the gate and baseline tests are in `gating`, and what a run judges
-//! (unsupported or oversized input, roles, context) in `scope`.
+//! the gate and baseline tests are in `gating`, what a run judges
+//! (unsupported or oversized input, roles, context) in `scope`, and the
+//! answer cache in `cache`.
 use super::*;
 use crate::{config::ConfigContext, options::CheckArgs};
 use clap::Parser;
 use serde_json::{Value, json};
 use std::path::PathBuf;
+mod cache;
 mod gating;
 #[path = "../../tests/support/git.rs"]
 pub(super) mod git;

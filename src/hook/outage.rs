@@ -146,7 +146,11 @@ pub(super) fn record(root: &Path, reason: &str) {
         reason: reason.to_string(),
     };
     if let (Ok(directory), Ok(bytes)) = (turn::directory(root), serde_json::to_vec(&outage)) {
-        let _ = crate::storage::atomic(&directory.join(FILE), &bytes);
+        let _ = crate::storage::atomic(
+            &directory.join(FILE),
+            &bytes,
+            crate::storage::Durability::Synced,
+        );
     }
 }
 

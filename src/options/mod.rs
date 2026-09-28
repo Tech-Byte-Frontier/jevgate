@@ -215,8 +215,9 @@ pub struct CheckArgs {
     pub report: bool,
     /// List the selected files, rules and planned requests without credentials, network or writes
     ///
-    /// Planned first-pass requests the cache already answers are counted apart
-    /// and cost nothing; follow-ups depend on the answers and are not known.
+    /// Planned first-pass requests and questions the cache already answers are
+    /// counted apart and cost nothing: a request sends only the questions the
+    /// cache lacks. Follow-ups depend on the answers and are not known.
     #[arg(long, help_heading = OUTPUT)]
     pub dry_run: bool,
     /// With --dry-run, include every initial request body (the exact source and questions)

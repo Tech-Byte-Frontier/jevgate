@@ -1,7 +1,14 @@
-//! Cached, validated and budgeted TypeSafe requests. One cache entry per uploaded request.
-use crate::{evaluate::Session, response, schema};
+//! Cached, validated and budgeted TypeSafe requests. Each answer is cached by
+//! the state it is about and its question, so a request sends only the
+//! questions the cache does not answer.
+use crate::{
+    evaluate::Session,
+    options::CheckArgs,
+    response, schema,
+    storage::{CacheReader, CachedAnswer},
+};
 use anyhow::{Result, ensure};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 pub(super) type SourceHashes = BTreeMap<String, Option<String>>;
@@ -68,9 +75,29 @@ pub(super) fn stage(request: &Value) -> &'static str {
     }
 }
 
-/// One cache entry per request: the model, state and questions it uploads.
-pub(super) fn judgment_key(request: &Value) -> String {
-    schema::hash(&serde_json::to_vec(&(schema::RUBRIC, provider_request(request))).unwrap())
+fn hash_of(value: &impl serde::Serialize) -> String {
+    schema::hash(&serde_json::to_vec(value).unwrap())
+}
+
+/// The key of every answer about one uploaded state: the rubric, the model and
+/// the state. TypeSafe answers each question of a request independently of
+/// the others, so an answer is kept by its state and question alone: sent
+/// whole and one question at a time, five times each, 51 questions of nine
+/// JevGate requests moved 0.005 on average, within their own spread across
+/// sends (0.007; a permutation test found no batching effect, p = 0.31).
+fn state_key(request: &Value) -> String {
+    hash_of(&(schema::RUBRIC, &request["model"], &request["state"]))
+}
+
+/// A question's key among its state's answers: its name and body.
+fn question_key(name: &str, question: &Value) -> String {
+    hash_of(&(name, question))
+}
+
+/// The key a whole request's answers were cached under before each question
+/// was, read to carry them over.
+fn request_key(request: &Value) -> String {
+    hash_of(&(schema::RUBRIC, provider_request(request)))
 }
 
 /// Aliases move to new model versions, so their answers expire. A pinned
@@ -79,34 +106,197 @@ fn cache_ttl(model: &str, ttl: u64) -> Option<u64> {
     (!crate::model::pinned(model)).then_some(ttl)
 }
 
-/// A valid, unexpired cached answer to `request`, read through `load`; none
-/// with `--refresh`.
-fn cached_answer(
-    args: &crate::options::CheckArgs,
-    request: &Value,
-    load: impl Fn(&str, Option<u64>) -> Option<(Value, u64)>,
-) -> Option<(Value, u64)> {
-    if args.refresh {
-        return None;
-    }
-    load(
-        &judgment_key(request),
-        cache_ttl(args.model(), args.cache_ttl_secs()),
-    )
-    .filter(|(b, _)| response::validate(b, request).is_ok())
+fn questions(request: &Value) -> impl Iterator<Item = (&String, &Value)> {
+    request["questions"].as_object().into_iter().flatten()
 }
 
-/// A dry run's cached answer to a planned request, read without opening the
-/// store.
-pub(super) fn answered(
+pub(super) fn question_count(request: &Value) -> u64 {
+    questions(request).count() as u64
+}
+
+/// Each of `request`'s answers in `body`, as the cache keeps them: given at
+/// `created_at`, with an even share of the body's usage, the remainder to
+/// the first, so the shares add up to what the request cost.
+fn cached_answers<'r>(
+    request: &'r Value,
+    body: &Value,
+    created_at: u64,
+) -> Vec<(&'r String, &'r Value, CachedAnswer)> {
+    let count = question_count(request).max(1);
+    let share = |total: u64, index: u64| total / count + u64::from(index < total % count);
+    let input = response::input_tokens(body).unwrap_or(0);
+    let output = response::output_tokens(body);
+    questions(request)
+        .zip(0..)
+        .map(|((name, question), index)| {
+            let answer = CachedAnswer {
+                created_at,
+                model: body["model"].as_str().unwrap_or_default().into(),
+                answer: response::typed_fields(&body["answers"][name], question),
+                input_tokens: share(input, index),
+                output_tokens: share(output, index),
+            };
+            (name, question, answer)
+        })
+        .collect()
+}
+
+/// A cached answer usable for `question` of `request`: well formed, and from
+/// the requested model when a version is pinned.
+fn usable(answer: &CachedAnswer, question: &Value, request: &Value) -> bool {
+    response::validate_model(&answer.model, request).is_ok()
+        && response::validate_answer(&answer.answer, question).is_ok()
+}
+
+/// What the cache holds for one planned request.
+struct Lookup {
+    state: String,
+    /// Cached answers by question name.
+    found: BTreeMap<String, CachedAnswer>,
+    /// The found answers read from the request's whole entry of an earlier
+    /// version, by question key, which a run copies under the state's key.
+    carried: BTreeMap<String, CachedAnswer>,
+    /// Names of the questions no answer is cached for.
+    missing: Vec<String>,
+}
+
+impl Lookup {
+    /// The cached answers to `request`: none with `--refresh` or without a
+    /// cache; otherwise its state's answers to its questions, and for the
+    /// questions they lack, the request's whole entry of an earlier version.
+    fn new(args: &CheckArgs, request: &Value, cache: Option<&CacheReader>) -> Self {
+        let mut lookup = Self {
+            state: state_key(request),
+            found: BTreeMap::new(),
+            carried: BTreeMap::new(),
+            missing: Vec::new(),
+        };
+        let Some(cache) = cache.filter(|_| !args.refresh) else {
+            lookup.missing = questions(request).map(|(name, _)| name.clone()).collect();
+            return lookup;
+        };
+        let ttl = cache_ttl(args.model(), args.cache_ttl_secs());
+        let stored = cache.answers(&lookup.state, ttl);
+        for (name, question) in questions(request) {
+            let key = question_key(name, question);
+            match stored
+                .get(&key)
+                .filter(|answer| usable(answer, question, request))
+            {
+                Some(answer) => {
+                    lookup.found.insert(name.clone(), answer.clone());
+                }
+                None => lookup.missing.push(name.clone()),
+            }
+        }
+        if !lookup.missing.is_empty()
+            && let Some((body, created_at)) = cache
+                .request(&request_key(request), ttl)
+                .filter(|(body, _)| response::validate(body, request).is_ok())
+        {
+            lookup.carry(request, &body, created_at);
+        }
+        lookup
+    }
+
+    /// Answer the missing questions from a valid whole-request `body` given
+    /// at `created_at`: an alias's answer does not live longer by being copied.
+    fn carry(&mut self, request: &Value, body: &Value, created_at: u64) {
+        for (name, question, answer) in cached_answers(request, body, created_at) {
+            if self.missing.contains(name) {
+                self.carried
+                    .insert(question_key(name, question), answer.clone());
+                self.found.insert(name.clone(), answer);
+            }
+        }
+        self.missing.clear();
+    }
+
+    /// Take the provider's `body` answering `sent`, given at `created_at`;
+    /// returns its answers by question key, to save.
+    fn answered_by(
+        &mut self,
+        sent: &Value,
+        body: &Value,
+        created_at: u64,
+    ) -> BTreeMap<String, CachedAnswer> {
+        let mut fresh = BTreeMap::new();
+        for (name, question, answer) in cached_answers(sent, body, created_at) {
+            fresh.insert(question_key(name, question), answer.clone());
+            self.found.insert(name.clone(), answer);
+        }
+        self.missing.clear();
+        fresh
+    }
+
+    /// `request` with only the questions to ask, or none when every one is answered.
+    fn unanswered(&self, request: &Value) -> Option<Value> {
+        if self.missing.is_empty() {
+            return None;
+        }
+        let mut sent = request.clone();
+        sent["questions"] = Value::Object(
+            questions(request)
+                .filter(|(name, _)| self.missing.contains(name))
+                .map(|(name, question)| (name.clone(), question.clone()))
+                .collect(),
+        );
+        Some(sent)
+    }
+
+    /// A response body answering the planned request from the found answers,
+    /// and when its newest answer was given: the answers by question name,
+    /// the model of the newest, and the sum of their usage shares.
+    fn body(&self, request: &Value) -> (Value, u64) {
+        let newest = self
+            .found
+            .values()
+            .max_by(|a, b| (a.created_at, &a.model).cmp(&(b.created_at, &b.model)));
+        let model = newest.map_or_else(
+            || request["model"].clone(),
+            |answer| Value::String(answer.model.clone()),
+        );
+        let answers: Map<String, Value> = self
+            .found
+            .iter()
+            .map(|(name, answer)| (name.clone(), answer.answer.clone()))
+            .collect();
+        let input: u64 = self.found.values().map(|a| a.input_tokens).sum();
+        let output: u64 = self.found.values().map(|a| a.output_tokens).sum();
+        let body = serde_json::json!({
+            "model": model,
+            "answers": answers,
+            "usage": {"input_tokens": input, "output_tokens": output},
+        });
+        (body, newest.map_or(0, |answer| answer.created_at))
+    }
+}
+
+/// The part of `request` a run would send: the request with only the
+/// questions the cache does not answer, or none when it answers them all.
+/// Read without opening the store, for planning and dry runs.
+pub(super) fn unanswered(
     root: &std::path::Path,
-    args: &crate::options::CheckArgs,
+    args: &CheckArgs,
     request: &Value,
 ) -> Option<Value> {
-    cached_answer(args, request, |key, ttl| {
-        crate::storage::peek(root, key, ttl)
-    })
-    .map(|(body, _)| body)
+    Lookup::new(args, request, CacheReader::peek(root).as_ref()).unanswered(request)
+}
+
+/// A dry run's cached answer to a whole planned request, read without
+/// opening the store; none while any question is unanswered.
+pub(super) fn answered(root: &std::path::Path, args: &CheckArgs, request: &Value) -> Option<Value> {
+    let lookup = Lookup::new(args, request, CacheReader::peek(root).as_ref());
+    lookup.missing.is_empty().then(|| lookup.body(request).0)
+}
+
+/// A planned request whose questions the cache does not all answer.
+struct Pending {
+    /// Its index in the batch.
+    index: usize,
+    /// The request as sent: only its unanswered questions.
+    sent: Value,
+    lookup: Lookup,
 }
 
 impl Session<'_> {
@@ -124,36 +314,49 @@ impl Session<'_> {
                 .max_requests
                 .map_or(pending.len(), |n| n.saturating_sub(self.requests) as usize),
         );
-        for (i, _) in pending.drain(allowed..) {
-            receipts[i].result = Err(anyhow::anyhow!(
+        for unsent in pending.drain(allowed..) {
+            receipts[unsent.index].result = Err(anyhow::anyhow!(
                 "Session API request budget exhausted; restart with an explicit larger --max-requests"
             ));
         }
         if !pending.is_empty() {
-            self.send(&pending, &mut receipts);
+            self.send(pending, &mut receipts);
         }
         receipts
     }
 
-    /// Fill receipts from valid cached answers; return the requests still to send.
-    fn answer_from_cache<'r>(
-        &self,
-        requests: &[&'r Value],
-        receipts: &mut [Receipt],
-    ) -> Vec<(usize, &'r Value)> {
+    /// Fill receipts from cached answers; return the requests still to send,
+    /// each with only its unanswered questions.
+    fn answer_from_cache(&self, requests: &[&Value], receipts: &mut [Receipt]) -> Vec<Pending> {
+        let cache = self.store.reader();
         let mut pending = Vec::new();
-        for (i, request) in requests.iter().enumerate() {
-            let cached = cached_answer(self.args, request, |key, ttl| self.store.load(key, ttl));
-            if let Some((cached, created)) = cached {
-                receipts[i].metrics.cache_hits = 1;
-                receipts[i].metrics.cached_judgments = 1;
-                receipts[i].result = Ok((cached, created, true));
-            } else if self.args.cache_only {
-                receipts[i].result = Err(anyhow::anyhow!(
-                    "No current cached response; rerun without --cache-only to allow an API request"
-                ));
-            } else {
-                pending.push((i, *request));
+        for (index, request) in requests.iter().enumerate() {
+            let mut lookup = Lookup::new(self.args, request, Some(&cache));
+            let carried = std::mem::take(&mut lookup.carried);
+            if !carried.is_empty() {
+                // A copy that cannot be written is made again from the
+                // whole-request entry on the next run; this run has the answers.
+                let _ = self.store.copy_answers(&lookup.state, carried);
+            }
+            let receipt = &mut receipts[index];
+            match lookup.unanswered(request) {
+                None => {
+                    let (body, created_at) = lookup.body(request);
+                    receipt.metrics.cache_hits = 1;
+                    receipt.metrics.cached_judgments = 1;
+                    receipt.metrics.cached_questions = lookup.found.len() as u64;
+                    receipt.result = Ok((body, created_at, true));
+                }
+                Some(_) if self.args.cache_only => {
+                    receipt.result = Err(anyhow::anyhow!(
+                        "No current cached response; rerun without --cache-only to allow an API request"
+                    ));
+                }
+                Some(sent) => pending.push(Pending {
+                    index,
+                    sent,
+                    lookup,
+                }),
             }
         }
         pending
@@ -161,7 +364,7 @@ impl Session<'_> {
 
     /// Upload `pending` through the evaluator, rechecking each source first,
     /// and record every outcome in its receipt.
-    fn send(&mut self, pending: &[(usize, &Value)], receipts: &mut [Receipt]) {
+    fn send(&mut self, pending: Vec<Pending>, receipts: &mut [Receipt]) {
         let root = &self.context.root;
         let max_bytes = self.args.max_context_bytes.max(self.args.max_file_bytes);
         let before = |request: &Value| {
@@ -170,7 +373,11 @@ impl Session<'_> {
             // source was already verified while preparing the batch.
             require_paths(root, max_bytes, request, &mut SourceHashes::new())
         };
-        let batch: Vec<&Value> = pending.iter().map(|(_, r)| *r).collect();
+        let (sent, mut lookups): (Vec<Value>, Vec<(usize, Lookup)>) = pending
+            .into_iter()
+            .map(|asked| (asked.sent, (asked.index, asked.lookup)))
+            .unzip();
+        let batch: Vec<&Value> = sent.iter().collect();
         let store = self.store;
         let requests_count = &mut self.requests;
         let paid = &mut self.paid;
@@ -179,11 +386,11 @@ impl Session<'_> {
             &batch,
             self.args.concurrency() as usize,
             &before,
-            &mut |index, outcome| {
-                let (i, request) = pending[index];
+            &mut |at, outcome| {
+                let (index, lookup) = &mut lookups[at];
                 *requests_count += u32::from(outcome.attempted);
-                let receipt = &mut receipts[i];
-                let billed = record(store, request, outcome, receipt);
+                let receipt = &mut receipts[*index];
+                let billed = record(store, &sent[at], lookup, outcome, receipt);
                 // An answer without usage says nothing of its tokens, so it
                 // stays out of the bytes-per-token calibration.
                 let metered = billed.as_ref().is_some_and(|b| b.input_tokens.is_some());
@@ -191,7 +398,7 @@ impl Session<'_> {
                     paid.bill(billed);
                 }
                 if metered && receipt.metrics.evaluated_judgments > 0 {
-                    observed.0 += serde_json::to_vec(&provider_request(request))
+                    observed.0 += serde_json::to_vec(&provider_request(&sent[at]))
                         .map_or(0, |v| v.len() as u64);
                     observed.1 += receipt.metrics.input_tokens;
                 }
@@ -245,19 +452,21 @@ impl Usage {
     }
 }
 
-/// Record one outcome: timing, token usage, and a validated answer saved to
-/// the cache. Returns what an answered request was billed, even when its
-/// answer failed validation.
+/// Record one outcome of sending `sent`, the unanswered questions of `lookup`'s
+/// request: timing, token usage, and the validated answers saved to the cache
+/// and joined with the cached ones. Returns what an answered request was
+/// billed, even when its answers failed validation.
 fn record(
     store: &crate::storage::Store,
-    request: &Value,
+    sent: &Value,
+    lookup: &mut Lookup,
     outcome: crate::transport::Outcome,
     receipt: &mut Receipt,
 ) -> Option<Billed> {
     receipt.metrics.service_ms = outcome.elapsed_ms;
     receipt.metrics.queue_wait_ms = outcome.started_ms;
     receipt.metrics.evidence_bytes = if outcome.attempted {
-        evidence_bytes(request)
+        evidence_bytes(sent)
     } else {
         0
     };
@@ -277,15 +486,16 @@ fn record(
             input_tokens,
             output_tokens,
         });
-        response::validate(&body, request)?;
+        response::validate(&body, sent)?;
         let timestamp = schema::now();
-        store.save(
-            &judgment_key(request),
-            &response::cache_value(&body, request),
-            timestamp,
-        )?;
+        let cached = lookup.found.len() as u64;
+        let fresh = lookup.answered_by(sent, &body, timestamp);
+        let asked = fresh.len() as u64;
+        store.save_answers(&lookup.state, fresh)?;
         receipt.metrics.evaluated_judgments += 1;
-        Ok((body, timestamp, false))
+        receipt.metrics.asked_questions = asked;
+        receipt.metrics.cached_questions = cached;
+        Ok((lookup.body(sent).0, timestamp, false))
     });
     receipt.metrics.retries = u64::from(outcome.retries);
     if outcome.attempted {
@@ -345,13 +555,32 @@ fn require_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn request() -> Value {
+        json!({"model":"jev-1.13.0","state":{"source":"fn f() {}"},
+            "questions":{"a":{"type":"noul","instructions":{"question":"Is it empty?"}}}})
+    }
 
     #[test]
     fn pinned_answers_do_not_expire_and_aliases_do() {
         let project = crate::tests::Project::new();
         let store = crate::storage::Store::open(&project.0).unwrap();
-        let body = serde_json::json!({"model":"jev-1.13.0","answers":{}});
-        store.save("old", &body, schema::now() - 7200).unwrap();
+        let body = json!({"model":"jev-1.13.0","answers":{}});
+        store
+            .save_request("old", &body, schema::now() - 7200)
+            .unwrap();
+        let answer = CachedAnswer {
+            created_at: schema::now() - 7200,
+            model: "jev-1.13.0".into(),
+            answer: json!({"type":"noul","noul":0.1}),
+            input_tokens: 1,
+            output_tokens: 0,
+        };
+        store
+            .save_answers("state", [("q".to_string(), answer)].into())
+            .unwrap();
+        let cache = store.reader();
         for (model, kept) in [
             ("jev-1.13.0", true),
             ("typesafe/jev-1.13.0", true),
@@ -362,19 +591,71 @@ mod tests {
             ("typesafe-ai/jev", false),
         ] {
             let ttl = cache_ttl(model, 3600);
-            assert_eq!(store.load("old", ttl).is_some(), kept, "{model}");
+            assert_eq!(cache.request("old", ttl).is_some(), kept, "{model}");
+            assert_eq!(
+                cache.answers("state", ttl).len(),
+                usize::from(kept),
+                "{model}"
+            );
         }
-        assert!(store.load("old", cache_ttl("jev-latest", 86_400)).is_some());
-        assert!(store.load("other", None).is_none());
+        let day = cache_ttl("jev-latest", 86_400);
+        assert!(cache.request("old", day).is_some());
+        assert_eq!(cache.answers("state", day).len(), 1);
+        assert!(cache.request("other", None).is_none());
+        assert!(cache.answers("other", None).is_empty());
     }
 
     #[test]
-    fn local_metadata_is_not_uploaded_or_part_of_the_cache_key() {
-        let plain = serde_json::json!({"model":"m","state":{"a":1},"questions":{}});
+    fn local_metadata_is_not_uploaded_or_part_of_the_cache_keys() {
+        let plain = json!({"model":"m","state":{"a":1},"questions":{}});
         let mut tagged = plain.clone();
-        tagged["jevgate"] = serde_json::json!({"stage":"functions","sources":[]});
+        tagged["jevgate"] = json!({"stage":"functions","sources":[]});
         assert_eq!(*provider_request(&tagged), plain);
-        assert_eq!(judgment_key(&tagged), judgment_key(&plain));
+        assert_eq!(request_key(&tagged), request_key(&plain));
+        assert_eq!(state_key(&tagged), state_key(&plain));
         assert_eq!(stage(&tagged), "functions");
+    }
+
+    #[test]
+    fn earlier_whole_request_keys_are_read_unchanged() {
+        // The key 0.25.0 saved this request's answers under: a change here
+        // would make every existing cache entry unreadable.
+        assert_eq!(
+            request_key(&request()),
+            "13e78f94719641fa4608e49d17958374cab141b93b4130f30ecbac6ba98017c7"
+        );
+    }
+
+    #[test]
+    fn a_question_is_keyed_by_its_state_name_and_body_alone() {
+        let first = request();
+        let mut other = first.clone();
+        other["questions"]["b"] = json!({"type":"noul","instructions":{"question":"Is it long?"}});
+        assert_eq!(state_key(&first), state_key(&other));
+        assert_ne!(request_key(&first), request_key(&other));
+        let body = &first["questions"]["a"];
+        assert_ne!(question_key("a", body), question_key("b", body));
+        let mut moved = first.clone();
+        moved["state"]["source"] = json!("fn g() {}");
+        assert_ne!(state_key(&first), state_key(&moved));
+        let mut model = first.clone();
+        model["model"] = json!("jev-latest");
+        assert_ne!(state_key(&first), state_key(&model));
+    }
+
+    #[test]
+    fn usage_is_shared_among_the_questions_it_paid_for() {
+        let mut request = request();
+        for name in ["b", "c"] {
+            request["questions"][name] = request["questions"]["a"].clone();
+        }
+        let body = json!({"model":"jev-1.13.0","usage":{"input_tokens":301,"output_tokens":2},
+            "answers":{"a":{"type":"noul","noul":0.1,"extra":1},"b":{"type":"noul","noul":0.2},"c":{"type":"noul","noul":0.3}}});
+        let answers = cached_answers(&request, &body, 7);
+        let inputs: Vec<u64> = answers.iter().map(|(_, _, a)| a.input_tokens).collect();
+        let outputs: Vec<u64> = answers.iter().map(|(_, _, a)| a.output_tokens).collect();
+        assert_eq!((inputs, outputs), (vec![101, 100, 100], vec![1, 1, 0]));
+        assert_eq!(answers[0].2.answer, json!({"type":"noul","noul":0.1}));
+        assert!(answers.iter().all(|(_, _, a)| a.created_at == 7));
     }
 }

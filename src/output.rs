@@ -149,40 +149,50 @@ pub(super) fn agent(
     Ok(())
 }
 
-/// What a dry run plans: first-pass requests, those the cache answers, and
-/// the estimated input tokens and dollars of the rest.
+/// What a dry run plans: first-pass requests and their questions, those the
+/// cache answers, and the estimated input tokens and dollars of what the
+/// rest send: a request sends only the questions the cache lacks.
 #[derive(serde::Serialize)]
 pub(crate) struct Preview {
     pub requests: u64,
     pub cached: u64,
+    pub questions: u64,
+    pub cached_questions: u64,
     pub tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usd: Option<f64>,
 }
 
 pub(crate) fn preview(report: &Report) -> Preview {
-    let stages = report.stages.values();
-    let tokens = stages.clone().map(|s| s.planned_tokens).sum();
+    let total = |field: fn(&crate::schema::StageMetrics) -> u64| {
+        report.stages.values().map(field).sum::<u64>()
+    };
+    let tokens = total(|s| s.planned_tokens);
     Preview {
-        requests: stages.clone().map(|s| s.planned_requests).sum(),
-        cached: stages.map(|s| s.planned_cached).sum(),
+        requests: total(|s| s.planned_requests),
+        cached: total(|s| s.planned_cached),
+        questions: total(|s| s.planned_questions),
+        cached_questions: total(|s| s.planned_cached_questions),
         tokens,
         usd: crate::model::usd(&report.requested_model, tokens),
     }
 }
 
 /// Status, gate, scope and cost on one line; for a dry run, the planned
-/// requests and the cost of those the cache does not answer.
+/// requests and questions and the cost of the questions the cache does not
+/// answer.
 pub(crate) fn headline(report: &Report) -> String {
     if report.dry_run {
         let Preview {
             requests,
             cached,
+            questions,
+            cached_questions,
             tokens,
             usd,
         } = preview(report);
         return format!(
-            "JevGate: dry run · {} files{} · {requests} first-pass requests, {cached} answered by the cache · ~{tokens} new input tokens{}; follow-ups depend on the answers",
+            "JevGate: dry run · {} files{} · {requests} first-pass requests, {cached} answered by the cache · {questions} questions, {cached_questions} answered by the cache · ~{tokens} new input tokens{}; follow-ups depend on the answers",
             report.files.len(),
             since(report),
             cost(usd)

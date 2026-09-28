@@ -1,21 +1,19 @@
 //! The writer's state under `.jevgate/`: the session lock, cached answers and
-//! published reports. Reading reports without the lock is in `reports`.
+//! published reports. Reading reports without the lock is in `reports`, and
+//! the answer cache's files in `cache`.
+mod cache;
 mod reports;
 
+pub use cache::{CacheReader, CachedAnswer};
 pub use reports::{history, read_latest, writer_active};
 
-use super::schema::{Report, now};
+use super::schema::Report;
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
 };
-
-/// A cached answer larger than this is ignored and asked again.
-const CACHE_ENTRY_BYTES: u64 = 1_048_576;
 
 /// Reports kept in `.jevgate/history/`, by generation; older ones are removed.
 const HISTORY: u64 = 64;
@@ -33,11 +31,14 @@ impl Drop for Store {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct Cache {
-    request_hash: String,
-    created_at: u64,
-    response: Value,
+/// Whether a write waits until its bytes are on disk.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Durability {
+    /// Answers paid for, and reports.
+    Synced,
+    /// A copy of answers another cache file still holds, made again if a
+    /// crash loses it.
+    Unsynced,
 }
 
 /// Create `path` as a directory, or accept an existing real (non-symlink) one.
@@ -89,6 +90,10 @@ impl Store {
             &directory.join("cache"),
             "Jev storage must be a real directory",
         )?;
+        real_directory(
+            &cache::answers_directory(&directory),
+            "Jev storage must be a real directory",
+        )?;
         let lock = lock_session(&directory.join("session.lock"))?;
         real_directory(
             &directory.join("history"),
@@ -100,32 +105,16 @@ impl Store {
         })
     }
 
-    /// `ttl` is `None` for answers that never expire (a pinned model version).
-    pub fn load(&self, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
-        load_entry(&self.directory, hash, ttl)
-    }
-
-    pub fn save(&self, hash: &str, response: &Value, created_at: u64) -> Result<()> {
-        let entry = Cache {
-            request_hash: hash.into(),
-            response: response.clone(),
-            created_at,
-        };
-        atomic(
-            &self.directory.join("cache").join(format!("{hash}.json")),
-            &serde_json::to_vec(&entry)?,
-        )
-    }
-
     /// Atomically replace a small state file directly under `.jevgate/`.
     pub fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
-        atomic(&self.directory.join(name), bytes)
+        atomic(&self.directory.join(name), bytes, Durability::Synced)
     }
 
     pub fn publish_html(&self, report: &Report) -> Result<()> {
         atomic(
             &self.directory.join("report.html"),
             crate::html_report::render(report)?.as_bytes(),
+            Durability::Synced,
         )
     }
 
@@ -139,8 +128,13 @@ impl Store {
                 .join("history")
                 .join(format!("{}.json", report.generation)),
             &bytes,
+            Durability::Synced,
         )?;
-        atomic(&self.directory.join("latest.json"), &bytes)?;
+        atomic(
+            &self.directory.join("latest.json"),
+            &bytes,
+            Durability::Synced,
+        )?;
         if report.generation > HISTORY {
             let old = self
                 .directory
@@ -154,32 +148,9 @@ impl Store {
     }
 }
 
-fn load_entry(directory: &Path, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
-    let path = directory.join("cache").join(format!("{hash}.json"));
-    if path.is_symlink() {
-        return None;
-    }
-    let entry: Cache =
-        serde_json::from_str(&crate::inventory::read_source(&path, CACHE_ENTRY_BYTES).ok()?)
-            .ok()?;
-    let age = now().checked_sub(entry.created_at)?;
-    (entry.request_hash == hash && ttl.is_none_or(|ttl| age < ttl))
-        .then_some((entry.response, entry.created_at))
-}
-
-/// A cached answer read without opening the store: no lock is taken and no
-/// directory is created, so a dry run stays free of saved state.
-pub fn peek(root: &Path, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
-    let directory = root.join(".jevgate");
-    if directory.is_symlink() || !directory.is_dir() {
-        return None;
-    }
-    load_entry(&directory, hash, ttl)
-}
-
-/// Replace `path` with `bytes` through a temporary file and a rename, so a
-/// reader never sees a partial file.
-pub(crate) fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Replace `path` with `bytes` through a temporary file, so a reader sees
+/// the old file or the new one, never part of either.
+pub(crate) fn atomic(path: &Path, bytes: &[u8], durability: Durability) -> Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -191,7 +162,9 @@ pub(crate) fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = options.open(&temporary)?;
     let result = (|| {
         file.write_all(bytes)?;
-        file.sync_all()?;
+        if durability == Durability::Synced {
+            file.sync_all()?;
+        }
         fs::rename(&temporary, path)
     })();
     if result.is_err() {

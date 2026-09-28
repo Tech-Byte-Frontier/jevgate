@@ -133,15 +133,14 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
 }
 
 /// Planned first-pass requests, without credentials, network or writes; the
-/// cache is read so answered requests are not counted as cost. A file whose
+/// cache is read so answered questions are not counted as cost. A file whose
 /// purpose the cache answers is planned as a run plans it; requests that
 /// depend on new answers (an unanswered file purpose, rechecks, locating
 /// blocks) are not known yet.
 fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &mut Report) {
     let budget = &TokenBudget::load(root);
-    let answered =
-        |request: &serde_json::Value| crate::requests::answered(root, args, request).is_some();
-    let limits = Limits::new(budget, &answered);
+    let unanswered = |request: &serde_json::Value| crate::requests::unanswered(root, args, request);
+    let limits = Limits::new(budget, &unanswered);
     let mut planned = Vec::new();
     let mut views = BTreeMap::new();
     for (owner, input) in inputs.iter().enumerate() {
@@ -188,17 +187,41 @@ fn count_planned(
             .stages
             .entry(crate::requests::stage(&request).into())
             .or_default();
-        stage.planned_requests += 1;
-        stage.planned_evidence_bytes += crate::requests::evidence_bytes(&request);
-        if crate::requests::answered(root, args, &request).is_some() {
-            stage.planned_cached += 1;
-        } else {
-            stage.planned_tokens += budget.request_tokens(&request) as u64;
-        }
+        count_request(
+            stage,
+            &request,
+            crate::requests::unanswered(root, args, &request),
+            budget,
+        );
         if args.show_requests {
             report
                 .initial_requests
                 .push(crate::requests::provider_request(&request).into_owned());
+        }
+    }
+}
+
+/// Count one planned request in its stage: its questions, those the cache
+/// answers, and the estimated tokens of `sent`, what a run would send of it
+/// (none when the cache answers every question).
+fn count_request(
+    stage: &mut crate::schema::StageMetrics,
+    request: &serde_json::Value,
+    sent: Option<serde_json::Value>,
+    budget: &TokenBudget,
+) {
+    let questions = crate::requests::question_count(request);
+    stage.planned_requests += 1;
+    stage.planned_evidence_bytes += crate::requests::evidence_bytes(request);
+    stage.planned_questions += questions;
+    match sent {
+        None => {
+            stage.planned_cached += 1;
+            stage.planned_cached_questions += questions;
+        }
+        Some(sent) => {
+            stage.planned_cached_questions += questions - crate::requests::question_count(&sent);
+            stage.planned_tokens += budget.request_tokens(&sent) as u64;
         }
     }
 }
@@ -376,10 +399,9 @@ impl Session<'_> {
         let mut purpose = Vec::new();
         let mut views = BTreeMap::new();
         let root = &self.context.root;
-        let answered = |request: &serde_json::Value| {
-            crate::requests::answered(root, self.args, request).is_some()
-        };
-        let limits = Limits::new(&self.budget, &answered);
+        let unanswered =
+            |request: &serde_json::Value| crate::requests::unanswered(root, self.args, request);
+        let limits = Limits::new(&self.budget, &unanswered);
         for (owner, file) in report.files.iter_mut().enumerate() {
             if file.status != Status::Pending {
                 continue;
@@ -642,6 +664,8 @@ fn add_metrics(stage: &mut crate::schema::StageMetrics, m: &crate::schema::Stage
     stage.cache_hits += m.cache_hits;
     stage.cached_judgments += m.cached_judgments;
     stage.evaluated_judgments += m.evaluated_judgments;
+    stage.asked_questions += m.asked_questions;
+    stage.cached_questions += m.cached_questions;
     stage.input_tokens += m.input_tokens;
     stage.output_tokens += m.output_tokens;
     stage.evidence_bytes += m.evidence_bytes;

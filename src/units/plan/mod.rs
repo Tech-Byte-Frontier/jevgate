@@ -89,9 +89,8 @@ pub fn plan(
     budget: &TokenBudget,
     root: &std::path::Path,
 ) -> Plan {
-    let answered =
-        |request: &serde_json::Value| crate::requests::answered(root, args, request).is_some();
-    let budget = Limits::new(budget, &answered);
+    let unanswered = |request: &serde_json::Value| crate::requests::unanswered(root, args, request);
+    let budget = Limits::new(budget, &unanswered);
     let mut result = Plan::default();
     let scope = parsed_scope(inputs, views, &mut result.skipped);
     let mut shared = Shared::new(&scope, args);
