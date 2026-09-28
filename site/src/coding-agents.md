@@ -20,6 +20,59 @@ is right, or say why the code should stay as it is.
 | 1 | The gate failed: act on the findings listed |
 | 2 | The run could not finish (no key, provider rejection, request budget); report it, don't treat it as a pass |
 
+## Set up an agent in one command
+
+`jevgate init --agent` writes an agent's hooks, which run [`jevgate hook`](#in-the-agents-loop-jevgate-hook), and a short text telling the agent how JevGate's findings work:
+
+```sh
+jevgate init --agent claude                    # Claude Code, for every repository you open
+jevgate init --agent codex,gemini --project    # this repository's Codex and Gemini CLI
+jevgate init --agent cursor --dry-run          # what would change, without writing
+jevgate init --agent claude --remove           # take out what JevGate wrote
+```
+
+| Agent | Hooks, yours / with `--project` | Instructions, yours / with `--project` |
+|---|---|---|
+| `claude` (Claude Code) | `~/.claude/settings.json` / `.claude/settings.json` | `~/.claude/rules/jevgate.md` / `.claude/rules/jevgate.md` |
+| `codex` | `~/.codex/hooks.json` / `.codex/hooks.json` | a block in `~/.codex/AGENTS.md` / `AGENTS.md` |
+| `cursor` | `~/.cursor/hooks.json` / `.cursor/hooks.json` | none (your rules live in Cursor's settings) / `.cursor/rules/jevgate.mdc` |
+| `gemini` (Gemini CLI) | `~/.gemini/settings.json` / `.gemini/settings.json` | a block in `~/.gemini/GEMINI.md` / `GEMINI.md` |
+| `opencode` (OpenCode 1.x) | a plugin: `~/.config/opencode/plugins/jevgate.js` / `.opencode/plugins/jevgate.js` | a block in `~/.config/opencode/AGENTS.md` / `AGENTS.md` |
+
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `XDG_CONFIG_HOME` move your files as they move the agents'. With `--project`, the files go at the top of the Git work tree, for everyone who works in the repository.
+
+It changes only JevGate's parts of each file:
+
+- **Merged, not replaced.** A hook is JevGate's when it runs `jevgate hook`, wherever `jevgate` lives. Other tools' hooks keep their place, also in a group shared with JevGate's, and the rest of the file keeps its key order, indentation, line ends and byte-order mark; a file written on one line is laid out over several. Running it again changes nothing.
+- **The text** sits between `<!-- jevgate:begin … -->` and `<!-- jevgate:end -->` in a file others write too, or is a file of JevGate's own where the agent reads a directory of rules. A file of that name that JevGate did not write is left alone.
+- **All or nothing.** Every file is read before the first is written, so a settings file that is not plain JSON (Gemini CLI accepts comments) stops the run with nothing written.
+- **`--remove`** takes out JevGate's hooks and text and nothing else, and deletes a file only when JevGate's parts were all it held.
+
+Then it runs the `jevgate` on your `PATH`, which the agent will run, on an event it ignores, and warns when that one is missing or cannot answer the hooks: a JevGate before 0.27, or the unrelated npm package named `jevgate`. It also warns when JevGate would run twice: the [plugin](#the-claude-code-plugin) beside `init --agent claude`, or Cursor, which also runs Claude Code's hooks.
+
+Hooks set up for your user check every Git repository you run the agent in, and upload what `jevgate check` would there; a repository's `jevgate.toml` bounds it. To choose the repositories, use `--project` in each.
+
+What each agent runs:
+
+- **Claude Code and Codex** run `jevgate hook || echo '{"systemMessage": …}'`. When `jevgate` is missing from the agent's `PATH` or older than 0.27, the hook says so and blocks nothing; a plain `jevgate hook` would block, since an older JevGate exits 2 on `hook` and both agents read exit 2 as a block (with JevGate 0.25.0, Claude Code dropped the prompt and Codex ended the turn). On Windows, Claude Code runs hooks in Git Bash, which Git for Windows installs, or PowerShell 7; Windows PowerShell 5.1 has no `||`.
+- **Codex** runs new or changed hooks only once you trust them in `/hooks`. On macOS and Linux it starts hooks from a login shell, so `jevgate` must be on the `PATH` your login profile sets.
+- **Gemini CLI** runs `jevgate hook; exit 0`. It denies on any exit but 0 and 1, so a missing `jevgate` would block every prompt; with exit 0 it shows the shell's error instead, in bash and in PowerShell. With `security.environmentVariableRedaction` on, hooks don't get `TYPESAFE_API_KEY`: use `jevgate auth login` or the repository's `.env`. JevGate's handlers are named `jevgate` (`/hooks disable jevgate`).
+- **Cursor** runs `jevgate hook --agent cursor`.
+- **OpenCode** has no command hooks, so it gets a plugin (OpenCode 1.x) that relays its events to `jevgate hook --agent opencode`. An edit's findings are appended to the tool's output, a blocked end of turn is sent back as the next prompt, and a failure is shown as a toast, never thrown into OpenCode. OpenCode 2 runs a different plugin API and does not load it yet.
+
+These commands stay the same across versions, so Codex's and Gemini CLI's trust in them holds after an upgrade.
+
+## The Claude Code plugin
+
+This repository is also a Claude Code plugin marketplace. Its plugin bundles the hooks `init --agent claude` writes, the [MCP server](#as-an-mcp-server) and a skill, `/jevgate:findings`, on acting on findings:
+
+```text
+/plugin marketplace add Tech-Byte-Frontier/jevgate
+/plugin install jevgate@jevgate
+```
+
+It runs the `jevgate` command, 0.27 or later, which you [install](install.md) separately. Use the plugin or `init --agent claude`, not both, or the hooks run twice. The plugin's version follows JevGate's releases.
+
 ## In the agent's loop: `jevgate hook`
 
 `jevgate hook` runs as a hook of the agent, so the check happens without being asked for. It reads one hook event as JSON on stdin and prints one JSON reply:
@@ -45,7 +98,7 @@ The hook detects the agent from the event; `--agent` names it. It gives up after
 | Copilot CLI, VS Code | the repository's `.claude/settings.json` (VS Code with `chat.useClaudeHooks`) | Claude Code's |
 | OpenCode | a plugin relaying `session.created`, `chat.message`, `tool.execute.after` and `session.idle` to `jevgate hook --agent opencode` | |
 
-For Claude Code:
+`jevgate init --agent` writes these for you. By hand, for Claude Code:
 
 ```json
 {
@@ -59,11 +112,11 @@ For Claude Code:
 }
 ```
 
-Cursor also runs the hooks in Claude Code's files, and Copilot CLI those in the repository's `.claude/settings.json`: configure JevGate in one of them per agent, or it runs twice. Gemini CLI starts hooks without your shell's environment, so `TYPESAFE_API_KEY` may not reach them; `jevgate auth login` or the repository's `.env` works there.
+Cursor also runs the hooks in Claude Code's files, and Copilot CLI those in the repository's `.claude/settings.json`: configure JevGate in one of them per agent, or it runs twice.
 
 ## As an MCP server
 
-`jevgate mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdin and stdout, so an agent can call JevGate as a tool instead of running a shell command. Register it, started in the repository:
+`jevgate mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdin and stdout, so an agent can call JevGate as a tool instead of running a shell command. The Claude Code plugin registers it; otherwise, register it started in the repository:
 
 ```sh
 claude mcp add jevgate -- jevgate mcp          # Claude Code

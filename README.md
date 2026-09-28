@@ -31,11 +31,12 @@ It reads Rust, Python, JavaScript, TypeScript, Go, C#, Ruby, PHP, Java and Bend 
 ```sh
 brew install tech-byte-frontier/tap/jevgate   # macOS and Linux, with Homebrew
 curl -fsSL https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/main/install.sh | sh   # Linux and macOS
+npm install -g @tech-byte-frontier/jevgate    # any platform with Node 20 or later
 cargo binstall jevgate            # any platform, with cargo-binstall
 cargo install jevgate --locked    # build from source; needs Rust 1.90 or later
 ```
 
-Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs an API key from [TypeSafe](https://console.typesafe.ai/settings/keys) or [OpenRouter](https://openrouter.ai/settings/keys), which serve the same model at the same price; a [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys) key is accepted too, but has not been tried with a real key yet. [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, shell completions and man pages.
+Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs an API key from [TypeSafe](https://console.typesafe.ai/settings/keys) or [OpenRouter](https://openrouter.ai/settings/keys), which serve the same model at the same price; a [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys) key is accepted too, but has not been tried with a real key yet. [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, the npm package, shell completions and man pages.
 
 ## Quick start
 
@@ -45,13 +46,14 @@ jevgate auth login                        # validate and save your API key: Type
 jevgate check --dry-run --show-requests   # see exactly what would be uploaded; free and offline
 jevgate check --report                    # review, then open a local HTML dashboard
 jevgate baseline                          # accept today's findings; later checks fail only on new ones
+jevgate init --agent claude               # check each edit and turn of Claude Code; also codex, cursor, gemini, opencode
 ```
 
 `jevgate check --report` writes the same findings to a local dashboard you can filter by path and classification, with each file's findings, undecided units and the answers behind them:
 
 ![JevGate's HTML report on zoxide: the gate's result and what fails it by default, totals for files, findings, notes and cost, then a list of files by classification, with src/util.rs open to show its two review findings, the one that fails the gate marked, and how each rule classified the file](site/src/images/report.png)
 
-`jevgate --help` gives the workflow, exit codes, files and environment, and `jevgate check --help` explains each flag and the JSON report. Coding agents can also call JevGate as a tool through its MCP server, `jevgate mcp` ([coding agents](https://tech-byte-frontier.github.io/jevgate/coding-agents.html)).
+`jevgate --help` gives the workflow, exit codes, files and environment, and `jevgate check --help` explains each flag and the JSON report. In a coding agent, JevGate's hooks give the agent each edit's findings and keep it working while findings fail the gate; a Claude Code plugin bundles them with the MCP server, `jevgate mcp` ([coding agents](https://tech-byte-frontier.github.io/jevgate/coding-agents.html)).
 
 ## Continuous integration
 

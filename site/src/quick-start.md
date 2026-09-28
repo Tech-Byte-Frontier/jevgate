@@ -6,6 +6,7 @@ jevgate auth login                        # validate and save your API key: Type
 jevgate check --dry-run --show-requests   # see exactly what would be uploaded; free and offline
 jevgate check --report                    # review, then open a local HTML dashboard
 jevgate baseline                          # accept today's findings; later checks fail only on new ones
+jevgate init --agent claude               # check each edit and turn of Claude Code; also codex, cursor, gemini, opencode
 ```
 
 More ways to run it:

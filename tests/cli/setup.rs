@@ -53,7 +53,8 @@ fn an_agent_is_set_up_once_and_taken_out() {
         stdout.contains("Claude Code, for your user (every repository):")
             && stdout
                 .contains("settings.json: hooks SessionStart, UserPromptSubmit, PostToolUse, Stop")
-            && stdout.contains("trust JevGate's"),
+            && stdout.contains("trust JevGate's")
+            && stdout.contains("check every Git repository you run the agent in"),
         "{stdout}"
     );
     assert_eq!(

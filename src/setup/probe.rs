@@ -29,7 +29,7 @@ pub(super) fn problem(path: Option<&OsStr>) -> Option<String> {
     };
     answer(&found).err().map(|why| {
         format!(
-            "the jevgate on your PATH ({}) cannot answer the hooks: {why}. The agent runs that one: upgrade it, or put a JevGate 0.27 or later first on your PATH",
+            "the jevgate on your PATH ({}) cannot answer the hooks: {why}. The agent runs that one: replace it with JevGate 0.27 or later, or put one first on your PATH (the npm package named jevgate is another program; JevGate's is @tech-byte-frontier/jevgate)",
             found.display()
         )
     })

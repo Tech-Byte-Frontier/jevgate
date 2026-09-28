@@ -277,6 +277,12 @@ impl Plan {
                 places.root.display()
             );
         }
+        if !setup.project {
+            say!(
+                "These hooks check every Git repository you run the agent in, and upload what `jevgate check` would there (a repository's {} bounds it); --project sets up one repository instead.",
+                crate::init::CONFIG_FILE
+            );
+        }
         if !setup.dry_run {
             say!(
                 "Next: `jevgate auth login` saves your TypeSafe key if you have not; the agent loads its hooks when a session starts."

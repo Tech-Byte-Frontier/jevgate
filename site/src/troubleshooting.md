@@ -57,7 +57,29 @@ Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–52
 **`JevGate did not check this turn: it has no snapshot of the turn's start`**
 : The hook that runs when a prompt is sent (`UserPromptSubmit`, `BeforeAgent`, `beforeSubmitPrompt`) is not configured. The end of the turn records a snapshot, so the next turn is checked.
 
+**`JevGate could not check: jevgate hook is missing, older than 0.27 or failed`**, or in Gemini CLI **`jevgate: command not found`** or **`unrecognized subcommand 'hook'`**
+: The agent found no `jevgate` on the `PATH` it starts hooks with, or an older one. [Install](install.md) JevGate 0.27 or later where the agent finds it; Codex starts hooks from a login shell, so on macOS and Linux its `PATH` comes from your login profile. `jevgate init --agent` runs the `jevgate` on your own `PATH` and warns when it cannot answer the hooks.
+
+**A Claude Code hook error about `||` on Windows**
+: Claude Code runs hooks in Git Bash, or in PowerShell when Git Bash is missing, and Windows PowerShell 5.1 has no `||`. Install Git for Windows, which brings Git Bash, or PowerShell 7.
+
 Nothing at all appears: check that the agent runs the hook (Claude Code's `/hooks`, Codex's `/hooks`, which also approves new or changed hooks, Gemini CLI's `/hooks panel`, Cursor's Hooks output channel), and that `jevgate` is on the `PATH` the agent starts hooks with.
+
+## `jevgate init --agent` stops
+
+It reads every file before writing any, so when it stops, nothing was written.
+
+**`… it is not plain JSON`**
+: The agent's settings file holds something JSON does not allow, such as comments, which Gemini CLI accepts. JevGate does not rewrite a file it cannot read whole: take them out, or add the hooks by hand from [coding agents](coding-agents.md#set-up-an-agent-in-one-command).
+
+**`… it was not written by JevGate, so it is left alone`**
+: A rules file or plugin of JevGate's name (`.claude/rules/jevgate.md`, `.cursor/rules/jevgate.mdc`, `jevgate.js`) is someone else's. Move it away, then run it again.
+
+**`… a symlink leads it outside the repository`**
+: With `--project`, a file or directory it writes, such as `AGENTS.md` or `.codex`, links outside the repository. JevGate writes a repository's files only inside it.
+
+**`… a JevGate begin marker without its end marker`**
+: The block between `<!-- jevgate:begin` and `<!-- jevgate:end -->` lost one of its lines. Restore it, or delete what is left of the block.
 
 ## Many files are uncertain
 
