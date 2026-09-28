@@ -21,6 +21,7 @@
 # Background
 
 - [How it works](how-it-works.md)
+- [Accuracy](accuracy.md)
 - [Limits](limits.md)
 - [Versions and stability](stability.md)
 - [Changelog](changelog.md)
@@ -28,5 +29,22 @@
 # Reference
 
 - [Rules](reference/rules.md)
+  - [File organization](rules/maintainability/file-organization.md)
+  - [Function simplification](rules/maintainability/function-simplification.md)
+  - [Shared logic](rules/maintainability/shared-logic.md)
+  - [Hardcoded values](rules/maintainability/hardcoded-values.md)
+  - [Injection](rules/security/injection.md)
+  - [Sensitive data](rules/security/sensitive-data.md)
+  - [Unsafe settings](rules/security/unsafe-settings.md)
+  - [Access control](rules/security/access-control.md)
+  - [Workflows](rules/security/workflows.md)
+  - [Test value](rules/tests/value.md)
+  - [Test redundancy](rules/tests/redundancy.md)
+  - [Laws (Bend 2)](rules/tests/laws.md)
+  - [Agent context](rules/documentation/agent-context.md)
+  - [Large docs](rules/documentation/large-docs.md)
+  - [Staleness](rules/documentation/staleness.md)
+  - [Duplication](rules/documentation/duplication.md)
+  - [Code comments](rules/documentation/comments.md)
 - [Configuration keys](reference/configuration.md)
 - [Command line](reference/cli.md)

@@ -96,11 +96,11 @@ A unit whose request carried a comment or string written to steer a reviewer is 
 
 ## A review did not fail the check
 
-By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the check; `jevgate rules` shows which, and how often each rule's reviews and considers were right. The other findings are reported, and the output says their rules are still being measured. To fail on them, set a level: `--fail-on review` or `fail_on = ["review"]` for every rule, or `--fail-on maintainability/shared-logic=review` for one.
+By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the check; `jevgate rules` shows which, and how often each rule's reviews and considers were right ([accuracy](accuracy.md) says how that is measured). The other findings are reported, and the output says their rules are still being measured. To fail on them, set a level: `--fail-on review` or `fail_on = ["review"]` for every rule, or `--fail-on maintainability/shared-logic=review` for one.
 
 ## A finding is wrong
 
-Accept it with `jevgate baseline`, and record why with `jevgate baseline mark wrong PATH:LINE`; `jevgate baseline stats` counts each rule's mistaken findings. Reporting it with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml), with the finding from `.jevgate/latest.json` and a small piece of the code, is how the rules improve.
+Each rule's page in the [rules reference](reference/rules.md) shows findings it got wrong and why, which may match yours. Accept it with `jevgate baseline`, and record why with `jevgate baseline mark wrong PATH:LINE`; `jevgate baseline stats` counts each rule's mistaken findings. Reporting it with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml), with the finding from `.jevgate/latest.json` and a small piece of the code, is how the rules improve.
 
 ## A `--base` check leaves out a finding
 

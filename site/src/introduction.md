@@ -20,7 +20,8 @@ Consider (2):
 ## Where to start
 
 - [Install](install.md) and follow the [quick start](quick-start.md): a dry run shows exactly what would be uploaded, free and offline.
-- [What it finds](what-it-finds.md) and the [rules reference](reference/rules.md) describe every rule and the question it asks.
+- [What it finds](what-it-finds.md) and the [rules reference](reference/rules.md) describe every rule and the question it asks, and each rule's page shows findings it got wrong.
+- [Accuracy](accuracy.md) gives how often each rule was right on projects JevGate was never tuned on, and how that is measured.
 - [Continuous integration](ci.md) sets JevGate up on pull requests with the GitHub Action, pre-commit or any other CI.
 - [How it works](how-it-works.md) explains the evidence units and how code, not a chat model, turns answers into findings.
 

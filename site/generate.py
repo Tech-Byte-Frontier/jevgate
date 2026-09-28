@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Write the site's reference pages from JevGate itself.
+"""Write the site's generated pages from JevGate itself.
 
     generate.py JEVGATE SCHEMA OUT_DIR
 
-rules.md comes from `jevgate rules --format json`, configuration.md from
-jevgate.schema.json, and cli.md from each command's --help, so the pages
-always describe the binary they were built with.
+From `jevgate rules --format json`: rules.md, the rules index; _rules.md, each
+rule's facts under an mdBook anchor named after its ID, which the rule's
+hand-written page (rules/<group>/<name>.md) includes; and _precision.md, the
+table of labeled findings the default gate is decided from, which accuracy.md
+includes. configuration.md comes from jevgate.schema.json and cli.md from each
+command's --help. So the pages always describe the binary they were built
+with. A rule without its page, or a page without its rule, fails the build.
 """
 import html
 import json
@@ -13,6 +17,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+BOOK = Path(__file__).resolve().parent / "src"
+LEVELS = ["review", "consider"]
+# Below this many labels a share says little, so the site gives the counts
+# alone; the default gate and each finding's precision start from it too
+# (MIN_LABELS in src/maturity.rs).
+MIN_LABELS = 20
 COMMANDS = ["auth", "check", "baseline", "rules", "init", "completions", "man", "serve", "mcp", "hook"]
 GROUPS = {
     "maintainability": "On by default, except hardcoded values: add it with `--rule default --rule hardcoded-values`, or a level for it in `[rules]`.",
@@ -26,9 +36,7 @@ def run(binary, *args):
     return subprocess.run([binary, *args], check=True, capture_output=True, text=True).stdout
 
 
-def rules_page(binary):
-    rules = json.loads(run(binary, "rules", "--format", "json"))
-    version = run(binary, "--version").strip()
+def rules_page(rules, version):
     lines = [
         "# Rules reference",
         "",
@@ -40,40 +48,31 @@ def rules_page(binary):
         "`mature`: those right at least 80% of the time over at least 20 findings labeled by hand on",
         "projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected.",
         "The other findings are reported without failing it.",
-        "*Reviews right* and *considers right* give the share of labeled findings that were right on",
-        "those projects, and how many were labeled; a debatable one counts as not right.",
+        "*Reviews right* and *considers right* give how many labeled findings were right on",
+        "those projects, of how many labeled; a debatable one counts as not right.",
         "`tests/laws` is labeled only on Bend 2 projects, which these numbers leave out.",
         "",
         "| Rule | Key | Default | Fails by default | Reviews right | Considers right | Question |",
         "|---|---|---|---|---|---|---|",
     ]
     for rule in rules:
-        anchor = rule["id"].replace("/", "-")
         default = "yes" if rule["default_enabled"] else "opt-in"
         maturity = rule["maturity"]
+        # The anchor keeps links to the sections this page had before the rule pages.
         lines.append(
-            f"| [`{rule['id']}`](#{anchor}) | `{rule['key']}` | {default} | {blocks(maturity)}"
-            f" | {right(maturity, 'review')} | {right(maturity, 'consider')} | {cell(rule['inspection'])} |"
+            f'| <a id="{html.escape(anchor(rule))}"></a>[`{rule["id"]}`](../{page(rule)}) | `{rule["key"]}` | {default}'
+            f" | {blocks(maturity)} | {right(maturity, 'review')} | {right(maturity, 'consider')} | {cell(rule['inspection'])} |"
         )
-    group = None
-    for rule in rules:
-        if rule["group"] != group:
-            group = rule["group"]
-            lines += ["", f"## {group.capitalize()}", "", GROUPS.get(group, "")]
-        anchor = rule["id"].replace("/", "-")
-        lines += [
-            "",
-            f'<a id="{html.escape(anchor)}"></a>',
-            f"### `{rule['id']}`",
-            "",
-            f"**Question:** {text(rule['inspection'])}",
-            "",
-            f"- **Key:** `{rule['key']}` · **Version:** {rule['version']}"
-            + (" · **Needs tests:** yes" if rule["requires_tests"] else ""),
-            f"- **Looks at:** {text(rule['scope'])}",
-            f"- **Evidence unit:** {text(rule['unit'])}",
-            f"- **Acceptable:** {text(rule['acceptable_example'])}",
-        ]
+    lines += [
+        "",
+        "Each rule's page gives what it looks at, the evidence it sends, and findings it got wrong on",
+        "open-source projects; [accuracy](../accuracy.md) explains how the labels are made.",
+        "",
+        "## Groups",
+        "",
+    ]
+    groups = dict.fromkeys(rule["group"] for rule in rules)
+    lines += [f"- **{group.capitalize()}:** {GROUPS.get(group, '')}" for group in groups]
     policy = rules[0]["decision_policy"]
     lines += [
         "",
@@ -88,18 +87,148 @@ def rules_page(binary):
     return "\n".join(lines) + "\n"
 
 
+def rule_facts(rules):
+    """Each rule's facts between mdBook anchors, for its page to include."""
+    lines = ["<!-- Generated by site/generate.py; each rule's page includes its part. -->"]
+    for rule in rules:
+        maturity = rule["maturity"]
+        names = ", ".join(f"`{n}`" for n in (rule["id"], name(rule), rule["key"]))
+        lines += [
+            "",
+            f"<!-- ANCHOR: {anchor(rule)} -->",
+            f"**Question:** {text(rule['inspection'])}",
+            "",
+            f"- **Runs:** {runs(rule)} · **Fails the check by default:** {fails(rule)}",
+            f"- **Right on projects JevGate was never tuned on:** {shares_by_level(maturity, 'unseen')}"
+            " ([how it is measured](../../accuracy.md))",
+            f"- **Right on the projects it was tuned on:** {shares_by_level(maturity, 'tuned')}",
+            f"- **Looks at:** {text(rule['scope'])}",
+            f"- **Evidence unit:** {text(rule['unit'])}",
+            f"- **Acceptable:** {text(rule['acceptable_example'])}",
+            f"- **Names:** {names} · **Version:** {rule['version']}",
+            f"<!-- ANCHOR_END: {anchor(rule)} -->",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def precision_table(rules):
+    """Every rule and level's labels on unseen and tuned projects, and what
+    fails the check by default, for the accuracy page."""
+    labeled = {
+        where: sum(m[where]["labeled"] for rule in rules for m in rule["maturity"].values())
+        for where in ("unseen", "tuned")
+    }
+    lines = [
+        "<!-- Generated by site/generate.py from `jevgate rules --format json`. -->",
+        f"{default_gate(rules)} In all, {labeled['unseen']:,} findings were labeled on the unseen projects",
+        f"and {labeled['tuned']:,} on the tuned ones.",
+        "",
+        "| Rule | Level | Right on unseen projects | Right on tuned projects | Fails the check by default |",
+        "|---|---|---|---|---|",
+    ]
+    for rule in rules:
+        link = f"[`{rule['id']}`]({page(rule)})"
+        levels = [(level, rule["maturity"][level]) for level in LEVELS if level in rule["maturity"]]
+        if not levels:
+            lines.append(f"| {link} | | not measured | not measured | no |")
+        for i, (level, m) in enumerate(levels):
+            unseen = share(m["unseen"]) or "none labeled"
+            tuned = share(m["tuned"]) or "none labeled"
+            fails_by_default = "no"
+            if m["mature"]:
+                unseen = f"**{unseen}**"
+                fails_by_default = "**yes**" if rule["default_enabled"] else "**once selected**"
+            lines.append(f"| {link if i == 0 else ''} | {level} | {unseen} | {tuned} | {fails_by_default} |")
+    return "\n".join(lines) + "\n"
+
+
+def default_gate(rules):
+    """What the default gate fails on, with the labels that put it there."""
+    mature = [(rule, level, m) for rule in rules for level, m in rule["maturity"].items() if m["mature"]]
+    by_default = described([item for item in mature if item[0]["default_enabled"]])
+    once_selected = described([item for item in mature if not item[0]["default_enabled"]])
+    sentence = f"With the default rules, a check fails only on {by_default or 'nothing'}"
+    return sentence + (f"; once selected, also on {once_selected}." if once_selected else ".")
+
+
+def described(levels):
+    """"function-simplification reviews, right 87% (20 of 23), and …"."""
+    return ", and ".join(f"{name(rule)} {level}s, right {share(m['unseen'])}" for rule, level, m in levels)
+
+
+def check_pages(rules):
+    """Every rule has its hand-written page, listed in SUMMARY.md, and every
+    page under rules/ is a rule's: otherwise the build fails."""
+    pages = {path.relative_to(BOOK / "rules").with_suffix("").as_posix() for path in (BOOK / "rules").rglob("*.md")}
+    summary = (BOOK / "SUMMARY.md").read_text(encoding="utf-8")
+    problems = [f"no page for {rule['id']}: add site/src/{page(rule)}" for rule in rules if rule["id"] not in pages]
+    problems += [f"site/src/rules/{p}.md names no rule" for p in sorted(pages - {rule["id"] for rule in rules})]
+    problems += [f"SUMMARY.md does not list {page(rule)}" for rule in rules if f"({page(rule)})" not in summary]
+    if problems:
+        sys.exit("\n".join(problems))
+
+
+def anchor(rule):
+    """`maintainability/shared-logic` → `maintainability-shared-logic`."""
+    return rule["id"].replace("/", "-")
+
+
+def name(rule):
+    """`maintainability/shared-logic` → `shared-logic`."""
+    return rule["id"].split("/")[1]
+
+
+def page(rule):
+    """The rule's hand-written page, relative to the book's source."""
+    return f"rules/{rule['id']}.md"
+
+
+def runs(rule):
+    if not rule["default_enabled"]:
+        return f"when selected: `--rule {name(rule)}`, `--rule {rule['group']}` or `--rule all`"
+    return "by default, with `--include-tests`" if rule["requires_tests"] else "by default"
+
+
+def fails(rule):
+    """"reviews", "considers, once the rule is selected", or "no"."""
+    levels = " and ".join(f"{level}s" for level in mature_levels(rule["maturity"]))
+    if not levels:
+        return "no"
+    return levels if rule["default_enabled"] else f"{levels}, once the rule is selected"
+
+
+def shares_by_level(maturity, where):
+    """"reviews 54% (46 of 85), considers 2 of 5", or "not measured"."""
+    measured = [f"{level}s {share(maturity[level][where]) or 'none labeled'}" for level in LEVELS if level in maturity]
+    return ", ".join(measured) or "not measured"
+
+
+def share(labels):
+    """"87% (20 of 23)"; "2 of 5" below MIN_LABELS; None without labels."""
+    right, labeled = labels["right"], labels["labeled"]
+    if not labeled:
+        return None
+    if labeled < MIN_LABELS:
+        return f"{right} of {labeled}"
+    percent = (200 * right + labeled) // (2 * labeled)  # half up, as JevGate rounds
+    return f"{percent}% ({right} of {labeled})"
+
+
 def blocks(maturity):
     """The levels that fail the default gate, or "no"."""
-    return ", ".join(level for level in ("review", "consider") if maturity.get(level, {}).get("mature")) or "no"
+    return ", ".join(mature_levels(maturity)) or "no"
+
+
+def mature_levels(maturity):
+    return [level for level in LEVELS if maturity.get(level, {}).get("mature")]
 
 
 def right(maturity, level):
-    """"87% of 23": labeled findings of a level right on unseen projects, or "-"."""
+    """A level's share right on unseen projects, or "-"."""
     unseen = maturity.get(level, {}).get("unseen")
-    if not unseen or not unseen["labeled"]:
+    if not unseen:
         return "-"
-    percent = (200 * unseen["right"] + unseen["labeled"]) // (2 * unseen["labeled"])  # half up, as JevGate rounds
-    return f"{percent}% of {unseen['labeled']}"
+    return share(unseen) or "-"
 
 
 def configuration_page(schema_path):
@@ -175,9 +304,17 @@ def main():
     binary, schema, out = sys.argv[1:4]
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "rules.md").write_text(rules_page(binary))
-    (out / "configuration.md").write_text(configuration_page(schema))
-    (out / "cli.md").write_text(cli_page(binary))
+    rules = json.loads(run(binary, "rules", "--format", "json"))
+    check_pages(rules)
+    pages = {
+        "rules.md": rules_page(rules, run(binary, "--version").strip()),
+        "_rules.md": rule_facts(rules),
+        "_precision.md": precision_table(rules),
+        "configuration.md": configuration_page(schema),
+        "cli.md": cli_page(binary),
+    }
+    for file, content in pages.items():
+        (out / file).write_text(content, encoding="utf-8")
 
 
 if __name__ == "__main__":

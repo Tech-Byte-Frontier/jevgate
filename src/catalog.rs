@@ -500,3 +500,56 @@ pub fn describe() -> Value {
             .collect(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn site() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("site/src")
+    }
+
+    /// SARIF links each rule to its page, so every rule needs one: the page
+    /// shows the facts `site/generate.py` writes under the rule's anchor, and
+    /// the site's table of contents lists it.
+    #[test]
+    fn every_rule_has_a_page_on_the_site() {
+        let summary = std::fs::read_to_string(site().join("SUMMARY.md")).unwrap();
+        for rule in rules() {
+            let page = std::fs::read_to_string(site().join(format!("rules/{}.md", rule.id)))
+                .unwrap_or_else(|_| panic!("site/src/rules/{}.md is missing", rule.id));
+            let facts = format!("_rules.md:{}}}}}", rule.id.replace('/', "-"));
+            assert!(
+                page.contains(&facts),
+                "{} does not include {facts}",
+                rule.id
+            );
+            assert!(
+                summary.contains(&format!("(rules/{}.md)", rule.id)),
+                "{}",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_rule_page_names_a_rule() {
+        for group in std::fs::read_dir(site().join("rules")).unwrap() {
+            let group = group.unwrap().path();
+            for page in std::fs::read_dir(&group).unwrap() {
+                let page = page.unwrap().path();
+                let id = format!(
+                    "{}/{}",
+                    group.file_name().unwrap().to_string_lossy(),
+                    page.file_stem().unwrap().to_string_lossy()
+                );
+                assert!(
+                    rules().iter().any(|rule| rule.id == id),
+                    "{} names no rule",
+                    page.display()
+                );
+            }
+        }
+    }
+}
