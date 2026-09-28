@@ -11,6 +11,7 @@ use crate::{
     options::{CheckArgs, ProposeArgs, ProposeFormat},
     tests::{Project, answer},
     transport::Evaluator,
+    units::questions::{PROPOSAL_CHECKERS, PROPOSAL_UNITS},
 };
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -49,8 +50,10 @@ const IDS: [&str; 2] = [
     "never-swallow-an-error-without-a-log",
 ];
 
-/// Answers that a line is a rule when it starts with "Never", and that a
-/// function shows it.
+/// Answers that a line is a rule when it starts with "Never", that a
+/// function shows it, and that a reviewer checks it, unless it is about
+/// characters per line, which a formatter checks, or locales, which a test
+/// run checks.
 #[derive(Default)]
 struct Rules {
     calls: usize,
@@ -61,18 +64,38 @@ impl Evaluator for Rules {
         self.calls += 1;
         let mut body = answer(request, 0);
         let candidates = request["state"]["candidates"].as_array().unwrap();
-        for (i, candidate) in candidates.iter().enumerate() {
-            let rule = candidate["text"].as_str().unwrap().starts_with("Never");
-            body["answers"][format!("c{i}_convention")] =
-                json!({"type": "noul", "noul": if rule { 0.95 } else { 0.05 }});
-            body["answers"][format!("c{i}_unit")] = json!({
-                "type": "choice", "choice": "function", "confidence": 0.9,
-                "probabilities": {"function": 0.9, "test": 0.02, "comment": 0.02,
-                    "section": 0.02, "file": 0.02, "change": 0.02},
-            });
+        for (key, slot) in body["answers"].as_object_mut().unwrap() {
+            let (position, question) = key[1..].split_once('_').unwrap();
+            let text = candidates[position.parse::<usize>().unwrap()]["text"]
+                .as_str()
+                .unwrap();
+            *slot = match question {
+                "convention" => {
+                    json!({"type": "noul", "noul": if text.starts_with("Never") { 0.95 } else { 0.05 }})
+                }
+                "unit" => likely("function", &PROPOSAL_UNITS),
+                _ if text.contains("characters per line") => likely("tool", &PROPOSAL_CHECKERS),
+                _ if text.contains("locales") => likely("run", &PROPOSAL_CHECKERS),
+                _ => likely("reviewer", &PROPOSAL_CHECKERS),
+            };
         }
         Ok(body)
     }
+}
+
+/// A Choice of `chosen` at 0.9, the rest spread over the other options.
+fn likely(chosen: &str, options: &[(&str, &str)]) -> Value {
+    let rest = 0.1 / (options.len() - 1) as f64;
+    let probabilities: serde_json::Map<String, Value> = options
+        .iter()
+        .map(|(option, _)| {
+            (
+                option.to_string(),
+                json!(if *option == chosen { 0.9 } else { rest }),
+            )
+        })
+        .collect();
+    json!({"type": "choice", "choice": chosen, "confidence": 0.9, "probabilities": probabilities})
 }
 
 /// A provider that refuses every request.
@@ -184,9 +207,14 @@ fn file(path: &str, text: &str) -> File {
     }
 }
 
+/// The first pass over `files`.
+fn first_pass(files: &[File]) -> super::ask::Plan {
+    super::ask::plan(files, ("jev-1.13.0", super::ask::Pass::First), |_, _| true)
+}
+
 #[test]
 fn each_line_is_asked_two_questions_in_a_request_without_paths_or_line_numbers() {
-    let plan = super::ask::plan(&[file("AGENTS.md", AGENTS)], "jev-1.13.0");
+    let plan = first_pass(&[file("AGENTS.md", AGENTS)]);
     assert_eq!(plan.requests.len(), 1);
     let request = &plan.requests[0];
     let candidates = request["state"]["candidates"].as_array().unwrap();
@@ -209,7 +237,7 @@ fn each_line_is_asked_two_questions_in_a_request_without_paths_or_line_numbers()
 #[test]
 fn a_copy_of_a_file_is_asked_once() {
     let files = [file("AGENTS.md", AGENTS), file("CLAUDE.md", AGENTS)];
-    let plan = super::ask::plan(&files, "jev-1.13.0");
+    let plan = first_pass(&files);
     assert_eq!(plan.requests.len(), 1);
     assert_eq!(plan.places[0], plan.places[1]);
 }
@@ -305,7 +333,11 @@ fn rules_become_note_questions_that_quote_their_line_and_load_as_question_files(
         &arguments(ProposeFormat::Table, false),
         &mut rules,
     );
-    assert_eq!((printed.code, rules.calls), (0, 1));
+    assert_eq!(
+        (printed.code, rules.calls),
+        (0, 2),
+        "the rules are asked what checks them"
+    );
     assert_eq!(proposals(&project), IDS.map(|id| format!("{id}.toml")));
     assert!(
         printed
@@ -359,7 +391,7 @@ fn a_rerun_asks_nothing_new_and_keeps_edited_and_accepted_proposals() {
         &arguments(ProposeFormat::Table, false),
         &mut rules,
     );
-    assert_eq!(rules.calls, 1, "the pack with the new line is asked");
+    assert_eq!(rules.calls, 1, "only the pack with the new line is asked");
     assert!(
         printed.stdout.contains("No new proposals."),
         "{}",
@@ -383,6 +415,40 @@ fn a_rerun_asks_nothing_new_and_keeps_edited_and_accepted_proposals() {
     assert_eq!(
         again.calls, 0,
         "unchanged lines are answered from the cache"
+    );
+}
+
+#[test]
+fn a_rule_a_tool_checks_is_not_proposed_and_one_a_test_run_shows_is() {
+    let project = Project::new();
+    project.write(
+        "AGENTS.md",
+        "# Style\n\n- Never write more than 100 characters per line.\n- Never log request bodies.\n- Never let the locales' keys differ.\n",
+    );
+    let printed = proposed(&project);
+    assert_eq!(
+        proposals(&project),
+        [
+            "never-let-the-locales-keys-differ.toml",
+            "never-log-request-bodies.toml"
+        ]
+    );
+    assert!(
+        printed.stdout.contains(
+            "A rule a formatter, linter, compiler or measuring script already checks at 0.80: 1 line."
+        ),
+        "{}",
+        printed.stdout
+    );
+    let report = json_run(&project, &mut Rules::default());
+    assert_eq!(report["thresholds"], json!({"rule": 0.8, "tool": 0.8}));
+    let line = &report["candidates"][0];
+    assert_eq!(line["checkers"]["tool"], 0.9);
+    assert!(line["proposal"].is_null());
+    assert_eq!(report["candidates"][1]["checkers"]["reviewer"], 0.9);
+    assert_eq!(
+        report["candidates"][2]["checkers"]["run"], 0.9,
+        "a rule a test run shows is still a reviewer's to check"
     );
 }
 
@@ -612,7 +678,9 @@ struct First(Rules);
 impl Evaluator for First {
     fn evaluate(&mut self, request: &Value) -> Result<Value> {
         let mut body = self.0.evaluate(request)?;
-        body["answers"]["c0_convention"] = json!({"type": "noul", "noul": 0.9});
+        if let Some(first) = body["answers"].get_mut("c0_convention") {
+            *first = json!({"type": "noul", "noul": 0.9});
+        }
         Ok(body)
     }
 }

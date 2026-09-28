@@ -284,6 +284,7 @@ mod tests {
             instructions_scope("sections[0]", &["src/".into(), "web/".into()]),
             proposal_convention("candidates[0]"),
             proposal_unit("candidates[0]"),
+            proposal_checker("candidates[0]"),
             document_split(),
             document_history(),
             document_part(&["P1".into(), "P2".into()]),

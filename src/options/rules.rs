@@ -24,13 +24,15 @@ pub enum RulesAction {
     /// Splits each instruction file into lines and list items and asks
     /// TypeSafe Jev of each whether it states a rule for how the code is
     /// written that one piece of it shows, and which piece: a function, test,
-    /// comment, documentation section, file or change. Each line it calls such
-    /// a rule becomes a custom question that quotes the line and cites its
-    /// file and line, written to `.jevgate/proposals/` (which Git ignores) as a
-    /// note. Read one, edit it, then accept it with `jevgate rules accept ID`;
-    /// nothing reaches the configuration otherwise. Answers are cached, so a
-    /// rerun pays only for changed lines, and it never overwrites a proposal or
-    /// proposes a line that is already a question.
+    /// comment, documentation section, file or change; then, of each rule,
+    /// whether a reviewer checks it or a formatter, linter or script already
+    /// does. Each rule a reviewer checks becomes a custom question that quotes
+    /// the line and cites its file and line, written to `.jevgate/proposals/`
+    /// (which Git ignores) as a note. Read one, edit it, then accept it with
+    /// `jevgate rules accept ID`; nothing reaches the configuration otherwise.
+    /// Answers are cached, so a rerun pays only for changed lines, and it
+    /// never overwrites a proposal or proposes a line that is already a
+    /// question.
     #[command(after_long_help = PROPOSE_EXAMPLES)]
     Propose(ProposeArgs),
     /// Accept proposed questions: check each one and move it to .jevgate/questions/
@@ -105,6 +107,8 @@ pub struct ProposeArgs {
     /// List the files, lines and planned requests without credentials, network or writes
     ///
     /// Requests the cache already answers are counted apart and cost nothing.
+    /// What checks each rule is asked only after the answers, so it is not
+    /// counted.
     #[arg(long)]
     pub dry_run: bool,
     /// With --dry-run, include every request body (the exact lines and questions)

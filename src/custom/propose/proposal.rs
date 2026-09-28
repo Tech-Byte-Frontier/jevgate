@@ -2,7 +2,7 @@
 //! file and line, its section heading as background and the text that
 //! introduces it as guidance, on the unit Jev chose, as a note.
 use super::{
-    ask::{Answered, Answers, Plan},
+    ask::{Answered, Asked},
     files::File,
     lines::Line,
     saved::Saved,
@@ -13,8 +13,33 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 
 /// The probability of a rule at or above which a line is proposed: the
-/// threshold of review findings.
+/// threshold of review findings. On the instruction files of six projects
+/// never used to write the questions, 197 of the 271 lines proposed were
+/// rules a labeler would keep as questions, 14 were not and 60 were
+/// debatable; of the 50 lines between 0.65 and 0.80, 6 were.
 pub const THRESHOLD: f64 = crate::policy::REVIEW_PROBABILITY;
+
+/// The probability that a formatter, linter, compiler or measuring script
+/// already checks a rule, at or above which it is not proposed: a question
+/// would repeat, at a price, a check the project runs anyway. On 33
+/// projects' instruction files it left out 15 of the 25 proposals labeled
+/// wrong (line and complexity budgets, line length) and none of the 97
+/// labeled right; on the six fresh projects, none of 271.
+pub const TOOL_CHECKED: f64 = crate::policy::REVIEW_PROBABILITY;
+
+/// Whether the first pass calls a line a rule.
+pub fn rule(answered: &Answered) -> bool {
+    crate::policy::probability_at_least(answered.convention, THRESHOLD)
+}
+
+/// Whether a line is proposed: Jev calls it a rule, and not one a tool
+/// already checks. A rule whose second answer is missing is not proposed.
+pub fn proposed(answered: &Answered) -> bool {
+    rule(answered)
+        && answered
+            .tool_checked()
+            .is_some_and(|p| !crate::policy::probability_at_least(p, TOOL_CHECKED))
+}
 
 /// The comment that marks a proposal with a hash of its rule, so a later run
 /// knows the rule was proposed or accepted, whatever a person changed.
@@ -71,29 +96,21 @@ pub struct Proposal {
 }
 
 /// Every candidate of `files` with its answers and proposal, in file order.
-pub fn decide<'a>(
-    files: &'a [File],
-    plan: &Plan,
-    answers: &Answers,
-    saved: &mut Saved,
-) -> Vec<Candidate<'a>> {
+pub fn decide<'a>(files: &'a [File], asked: &Asked, saved: &mut Saved) -> Vec<Candidate<'a>> {
     let mut seen = BTreeSet::new();
     let mut candidates = Vec::new();
-    for (file, places) in files.iter().zip(&plan.places) {
-        for (line, place) in file.lines.iter().zip(places) {
-            let answered = answers.of(*place);
-            let proposal = answered
-                .as_ref()
-                .filter(|a| crate::policy::probability_at_least(a.convention, THRESHOLD))
-                .map(|a| {
-                    let mut proposal = Proposal::new(file, line, a);
-                    proposal.status = if !seen.insert(proposal.marker.clone()) {
-                        Status::Repeated
-                    } else {
-                        saved.place(&mut proposal.id, &proposal.marker)
-                    };
-                    proposal
-                });
+    for (at_file, file) in files.iter().enumerate() {
+        for (at_line, line) in file.lines.iter().enumerate() {
+            let answered = asked.answered(at_file, at_line);
+            let proposal = answered.as_ref().filter(|a| proposed(a)).map(|a| {
+                let mut proposal = Proposal::new(file, line, a);
+                proposal.status = if !seen.insert(proposal.marker.clone()) {
+                    Status::Repeated
+                } else {
+                    saved.place(&mut proposal.id, &proposal.marker)
+                };
+                proposal
+            });
             candidates.push(Candidate {
                 file,
                 line,

@@ -76,7 +76,8 @@ fn propose(
     (check, evaluator): (&CheckArgs, &mut dyn Evaluator),
 ) -> Result<Printed> {
     let (files, skipped) = files::read(&args.paths, context, check.max_file_bytes)?;
-    let plan = ask::plan(&files, check.model());
+    let model = check.model();
+    let plan = ask::plan(&files, (model, ask::Pass::First), |_, _| true);
     let format = args.output_format();
     if args.dry_run {
         let price = ask::price(&plan, &context.root, check);
@@ -84,7 +85,7 @@ fn propose(
             ProposeFormat::Json => {
                 render::dry_run_json(&files, &skipped, (&plan, &price), args.show_requests)?
             }
-            _ => render::dry_run(&files, &skipped, (&plan, &price), check.model()),
+            _ => render::dry_run(&files, &skipped, (&plan, &price), model),
         };
         return Ok(Printed {
             stdout,
@@ -95,15 +96,15 @@ fn propose(
     crate::cancellation::install()?;
     let store = Store::open(&context.root)?;
     let mut session = crate::check::session(check, context, &store, evaluator);
-    let answers = ask::ask(&plan, &mut session);
+    let asked = ask::ask_both(&files, (plan, model), proposal::THRESHOLD, &mut session);
     let usage = render::Usage {
         requests: session.requests,
         tokens: session.paid.input_tokens,
         usd: session.paid.usd(),
     };
     let mut saved = saved::Saved::load(&context.root, context.questions);
-    let mut candidates = proposal::decide(&files, &plan, &answers, &mut saved);
-    let errors = answers.errors();
+    let mut candidates = proposal::decide(&files, &asked, &mut saved);
+    let errors = asked.errors();
     let code = if errors.is_empty() { 0 } else { 2 };
     let (stdout, notes) = match format {
         ProposeFormat::Table => {

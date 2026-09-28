@@ -3,9 +3,10 @@
 //! run's plan and price.
 use super::{
     PROPOSALS,
+    ask::Answered,
     ask::{Plan, Price},
     files::{File, Skipped},
-    proposal::{Candidate, Status, THRESHOLD, slashed},
+    proposal::{Candidate, Status, THRESHOLD, TOOL_CHECKED, proposed, rule, slashed},
 };
 use crate::output::count;
 use anyhow::Result;
@@ -56,7 +57,7 @@ pub fn dry_run(
     let lines: usize = files.iter().map(|f| f.lines.len()).sum();
     let cost = crate::output::cost(crate::model::usd(model, price.tokens));
     let mut out = vec![format!(
-        "JevGate: dry run · {} · {} · {} requests, {} answered by the cache · ~{} new input tokens{cost}",
+        "JevGate: dry run · {} · {} · {} requests, {} answered by the cache · ~{} new input tokens{cost}; what would check each rule is asked after the answers",
         count(files.len(), "file"),
         count(lines, "line"),
         plan.requests.len(),
@@ -184,15 +185,30 @@ fn not_proposed(candidates: &[Candidate<'_>], errors: &[String]) -> Vec<String> 
     if !saved.is_empty() {
         out.push(format!("Not written: {}.", saved.join("; ")));
     }
-    let answered = candidates.iter().filter(|c| c.answered.is_some()).count();
-    let rules = candidates.iter().filter(|c| c.proposal.is_some()).count();
-    if answered > 0 {
+    let answered: Vec<&Answered> = candidates
+        .iter()
+        .filter_map(|c| c.answered.as_ref())
+        .filter(|a| !rule(a) || a.checkers.is_some())
+        .collect();
+    let no_rule = answered.iter().filter(|a| !rule(a)).count();
+    let tool = answered.iter().filter(|a| rule(a) && !proposed(a)).count();
+    if no_rule > 0 {
         out.push(format!(
-            "{} of {answered} state no rule to check on the code at {THRESHOLD:.2}; `--format json` shows each line with its answers.",
-            count(answered - rules, "line"),
+            "No rule to check on the code at {THRESHOLD:.2}: {} of {}.",
+            count(no_rule, "line"),
+            answered.len()
         ));
     }
-    let unanswered = candidates.len() - answered;
+    if tool > 0 {
+        out.push(format!(
+            "A rule a formatter, linter, compiler or measuring script already checks at {TOOL_CHECKED:.2}: {}.",
+            count(tool, "line"),
+        ));
+    }
+    if no_rule + tool > 0 {
+        out.push("`--format json` shows each line with its answers.".into());
+    }
+    let unanswered = candidates.len() - answered.len();
     if unanswered > 0 {
         out.push(format!(
             "{} went unanswered: {}",
@@ -232,7 +248,7 @@ pub fn json(
         "dry_run": false,
         "complete": errors.is_empty(),
         "errors": errors,
-        "threshold": THRESHOLD,
+        "thresholds": {"rule": THRESHOLD, "tool": TOOL_CHECKED},
         "files": files_json(files),
         "skipped": skipped,
         "candidates": candidates.iter().map(candidate_json).collect::<Vec<_>>(),
@@ -267,6 +283,7 @@ fn candidate_json(candidate: &Candidate<'_>) -> Value {
         value["convention"] = json!(answered.convention);
         value["unit"] = json!(answered.unit().0);
         value["units"] = json!(answered.units);
+        value["checkers"] = json!(answered.checkers);
     }
     value["proposal"] = candidate
         .proposal
