@@ -302,30 +302,28 @@ fn path_like(token: &str, top: &BTreeSet<&str>) -> Option<String> {
     (extension || (t.contains('/') && top.contains(first))).then_some(t)
 }
 
+/// Whether `name`, as a document in `base` writes it, is in the repository:
+/// tracked or on disk from the root or from `base`, or a tracked file it
+/// names in part.
 fn present(root: &Path, base: &Path, name: &str, history: &History) -> bool {
     let trimmed = name.trim_end_matches('/');
     let candidates = [normal(Path::new(trimmed)), normal(&base.join(trimmed))];
-    if candidates
+    candidates
         .iter()
         .any(|c| history.tracked.contains(c) || root.join(c).exists())
-    {
-        return true;
-    }
-    // A partial path such as `services/quota.ts` names a deeper file, and a
-    // module path without its extension, such as `web/test/i18n-mock` in an
-    // import, names `i18n-mock.ts`.
-    let suffix = format!("/{trimmed}");
-    let module = Path::new(trimmed).extension().is_none();
-    // Compared with forward slashes: `normal` joins with the platform's
-    // separator, while tracked paths keep Git's.
-    let slashed = |p: &Path| {
-        p.iter()
-            .map(|part| part.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/")
-    };
+        || names_in_part(trimmed, &candidates, &history.tracked)
+}
+
+/// Whether `name`, read from the root or the document's directory as
+/// `candidates`, names a file of `tracked` in part: a partial path such as
+/// `services/quota.ts` names a deeper file, a directory the files under it,
+/// and a module path without its extension, such as `web/test/i18n-mock` in
+/// an import, names `i18n-mock.ts`.
+fn names_in_part(name: &str, candidates: &[PathBuf], tracked: &BTreeSet<PathBuf>) -> bool {
+    let suffix = format!("/{name}");
+    let module = Path::new(name).extension().is_none();
     let wanted: Vec<String> = candidates.iter().map(|c| slashed(c)).collect();
-    history.tracked.iter().any(|p| {
+    tracked.iter().any(|p| {
         let whole = slashed(p);
         let p = p.to_string_lossy();
         let stem = whole
@@ -333,12 +331,20 @@ fn present(root: &Path, base: &Path, name: &str, history: &History) -> bool {
             .filter(|(_, e)| !e.contains('/'))
             .map(|(s, _)| s);
         p.ends_with(&suffix)
-            || p.starts_with(&format!("{trimmed}/"))
+            || p.starts_with(&format!("{name}/"))
             || module && stem.is_some_and(|s| wanted.iter().any(|w| w == s) || s.ends_with(&suffix))
     })
 }
 
-/// A relative path without `.` and `..` parts.
+/// `path` with forward slashes, to compare with tracked paths: `normal`
+/// joins with the platform's separator, while tracked paths keep Git's.
+fn slashed(path: &Path) -> String {
+    path.iter()
+        .map(|part| part.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Whether `name`, relative to the document's directory `base`, climbs
 /// above the repository root.
 fn escapes(base: &Path, name: &str) -> bool {
@@ -356,6 +362,7 @@ fn escapes(base: &Path, name: &str) -> bool {
     false
 }
 
+/// A relative path without `.` and `..` parts.
 fn normal(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
@@ -527,10 +534,6 @@ fn link_targets(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Scripts named after a package manager or task runner where a command
-/// starts: at the start of a code line or an inline code span, after a
-/// prompt, or after `&&`, `||`, `;` or `|`. The same word inside a comment
-/// or a sentence, such as "make sure", is not a command.
 /// The build tools whose targets the repository can declare: `make` and
 /// `just` name a target only when it tracks a Makefile or justfile.
 /// openclaw documents `make routing-isolation` from a separate models
@@ -541,38 +544,50 @@ struct Runners {
     just: bool,
 }
 
+/// Scripts named after a package manager or task runner where a command
+/// starts: at the start of a code line or an inline code span, after a
+/// prompt, or after `&&`, `||`, `;` or `|`. The same word inside a comment
+/// or a sentence, such as "make sure", is not a command.
 fn commands(text: &str, runners: Runners) -> Vec<String> {
     let (prose, code) = split_fences(text);
     let spans = prose.into_iter().flat_map(line_spans).map(|(_, span)| span);
     let mut out = Vec::new();
     for line in code.into_iter().chain(spans) {
         let line = line.replace("&&", ";").replace("||", ";");
-        for command in line.split([';', '|']) {
-            let words: Vec<&str> = command
-                .split_whitespace()
-                .skip_while(|w| matches!(*w, "$" | ">" | "%") || assignment(w))
-                .collect();
-            let next = |n: usize| words.get(n).copied().unwrap_or("");
-            let script = match next(0) {
-                "pnpm" | "yarn" | "npm" if next(1) == "run" => next(2),
-                "pnpm" | "yarn" => next(1),
-                "make" if runners.make => next(1),
-                "just" if runners.just => next(1),
-                _ => continue,
-            };
-            let name_like = script
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_lowercase())
-                && script
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "-_:.".contains(c));
-            if name_like && !BUILTIN.contains(&script) {
-                out.push(script.to_string());
-            }
-        }
+        out.extend(
+            line.split([';', '|'])
+                .filter_map(|command| script(command, runners)),
+        );
     }
     out
+}
+
+/// The script one command runs through a package manager or task runner,
+/// past a prompt and variable assignments: `build` in
+/// `$ CI=1 pnpm run build`. None for other commands, for a word no script
+/// is named like, such as `$(TARGET)`, and for the package managers' own
+/// commands, such as `install`.
+fn script(command: &str, runners: Runners) -> Option<String> {
+    let words: Vec<&str> = command
+        .split_whitespace()
+        .skip_while(|w| matches!(*w, "$" | ">" | "%") || assignment(w))
+        .collect();
+    let next = |n: usize| words.get(n).copied().unwrap_or("");
+    let script = match next(0) {
+        "pnpm" | "yarn" | "npm" if next(1) == "run" => next(2),
+        "pnpm" | "yarn" => next(1),
+        "make" if runners.make => next(1),
+        "just" if runners.just => next(1),
+        _ => return None,
+    };
+    let name_like = script
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase())
+        && script
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_:.".contains(c));
+    (name_like && !BUILTIN.contains(&script)).then(|| script.to_string())
 }
 
 /// A shell variable assignment such as `NODE_ENV=production`.
