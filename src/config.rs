@@ -27,7 +27,7 @@ pub struct Config {
     pub rules: Rules,
     /// Ceiling on API attempts per invocation; flags can only lower it. Default: unlimited.
     pub max_requests: Option<u32>,
-    /// Ceiling on simultaneous requests, at most 6; a higher value is lowered to 6 with a notice. Default: 6.
+    /// Ceiling on simultaneous requests; flags can only lower it. JevGate sends at most 6 at once, so a higher value has no effect. Default: 6.
     pub concurrency: Option<u32>,
     /// Files larger than this are reported as needs-context, never truncated. Default: 262144.
     pub max_file_bytes: Option<u64>,
@@ -299,8 +299,9 @@ impl ConfigContext {
 }
 
 /// Lower a concurrency above [`MAX_CONCURRENCY`] to it, saying so on stderr:
-/// 0.25 accepted up to 8, and a configuration or script valid then keeps
-/// working.
+/// 0.25 accepted `--concurrency` up to 8, and a script valid then keeps
+/// working. Only the flag can be higher: `concurrency` in jevgate.toml is a
+/// ceiling on it, so a higher one there changes nothing and says nothing.
 ///
 /// [`MAX_CONCURRENCY`]: crate::options::MAX_CONCURRENCY
 fn cap_concurrency(args: &mut CheckArgs) {
@@ -646,12 +647,17 @@ mod tests {
         );
         for valid_in_0_25 in ["concurrency = 7", "concurrency = 8"] {
             let args = configured(valid_in_0_25, &[], &[]).unwrap();
-            assert_eq!(args.concurrency, 6, "{valid_in_0_25} is lowered");
+            assert_eq!(args.concurrency, 6, "{valid_in_0_25} leaves the default");
         }
         assert!(configured("concurrency = 0", &[], &[]).is_err());
+        let context = ConfigContext {
+            invocation_dir: PathBuf::from("."),
+            root: PathBuf::from("."),
+            config: toml::from_str("concurrency = 8").unwrap(),
+        };
         let mut flagged = crate::tests::args();
         flagged.concurrency = 8;
-        cap_concurrency(&mut flagged);
-        assert_eq!(flagged.concurrency, 6, "--concurrency 8 is lowered too");
+        context.configure(&mut flagged).unwrap();
+        assert_eq!(flagged.concurrency, 6, "--concurrency 8 is lowered to 6");
     }
 }

@@ -279,4 +279,15 @@ fn a_concurrency_above_six_is_lowered_with_a_notice() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["concurrency"], 6);
+    let zero = project
+        .command()
+        .args(["check", "--dry-run", "--concurrency", "0"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&zero.stderr);
+    assert_eq!(zero.status.code(), Some(2));
+    assert!(
+        stderr.contains("Use a whole number from 1 to 6") && !stderr.contains("4294967295"),
+        "{stderr}"
+    );
 }

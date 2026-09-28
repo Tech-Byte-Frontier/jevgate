@@ -235,7 +235,7 @@ pub struct CheckArgs {
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000), help_heading = BUDGETS)]
     pub max_requests: Option<u32>,
     /// Maximum simultaneous requests, at most 6; a higher value is lowered to 6
-    #[arg(long, value_name = "N", default_value_t = MAX_CONCURRENCY, value_parser = clap::value_parser!(u32).range(1..), help_heading = BUDGETS)]
+    #[arg(long, value_name = "N", default_value_t = MAX_CONCURRENCY, value_parser = concurrency, help_heading = BUDGETS)]
     pub concurrency: u32,
     /// Per-file read limit; a larger file is reported as needs-context, never truncated
     #[arg(long, value_name = "BYTES", default_value_t = DEFAULT_MAX_FILE_BYTES, value_parser = clap::value_parser!(u64).range(1..=1048576), help_heading = BUDGETS)]
@@ -293,8 +293,9 @@ pub struct PathLevels {
 /// Upper bound on simultaneous requests, and the default: six workers made 18
 /// to 20 requests a second on the corpus's largest runs (0.3 s a request),
 /// just under TypeSafe's limit of 1,200 a minute; eight would make about 27.
-/// Rate-limit retries share one cooldown. A higher `--concurrency` or
-/// `concurrency` is lowered to it with a notice, since 0.25 accepted up to 8.
+/// Rate-limit retries share one cooldown. A higher `--concurrency` is
+/// lowered to it with a notice, since 0.25 accepted up to 8; `concurrency` in
+/// jevgate.toml is a ceiling on the flag, so a higher one has no effect.
 pub const MAX_CONCURRENCY: u32 = 6;
 
 /// Default read limit per file. Units are sent separately, so this bounds
@@ -304,6 +305,17 @@ pub const DEFAULT_MAX_FILE_BYTES: u64 = 262_144;
 
 fn names(levels: &[FailOn]) -> Vec<String> {
     levels.iter().map(|f| f.name().to_string()).collect()
+}
+
+/// `--concurrency`: at least 1. A higher value than [`MAX_CONCURRENCY`] is
+/// accepted here and lowered to it with a notice when the check starts.
+fn concurrency(value: &str) -> Result<u32, String> {
+    match value.parse::<u32>() {
+        Ok(n) if n > 0 => Ok(n),
+        _ => Err(format!(
+            "Use a whole number from 1 to {MAX_CONCURRENCY}; a higher one is lowered to {MAX_CONCURRENCY}"
+        )),
+    }
 }
 
 fn source_extension(value: &str) -> Result<String, String> {
