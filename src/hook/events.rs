@@ -419,45 +419,42 @@ impl<'a> Hook<'a> {
         );
         let (failing, advisory): (Vec<_>, Vec<_>) =
             checked.flagged.into_iter().partition(Flagged::fails);
-        let undecided = checked.undecided;
-        let (failed, unsure) = (failing.len(), undecided.len());
+        let (failed, unsure) = (failing.len(), checked.undecided.len());
         let user = if failed + unsure == 0 {
             text::passed(blocks > 0, &advisory, !checked.unreviewed.is_empty())
-        } else if turn.blocked_tree.as_deref() == Some(now.as_str()) {
-            Some(text::let_through(
-                failed,
-                unsure,
-                text::LetThrough::Unchanged,
-            ))
-        } else if blocks >= text::MAX_BLOCKS {
-            Some(text::let_through(failed, unsure, text::LetThrough::Cap))
+        } else if let Some(why) = let_through(&turn, &now, blocks) {
+            Some(text::let_through(failed, unsure, why))
         } else {
-            let user = text::joined(Some(text::blocked(failed, unsure, blocks + 1)), guards, " ");
             let blocking = Blocking {
                 failing: &failing,
-                undecided: &undecided,
+                undecided: &checked.undecided,
                 block: blocks + 1,
             };
-            return self.block(turn, blocking, now, user);
+            return self.block(turn, blocking, now, guards);
         };
-        // The turn is over: the next one starts from here, which keeps a
-        // setup without the turn-start hook checking one turn at a time.
+        self.end_turn(now, text::joined(user, guards, " "))
+    }
+
+    /// End the turn, telling the person `user`: the next one starts from
+    /// `now`, which keeps a setup without the turn-start hook checking one
+    /// turn at a time.
+    fn end_turn(&self, now: String, user: Option<String>) -> Reply {
         let _ = turn::save(&self.root, &Turn::begin(&self.event.session, now, None));
         Reply {
-            user: text::joined(user, guards, " "),
+            user,
             ..Reply::default()
         }
     }
 
     /// Block the stop on what `blocking` names, recording the block, and
-    /// tell the person `user`. A block that cannot be recorded is not made,
-    /// so the cap always holds.
+    /// tell the person so, then `guards`. A block that cannot be recorded is
+    /// not made, so the cap always holds.
     fn block(
         &self,
         mut turn: Turn,
         blocking: Blocking,
         now: String,
-        user: Option<String>,
+        guards: Option<String>,
     ) -> Reply {
         let Blocking {
             failing,
@@ -471,10 +468,11 @@ impl<'a> Hook<'a> {
         if let Err(error) = turn::save(&self.root, &turn) {
             return failed(self.event, "this turn", &format!("{error:#}"));
         }
+        let user = text::blocked(failing.len(), undecided.len(), block);
         Reply {
             block: true,
             agent: Some(reason),
-            user,
+            user: text::joined(Some(user), guards, " "),
         }
     }
 
@@ -542,6 +540,19 @@ struct Blocking<'a> {
     failing: &'a [Flagged],
     undecided: &'a [review::Undecided],
     block: u32,
+}
+
+/// Why a stop whose findings fail the gate lets the agent finish: nothing
+/// changed since the turn's last block, or the turn was blocked as often as
+/// the hook blocks one. None when the stop is blocked again.
+fn let_through(turn: &Turn, now: &str, blocks: u32) -> Option<text::LetThrough> {
+    if turn.blocked_tree.as_deref() == Some(now) {
+        Some(text::LetThrough::Unchanged)
+    } else if blocks >= text::MAX_BLOCKS {
+        Some(text::LetThrough::Cap)
+    } else {
+        None
+    }
 }
 
 /// `reply` opened with the line that tells the agent JevGate's hooks run in
