@@ -255,7 +255,13 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
         reason.contains("\nFix them, then finish. If a finding is mistaken, keep the code"),
         "{reason}"
     );
-    let short = text::after_edit(&[PathBuf::from("src/a.rs")], &failing(2, 3), &[], &[]).unwrap();
+    let short = text::after_edit(
+        &[PathBuf::from("src/a.rs")],
+        (&failing(2, 3), &[]),
+        &[],
+        &[],
+    )
+    .unwrap();
     assert!(!short.contains("not shown"), "{short}");
     // Guards take their room first: the whole context still fits.
     let guards: Vec<crate::guards::Guard> = (0..12)
@@ -270,9 +276,9 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
     let guards: Vec<&crate::guards::Guard> = guards.iter().collect();
     let full = text::after_edit(
         &[PathBuf::from("src/a.rs")],
-        &failing(30, 200),
-        &[],
+        (&failing(30, 200), &[]),
         &guards,
+        &[],
     )
     .unwrap();
     assert!(full.chars().count() < 8_000, "{}", full.len());
@@ -288,15 +294,15 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
     };
     let file = [PathBuf::from("src/a,b.rs")];
     assert_eq!(
-        text::after_edit(&file, std::slice::from_ref(&flagged), &[], &[]).unwrap(),
+        text::after_edit(&file, (std::slice::from_ref(&flagged), &[]), &[], &[]).unwrap(),
         "JevGate reviewed src/a,b.rs after this edit: 1 finding, none fails the quality gate.\n- src/a,b.rs:12 consider maintainability/shared-logic: Copies: 50% alike, see `b`. Next: Share one | implementation.\nNone of them blocks the end of the turn."
     );
     assert_eq!(
-        text::after_edit(&file, &[], &failing(2, 3), &[]).unwrap(),
+        text::after_edit(&file, (&[], &failing(2, 3)), &[], &[]).unwrap(),
         "JevGate reviewed src/a,b.rs after this edit: 2 findings reported earlier this turn remain (2 fail the quality gate)."
     );
-    let both = text::after_edit(&file, &[flagged], &failing(1, 3), &[]).unwrap();
+    let both = text::after_edit(&file, (&[flagged], &failing(1, 3)), &[], &[]).unwrap();
     assert!(both.starts_with("JevGate reviewed src/a,b.rs after this edit: 1 new finding, none fails the quality gate.\n- "), "{both}");
     assert!(both.ends_with("\n1 finding reported earlier this turn remains (1 fails the quality gate).\nFindings that fail the gate block the end of the turn until they are fixed; the others are optional."), "{both}");
-    assert_eq!(text::after_edit(&file, &[], &[], &[]), None);
+    assert_eq!(text::after_edit(&file, (&[], &[]), &[], &[]), None);
 }

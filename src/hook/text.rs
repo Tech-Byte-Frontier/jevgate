@@ -1,7 +1,7 @@
 //! What the hook says: one line per finding for the agent, within what every
 //! agent reads whole, and short notes for the person. Context states facts;
 //! only the reason of a block, which the agent is meant to act on, instructs.
-use super::review::Flagged;
+use super::review::{Flagged, Unreviewed};
 use crate::{
     guards::{self, Guard, Kind},
     output,
@@ -26,28 +26,80 @@ const REASON_CHARS: usize = 400;
 pub(super) const MAX_BLOCKS: u32 = 3;
 /// Where the person sees findings the hook did not send the agent.
 const LIST_THEM: &str = "`jevgate check --base HEAD` lists them.";
-/// Guards listed after an edit, and named in the person's note, at most.
+/// Guards and unreviewed files listed after an edit, and named in the
+/// person's note, at most.
 const SHOWN_GUARDS: usize = 5;
 const NAMED_GUARDS: usize = 3;
 /// A guard's line is cut at this length.
 const GUARD_CHARS: usize = 240;
 
 /// The context after an edit: the findings the agent was not given yet this
-/// turn, a count of the `known` ones, and the `guards` it was not told of
-/// yet; nothing when there is none of them. Guards take their room first.
+/// turn, a count of the `known` ones, then the edited files the check did
+/// not judge and the `guards` it was not told of yet; nothing when there is
+/// none of them. The notes take their room first.
 pub(super) fn after_edit(
     files: &[PathBuf],
-    new: &[Flagged],
-    known: &[Flagged],
+    (new, known): (&[Flagged], &[Flagged]),
     guards: &[&Guard],
+    unreviewed: &[&Unreviewed],
 ) -> Option<String> {
-    let noticed = guards_noticed(guards);
+    let noticed = joined(unreviewed_agent(unreviewed), guards_noticed(guards), "\n\n");
     let room = MAX_CHARS.saturating_sub(noticed.as_ref().map_or(0, |n| n.len() + 2));
     joined(
         findings_after_edit(files, (new, known), room),
         noticed,
         "\n\n",
     )
+}
+
+/// The agent's note on edited files of code the check did not judge, so
+/// that silence about them is not read as a pass.
+fn unreviewed_agent(files: &[&Unreviewed]) -> Option<String> {
+    let line = |file: &Unreviewed| format!("{}: {}.", file.path.display(), reason(&file.why));
+    match files {
+        [] => None,
+        [one] => Some(format!("JevGate did not review {}", line(one))),
+        _ => {
+            let mut text = format!(
+                "JevGate did not review {}:",
+                output::count(files.len(), "edited file")
+            );
+            for file in files.iter().take(SHOWN_GUARDS) {
+                text.push_str(&format!("\n- {}", line(file)));
+            }
+            if files.len() > SHOWN_GUARDS {
+                text.push_str(&format!(
+                    "\n{} not shown.",
+                    output::count(files.len() - SHOWN_GUARDS, "more")
+                ));
+            }
+            Some(text)
+        }
+    }
+}
+
+/// The person's note on changed files of code the turn's check did not
+/// judge, each with the first clause of why.
+pub(super) fn unreviewed_user(files: &[Unreviewed]) -> Option<String> {
+    if files.is_empty() {
+        return None;
+    }
+    let mut named: Vec<String> = files
+        .iter()
+        .take(NAMED_GUARDS)
+        .map(|file| {
+            let why = file.why.split(['.', ';', ',']).next().unwrap_or_default();
+            format!("{} ({})", file.path.display(), why.trim())
+        })
+        .collect();
+    if files.len() > NAMED_GUARDS {
+        named.push(format!("{} more", files.len() - NAMED_GUARDS));
+    }
+    Some(format!(
+        "JevGate did not review {} this turn changed: {}.",
+        output::count(files.len(), "file"),
+        named.join("; ")
+    ))
 }
 
 /// The findings part of the context after an edit, within `room` characters.

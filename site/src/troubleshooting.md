@@ -83,7 +83,7 @@ It reads every file before writing any, so when it stops, nothing was written.
 
 ## The agent accepted a finding and the hook still blocks
 
-Within a turn, the agent hook reads `jevgate.toml`, `jevgate-baseline.json` and `jevgate: allow` comments as they were when the turn began, so an agent cannot unblock itself by accepting its own findings or loosening the gate. Such a finding is marked `(fails the gate; accepted this turn)`, the person is told of the edit when the turn ends, and the edit counts from the next turn. If the finding is wrong, keep the accepting edit; if not, remove it.
+Within a turn, the agent hook reads `jevgate.toml`, `jevgate-baseline.json` and `jevgate: allow` comments as they were when the turn began, so an agent cannot unblock itself by accepting its own findings or loosening the gate. Such a finding is marked `(fails the gate; accepted this turn)`, the person is told of the edit when the turn ends, and the edit counts from the next turn. If the finding is wrong, keep the accepting edit; if not, remove it. The same holds for a `jevgate.toml` or baseline the turn leaves unreadable (the person reads that it `does not parse`), and for a generated-code marker (`// @generated`, `DO NOT EDIT`) added to a file JevGate judged when the turn began: the file is judged this turn, and a guard says it is skipped from now on.
 
 ## Many files are uncertain
 

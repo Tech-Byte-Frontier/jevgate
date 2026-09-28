@@ -46,6 +46,10 @@ pub enum Kind {
     WeakerAssertion,
     Configuration,
     Baseline,
+    /// A file of code people wrote that the change makes JevGate skip: it
+    /// now reads as generated code or a copied library, or it grew past
+    /// `--max-file-bytes`.
+    SkippedFile,
     /// Text addressed to a reviewer that Jev reads as written to steer it.
     Steering,
 }
@@ -107,6 +111,20 @@ impl Guard {
                 ),
             )
         })
+    }
+
+    /// `path`, which the check skips now for `skip` but judged before.
+    fn skipped_file(path: &Path, skip: Skip, limit: u64) -> Self {
+        let (text, now) = match skip {
+            Skip::Copied("vendored") => ("vendored", "now reads as a copied library".to_string()),
+            Skip::Copied(_) => ("generated", "now reads as generated code".to_string()),
+            Skip::Size => (
+                "max_file_bytes",
+                format!("grows past max_file_bytes ({limit} bytes)"),
+            ),
+        };
+        let message = format!("{now}, so JevGate stops judging it");
+        Self::new(Kind::SkippedFile, path, None, text, message)
     }
 
     /// The text at `line` of `path`, when Jev read it at 0.80 as written to
@@ -172,6 +190,10 @@ pub fn summary<'a>(guards: impl IntoIterator<Item = &'a Guard>) -> String {
         counted(Kind::WeakerAssertion, "weakens", "test"),
         named(Kind::Configuration, "edits jevgate.toml"),
         named(Kind::Baseline, "edits jevgate-baseline.json"),
+        (of(Kind::SkippedFile) > 0).then(|| {
+            let files = output::count(of(Kind::SkippedFile), "file");
+            format!("keeps {files} from being judged")
+        }),
         named(Kind::Steering, "holds text written to steer a reviewer"),
     ]
     .into_iter()
@@ -222,9 +244,11 @@ fn settings(path: &Path) -> bool {
 }
 
 /// What the scan reads of a change: each changed file's text now, the
-/// deleted files it follows (settings and tests), and their previous texts.
+/// changed files of code it skips now, the deleted files it follows
+/// (settings and tests), and their previous texts.
 struct Texts<'c> {
     current: BTreeMap<&'c Path, String>,
+    skipped: BTreeMap<&'c Path, Skip>,
     deleted: Vec<&'c Path>,
     before: BTreeMap<PathBuf, String>,
 }
@@ -236,13 +260,24 @@ impl<'c> Texts<'c> {
         let root = files.root;
         let in_scope =
             |path: &Path| scope.is_empty() || scope.iter().any(|s| root.join(path).starts_with(s));
-        let current: BTreeMap<&Path, String> = changes
+        let mut current = BTreeMap::new();
+        let mut skipped = BTreeMap::new();
+        for path in changes
             .paths
             .keys()
             .map(PathBuf::as_path)
             .filter(|p| in_scope(p))
-            .filter_map(|p| files.read(p, settings(p)).map(|text| (p, text)))
-            .collect();
+        {
+            match files.read(path, settings(path)) {
+                Now::Text(text) => {
+                    current.insert(path, text);
+                }
+                Now::Skipped(skip) => {
+                    skipped.insert(path, skip);
+                }
+                Now::Unread => {}
+            }
+        }
         let deleted: Vec<&Path> = changes
             .deleted
             .iter()
@@ -253,6 +288,7 @@ impl<'c> Texts<'c> {
         // the baseline whole, code up to `--max-file-bytes`.
         let (old_settings, old_code): (Vec<&Path>, Vec<&Path>) = current
             .keys()
+            .chain(skipped.keys())
             .filter_map(|p| changes.paths[*p].as_deref())
             .chain(deleted.iter().copied())
             .partition(|p| settings(p));
@@ -263,9 +299,18 @@ impl<'c> Texts<'c> {
         before.extend(blobs(&old_settings, SETTINGS_BYTES));
         Self {
             current,
+            skipped,
             deleted,
             before,
         }
+    }
+
+    /// The previous text of `path`, a changed file.
+    fn previous(&self, changes: &revision::Changes, path: &Path) -> Option<&str> {
+        changes.paths[path]
+            .as_deref()
+            .and_then(|p| self.before.get(p))
+            .map(String::as_str)
     }
 
     /// The guards of the texts, and the tests whose assertions changed.
@@ -274,13 +319,21 @@ impl<'c> Texts<'c> {
         let mut tests = Removed::default();
         for (path, text) in &self.current {
             let previous = changes.paths[*path].as_deref();
-            let old = previous
-                .and_then(|p| self.before.get(p))
-                .map(String::as_str);
+            let old = self.previous(changes, path);
             if settings(path) {
                 scan.guards.extend(settings_guard(path, old, Some(text)));
             } else {
                 files.guard(path, (previous, old), text, &mut scan, &mut tests);
+            }
+        }
+        // Skipped now, judged before: a marker or padding took the file out.
+        for (path, skip) in &self.skipped {
+            if self
+                .previous(changes, path)
+                .is_some_and(|old| files.written(path, old))
+            {
+                scan.guards
+                    .push(Guard::skipped_file(path, *skip, files.limit));
             }
         }
         for &path in &self.deleted {
@@ -334,6 +387,26 @@ fn raised(probability: f64) -> bool {
     crate::policy::probability_at_least(probability, crate::policy::REVIEW_PROBABILITY)
 }
 
+/// What the scan reads of a changed file now.
+enum Now {
+    Text(String),
+    /// Code people write that the check skips now.
+    Skipped(Skip),
+    /// Neither: not code people write, outside the upload patterns, or
+    /// unreadable.
+    Unread,
+}
+
+/// Why the check skips a file of code people write.
+#[derive(Clone, Copy, Debug)]
+enum Skip {
+    /// It reads as build output or a copied library (the kind the check
+    /// recasts it as).
+    Copied(&'static str),
+    /// It is larger than the read limit.
+    Size,
+}
+
 /// Which changed files the scan reads, and how.
 struct Files<'a> {
     root: &'a Path,
@@ -369,22 +442,37 @@ impl<'a> Files<'a> {
         self.reads(path) && self.classifier.role(path) == "test"
     }
 
-    /// The text of `path` now, when the check reads it and it is neither
-    /// build output nor a copied library; `settings` files (jevgate.toml,
-    /// the baseline) are read whatever the upload patterns say.
-    fn read(&self, path: &Path, settings: bool) -> Option<String> {
+    /// What the scan reads of `path` now: its text when the check reads it;
+    /// that the check skips it, when it is code people write that reads as
+    /// build output or a copied library, or is larger than the read limit.
+    /// `settings` files (jevgate.toml, the baseline) are read whatever the
+    /// upload patterns say.
+    fn read(&self, path: &Path, settings: bool) -> Now {
         let on_disk = self.root.join(path);
         if settings {
-            return crate::inventory::read_source(&on_disk, SETTINGS_BYTES).ok();
+            return crate::inventory::read_source(&on_disk, SETTINGS_BYTES)
+                .map_or(Now::Unread, Now::Text);
         }
         if !self.reads(path) {
-            return None;
+            return Now::Unread;
         }
-        let text = crate::inventory::read_source(&on_disk, self.limit).ok()?;
+        if std::fs::symlink_metadata(&on_disk).is_ok_and(|m| m.len() > self.limit) {
+            return Now::Skipped(Skip::Size);
+        }
+        let Ok(text) = crate::inventory::read_source(&on_disk, self.limit) else {
+            return Now::Unread;
+        };
         let role = self.classifier.role(path);
-        crate::inventory::not_written_here(&on_disk, role, &text)
-            .is_none()
-            .then_some(text)
+        match crate::inventory::not_written_here(&on_disk, role, &text) {
+            Some(kind) => Now::Skipped(Skip::Copied(kind)),
+            None => Now::Text(text),
+        }
+    }
+
+    /// Whether `text`, a version of `path`, is code people wrote.
+    fn written(&self, path: &Path, text: &str) -> bool {
+        let role = self.classifier.role(path);
+        crate::inventory::not_written_here(&self.root.join(path), role, text).is_none()
     }
 
     /// The guards of one changed file, from its text `after` and its

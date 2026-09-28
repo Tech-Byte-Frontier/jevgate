@@ -177,8 +177,9 @@ impl<'a> Hook<'a> {
         };
         let Some(mut turn) = turn else {
             let guards: Vec<_> = checked.guards.iter().collect();
+            let unreviewed: Vec<_> = checked.unreviewed.iter().collect();
             return Reply {
-                agent: text::after_edit(&shown, &checked.flagged, &[], &guards),
+                agent: text::after_edit(&shown, (&checked.flagged, &[]), &guards, &unreviewed),
                 ..Reply::default()
             };
         };
@@ -191,9 +192,19 @@ impl<'a> Hook<'a> {
             .iter()
             .filter(|g| !turn.reported.contains(&g.id))
             .collect();
-        let context = text::after_edit(&shown, &new, &known, &guards);
-        let ids = new.iter().map(|f| f.finding.fingerprint.as_str());
-        if turn.report(ids.chain(guards.iter().map(|g| g.id.as_str()))) {
+        let unreviewed: Vec<_> = checked
+            .unreviewed
+            .iter()
+            .filter(|u| !turn.reported.contains(&u.id()))
+            .collect();
+        let context = text::after_edit(&shown, (&new, &known), &guards, &unreviewed);
+        let ids: Vec<String> = new
+            .iter()
+            .map(|f| f.finding.fingerprint.clone())
+            .chain(guards.iter().map(|g| g.id.clone()))
+            .chain(unreviewed.iter().map(|u| u.id()))
+            .collect();
+        if turn.report(ids.iter().map(String::as_str)) {
             let _ = turn::save(&self.root, &turn);
         }
         self.context(turn, context)
@@ -244,7 +255,11 @@ impl<'a> Hook<'a> {
     /// not blocked ends the turn. The person hears of the turn's guards.
     fn decide(&self, turn: Turn, now: String, checked: Checked) -> Reply {
         let blocks = if self.event.continued { turn.blocks } else { 0 };
-        let guards = text::guards_user(&checked.guards);
+        let guards = text::joined(
+            text::unreviewed_user(&checked.unreviewed),
+            text::guards_user(&checked.guards),
+            " ",
+        );
         let (failing, advisory): (Vec<_>, Vec<_>) =
             checked.flagged.into_iter().partition(Flagged::fails);
         let user = if failing.is_empty() {
@@ -306,12 +321,14 @@ impl<'a> Hook<'a> {
         }
     }
 
-    /// Run one check with the repository's configuration.
+    /// Run one check in the repository.
     fn check(&self, scope: review::Scope) -> Result<Checked, String> {
-        let context = config::ConfigContext::discover_in(&self.cwd, None)
-            .map_err(|error| format!("{error:#}"))?;
+        let place = review::Place {
+            cwd: self.cwd.clone(),
+            root: self.root.clone(),
+        };
         review::check(
-            context,
+            place,
             scope,
             Arc::clone(&self.host.evaluators),
             self.deadline,

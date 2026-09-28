@@ -16,12 +16,15 @@ enum Edit {
     Same,
     /// What changed, as a phrase: "fail_on, rules", "accepts 2 more findings".
     Named(String),
-    /// One version does not parse.
+    /// The version before does not parse.
     Unreadable,
 }
 
 /// An edit to jevgate.toml or the baseline, from the text `before` and
-/// `after` it (none when the file did not exist).
+/// `after` it (none when the file did not exist). One that no longer parses
+/// says so: the agent hook's gate reads the file as the turn began, so the
+/// agent cannot switch the gate off by breaking it, and the person hears why
+/// the next turn cannot be checked.
 pub(super) fn settings_guard(
     path: &Path,
     before: Option<&str>,
@@ -33,8 +36,22 @@ pub(super) fn settings_guard(
     } else {
         Kind::Configuration
     };
+    let parses = |text: &str| {
+        if baseline {
+            crate::baseline::parses(text)
+        } else {
+            toml::from_str::<crate::config::Config>(text).is_ok()
+        }
+    };
     let (text, message) = match (before, after) {
         (None, None) => return None,
+        (_, Some(after)) if !parses(after) => (
+            String::new(),
+            format!(
+                "is {} and does not parse",
+                if before.is_some() { "edited" } else { "added" }
+            ),
+        ),
         (None, Some(_)) => (String::new(), "is added".to_string()),
         (Some(_), None) => (String::new(), "is deleted".to_string()),
         (Some(before), Some(after)) => {

@@ -63,6 +63,11 @@ fn parse(text: &str) -> Result<Baseline> {
     Ok(baseline)
 }
 
+/// Whether `text` is a baseline JevGate can read.
+pub(crate) fn parses(text: &str) -> bool {
+    parse(text).is_ok()
+}
+
 /// Mark findings whose fingerprints the baseline accepted: the committed
 /// one, or the one in Git tree `as_of` when given.
 pub fn apply(root: &Path, report: &mut Report, as_of: Option<&str>) -> Result<()> {

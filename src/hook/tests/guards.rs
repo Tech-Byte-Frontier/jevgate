@@ -113,6 +113,96 @@ fn a_looser_configuration_in_the_turn_does_not_let_the_agent_stop() {
 }
 
 #[test]
+fn settings_the_turn_breaks_do_not_let_the_agent_stop() {
+    let broken = [
+        ("jevgate.toml", "fail_on = [\n", "edited"),
+        (
+            "jevgate.toml",
+            "rules = [\"function-simplification\"]\nfail_on_everything = false\n",
+            "edited",
+        ),
+        ("jevgate-baseline.json", "{ not json", "added"),
+    ];
+    for (file, text, how) in broken {
+        let project = repository();
+        let host = reviewing();
+        send(&project, &host, prompt("refactor"));
+        project.write("lib.rs", &long_function("f"));
+        project.write(file, text);
+        let edited = send(&project, &host, edit(&project, "lib.rs"));
+        assert!(
+            context(&edited).contains(
+                "lib.rs:1 review maintainability/function-simplification (fails the gate)"
+            ),
+            "{file}: {edited}"
+        );
+        let blocked = send(&project, &host, stop(false));
+        assert_eq!(blocked["decision"], "block", "{file}: {blocked}");
+        assert!(
+            message(&blocked).contains(&format!("{file} is {how} and does not parse")),
+            "{file}: {blocked}"
+        );
+    }
+}
+
+#[test]
+fn a_generated_code_marker_added_in_the_turn_does_not_let_the_agent_stop() {
+    let project = repository();
+    let host = reviewing();
+    send(&project, &host, prompt("refactor"));
+    project.write("lib.rs", &format!("// @generated\n{}", long_function("f")));
+    let edited = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited).contains(
+            "- lib.rs:2 review maintainability/function-simplification (fails the gate): "
+        ),
+        "{edited}"
+    );
+    let blocked = send(&project, &host, stop(false));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+    assert!(
+        message(&blocked).contains(
+            "this turn keeps 1 file from being judged (lib.rs now reads as generated code, so JevGate stops judging it)"
+        ),
+        "{blocked}"
+    );
+}
+
+#[test]
+fn a_changed_file_the_check_skips_is_named_to_the_agent_and_the_person() {
+    let project = repository();
+    let host = reviewing();
+    send(&project, &host, prompt("add code"));
+    project.write(
+        "lib.rs",
+        &format!("{}{}", long_function("f"), "// pad\n".repeat(40_000)),
+    );
+    project.write("gen.rs", &format!("// @generated\n{}", long_function("g")));
+    let padded = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&padded).starts_with(
+            "JevGate did not review lib.rs: 280473 bytes exceeds the 262144-byte read cap"
+        ),
+        "{padded}"
+    );
+    let created = send(&project, &host, edit(&project, "gen.rs"));
+    assert_eq!(
+        context(&created),
+        "JevGate did not review gen.rs: Generated code. Review its generator or source definitions instead."
+    );
+    let stopped = send(&project, &host, stop(false));
+    assert!(stopped.get("decision").is_none(), "{stopped}");
+    assert!(
+        message(&stopped).starts_with("JevGate did not review 2 files this turn changed: gen.rs (Generated code); lib.rs (280473 bytes exceeds the 262144-byte read cap). "),
+        "{stopped}"
+    );
+    assert!(
+        message(&stopped).ends_with("this turn keeps 1 file from being judged (lib.rs grows past max_file_bytes (262144 bytes), so JevGate stops judging it)."),
+        "{stopped}"
+    );
+}
+
+#[test]
 fn an_edit_to_jevgate_toml_alone_is_told_to_the_person() {
     let project = repository();
     let host = reviewing();

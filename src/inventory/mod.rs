@@ -289,23 +289,46 @@ fn load(
     if role == "source" && discovery::vendored(&path, None) {
         return Ok(recast(result, "vendored", relative));
     }
+    let copied = |source: &str| copied_now((&path, relative), &role, source, args, context);
     if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
         // A copied library or build output is excluded whatever its size.
         let copied = read_source(&path, LOCAL_PARSE_MAX)
             .ok()
-            .and_then(|source| not_written_here(&path, &role, &source));
+            .and_then(|source| copied(&source));
         return Ok(match copied {
             Some(kind) => recast(result, kind, relative),
             None => over_read_cap(result, relative, &path, args.max_file_bytes)?,
         });
     }
     match read_source(&path, args.max_file_bytes) {
-        Ok(source) => Ok(match not_written_here(&path, &role, &source) {
+        Ok(source) => Ok(match copied(&source) {
             Some(kind) => recast(result, kind, relative),
             None => source_input(result, source, (&path, relative), args, context, extra),
         }),
         Err(error) => Ok(unread(result, error)),
     }
+}
+
+/// [`not_written_here`] for `source`, the file at `path` (`relative` to the
+/// root), unless it was code people wrote when an agent's turn began: within
+/// a turn, a generated-code marker the turn added does not exempt the file,
+/// just as the turn's edits to jevgate.toml and the baseline count only
+/// from the next turn.
+fn copied_now(
+    (path, relative): (&Path, &Path),
+    role: &str,
+    source: &str,
+    args: &CheckArgs,
+    context: &ConfigContext,
+) -> Option<&'static str> {
+    let kind = not_written_here(path, role, source)?;
+    let written_then = args.turn_start().is_some_and(|start| {
+        crate::revision::blobs(&context.root, start, &[relative], args.max_file_bytes)
+            .ok()
+            .and_then(|mut texts| texts.remove(relative))
+            .is_some_and(|then| not_written_here(path, role, &then).is_none())
+    });
+    (!written_then).then_some(kind)
 }
 
 /// A file that could not be read. Binary and non-UTF-8 files are reported and

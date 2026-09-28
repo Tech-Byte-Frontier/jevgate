@@ -66,18 +66,42 @@ impl Flagged {
     }
 }
 
-/// What one hook check found: the findings the agent may act on, and what
-/// the change does to the checks around the code.
+/// A changed file of code the check did not judge, and why: it reads as
+/// generated code or a copied library, it is larger than max_file_bytes, or
+/// it does not parse. Silence about it would read as a pass.
+#[derive(Clone, Debug)]
+pub(super) struct Unreviewed {
+    pub path: PathBuf,
+    pub why: String,
+}
+
+impl Unreviewed {
+    /// The same file, not judged for the same reason, has the same id.
+    pub fn id(&self) -> String {
+        crate::schema::hash(format!("unreviewed {} {}", self.path.display(), self.why).as_bytes())
+    }
+}
+
+/// What one hook check found: the findings the agent may act on, what the
+/// change does to the checks around the code, and the files it did not judge.
 #[derive(Debug, Default)]
 pub(super) struct Checked {
     pub flagged: Vec<Flagged>,
     pub guards: Vec<Guard>,
+    pub unreviewed: Vec<Unreviewed>,
 }
 
-/// Check `scope` and wait for it until `deadline`. The error says why the
-/// check could not finish, for the person and the agent.
+/// Where a hook check runs: the session's directory and the repository
+/// around it.
+pub(super) struct Place {
+    pub cwd: PathBuf,
+    pub root: PathBuf,
+}
+
+/// Check `scope` in `place` and wait for it until `deadline`. The error
+/// says why the check could not finish, for the person and the agent.
 pub(super) fn check(
-    context: ConfigContext,
+    place: Place,
     scope: Scope,
     evaluators: Arc<Evaluators>,
     deadline: Instant,
@@ -90,7 +114,8 @@ pub(super) fn check(
     // The thread is left behind at the deadline; the process exits after the
     // reply, and the answers it received are already in the cache.
     std::thread::spawn(move || {
-        let checked = run(context, scope, evaluators.as_ref(), lock_until);
+        let checked = context(&place, &scope)
+            .and_then(|context| run(context, scope, evaluators.as_ref(), lock_until));
         let _ = sender.send(checked.map_err(|e| format!("{e:#}")));
     });
     match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -103,17 +128,28 @@ pub(super) fn check(
     }
 }
 
+/// The repository's configuration for a check of `scope`: within a turn,
+/// jevgate.toml as the turn began, so the agent's edits to it, even one that
+/// breaks it, count from the next turn; else the one there now.
+fn context(place: &Place, scope: &Scope) -> Result<ConfigContext> {
+    let Some((start, _)) = &scope.trees else {
+        return ConfigContext::discover_in(&place.cwd, None);
+    };
+    Ok(ConfigContext {
+        invocation_dir: place.cwd.clone(),
+        root: place.root.clone(),
+        config: configuration_at(&place.root, start)?,
+    })
+}
+
 /// The check itself: what `jevgate check` does with the repository's
-/// configuration (as the turn began, within a turn), less the output.
+/// configuration, less the output.
 fn run(
-    mut context: ConfigContext,
+    context: ConfigContext,
     scope: Scope,
     evaluators: &Evaluators,
     lock_until: Instant,
 ) -> Result<Checked> {
-    if let Some((start, _)) = &scope.trees {
-        context.config = configuration_at(&context.root, start)?;
-    }
     let args = arguments(&context, scope)?;
     let paths = inventory::scope(&args, &context)?;
     let inputs = inventory::collect(&args, &context, &paths)?;
@@ -122,8 +158,8 @@ fn run(
         // but an edit to jevgate.toml or the baseline is still a guard.
         let guards = guards::scan(&context.root, &args, &context.config, &paths).guards;
         return Ok(Checked {
-            flagged: Vec::new(),
             guards,
+            ..Checked::default()
         });
     }
     let store = open_store(&context.root, lock_until)?;
@@ -136,12 +172,13 @@ fn run(
         bail!(incomplete(&report));
     }
     let accepted_now = match args.turn_start() {
-        Some(_) => accepted_now(&context.root, &report)?,
+        Some(_) => accepted_now(&context.root, &report),
         None => BTreeSet::new(),
     };
     Ok(Checked {
         flagged: flag(&report, &accepted_now),
         guards: std::mem::take(&mut report.guards),
+        unreviewed: unreviewed(&report),
     })
 }
 
@@ -157,19 +194,20 @@ fn configuration_at(root: &Path, start: &str) -> Result<Config> {
 
 /// The fingerprints of the findings the baseline and allow comments accept
 /// now, though not when the turn began: the turn's own edits accepted them.
-fn accepted_now(root: &Path, report: &Report) -> Result<BTreeSet<String>> {
+/// A baseline the turn left unreadable accepts nothing; its guard tells the
+/// person.
+fn accepted_now(root: &Path, report: &Report) -> BTreeSet<String> {
     let mut now = report.clone();
     crate::suppress::apply(root, &mut now, &BTreeSet::new());
-    crate::baseline::apply(root, &mut now, None)?;
+    let _ = crate::baseline::apply(root, &mut now, None);
     let then = report.files.iter().flat_map(|f| &f.findings);
-    Ok(now
-        .files
+    now.files
         .iter()
         .flat_map(|f| &f.findings)
         .zip(then)
         .filter(|(now, then)| now.accepted() && !then.accepted())
         .map(|(now, _)| now.fingerprint.clone())
-        .collect())
+        .collect()
 }
 
 /// `check`'s arguments with the repository's configuration, for `scope`.
@@ -224,6 +262,31 @@ fn incomplete(report: &Report) -> String {
         Some(first) => (*first).to_string(),
         None => "the check did not finish".into(),
     }
+}
+
+/// The files of code in `report` that the check skipped or could not send
+/// whole, with the reason the report gives.
+fn unreviewed(report: &Report) -> Vec<Unreviewed> {
+    report
+        .files
+        .iter()
+        .filter(|f| matches!(f.status, Status::Skipped | Status::NeedsContext))
+        .filter(|f| {
+            matches!(
+                f.role.as_str(),
+                "source" | "test" | "generated" | "vendored"
+            )
+        })
+        .map(|f| Unreviewed {
+            path: f.path.clone(),
+            why: f
+                .error
+                .clone()
+                .or_else(|| f.classification.as_ref().map(|c| c.reason.clone()))
+                .filter(|why| !why.is_empty())
+                .unwrap_or_else(|| "it was not judged".into()),
+        })
+        .collect()
 }
 
 /// The findings the agent may act on: not notes and not accepted (as the
