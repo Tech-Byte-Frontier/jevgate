@@ -229,13 +229,20 @@ impl Question {
     /// What it is asked about and when it fails, for the rules table:
     /// `function, review at 0.80, src/api/**`.
     pub fn summary(&self) -> String {
-        let level = crate::output::label(&self.level);
-        let mut parts = vec![
-            crate::output::label(&self.unit),
-            format!("{level} at {:.2}", self.threshold),
-        ];
+        let mut parts = vec![self.asked()];
         parts.extend(self.paths.iter().cloned());
         parts.join(", ")
+    }
+
+    /// Its unit, and the level and threshold of its findings:
+    /// `function, review at 0.80`.
+    pub fn asked(&self) -> String {
+        let level = crate::output::label(&self.level);
+        format!(
+            "{}, {level} at {:.2}",
+            crate::output::label(&self.unit),
+            self.threshold
+        )
     }
 
     /// The definition `jevgate rules --format json` adds to its entry.

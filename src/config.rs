@@ -47,6 +47,24 @@ pub struct Config {
     pub question: Vec<crate::custom::Spec>,
 }
 
+impl Config {
+    /// The configuration in `file`, or the defaults when it does not exist
+    /// and is not `required`.
+    pub fn read(file: &Path, required: bool) -> Result<Self> {
+        if !required && !file.exists() {
+            return Ok(Self::default());
+        }
+        let text = std::fs::read_to_string(file)
+            .with_context(|| format!("Cannot read {}", file.display()))?;
+        let config =
+            toml::from_str(&text).with_context(|| format!("Invalid {}", file.display()))?;
+        if let Some(notice) = written_before_mature(&text) {
+            note!("jevgate: {notice}");
+        }
+        Ok(config)
+    }
+}
+
 /// `[[scope]]`: gate levels for the files `paths` match. `fail_on` applies to
 /// every rule there, and `rules` to single rules or groups. The last scope
 /// that matches a file and addresses a rule wins; other files and rules keep
@@ -144,18 +162,7 @@ impl ConfigContext {
             Some(file) => (invocation_dir.join(file), true),
             None => (root.join(crate::init::CONFIG_FILE), false),
         };
-        let config: Config = if required || file.exists() {
-            let text = std::fs::read_to_string(&file)
-                .with_context(|| format!("Cannot read {}", file.display()))?;
-            let config =
-                toml::from_str(&text).with_context(|| format!("Invalid {}", file.display()))?;
-            if let Some(notice) = written_before_mature(&text) {
-                note!("jevgate: {notice}");
-            }
-            config
-        } else {
-            Config::default()
-        };
+        let config = Config::read(&file, required)?;
         let directory = (!required).then(|| crate::custom::directory(&root));
         let questions =
             crate::custom::load(&root, (&file, &config.question), directory.as_deref())?;
