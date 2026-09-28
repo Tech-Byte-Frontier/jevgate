@@ -20,6 +20,8 @@ const HISTORY: u64 = 64;
 
 pub struct Store {
     pub directory: PathBuf,
+    /// The cache files Git tracks as the store opens, which are never read.
+    tracked: std::sync::Arc<std::collections::BTreeSet<PathBuf>>,
     _lock: fs::File,
 }
 
@@ -100,6 +102,7 @@ impl Store {
             "History must be a real directory",
         )?;
         Ok(Self {
+            tracked: std::sync::Arc::new(cache::tracked(&directory)),
             directory,
             _lock: lock,
         })

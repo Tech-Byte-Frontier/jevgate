@@ -127,7 +127,7 @@ fn guard_schema() -> Value {
         "type": "object",
         "description": "What the change does to the checks around the code, for a person to look at: never a finding, never failing the gate",
         "properties": {
-            "kind": {"type": "string", "enum": ["allow", "suppression", "skipped-test", "focused-test", "deleted-test", "weaker-assertion", "configuration", "baseline", "skipped-file", "steering"]},
+            "kind": {"type": "string", "enum": ["allow", "suppression", "skipped-test", "focused-test", "deleted-test", "weaker-assertion", "configuration", "baseline", "skipped-file", "steering", "cache"]},
             "path": {"type": "string"},
             "line": {"type": "integer"},
             "text": {"type": "string", "description": "What was found: the line, a test's name, the settings changed"},

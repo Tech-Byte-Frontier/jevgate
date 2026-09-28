@@ -52,6 +52,9 @@ pub enum Kind {
     SkippedFile,
     /// Text addressed to a reviewer that Jev reads as written to steer it.
     Steering,
+    /// Files of JevGate's answer cache the change commits, which a check
+    /// never reads.
+    Cache,
 }
 
 /// One guard: where, what was found and what it does.
@@ -200,6 +203,7 @@ pub fn summary<'a>(guards: impl IntoIterator<Item = &'a Guard>) -> String {
             format!("keeps {files} from being judged")
         }),
         named(Kind::Steering, "holds text written to steer a reviewer"),
+        named(Kind::Cache, "commits JevGate's cached answers"),
     ]
     .into_iter()
     .flatten()
@@ -357,8 +361,31 @@ impl<'c> Texts<'c> {
             }
         }
         scan.guards.extend(tests.guards());
+        scan.guards.extend(cache_guard(changes));
         scan
     }
+}
+
+/// The files a change adds or edits in JevGate's answer cache, which only
+/// Git tracking them puts in a change: a check never reads them, and the
+/// person hears of the attempt. One guard for all of them.
+fn cache_guard(changes: &revision::Changes) -> Option<Guard> {
+    let cache = Path::new(".jevgate/cache");
+    let committed = changes
+        .paths
+        .keys()
+        .filter(|p| p.starts_with(cache))
+        .count();
+    (committed > 0).then(|| {
+        let files = output::count(committed, "file");
+        Guard::new(
+            Kind::Cache,
+            cache,
+            None,
+            &files,
+            format!("commits {files} of JevGate's answer cache, which checks never read"),
+        )
+    })
 }
 
 /// The `jevgate: allow` comments among `guards`: the files and lines of

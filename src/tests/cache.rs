@@ -462,3 +462,51 @@ fn only_tampered_answers_are_asked_again() {
     let (body, _, _) = receipts[0].result.as_ref().unwrap();
     assert!(body["usage"]["input_tokens"].as_u64().unwrap() < 1_000);
 }
+
+#[test]
+fn answers_a_change_commits_to_the_cache_are_never_read() {
+    let project = Project::new();
+    project.write("lib.rs", &function("f"));
+    project.commit_all();
+    // The change's long function, with answers that clear it written by a
+    // local run and committed with it, as a pull request could.
+    project.write("lib.rs", &long_function("f"));
+    let mut options = args();
+    options.rules = vec![crate::catalog::FUNCTION_SIMPLIFICATION.into()];
+    options.base = Some("HEAD".into());
+    let cleared = run(&project, &options, &mut Mock::default());
+    assert!(
+        file_findings(&cleared).is_empty(),
+        "the committed answers clear it"
+    );
+    project.git(&["add", "-f", ".jevgate/cache", "lib.rs"]);
+    project.git(&["commit", "-qm", "a long function and answers clearing it"]);
+    options.base = Some("HEAD~1".into());
+    let mut reviewing = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    let checked = run(&project, &options, &mut reviewing);
+    assert!(
+        reviewing.calls > 0,
+        "asked, not read from the committed cache"
+    );
+    assert_eq!(file_findings(&checked), [crate::schema::Strength::Review]);
+    let guards: Vec<String> = checked.guards.iter().map(|g| g.describe()).collect();
+    assert!(
+        guards
+            .iter()
+            .any(|g| g.starts_with(".jevgate/cache commits ")
+                && g.ends_with(" of JevGate's answer cache, which checks never read")),
+        "{guards:?}"
+    );
+}
+
+/// The strengths of the findings of the report's one file.
+fn file_findings(report: &crate::schema::Report) -> Vec<crate::schema::Strength> {
+    report.files[0]
+        .findings
+        .iter()
+        .map(|f| f.strength)
+        .collect()
+}

@@ -8,6 +8,10 @@
 //! every file takes a 4 KiB block, and every save waits for the disk (4.8 ms
 //! a file on macOS). One file per state keeps the file count and the reads of
 //! one file per request.
+//!
+//! A cache file Git tracks is never read: a pull request could commit
+//! answers, whose names anyone can compute from a local run, that clear its
+//! own code, and a check of it in a fresh clone would trust them.
 use super::{Durability, Store, atomic};
 use crate::schema::now;
 use anyhow::Result;
@@ -16,6 +20,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 /// A cache file larger than this is ignored, and what it held is asked again.
@@ -62,10 +67,45 @@ fn state_path(directory: &Path, state: &str) -> PathBuf {
     answers_directory(directory).join(format!("{state}.json"))
 }
 
-/// A cache file's JSON; none when it is missing, a symlink, too large or not
-/// what it should be.
-fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+/// A cache file's JSON; none when it is missing, a symlink, too large, not
+/// what it should be, or among the `tracked` files.
+fn read_json<T: DeserializeOwned>(path: &Path, tracked: &BTreeSet<PathBuf>) -> Option<T> {
+    if tracked.contains(path) {
+        return None;
+    }
     serde_json::from_str(&crate::inventory::read_source(path, CACHE_ENTRY_BYTES).ok()?).ok()
+}
+
+/// The files under the cache of `directory` (a `.jevgate`) that Git tracks;
+/// none outside Git, or when Git cannot run. A run asks once, as its store
+/// opens.
+pub(super) fn tracked(directory: &Path) -> BTreeSet<PathBuf> {
+    let Some(root) = directory.parent() else {
+        return BTreeSet::new();
+    };
+    let listed =
+        crate::revision::git(root, &["ls-files", "-z", "--", ".jevgate/cache"]).unwrap_or_default();
+    listed
+        .split(|b| *b == 0)
+        .filter_map(|name| std::str::from_utf8(name).ok())
+        .filter(|name| !name.is_empty())
+        .map(|name| root.join(name))
+        .collect()
+}
+
+/// [`tracked`], asked once a process for each directory: planning and dry
+/// runs look up each request apart, without a store, and only price what
+/// the cache answers.
+fn tracked_once(directory: &Path) -> Arc<BTreeSet<PathBuf>> {
+    static TRACKED: OnceLock<Mutex<BTreeMap<PathBuf, Arc<BTreeSet<PathBuf>>>>> = OnceLock::new();
+    let known = TRACKED.get_or_init(Mutex::default);
+    let mut known = known
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = known
+        .entry(directory.to_path_buf())
+        .or_insert_with(|| Arc::new(tracked(directory)));
+    Arc::clone(entry)
 }
 
 /// Whether an answer given at `created_at` is still used: always for a pinned
@@ -81,6 +121,8 @@ fn current(created_at: u64, ttl: Option<u64>) -> bool {
 /// lock while planning and in dry runs, which write nothing.
 pub struct CacheReader {
     directory: PathBuf,
+    /// The cache files Git tracks, which are never read.
+    tracked: Arc<BTreeSet<PathBuf>>,
 }
 
 impl CacheReader {
@@ -89,16 +131,20 @@ impl CacheReader {
     /// directory.
     pub fn peek(root: &Path) -> Option<Self> {
         let directory = root.join(".jevgate");
-        (!directory.is_symlink() && directory.is_dir()).then_some(Self { directory })
+        (!directory.is_symlink() && directory.is_dir()).then(|| Self {
+            tracked: tracked_once(&directory),
+            directory,
+        })
     }
 
     /// The answers about `state` by question key, without those `ttl` has
     /// expired or that claim a time in the future.
     pub fn answers(&self, state: &str, ttl: Option<u64>) -> BTreeMap<String, CachedAnswer> {
-        let mut answers = read_json::<StateEntry>(&state_path(&self.directory, state))
-            .filter(|entry| entry.state_hash == state)
-            .map(|entry| entry.answers)
-            .unwrap_or_default();
+        let mut answers =
+            read_json::<StateEntry>(&state_path(&self.directory, state), &self.tracked)
+                .filter(|entry| entry.state_hash == state)
+                .map(|entry| entry.answers)
+                .unwrap_or_default();
         answers.retain(|_, answer| current(answer.created_at, ttl));
         answers
     }
@@ -107,7 +153,7 @@ impl CacheReader {
     /// request `hash`, and when it was given.
     pub fn request(&self, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
         let path = self.directory.join("cache").join(format!("{hash}.json"));
-        let entry = read_json::<RequestEntry>(&path)?;
+        let entry = read_json::<RequestEntry>(&path, &self.tracked)?;
         (entry.request_hash == hash && current(entry.created_at, ttl))
             .then_some((entry.response, entry.created_at))
     }
@@ -117,6 +163,7 @@ impl Store {
     pub fn reader(&self) -> CacheReader {
         CacheReader {
             directory: self.directory.clone(),
+            tracked: Arc::clone(&self.tracked),
         }
     }
 
@@ -144,7 +191,7 @@ impl Store {
         durability: Durability,
     ) -> Result<()> {
         let path = state_path(&self.directory, state);
-        let mut entry = read_json::<StateEntry>(&path)
+        let mut entry = read_json::<StateEntry>(&path, &self.tracked)
             .filter(|entry| entry.state_hash == state)
             .unwrap_or_else(|| StateEntry {
                 state_hash: state.into(),
