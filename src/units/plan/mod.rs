@@ -108,9 +108,6 @@ pub fn plan(
         };
         handlers::plan(&scope, &evidence, args, budget, &mut result);
     }
-    for &owner in &scope.owners {
-        file::plan_steering(&scope, owner, args, budget, &mut result);
-    }
     let drift = drift::Shared::new(
         inputs,
         &scope.documents,
@@ -137,6 +134,11 @@ pub fn plan(
         result.files.insert(owner, file);
     }
     keep_changed(inputs, &mut result);
+    // Text addressed to a reviewer is asked about once the requests that
+    // send it are known: with `--base`, those the change touched.
+    for &owner in &scope.owners {
+        file::plan_steering(&scope, owner, args, budget, &mut result);
+    }
     result
 }
 

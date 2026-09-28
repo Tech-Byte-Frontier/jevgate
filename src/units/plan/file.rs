@@ -130,8 +130,9 @@ pub(super) fn plan_file(
 }
 
 /// Ask about the text addressed to a reviewer in one selected code file,
-/// once every rule has planned its requests: only text a request sends can
-/// move an answer.
+/// once every rule has planned its requests and `--base` has kept those
+/// about what the change touched: only text a request sends can move an
+/// answer.
 pub(super) fn plan_steering(
     scope: &Scope<'_>,
     owner: usize,
