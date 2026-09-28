@@ -4,7 +4,10 @@
 //! (statement blocks, control flow, literals) and where it keeps its tests;
 //! `analysis::units::generic` turns the query's captures into units. Only
 //! the rules those units can serve judge these files: function
-//! simplification, file organization, shared logic and comments.
+//! simplification, file organization, shared logic and comments. Every
+//! language here is in preview: it becomes supported once two projects
+//! JevGate was never tuned on meet the maturity bar (a rule and level right
+//! at least 80% of the time over at least 20 labeled findings).
 //!
 //! The queries are JevGate's own, written in the captures GitHub's code
 //! navigation uses (`@definition.function`, `@definition.class`, `@name`,

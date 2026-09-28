@@ -82,9 +82,10 @@ signatures, or one candidate pair.
    holding ERB tags or `//#if` conditions) keep the strict rule, since their
    placeholders are not the language's syntax.
    C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir and Lua are read by a
-   generic tier (`src/analysis/generic`): one tag query per language, in
-   the captures GitHub's code navigation uses, finds functions, methods,
-   types and calls, and a table names the nodes that hold statements, nest
+   generic tier (`src/analysis/generic`), in preview until measured on
+   projects never used for tuning. One tag query per language, in the
+   captures GitHub's code navigation uses, finds functions, methods, types
+   and calls, and a table names the nodes that hold statements, nest
    control flow and hold literals. The grammars' own `tags.scm` tag what
    names a definition (a C prototype's declarator, a Swift method's whole
    class), so the queries are JevGate's, with the definition itself as the

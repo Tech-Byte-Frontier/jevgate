@@ -1,5 +1,7 @@
 # Supported languages and frameworks
 
+Each language is supported or in preview. The ten languages with analyzers of their own are supported. The nine the [generic tier](#generic-support) reads are in preview until two projects JevGate was never tuned on meet the maturity bar: a rule and level right at least 80% of the time, over at least 20 labeled findings. A preview language's findings are reported like any other. [Support levels](#support-levels) lists each language's level and how often its findings were right.
+
 ✅ judged · ➖ not applicable
 
 | Language or file | Extensions | Maintainability | Tests | Security | Documentation |
@@ -14,7 +16,7 @@
 | PHP | `.php` `.phtml` | ✅ | ✅ PHPUnit `…TestCase` classes, Pest `test`/`it` | ✅ | ✅ comments |
 | Java | `.java` | ✅ | ✅ JUnit 4 and 5, TestNG: `@Test`, `@ParameterizedTest`, `@Nested`, JUnit 3 `TestCase` | ✅ | ✅ comments |
 | Bend 2 ([bendlang/bend](https://github.com/bendlang/bend) 2.0.x) | `.bend` | ✅ | ✅ programs ending in the `#\|` lines their run must print, or defining `main` on a test path; laws (`tests/laws`) | ✅ defs that perform effects or build text | ✅ comments |
-| C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir, Lua ([generic support](#generic-support)) | `.c` `.h` · `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` · `.kt` `.kts` · `.swift` · `.sh` `.bash` · `.dart` · `.scala` · `.ex` `.exs` · `.lua` | ✅ function simplification, file organization, shared logic | ➖ test files are found by path and not judged yet | ➖ | ✅ comments |
+| C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir, Lua ([generic support](#generic-support), preview) | `.c` `.h` · `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` · `.kt` `.kts` · `.swift` · `.sh` `.bash` · `.dart` · `.scala` · `.ex` `.exs` · `.lua` | ✅ function simplification, file organization, shared logic | ➖ test files are found by path and not judged yet | ➖ | ✅ comments |
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ✅ script comments |
 | Server templates: ERB, EJS, JSP, Handlebars, Mustache, Nunjucks, Twig, Jinja, Go | `.erb` `.ejs` `.jsp` `.hbs` `.mustache` `.njk` `.twig` `.jinja` `.j2` `.tmpl` `.gohtml`, and `.html` under `templates/`, `views/`, `layouts/`, `partials/` or `includes/` | ✅ inline scripts only | ➖ | ✅ inline scripts, as the page's code in the visitor's browser; and the code that reads the request, a cookie, the session or the signed-in user: tags that write it unescaped (`<%= raw … %>`, `.html_safe`, `<%== … %>`, `<%- … %>`, `{{{ … }}}`, `\|safe`, `\|raw`) and a JSP page's scriptlets | ✅ script comments |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
@@ -55,9 +57,25 @@
 
 Other files, such as Zig, are listed as skipped with the reason and never fail the gate.
 
+## Support levels
+
+| Language | Level | Unseen projects | Reviews right | Considers right |
+|---|---|---:|---:|---:|
+| Rust | supported | 7 | 69% (37 of 54) | 64% (129 of 202) |
+| Python | supported | 4 | 51% (18 of 35) | 52% (43 of 82) |
+| Go | supported | 3 | 8 of 10 | 57% (24 of 42) |
+| TypeScript | supported | 4 | 2 of 4 | 58% (14 of 24) |
+| PHP | supported | 2 | 1 of 6 | 11 of 18 |
+| Java | supported | 2 | 1 of 3 | 4 of 12 |
+| JavaScript | supported | 3 | 1 of 1 | 1 of 5 |
+| C#, Ruby, Bend 2 | supported | none | not measured | not measured |
+| C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir, Lua | preview | none yet | not measured | not measured |
+
+A finding is right when a person reading the code agrees with it; a debatable one counts as not right. The counts are 0.25.0's reviews and considers on the 25 projects JevGate was never tuned on (11 held out, 14 fresh), each labeled by hand from the code, for the four rules every language gets: function simplification, file organization, shared logic and comments. A percentage is shown from 20 labels on. Those projects hold no C#, Ruby or Bend 2 finding of these rules. A preview language is measured the same way, on projects never used for tuning, before it can become supported.
+
 ## Generic support
 
-C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir and Lua are read through one tree-sitter tag query per language, written in the captures GitHub's code navigation uses (`@definition.function`, `@definition.class`, `@reference.call`): it finds functions, methods, types and the calls each makes, and a table per language names the nodes that hold statements, nest control flow and hold literals. These files get function simplification, file organization, shared logic and comments, and every request names the language. What they do not get:
+C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir and Lua are in preview. They are read through one tree-sitter tag query per language, written in the captures GitHub's code navigation uses (`@definition.function`, `@definition.class`, `@reference.call`): it finds functions, methods, types and the calls each makes, and a table per language names the nodes that hold statements, nest control flow and hold literals. These files get function simplification, file organization, shared logic and comments, and every request names the language. What they do not get:
 
 - Hardcoded values and the security rules: those need a language's own sites, sources and sinks.
 - Test rules: a test file is found by path and reported as not judged yet. Besides `test/`, `tests/`, `test_*` and `*_test.*`, that is a class named `…Test`, `…Tests`, `…Spec` or `…IT` (Kotlin, Swift, Scala; `…Suite` in Scala), a Kotlin source set such as `androidTest` or `commonTest`, a Swift test target such as `VaporTests`, busted's `spec/` and `*_spec.lua`, Dart's `integration_test/`, `*_unittest.cc` and `*.bats`.

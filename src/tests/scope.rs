@@ -214,7 +214,8 @@ fn a_generic_language_gets_only_the_rules_its_units_serve_and_its_tests_are_not_
     );
     let reason = &shop.classification.as_ref().unwrap().reason;
     assert!(
-        reason.contains("the hardcoded-value, security and test rules do not read Kotlin"),
+        reason.starts_with("Kotlin support is generic and in preview")
+            && reason.contains("the hardcoded-value, security and test rules do not read Kotlin"),
         "{reason}"
     );
     let test = file("ShopTest.kt");
