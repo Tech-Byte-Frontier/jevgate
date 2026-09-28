@@ -81,9 +81,15 @@ It reads every file before writing any, so when it stops, nothing was written.
 **`… a JevGate begin marker without its end marker`**
 : The block between `<!-- jevgate:begin` and `<!-- jevgate:end -->` lost one of its lines. Restore it, or delete what is left of the block.
 
+## The agent accepted a finding and the hook still blocks
+
+Within a turn, the agent hook reads `jevgate.toml`, `jevgate-baseline.json` and `jevgate: allow` comments as they were when the turn began, so an agent cannot unblock itself by accepting its own findings or loosening the gate. Such a finding is marked `(fails the gate; accepted this turn)`, the person is told of the edit when the turn ends, and the edit counts from the next turn. If the finding is wrong, keep the accepting edit; if not, remove it.
+
 ## Many files are uncertain
 
 A file is `uncertain` when some of its answers stayed undecided after the follow-up questions. JevGate reports this instead of hiding it or counting the file as clear. `--verbose` lists each undecided unit and the question it stayed undecided on; the JSON report also quotes each such question as it was asked, with what each answer means and the probabilities Jev gave them, and the MCP tools hand them to an agent as verify items. It never fails the gate unless you ask for that with `--fail-on uncertain`.
+
+A unit whose request carried a comment or string written to steer a reviewer is uncertain too, listed as `text written to steer a reviewer (line N)`, since its answers may be the text's rather than the code's. Remove the text and the unit is judged again.
 
 ## A review did not fail the check
 

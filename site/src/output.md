@@ -39,3 +39,21 @@ PORT = 4222
 The report keeps the finding with its reason, it never fails the gate, and `jevgate baseline` leaves it out, so deleting the comment brings it back.
 
 `jevgate baseline` can record why each finding was accepted: `intended` (right, and meant to be so), `later` (right, to fix later) or `wrong` (mistaken), with `--reason` or `jevgate baseline mark`. Reasons survive later rewrites of the baseline, and `jevgate baseline stats` reports each rule's share of findings marked wrong: labels from daily use, not the model's own probabilities.
+
+## Guards
+
+A check with `--base`, and each check of the [agent hook](coding-agents.md#in-the-agents-loop-jevgate-hook), also reports what the change does to the checks around the code. Code finds most of them; Jev is asked only about the evidence code selected:
+
+| Guard | When |
+|---|---|
+| `suppression` | a line the change adds turns off another tool: `# noqa`, `# type: ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `#[allow(…)]`, `//nolint`, `@SuppressWarnings`, `rubocop:disable`, `# nosec`, `# pragma: no cover` and about 50 more |
+| `allow` | a line the change adds is a `jevgate: allow` comment |
+| `skipped-test`, `focused-test` | a test file gains `it.skip`, `xit`, `@pytest.mark.skip`, `#[ignore]`, `t.Skip`, `@Disabled`, `markTestSkipped` or RSpec's `skip`; or `.only` or `fit`, which skip every other test |
+| `deleted-test` | a test is gone and no file of the change gained a test of that name, or a test file is deleted |
+| `weaker-assertion` | a test whose assertion lines the change removed or rewrote, which Jev reads at 0.80 as checking less than before; it is asked with the test before and after and the functions of its file the new version newly calls |
+| `configuration`, `baseline` | `jevgate.toml` or `jevgate-baseline.json` is added, deleted or edited: the keys that changed, or the findings accepted, dropped or given another reason |
+| `steering` | a comment or string Jev reads at 0.80 as written to steer a reviewer, on any check; no unit asked in a request that sent it can clear |
+
+A moved or renamed line adds nothing, and neither does a marker quoted in a string, named in a comment (a skip marker; in Markdown, anything outside an HTML comment) or read by another language's tools (`# noqa` in Rust); generated code, type declarations, migrations and test data are left out. Guards follow the findings (`Guards (N):`, the first ten; `--verbose` shows all), and are `guards` in the JSON report (kind, path, line, text, message, probability, id) and GitHub notices with a list in the job summary; SARIF and GitLab reports carry findings only. They never fail the gate, and neither the baseline nor an allow comment accepts them: they are facts for a person to look at, most of them legitimate.
+
+On the last five commits of 142 corpus projects, 129 guards were reported (75 suppressions, 50 removed tests, 4 skipped tests), each checked against Git, and the scan adds 29 ms at the median to a check of a last commit.
