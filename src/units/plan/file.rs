@@ -150,10 +150,40 @@ pub(super) fn plan_steering(
         .into_iter()
         .filter(|text| !(text.string && tests.iter().any(|lines| lines.contains(&text.line))))
         .collect();
+    ask_steering(scope, owner, texts, (args, budget), plan);
+}
+
+/// Ask about each of `texts` of `owner` that one of its requests sends.
+fn ask_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    texts: Vec<crate::analysis::steering::Addressed>,
+    (args, budget): (&CheckArgs, Limits<'_>),
+    plan: &mut Plan,
+) {
     if let (false, Some(file)) = (texts.is_empty(), plan.files.get_mut(&owner)) {
-        let context = file_context(input, owner, args, budget);
+        let context = file_context(&scope.inputs[owner], owner, args, budget);
         guards::plan_steering(&context, texts, file, &mut plan.requests);
     }
+}
+
+/// Ask about each paragraph of a document, such as an instruction file,
+/// that addresses a reviewer and that a request of the document sends: a
+/// section asked beside it cannot clear on its answers, as a function
+/// asked beside a steering comment cannot.
+pub(super) fn plan_document_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    args: &CheckArgs,
+    budget: Limits<'_>,
+    plan: &mut Plan,
+) {
+    let source = scope.inputs[owner].source.as_deref().unwrap_or("");
+    let texts = crate::analysis::steering::paragraphs(
+        source,
+        crate::analysis::steering::Audience::Reviewers,
+    );
+    ask_steering(scope, owner, texts, (args, budget), plan);
 }
 
 /// One selected code file's facts, with the role a web framework gives it.
