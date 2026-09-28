@@ -235,3 +235,145 @@ fn request(file: &FileContext<'_>, lane: &Value, pack: &[Entry], out: &FilePlan)
     });
     file.request(STAGE, state, questions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        catalog::{FUNCTION_SIMPLIFICATION, HARDCODED_VALUES},
+        token_budget::{Limits, TokenBudget},
+        units::{Detail, FollowUp, Presence, UnitPlan},
+    };
+
+    /// A follow-up that is never sent: only whether a unit keeps it matters.
+    fn follow_up() -> FollowUp {
+        (json!({}), Asked::default()).into()
+    }
+
+    /// A judged unit with a recheck.
+    fn unit(rule: &'static str, id: &str, detail: Detail) -> UnitPlan {
+        UnitPlan {
+            rule,
+            id: id.into(),
+            name: id.into(),
+            presence: Presence::Judged,
+            locations: Vec::new(),
+            quote: None,
+            lines: 3,
+            identity: String::new(),
+            detail,
+            recheck: Some(follow_up()),
+        }
+    }
+
+    /// The function simplification and hardcoded-value units of a function
+    /// `name` at `position`, with what each asks. Neither `find` nor `scan`
+    /// ends a run, so they start in one pack.
+    fn judged(name: &str, position: usize, out: &mut FilePlan) -> [FunctionAsk; 2] {
+        let split = Detail::Function {
+            blocks: Vec::new(),
+            locate: Some(follow_up()),
+        };
+        out.units.push(unit(FUNCTION_SIMPLIFICATION, name, split));
+        let values = Detail::Values {
+            values: vec!["40".into()],
+            choices: vec!["40".into()],
+            repeated: vec![false],
+            locate: Some(follow_up()),
+        };
+        out.units.push(unit(HARDCODED_VALUES, name, values));
+        let ask = |ask| FunctionAsk {
+            position,
+            name: name.into(),
+            source: format!("fn {name}() -> u32 {{\n    40\n}}\n"),
+            ask,
+        };
+        [
+            ask(Ask::Split {
+                unit: out.units.len() - 2,
+                nested: false,
+            }),
+            ask(Ask::Values {
+                unit: out.units.len() - 1,
+                evidence: Map::from_iter([("values".to_string(), json!(["40"]))]),
+            }),
+        ]
+    }
+
+    /// The question names of each request planned for `asks` when only the
+    /// requests `fits` accepts fit, as if the answer cache answered them
+    /// whole: at a thousand tokens a byte, none fits by its size.
+    fn planned(
+        asks: Vec<FunctionAsk>,
+        out: &mut FilePlan,
+        fits: &dyn Fn(&Value) -> bool,
+    ) -> Vec<Vec<String>> {
+        let budget = TokenBudget {
+            bytes_per_token: 1e-3,
+        };
+        let unanswered = |request: &Value| (!fits(request)).then(|| request.clone());
+        let file = FileContext {
+            owner: 0,
+            path: std::path::Path::new("lib.rs"),
+            language: "Rust",
+            source: "",
+            source_hash: "",
+            model: "jev-1.13.0",
+            budget: Limits::new(&budget, &unanswered),
+            framework: None,
+            project: None,
+            changed: None,
+        };
+        let mut requests = Vec::new();
+        send(&file, asks, out, &mut requests);
+        requests
+            .iter()
+            .map(|p| {
+                p.request["questions"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .cloned()
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_pack_that_does_not_fit_is_sent_a_function_at_a_time_with_every_rule() {
+        let mut out = FilePlan::default();
+        let mut asks = Vec::from(judged("find", 0, &mut out));
+        asks.extend(judged("scan", 1, &mut out));
+        let one_function = |request: &Value| {
+            request["state"]["functions"]
+                .as_array()
+                .is_some_and(|f| f.len() == 1)
+        };
+        let asked = planned(asks, &mut out, &one_function);
+        let every_rule = ["f0_environment", "f0_magic", "f0_special", "f0_split"];
+        assert_eq!(asked, [every_rule, every_rule]);
+        assert!(out.units.iter().all(|u| u.presence == Presence::Judged));
+    }
+
+    #[test]
+    fn a_function_whose_questions_do_not_fit_together_is_asked_rule_by_rule() {
+        let mut out = FilePlan::default();
+        let asks = Vec::from(judged("find", 0, &mut out));
+        let split_alone = |request: &Value| {
+            request["questions"]
+                .as_object()
+                .is_some_and(|q| q.keys().all(|key| key.ends_with("_split")))
+        };
+        assert_eq!(planned(asks, &mut out, &split_alone), [["f0_split"]]);
+        let [split, values] = &out.units[..] else {
+            panic!("two units");
+        };
+        assert_eq!(split.presence, Presence::Judged);
+        assert!(split.recheck.is_some(), "the split is still rechecked");
+        // Its values could not be sent even alone: they need context, and
+        // neither their recheck nor their locate is asked.
+        assert_eq!(values.presence, Presence::NeedsContext);
+        assert!(values.recheck.is_none());
+        assert!(matches!(values.detail, Detail::Values { locate: None, .. }));
+    }
+}
