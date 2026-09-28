@@ -33,9 +33,23 @@ fn call(id: u64, name: &str, arguments: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
 }
 
-/// The reply to request `id`.
-fn reply_to(messages: &[Value], id: u64) -> &Value {
-    messages.iter().find(|m| m["id"] == id).unwrap()
+/// A `jevgate_check` call that asks for progress with `token`.
+fn check_with_progress(id: u64, token: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+        "params": {"name": "jevgate_check", "arguments": {}, "_meta": {"progressToken": token}}})
+}
+
+/// The reply to request `id`, and the notifications sent after the reply
+/// before it.
+fn reply_to(messages: &[Value], id: u64) -> (&Value, Vec<&Value>) {
+    let at = messages.iter().position(|m| m["id"] == id).unwrap();
+    let mut before: Vec<&Value> = messages[..at]
+        .iter()
+        .rev()
+        .take_while(|m| m.get("id").is_none())
+        .collect();
+    before.reverse();
+    (&messages[at], before)
 }
 
 /// Write a clear answer to every first-pass request a dry run plans into
@@ -110,7 +124,7 @@ fn clear(question: &Value) -> Value {
 }
 
 #[test]
-fn mcp_returns_structured_results() {
+fn mcp_returns_structured_results_and_reports_a_checks_progress() {
     let project = Project::new();
     std::fs::write(project.0.join("app.py"), APP).unwrap();
     let cached = cache_clear_answers(&project);
@@ -122,19 +136,19 @@ fn mcp_returns_structured_results() {
             json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
             call(3, "jevgate_check", json!({"dry_run": true})),
-            call(4, "jevgate_check", json!({})),
+            check_with_progress(4, json!("p4")),
             call(5, "jevgate_findings", json!({"max_verify": 0})),
             call(6, "jevgate_findings", json!({"max_findings": 0})),
             call(7, "no_such_tool", json!({})),
         ],
     );
-    let init = reply_to(&messages, 1);
+    let (init, _) = reply_to(&messages, 1);
     assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
-    let list = reply_to(&messages, 2);
+    let (list, _) = reply_to(&messages, 2);
     for tool in list["result"]["tools"].as_array().unwrap() {
         assert_eq!(tool["outputSchema"]["type"], "object", "{}", tool["name"]);
     }
-    let dry = reply_to(&messages, 3);
+    let (dry, _) = reply_to(&messages, 3);
     let dry = &dry["result"];
     assert_eq!(dry["isError"], false);
     assert_eq!(dry["structuredContent"]["dry_run"], true);
@@ -146,7 +160,7 @@ fn mcp_returns_structured_results() {
     let text = dry["content"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("JevGate: dry run · 1 files"), "{text}");
     assert!(text.ends_with("(dry run: nothing was sent)"));
-    let check = reply_to(&messages, 4);
+    let (check, progress) = reply_to(&messages, 4);
     let result = &check["result"];
     assert_eq!(result["isError"], false, "{result}");
     let structured = &result["structuredContent"];
@@ -158,7 +172,19 @@ fn mcp_returns_structured_results() {
     let text = result["content"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("JevGate: clear · gate passed"), "{text}");
     assert!(text.ends_with("(exit 0: the gate passed)"));
-    let findings = reply_to(&messages, 5);
+    // Progress before the reply: the start, then the answered first pass.
+    let steps: Vec<(&Value, &Value)> = progress
+        .iter()
+        .map(|n| {
+            assert_eq!(n["method"], "notifications/progress");
+            (&n["params"]["progressToken"], &n["params"]["progress"])
+        })
+        .collect();
+    assert_eq!(
+        steps,
+        [(&json!("p4"), &json!(0)), (&json!("p4"), &json!(cached))]
+    );
+    let (findings, _) = reply_to(&messages, 5);
     let last = &findings["result"]["structuredContent"];
     assert_eq!(last["headline"], structured["headline"], "the same report");
     assert_eq!(
@@ -166,7 +192,7 @@ fn mcp_returns_structured_results() {
         last.to_string(),
         "the text is the structured result as JSON"
     );
-    let refused = reply_to(&messages, 6);
+    let (refused, _) = reply_to(&messages, 6);
     assert_eq!(refused["result"]["isError"], true);
     assert!(
         refused["result"]["content"][0]["text"]
@@ -174,7 +200,7 @@ fn mcp_returns_structured_results() {
             .unwrap()
             .contains("`max_findings` must be a whole number from 1 to 200")
     );
-    let unknown = reply_to(&messages, 7);
+    let (unknown, _) = reply_to(&messages, 7);
     assert_eq!(unknown["error"]["code"], -32602);
 }
 
@@ -185,11 +211,13 @@ fn mcp_reports_an_incomplete_check_as_an_error_that_says_why() {
     let messages = session(
         project.command(),
         &[
-            call(1, "jevgate_check", json!({})),
+            check_with_progress(1, json!(7)),
             call(2, "jevgate_check", json!({"base": "no-such-revision"})),
         ],
     );
-    let check = reply_to(&messages, 1);
+    let (check, progress) = reply_to(&messages, 1);
+    assert_eq!(progress.len(), 1, "the start; no request was answered");
+    assert_eq!(progress[0]["params"]["progressToken"], 7);
     let result = &check["result"];
     assert_eq!(result["isError"], true, "exit 2 is never a pass");
     let structured = &result["structuredContent"];
@@ -205,7 +233,7 @@ fn mcp_reports_an_incomplete_check_as_an_error_that_says_why() {
     let text = result["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("\nFailed 1: No API key configured"), "{text}");
     assert!(text.ends_with("this is not a pass)"), "{text}");
-    let base = reply_to(&messages, 2);
+    let (base, _) = reply_to(&messages, 2);
     assert_eq!(base["result"]["isError"], true);
     assert!(
         base["result"]["content"][0]["text"]
@@ -238,7 +266,8 @@ fn a_run_stopped_by_exhausted_credits_says_why_in_the_agent_text_and_to_the_agen
     assert!(agent.contains(reason), "{agent}");
     assert!(!agent.contains("private"), "{agent}");
     let messages = session(run(), &[call(1, "jevgate_check", json!({}))]);
-    let result = &reply_to(&messages, 1)["result"];
+    let (reply, _) = reply_to(&messages, 1);
+    let result = &reply["result"];
     assert_eq!(result["isError"], true);
     assert!(
         result["content"][0]["text"]

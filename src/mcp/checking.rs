@@ -1,15 +1,15 @@
 //! Running `jevgate check` for a tool call: its arguments, its report
 //! snapshots read as the child publishes them (`--format jsonl` prints one
-//! at the start and after each stage), and the tool result a finished check
-//! becomes. The last snapshot is the report, so the text and the structured
-//! result come from the same one.
+//! at the start and after each stage), the progress they show, and the tool
+//! result a finished check becomes. The last snapshot is the report, so the
+//! text and the structured result come from the same one.
 use super::{
     Outcome,
     results::{Selection, structured},
 };
 use crate::{output, schema::Report};
 use anyhow::{Context, Result};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read},
     process::{Command, Stdio},
@@ -65,8 +65,8 @@ pub(super) struct Finished {
     code: Option<i32>,
 }
 
-/// Run the check to its end.
-pub(super) fn run(command: &mut Command) -> Result<Finished> {
+/// Run the check, calling `snapshot` with each report it publishes.
+pub(super) fn run(command: &mut Command, snapshot: &mut dyn FnMut(&Report)) -> Result<Finished> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -87,7 +87,7 @@ pub(super) fn run(command: &mut Command) -> Result<Finished> {
         .stdout
         .take()
         .context("No stdout from jevgate check")?;
-    let report = last_snapshot(BufReader::new(stdout));
+    let report = last_snapshot(BufReader::new(stdout), snapshot);
     let status = child.wait().context("jevgate check did not finish")?;
     Ok(Finished {
         report,
@@ -96,15 +96,18 @@ pub(super) fn run(command: &mut Command) -> Result<Finished> {
     })
 }
 
-/// The last report of a stream of snapshots, one per line. A line that is
-/// not a report counts as none: the last line decides. The stream is
-/// dropped on return, so a child still writing after a read error gets a
-/// closed pipe instead of waiting.
-fn last_snapshot(mut lines: impl BufRead) -> Option<Report> {
+/// The last report of a stream of snapshots, one per line, calling
+/// `snapshot` with each. A line that is not a report counts as none: the
+/// last line decides. The stream is dropped on return, so a child still
+/// writing after a read error gets a closed pipe instead of waiting.
+fn last_snapshot(mut lines: impl BufRead, snapshot: &mut dyn FnMut(&Report)) -> Option<Report> {
     let mut line = Vec::new();
     let mut report = None;
     while lines.read_until(b'\n', &mut line).unwrap_or(0) > 0 {
         report = serde_json::from_slice::<Report>(&line).ok();
+        if let Some(report) = &report {
+            snapshot(report);
+        }
         line.clear();
     }
     report
@@ -152,10 +155,49 @@ impl Finished {
     }
 }
 
+/// Progress notifications for one call, sent for each snapshot whose
+/// answered requests grew, since a notification's progress must increase.
+pub(super) struct Progress {
+    token: Value,
+    answered: Option<u64>,
+}
+
+impl Progress {
+    pub(super) fn new(token: Value) -> Self {
+        Self {
+            token,
+            answered: None,
+        }
+    }
+
+    pub(super) fn notification(&mut self, report: &Report) -> Option<Value> {
+        let stages = report.stages.values();
+        let cached: u64 = stages.clone().map(|s| s.cache_hits).sum();
+        let answered = cached + stages.map(|s| s.successful_requests).sum::<u64>();
+        if self.answered.is_some_and(|last| answered <= last) {
+            return None;
+        }
+        self.answered = Some(answered);
+        let cost = report
+            .estimated_usd
+            .map_or(String::new(), |usd| format!(", ~${usd:.4} so far"));
+        let files = output::count(report.files.len(), "file");
+        Some(json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/progress",
+            "params": {
+                "progressToken": self.token,
+                "progress": answered,
+                "message": format!("{files}: {answered} requests answered, {cached} from the cache{cost}"),
+            },
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::schema::StageMetrics;
 
     #[test]
     fn tool_arguments_never_become_flags() {
@@ -182,6 +224,35 @@ mod tests {
             ]
         );
         assert!(arguments(&json!({"paths": "src"})).is_err());
+    }
+
+    #[test]
+    fn progress_is_sent_only_when_more_requests_are_answered() {
+        let project = crate::tests::Project::new();
+        project.write("a.rs", &crate::tests::function("a"));
+        let (_, mut report) = crate::tests::snapshot(&project, &crate::tests::args());
+        let mut progress = Progress::new(json!("t1"));
+        let first = progress.notification(&report).unwrap();
+        assert_eq!(first["method"], "notifications/progress");
+        assert_eq!(first["params"]["progressToken"], "t1");
+        assert_eq!(first["params"]["progress"], 0);
+        assert!(progress.notification(&report).is_none(), "nothing new");
+        report.stages.insert(
+            "functions".into(),
+            StageMetrics {
+                cache_hits: 3,
+                successful_requests: 2,
+                ..Default::default()
+            },
+        );
+        // 50,000 paid input tokens at $0.042 a million.
+        report.estimated_usd = Some(0.0021);
+        let later = progress.notification(&report).unwrap();
+        assert_eq!(later["params"]["progress"], 5);
+        assert_eq!(
+            later["params"]["message"],
+            "1 file: 5 requests answered, 3 from the cache, ~$0.0021 so far"
+        );
     }
 
     #[test]

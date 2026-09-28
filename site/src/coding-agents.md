@@ -92,6 +92,8 @@ Each tool returns a structured result, described by its output schema, and text 
 
 A verify item is not a finding and never fails the gate: it is a question Jev could not settle about one unit. It holds the question as it was asked, the evidence the question named (such as `functions[0].source`, the unit's code at its location), and each likely answer with what it means and its probability. Read the code there and change it only if you agree it should change. This follows TypeSafe's confidence-routing pattern: a case the classifier leaves open goes to a stronger reasoner, with the question and its evidence.
 
+A call that carries a progress token (`_meta.progressToken`) gets a progress notification when the check starts and after each stage that answers requests, such as `42 files: 340 requests answered, 290 from the cache, ~$0.0021 so far`, so a long first check never looks idle.
+
 ## Structured output
 
 `--format json` prints the full report: every file, finding, raw answer and probability, and the gate. The same report is always written to `.jevgate/latest.json`, whatever the output format, so an agent can run the check once and read the details after. `jevgate check --help` explains its fields.
