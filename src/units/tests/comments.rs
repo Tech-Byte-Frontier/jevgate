@@ -145,7 +145,7 @@ fn a_single_short_comment_is_a_note_and_a_narrated_edit_is_rewritten() {
 fn an_undecided_comment_is_rechecked_then_settled_by_its_kind() {
     let source = "fn total(values: &[i32]) -> i32 {\n    let mut sum = 0;\n    // Walk the values\n    // one by one.\n    for value in values {\n        sum += value;\n    }\n    sum\n}\n";
     let (project, options) = rule_project(source, catalog::COMMENTS);
-    let mut eval = scripted(3);
+    let mut eval = scripted(UNDECIDED);
     let report = run(&project, &options, &mut eval);
     assert_eq!(eval.stages, ["first", "recheck", "first"], "then the kind");
     // The scripted kind picks the first option, a kind that tells the

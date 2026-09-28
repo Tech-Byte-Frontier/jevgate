@@ -145,6 +145,10 @@ fn is_recheck(request: &Value) -> bool {
         || request["state"]["file"]["source"].is_string()
 }
 
+/// The scripted level that spreads every answer's probability, so each unit
+/// stays undecided (see `crate::tests::answer`).
+const UNDECIDED: usize = 3;
+
 fn scripted(level: usize) -> Scripted {
     Scripted {
         level,
@@ -159,7 +163,7 @@ fn scripted(level: usize) -> Scripted {
 fn run_rechecked(project: &Project, rule: &str, level: usize) -> (CheckArgs, Report) {
     let mut options = args();
     only(&mut options, rule);
-    let mut eval = scripted(3);
+    let mut eval = scripted(UNDECIDED);
     eval.recheck_level = Some(level);
     let report = run(project, &options, &mut eval);
     (options, report)
