@@ -16,6 +16,15 @@ Below 20 labels a cell gives the counts without a percentage: a few more labels 
 - **Unseen and tuned projects.** The unseen projects are 11 held out from the start and 14 added later, none used to tune the rules (listed below). The tuned projects are the other labeled projects, without Bend 2 code, which the table leaves out. Only unseen numbers decide what fails the check.
 - **Examples.** The wrong findings on the rule pages come from open-source projects used for tuning only: explaining why an unseen project's findings were wrong would be tuning on it.
 
+## A third set: 27 public projects
+
+After this release's table was measured, function simplification ran alone on 27 public projects JevGate had never run, three per supported language except Bend 2 (from xh, requests and axios to Dapper, Puma and HikariCP), chosen by language, size and price before any was run. The test asked whether considers on long functions could be a third mature level, with the rule fixed before any finding was read: 80 or more lines (or 50 or more with a split answer's top level of at least 0.55) had to be right at least 75% of the time on these projects and 80% on all unseen ones. Seven labeling agents labeled 311 findings with one brief and the labeling guide, seeing neither the band nor the probabilities.
+
+- **Function-simplification reviews held: right 80 of 93 times (86%)** on functions of 50 lines or more, against 20 of 23 in the table; the 21 reviews on shorter functions were not labeled. This supports failing the check on them by default.
+- **Considers did not.** On functions of 80 lines or more they were right 81 of 132 times (61%), and 68% pooled with the earlier unseen projects; outside both bands, 6 of 30 sampled considers were right. The whole consider level on these projects was right about 42% of the time, against the table's 67%, which leans on the maintainer's own repositories (78% right there, 65% on public projects): read a function-simplification consider's share as an upper bound.
+
+These labels are not in the table: the reviews and considers labeled were chosen by the length of their functions, not drawn from all findings.
+
 ## Why tuned numbers are higher
 
 Each release changed questions and composition until wrong findings on the tuned projects went away; the [changelog](changelog.md) records each change with its numbers. A change that removes one project's wrong findings need not carry over to code nobody looked at, which is why the tuned column overstates what a new project sees. The tuned projects also hold 8 of the 9 intentionally vulnerable applications, where security findings are right far more often: on the tuned projects, injection reviews were right 76 of 83 times in those applications and 5 of 13 times in the others.
