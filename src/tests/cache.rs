@@ -256,14 +256,21 @@ fn refresh_asks_every_question_and_cache_only_needs_every_answer() {
     assert_eq!(asked(&mock)[1].len(), 3);
 }
 
-#[test]
-fn alias_answers_expire_one_by_one_and_keep_their_age_when_carried() {
-    let project = Project::new();
+/// Options asking an alias, whose answers expire after an hour, and
+/// `three_questions` asked of it.
+fn alias() -> (CheckArgs, Value) {
     let mut options = args();
     options.model = Some("jev-latest".into());
     options.cache_ttl_secs = Some(3600);
     let mut request = three_questions();
     request["model"] = json!("jev-latest");
+    (options, request)
+}
+
+#[test]
+fn alias_answers_expire_one_by_one_and_keep_their_age_when_carried() {
+    let project = Project::new();
+    let (mut options, request) = alias();
     save_whole(&project, &request, schema::now() - 7200);
     let mut mock = Mock::default();
     ask(&project, &options, &mut mock, &[&request]);
@@ -284,11 +291,7 @@ fn alias_answers_expire_one_by_one_and_keep_their_age_when_carried() {
 #[test]
 fn an_alias_answer_that_expires_in_a_session_is_asked_once_and_replaced() {
     let project = Project::new();
-    let mut options = args();
-    options.model = Some("jev-latest".into());
-    options.cache_ttl_secs = Some(3600);
-    let mut request = three_questions();
-    request["model"] = json!("jev-latest");
+    let (options, request) = alias();
     let context = project.context();
     let store = storage::Store::open(&project.0).unwrap();
     let mut shifting = Shifting::default();

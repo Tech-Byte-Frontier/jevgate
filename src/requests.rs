@@ -230,6 +230,22 @@ pub(super) struct Billed {
     output_tokens: u64,
 }
 
+impl Billed {
+    /// What the provider's `body` says was billed. A model name that fails
+    /// validation is billed to "unknown", which has no price.
+    fn of(body: &Value) -> Self {
+        let model = body["model"]
+            .as_str()
+            .filter(|name| crate::model::valid_name(name))
+            .unwrap_or("unknown");
+        Self {
+            model: model.to_owned(),
+            input_tokens: response::input_tokens(body),
+            output_tokens: response::output_tokens(body),
+        }
+    }
+}
+
 /// What this invocation's requests were billed, and by which models.
 #[derive(Default)]
 pub struct Usage {
@@ -267,9 +283,9 @@ impl Usage {
 }
 
 /// Record one outcome of sending `sent`, the unanswered questions of `lookup`'s
-/// request: timing, token usage, and the validated answers saved to the cache
-/// and joined with the cached ones. Returns what an answered request was
-/// billed, even when its answers failed validation.
+/// request: timing, token usage, and the answers [`receive`] takes from it.
+/// Returns what an answered request was billed, even when its answers failed
+/// validation.
 fn record(
     store: &crate::storage::Store,
     answered: &mut Answered,
@@ -285,30 +301,14 @@ fn record(
     } else {
         0
     };
-    let mut billed = None;
-    receipt.result = outcome.result.and_then(|body| {
-        let input_tokens = response::input_tokens(&body);
-        let output_tokens = response::output_tokens(&body);
-        receipt.metrics.input_tokens += input_tokens.unwrap_or(0);
-        receipt.metrics.output_tokens += output_tokens;
-        // A name that fails validation is billed to "unknown", which has no price.
-        let model = body["model"]
-            .as_str()
-            .filter(|name| crate::model::valid_name(name))
-            .unwrap_or("unknown");
-        billed = Some(Billed {
-            model: model.to_owned(),
-            input_tokens,
-            output_tokens,
-        });
-        response::validate(&body, sent)?;
-        let cached = lookup.found.len() as u64;
-        let timestamp = lookup.keep(store, answered, sent, &body)?;
-        receipt.metrics.evaluated_judgments += 1;
-        receipt.metrics.asked_questions = question_count(sent);
-        receipt.metrics.cached_questions = cached;
-        Ok((lookup.body(sent).0, timestamp, false))
-    });
+    let billed = outcome.result.as_ref().ok().map(Billed::of);
+    if let Some(bill) = &billed {
+        receipt.metrics.input_tokens += bill.input_tokens.unwrap_or(0);
+        receipt.metrics.output_tokens += bill.output_tokens;
+    }
+    receipt.result = outcome
+        .result
+        .and_then(|body| receive((store, answered), sent, lookup, &body, &mut receipt.metrics));
     receipt.metrics.retries = u64::from(outcome.retries);
     if outcome.attempted {
         if receipt.result.is_ok() {
@@ -318,6 +318,26 @@ fn record(
         }
     }
     billed
+}
+
+/// Take the provider's `body` answering `sent`: validate it, keep its
+/// answers in the cache, and return them joined with the cached ones, as
+/// the planned request's answers, with when they were given. `metrics`
+/// counts the questions asked and those the cache answered.
+fn receive(
+    (store, answered): (&crate::storage::Store, &mut Answered),
+    sent: &Value,
+    lookup: &mut Lookup,
+    body: &Value,
+    metrics: &mut schema::StageMetrics,
+) -> Result<(Value, u64, bool)> {
+    response::validate(body, sent)?;
+    let cached = lookup.found.len() as u64;
+    let timestamp = lookup.keep(store, answered, sent, body)?;
+    metrics.evaluated_judgments += 1;
+    metrics.asked_questions = question_count(sent);
+    metrics.cached_questions = cached;
+    Ok((lookup.body(sent).0, timestamp, false))
 }
 
 pub(super) fn require_current(
