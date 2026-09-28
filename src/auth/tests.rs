@@ -174,14 +174,37 @@ fn keyring_only_mode_never_falls_back_and_partial_logout_is_reported() {
     assert!(!saved.path.exists());
 }
 
-/// The first key a check finds with `environment` set and `file` as its
-/// credential file; the saved key's provider is Vercel.
-fn located(environment: &[(Provider, &str)], file: CredentialFile<'_>) -> Result<Located> {
+/// What `jevgate auth login` saved, as a check finds it before reading the
+/// key: the provider recorded beside it, and the provider a key saved before
+/// 0.26, which recorded none, turns out to have when the store is read.
+#[derive(Clone, Copy, Default)]
+struct Saved {
+    recorded: Option<Provider>,
+    stored: Option<Provider>,
+}
+
+/// The first key a check finds with `environment` set, `file` as its
+/// credential file and `saved` saved; `read` notes whether the credential
+/// store was read.
+fn located_with(
+    environment: &[(Provider, &str)],
+    file: CredentialFile<'_>,
+    saved: Saved,
+    read: &Cell<bool>,
+) -> Result<Located> {
     let environment = environment
         .iter()
         .map(|(provider, value)| (*provider, value.to_string()))
         .collect();
-    sources::locate(environment, file, || Provider::Vercel)
+    sources::locate(environment, file, saved.recorded, || {
+        read.set(true);
+        saved.stored
+    })
+}
+
+/// The first key a check finds when no key is saved.
+fn located(environment: &[(Provider, &str)], file: CredentialFile<'_>) -> Result<Located> {
+    located_with(environment, file, Saved::default(), &Cell::new(false))
 }
 
 /// The found key's provider, value and source.
@@ -197,7 +220,7 @@ fn found(located: Result<Located>) -> (Provider, String, String) {
 }
 
 #[test]
-fn keys_are_read_from_the_environment_then_the_credential_file_then_the_saved_key() {
+fn a_gateways_variable_is_read_after_every_key_given_to_jevgate() {
     let project = crate::tests::Project::new();
     let path = project.0.join(".env");
     let repository = CredentialFile {
@@ -208,50 +231,93 @@ fn keys_are_read_from_the_environment_then_the_credential_file_then_the_saved_ke
         path: &path,
         explicit: true,
     };
+    let gateways = [
+        (Provider::Openrouter, "sk-or-environment"),
+        (Provider::Vercel, "vck_environment"),
+    ];
     project.write(
         ".env",
         "OPENROUTER_API_KEY=sk-or-file\nTYPESAFE_API_KEY=file-key\n",
     );
-    let everything = [
-        (Provider::Openrouter, "sk-or-environment"),
-        (Provider::Vercel, "vck_environment"),
-    ];
-    let (provider, value, source) = found(located(&everything, repository));
+    let everything = [(Provider::Typesafe, "environment-key"), gateways[0]];
+    let (provider, value, source) = found(located(&everything, selected));
     assert_eq!(
-        (provider, value.as_str()),
-        (Provider::Openrouter, "sk-or-environment")
+        (provider, value.as_str(), source.as_str()),
+        (
+            Provider::Typesafe,
+            "environment-key",
+            "TYPESAFE_API_KEY environment variable"
+        )
     );
-    assert_eq!(source, "OPENROUTER_API_KEY environment variable");
-    let (provider, value, _) = found(located(&[], selected));
-    assert_eq!(
-        (provider, value.as_str()),
-        (Provider::Typesafe, "file-key"),
-        "TypeSafe's key comes first in a file too"
-    );
+    for file in [repository, selected] {
+        let (provider, value, _) = found(located(&gateways, file));
+        assert_eq!(
+            (provider, value.as_str()),
+            (Provider::Typesafe, "file-key"),
+            "the credential file's TypeSafe key comes before a gateway's variable"
+        );
+    }
     project.write(
         ".env",
         "TYPESAFE_API_KEY=\nOPENROUTER_API_KEY=sk-or-file\nAI_GATEWAY_API_KEY=''\nUNRELATED=keep-me\n",
     );
-    let (provider, value, source) = found(located(&[], selected));
+    let (provider, value, source) = found(located(&gateways[1..], selected));
     assert_eq!(
         (provider, value.as_str()),
         (Provider::Openrouter, "sk-or-file")
     );
     assert!(source.starts_with("--env-file:") && source.ends_with("(OPENROUTER_API_KEY)"));
-    let (provider, _, source) = found(located(&[], repository));
+    let (provider, value, source) = found(located(&gateways, repository));
     assert_eq!(
-        (provider, source.as_str()),
-        (Provider::Vercel, "saved"),
-        "the repository .env is read only for TYPESAFE_API_KEY"
+        (provider, value.as_str(), source.as_str()),
+        (
+            Provider::Openrouter,
+            "sk-or-environment",
+            "OPENROUTER_API_KEY environment variable"
+        ),
+        "the repository .env is read only for TYPESAFE_API_KEY, and nothing is saved"
     );
     project.write(".env", "UNRELATED=keep-me\n");
     assert!(
-        located(&[], selected).is_err(),
+        located(&gateways, selected).is_err(),
         "a selected file must hold a key"
     );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         "UNRELATED=keep-me\n"
+    );
+}
+
+#[test]
+fn the_saved_key_comes_before_a_gateways_variable_and_the_store_is_read_only_to_decide_that() {
+    let project = crate::tests::Project::new();
+    let path = project.0.join("absent.env");
+    let file = CredentialFile {
+        path: &path,
+        explicit: false,
+    };
+    let gateway = [(Provider::Openrouter, "sk-or-environment")];
+    let recorded = Saved {
+        recorded: Some(Provider::Vercel),
+        stored: None,
+    };
+    let before_0_26 = Saved {
+        recorded: None,
+        stored: Some(Provider::Typesafe),
+    };
+    for (saved, reads_the_store) in [(recorded, false), (before_0_26, true)] {
+        let read = Cell::new(false);
+        let (provider, _, source) = found(located_with(&gateway, file, saved, &read));
+        assert_eq!(source, "saved");
+        assert_eq!(Some(provider), saved.recorded.or(saved.stored));
+        assert_eq!(read.get(), reads_the_store);
+    }
+    let read = Cell::new(false);
+    let (provider, _, source) = found(located_with(&[], file, before_0_26, &read));
+    assert_eq!(
+        (provider, source.as_str(), read.get()),
+        (Provider::Typesafe, "saved", false),
+        "without a gateway's variable, a key saved before 0.26 is TypeSafe's, as it was then"
     );
 }
 

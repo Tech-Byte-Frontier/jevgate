@@ -6,12 +6,13 @@ use clap::{Subcommand, ValueEnum};
 pub enum JevCommand {
     /// Save, inspect or remove your API key: TypeSafe, OpenRouter or Vercel AI Gateway
     ///
-    /// A check uses the first key it finds: TYPESAFE_API_KEY, OPENROUTER_API_KEY
-    /// or AI_GATEWAY_API_KEY in the environment, in that order; then the file
-    /// named by `check --env-file` (the same names), else TYPESAFE_API_KEY in
-    /// the repository's `.env`; then the key saved by `jevgate auth login`.
-    /// The key goes only to its own provider. In CI, set one variable from a
-    /// secret; nothing needs to be saved.
+    /// A check uses the first key it finds: TYPESAFE_API_KEY in the
+    /// environment; then the file named by `check --env-file` (TYPESAFE_API_KEY,
+    /// OPENROUTER_API_KEY or AI_GATEWAY_API_KEY), else TYPESAFE_API_KEY in the
+    /// repository's `.env`; then the key saved by `jevgate auth login`; then
+    /// OPENROUTER_API_KEY or AI_GATEWAY_API_KEY in the environment, which
+    /// other tools read too. The key goes only to its own provider. In CI, set
+    /// one variable from a secret; nothing needs to be saved.
     #[command(after_long_help = AUTH_EXAMPLES)]
     Auth {
         #[command(subcommand)]
@@ -215,9 +216,9 @@ Files (at the repository root):
   .jevgate/report.html    HTML dashboard, with --report
 
 Environment:
-  TYPESAFE_API_KEY          A TypeSafe key; wins over the keys below and every saved credential
-  OPENROUTER_API_KEY        An OpenRouter key, used when TYPESAFE_API_KEY is not set
-  AI_GATEWAY_API_KEY        A Vercel AI Gateway key, used when neither is set
+  TYPESAFE_API_KEY          A TypeSafe key; wins over --env-file, .env and the saved key
+  OPENROUTER_API_KEY        An OpenRouter key, used when no key comes from those
+  AI_GATEWAY_API_KEY        A Vercel AI Gateway key, used when neither comes first
   JEVGATE_BASE_URL          Send requests to this API root instead (https, or http to localhost),
                             for a self-hosted proxy; never read from jevgate.toml or .env
   JEVGATE_CREDENTIAL_STORE  Where `auth login` saves: auto, keyring or file

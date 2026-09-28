@@ -1,5 +1,6 @@
-//! Where a check finds its key: the environment, then a credential file, then
-//! the key saved by `jevgate auth login`. The first key found is used, and it
+//! Where a check finds its key: TYPESAFE_API_KEY in the environment, then a
+//! credential file, then the key saved by `jevgate auth login`, then a
+//! gateway's variable in the environment. The first key found is used, and it
 //! goes only to the provider that issued it.
 use super::{
     secret::Secret,
@@ -7,7 +8,7 @@ use super::{
 };
 use crate::provider::Provider;
 use anyhow::{Context, Result, bail, ensure};
-use std::{io::Read, path::Path};
+use std::{cell::OnceCell, io::Read, path::Path};
 
 pub struct Credential {
     pub key: Secret,
@@ -84,10 +85,12 @@ impl CredentialFile<'_> {
     }
 }
 
-/// Where the key a check will use is, found without reading the saved key.
+/// Where the key a check will use is, found without reading the saved key
+/// where its provider is recorded.
 pub enum Located {
     Key(Credential),
-    /// The key saved by `jevgate auth login`, of the provider recorded beside it.
+    /// The key saved by `jevgate auth login`, of the provider recorded beside
+    /// it; a key saved before 0.26 recorded none and was TypeSafe's.
     Saved(Provider),
 }
 
@@ -120,16 +123,29 @@ fn environment_source(provider: Provider) -> String {
     format!("{} environment variable", provider.service().variable)
 }
 
-/// The first key in a check's order: the environment's, then the credential
-/// file's; else the saved key, whose provider `saved` gives.
+/// Whether a key in the environment is read before the credential file and
+/// the saved key: only TypeSafe's. Other tools read OPENROUTER_API_KEY and
+/// AI_GATEWAY_API_KEY too, so one exported for them is read last: it must not
+/// move a check off the key it was given, to another account's credits,
+/// another data processor and a model name no cached answer was asked with.
+fn read_first((provider, _): &(Provider, String)) -> bool {
+    *provider == Provider::Typesafe
+}
+
+/// The first key in a check's order: TYPESAFE_API_KEY in the environment,
+/// the credential file's keys, the saved key, then the gateways' variables.
+/// `recorded` is the provider recorded beside the saved key; `stored` reads
+/// the provider of a key saved before 0.26, which recorded none, and is
+/// called only when a gateway's variable would otherwise be used.
 pub fn locate(
     environment: Vec<(Provider, String)>,
     file: CredentialFile<'_>,
-    saved: impl FnOnce() -> Provider,
+    recorded: Option<Provider>,
+    stored: impl FnOnce() -> Option<Provider>,
 ) -> Result<Located> {
-    if let Some((provider, value)) = environment.into_iter().next() {
-        let key = Secret::parse(value)?;
-        return credential(provider, key, environment_source(provider)).map(Located::Key);
+    let (first, last): (Vec<_>, Vec<_>) = environment.into_iter().partition(read_first);
+    if let Some(found) = first.into_iter().next() {
+        return environment_key(found);
     }
     if let Some((provider, key)) = file.keys()?.into_iter().next() {
         return credential(provider, key, file.source(provider)).map(Located::Key);
@@ -138,7 +154,18 @@ pub fn locate(
         !file.explicit,
         "Selected --env-file is missing or has no TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY; correct the path or run jevgate auth login without --env-file"
     );
-    Ok(Located::Saved(saved()))
+    let Some(gateway) = last.into_iter().next() else {
+        return Ok(Located::Saved(recorded.unwrap_or_default()));
+    };
+    match recorded.or_else(stored) {
+        Some(provider) => Ok(Located::Saved(provider)),
+        None => environment_key(gateway),
+    }
+}
+
+fn environment_key((provider, value): (Provider, String)) -> Result<Located> {
+    let key = Secret::parse(value)?;
+    credential(provider, key, environment_source(provider)).map(Located::Key)
 }
 
 /// A key found for `provider`, unless its prefix shows another provider
@@ -169,36 +196,60 @@ pub fn refuse_foreign(provider: Provider, key: &Secret, holder: &str) -> Result<
     Ok(())
 }
 
-/// The provider recorded beside the saved key; TypeSafe when none is, as for
-/// keys saved before 0.26.
-fn recorded() -> Provider {
-    store::recorded_provider().unwrap_or_default()
+/// The key saved by `jevgate auth login`, from the store
+/// `JEVGATE_CREDENTIAL_STORE` names.
+fn read_saved() -> Result<Option<SavedKey>> {
+    SavedCredentials::<NativeBackend>::native(StorageMode::configured()?)?.get()
 }
 
-/// The provider of the key a check will use, found without reading the saved
-/// key, since a check's default model depends on it; TypeSafe when no key is
-/// found or its source cannot be read, which then fails where it is used.
+/// The provider of a key saved before 0.26, which recorded none beside it,
+/// read from the credential store; none when no key is saved or the store
+/// cannot be read, as in CI, where the system store needs a terminal.
+fn stored_provider() -> Option<Provider> {
+    read_saved().ok().flatten().map(|saved| saved.provider)
+}
+
+/// The provider of the key a check will use, since a check's default model
+/// depends on it: found without reading the credential store unless a
+/// gateway's variable is set and no provider is recorded. TypeSafe when no
+/// key is found or its source cannot be read, which then fails where it is
+/// used.
 pub fn planned_provider(path: &Path, explicit: bool) -> Provider {
     let file = CredentialFile { path, explicit };
     environment()
-        .and_then(|environment| locate(environment, file, recorded))
+        .and_then(|environment| {
+            locate(
+                environment,
+                file,
+                store::recorded_provider(),
+                stored_provider,
+            )
+        })
         .map_or(Provider::Typesafe, |located| located.provider())
 }
 
 /// The key a check uses; the saved key is read only when nothing before it
-/// holds one.
+/// holds one, and at most once.
 pub fn resolve(path: &Path, explicit: bool) -> Result<Credential> {
     let file = CredentialFile { path, explicit };
-    match locate(environment()?, file, recorded)? {
+    let read = OnceCell::new();
+    let stored = || {
+        read.get_or_init(read_saved)
+            .as_ref()
+            .ok()
+            .and_then(Option::as_ref)
+            .map(|saved| saved.provider)
+    };
+    match locate(environment()?, file, store::recorded_provider(), stored)? {
         Located::Key(credential) => Ok(credential),
         Located::Saved(provider) => saved(provider, file, || {
-            SavedCredentials::<NativeBackend>::native(StorageMode::configured()?)?.get()
+            read.into_inner().unwrap_or_else(read_saved)
         }),
     }
 }
 
-/// The saved key, which must be of the provider recorded beside it: a check
-/// planned its model for that provider.
+/// The saved key, which must be of the provider `recorded` beside it (or
+/// read from it): a check planned its model for that provider.
 pub fn saved(
     recorded: Provider,
     file: CredentialFile<'_>,
@@ -225,32 +276,37 @@ pub fn saved(
 /// The keys set besides the one a check uses, in the order a check reads them.
 pub fn unused(path: &Path, explicit: bool) -> Result<Vec<String>> {
     let file = CredentialFile { path, explicit };
-    let mut found: Vec<String> = environment()?
-        .into_iter()
-        .map(|(provider, _)| environment_source(provider))
-        .collect();
+    let (first, last): (Vec<_>, Vec<_>) = environment()?.into_iter().partition(read_first);
+    let source = |(provider, _): (Provider, String)| environment_source(provider);
+    let mut found: Vec<String> = first.into_iter().map(source).collect();
     found.extend(
         file.keys()?
             .into_iter()
             .map(|(provider, _)| file.source(provider)),
     );
-    if let Some(provider) = store::recorded_provider() {
+    let saved =
+        store::recorded_provider().or_else(|| (!last.is_empty()).then(stored_provider).flatten());
+    if let Some(provider) = saved {
         found.push(format!(
             "the {} key saved by jevgate auth login",
             provider.service().label
         ));
     }
+    found.extend(last.into_iter().map(source));
     Ok(found.into_iter().skip(1).collect())
 }
 
 /// The key that a check uses instead of the saved one, when there is one:
-/// an environment variable or the repository's `.env`.
+/// TYPESAFE_API_KEY in the environment or the repository's `.env`. A
+/// gateway's variable is read after the saved key, so it overrides nothing.
 pub fn override_source(path: &Path) -> Result<Option<String>> {
     let file = CredentialFile {
         path,
         explicit: false,
     };
-    Ok(match locate(environment()?, file, Provider::default)? {
+    // Located as if a key were saved, so only the keys read before it count.
+    let as_if_saved = Some(Provider::default());
+    Ok(match locate(environment()?, file, as_if_saved, || None)? {
         Located::Key(credential) => Some(credential.source),
         Located::Saved(_) => None,
     })

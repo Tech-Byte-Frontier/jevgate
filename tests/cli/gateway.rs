@@ -135,6 +135,71 @@ fn a_check_with_a_vercel_key_shows_the_gateway_and_an_unknown_cost() {
     );
 }
 
+/// A key saved as 0.25 saved it: the bare key in the owner-only file, with no
+/// provider recorded beside it.
+#[cfg(unix)]
+fn save_as_0_25(project: &Project, key: &str) {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let directory = project.0.join("isolated-auth");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .unwrap();
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(directory.join("credentials"))
+        .unwrap();
+    std::io::Write::write_all(&mut file, key.as_bytes()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_gateway_key_exported_for_other_tools_does_not_replace_the_key_given_to_jevgate() {
+    let project = Project::new();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+    std::fs::write(project.0.join("ts.env"), "TYPESAFE_API_KEY=file-key\n").unwrap();
+    save_as_0_25(&project, "saved-key");
+    for (args, key) in [
+        (&["--env-file", "ts.env"][..], "file-key"),
+        (&[], "saved-key"),
+    ] {
+        let provider =
+            MockProvider::start(|received| Reply::json(200, &answer(&received.json(), 0)));
+        let output = project
+            .command()
+            .args(["check", ".", "--refresh", "--format", "json"])
+            .args(args)
+            .env("OPENROUTER_API_KEY", "sk-or-v1-other-tool")
+            .env("JEVGATE_BASE_URL", &provider.url)
+            .output()
+            .unwrap();
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{errors}");
+        asked(&provider.received(), "/v1/systemone", key, "jev-1.13.0");
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["provider"], "typesafe", "{key}");
+    }
+    let status = project
+        .command()
+        .args(["auth", "status", "--offline", "--json"])
+        .env("OPENROUTER_API_KEY", "sk-or-v1-other-tool")
+        .output()
+        .unwrap();
+    let body: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert!(
+        body["source"]
+            .as_str()
+            .unwrap()
+            .starts_with("protected file:")
+    );
+    assert_eq!(
+        body["unused"],
+        json!(["OPENROUTER_API_KEY environment variable"])
+    );
+}
+
 #[test]
 fn the_repository_cannot_choose_where_keys_go() {
     let project = Project::new();

@@ -257,9 +257,10 @@ pub struct CheckArgs {
     pub cache_only: bool,
     /// Credential file holding TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY [default: <repository root>/.env]
     ///
-    /// Keys in the environment take precedence. The repository's .env is
-    /// read only for TYPESAFE_API_KEY: a gateway's key there is usually the
-    /// application's own.
+    /// TYPESAFE_API_KEY in the environment takes precedence; the file comes
+    /// before the saved key and a gateway's variable in the environment. The
+    /// repository's .env is read only for TYPESAFE_API_KEY: a gateway's key
+    /// there is usually the application's own.
     #[arg(long, value_name = "FILE", help_heading = BUDGETS)]
     pub env_file: Option<PathBuf>,
     /// Keep running and re-check the selected files after each save
