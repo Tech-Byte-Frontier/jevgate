@@ -143,19 +143,43 @@ pub(super) fn agent(
     Ok(())
 }
 
+/// What a dry run plans: first-pass requests, those the cache answers, and
+/// the estimated input tokens and dollars of the rest.
+#[derive(serde::Serialize)]
+pub(crate) struct Preview {
+    pub requests: u64,
+    pub cached: u64,
+    pub tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usd: Option<f64>,
+}
+
+pub(crate) fn preview(report: &Report) -> Preview {
+    let stages = report.stages.values();
+    let tokens = stages.clone().map(|s| s.planned_tokens).sum();
+    Preview {
+        requests: stages.clone().map(|s| s.planned_requests).sum(),
+        cached: stages.map(|s| s.planned_cached).sum(),
+        tokens,
+        usd: crate::model::usd(&report.requested_model, tokens),
+    }
+}
+
 /// Status, gate, scope and cost on one line; for a dry run, the planned
 /// requests and the cost of those the cache does not answer.
 pub(crate) fn headline(report: &Report) -> String {
     if report.dry_run {
-        let stages = report.stages.values();
-        let planned: u64 = stages.clone().map(|s| s.planned_requests).sum();
-        let cached: u64 = stages.clone().map(|s| s.planned_cached).sum();
-        let tokens: u64 = stages.map(|s| s.planned_tokens).sum();
-        let cost = cost(crate::model::usd(&report.requested_model, tokens));
+        let Preview {
+            requests,
+            cached,
+            tokens,
+            usd,
+        } = preview(report);
         return format!(
-            "JevGate: dry run · {} files{} · {planned} first-pass requests, {cached} answered by the cache · ~{tokens} new input tokens{cost}; follow-ups depend on the answers",
+            "JevGate: dry run · {} files{} · {requests} first-pass requests, {cached} answered by the cache · ~{tokens} new input tokens{}; follow-ups depend on the answers",
             report.files.len(),
-            since(report)
+            since(report),
+            cost(usd)
         );
     }
     let gate = match &report.gate {

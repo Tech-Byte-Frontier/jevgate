@@ -77,11 +77,20 @@ The second form is for clients configured with JSON, such as Cursor. The server 
 
 | Tool | What it does |
 |---|---|
-| `jevgate_check` | Runs `jevgate check` in the repository with `base`, `whole_files`, `paths`, `rules`, `include_tests`, `dry_run` or `verbose`, and returns the ranked findings. An incomplete run (exit 2) is a tool error, never a pass |
-| `jevgate_findings` | Reads the last report's findings, optionally under one path, without running anything |
+| `jevgate_check` | Runs `jevgate check` in the repository with `base`, `whole_files`, `paths`, `rules`, `include_tests`, `dry_run` or `verbose`, and returns the findings and verify items. An incomplete run (exit 2) is a tool error, never a pass |
+| `jevgate_findings` | Reads the last report's findings and verify items, optionally under one `path`, without running anything |
 | `jevgate_rules` | Lists every rule with the question it asks |
 
 A check runs as a child process with the repository's `jevgate.toml` and key, so the tool reviews exactly what the command line would.
+
+Each tool returns a structured result, described by its output schema, and text for clients that read only text: the agent text for `jevgate_check`, the same result as JSON for the others. Claude Code shows the model only the structured result, so it holds everything the text does:
+
+- `headline`, `status`, `complete`, `exit_code` and `gate`: what the run found and whether the gate passed.
+- `errors`: the run's errors, then one `Failed N: reason` line per reason files failed, such as a missing key or exhausted credit. `skipped`: why files were not judged, such as a syntax error in the file just edited.
+- `findings`: new findings before accepted ones and reviews before considers, each by rank, with its location, message, next step and probability, and its fingerprint as `id`, the id the baseline and the SARIF and GitLab reports use. At most `max_findings` (default 20); `total_findings` counts them all.
+- `verify`: the units Jev left undecided, highest concern first. At most `max_verify` (default 5; 0 leaves them out); `total_verify` counts them all.
+
+A verify item is not a finding and never fails the gate: it is a question Jev could not settle about one unit. It holds the question as it was asked, the evidence the question named (such as `functions[0].source`, the unit's code at its location), and each likely answer with what it means and its probability. Read the code there and change it only if you agree it should change. This follows TypeSafe's confidence-routing pattern: a case the classifier leaves open goes to a stronger reasoner, with the question and its evidence.
 
 ## Structured output
 
