@@ -71,8 +71,8 @@ impl Ask {
         !matches!(self, Self::Split { .. })
     }
 
-    /// Add its questions about `functions[index]` of a pack.
-    fn ask(
+    /// Add its questions about `functions[index]` of a pack to `questions`.
+    fn add_questions(
         &self,
         questions: &mut Questions,
         (index, state): (usize, &Value),
@@ -230,7 +230,7 @@ fn request(file: &FileContext<'_>, lane: &Value, pack: &[Entry], out: &FilePlan)
     let mut questions = Questions::default();
     for (index, entry) in pack.iter().enumerate() {
         for ask in &entry.asks {
-            ask.ask(&mut questions, (index, &entry.state), file, out);
+            ask.add_questions(&mut questions, (index, &entry.state), file, out);
         }
     }
     let state = json!({
