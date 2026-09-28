@@ -57,6 +57,9 @@ pub(crate) struct Language {
 struct Tests {
     /// File stems' endings, by case: `OrdersTest`, not `Contest`.
     stems: &'static [&'static str],
+    /// File stems' beginnings, in lower case: C's `test.c`, `testheap.c`
+    /// and `test-lib.c`.
+    prefixes: &'static [&'static str],
     /// File name endings, in lower case: `_spec.lua`, `.bats`.
     names: &'static [&'static str],
     /// Directory names, in lower case: busted's `spec`, Dart's `integration_test`.
@@ -69,16 +72,27 @@ struct Tests {
 impl Tests {
     const NONE: Tests = Tests {
         stems: &[],
+        prefixes: &[],
         names: &[],
         directories: &[],
         directory_ends: &[],
     };
 }
 
-/// Test classes named as JUnit, Kotest, ScalaTest and XCTest name them.
-const CLASS_TESTS: &[&str] = &["Test", "Tests", "Spec", "IT"];
+/// Test classes named as JUnit and XCTest name them, as Java's are. Kotest's
+/// and ScalaTest's `…Spec` and `…Suite` are found by their test directory:
+/// outside one, production code takes those names (Compose's
+/// `AnimationSpec`; kotlinconf-app's `AnimatedContentSpec` in `commonMain`).
+const CLASS_TESTS: &[&str] = &["Test", "Tests", "IT"];
 
 const C_LITERALS: &[&str] = &["string_content", "number_literal", "char_literal"];
+/// C and C++ tests named by their stem: `test.c`, `testheap.c` (beanstalkd),
+/// `test-lib.c` and `linenoise-test.c`, beside the shared `test_*.c`.
+const C_TESTS: Tests = Tests {
+    stems: &["-test", "-tests"],
+    prefixes: &["test"],
+    ..Tests::NONE
+};
 const C_CONTROL: &[&str] = &[
     "if_statement",
     "for_statement",
@@ -100,7 +114,7 @@ static LANGUAGES: [Language; 9] = [
         conditionals: &["if_statement"],
         clauses: &["else_clause"],
         literals: C_LITERALS,
-        tests: Tests::NONE,
+        tests: C_TESTS,
         query: OnceLock::new(),
     },
     Language {
@@ -129,10 +143,8 @@ static LANGUAGES: [Language; 9] = [
             "char_literal",
         ],
         tests: Tests {
-            stems: &["Test", "Tests"],
-            names: &["_unittest.cc", "_unittest.cpp"],
-            directories: &[],
-            directory_ends: &[],
+            stems: &["Test", "Tests", "-test", "-tests", "_unittest"],
+            ..C_TESTS
         },
         query: OnceLock::new(),
     },
@@ -161,9 +173,8 @@ static LANGUAGES: [Language; 9] = [
         ],
         tests: Tests {
             stems: CLASS_TESTS,
-            names: &[],
-            directories: &[],
             directory_ends: &["Test"],
+            ..Tests::NONE
         },
         query: OnceLock::new(),
     },
@@ -196,9 +207,8 @@ static LANGUAGES: [Language; 9] = [
         ],
         tests: Tests {
             stems: CLASS_TESTS,
-            names: &[],
-            directories: &[],
             directory_ends: &["Tests"],
+            ..Tests::NONE
         },
         query: OnceLock::new(),
     },
@@ -220,10 +230,8 @@ static LANGUAGES: [Language; 9] = [
         clauses: &["elif_clause", "else_clause"],
         literals: &["string_content", "raw_string", "ansi_c_string", "number"],
         tests: Tests {
-            stems: &[],
             names: &[".bats"],
-            directories: &[],
-            directory_ends: &[],
+            ..Tests::NONE
         },
         query: OnceLock::new(),
     },
@@ -256,10 +264,8 @@ static LANGUAGES: [Language; 9] = [
             "hex_integer_literal",
         ],
         tests: Tests {
-            stems: &[],
-            names: &[],
             directories: &["integration_test", "test_driver"],
-            directory_ends: &[],
+            ..Tests::NONE
         },
         query: OnceLock::new(),
     },
@@ -287,10 +293,8 @@ static LANGUAGES: [Language; 9] = [
             "character_literal",
         ],
         tests: Tests {
-            stems: &["Test", "Tests", "Spec", "Suite", "IT"],
-            names: &[],
-            directories: &[],
-            directory_ends: &[],
+            stems: CLASS_TESTS,
+            ..Tests::NONE
         },
         query: OnceLock::new(),
     },
@@ -327,10 +331,9 @@ static LANGUAGES: [Language; 9] = [
         clauses: &["elseif_statement", "else_statement"],
         literals: &["string_content", "number"],
         tests: Tests {
-            stems: &[],
             names: &["_spec.lua"],
             directories: &["spec"],
-            directory_ends: &[],
+            ..Tests::NONE
         },
         query: OnceLock::new(),
     },
@@ -374,7 +377,9 @@ pub(crate) fn test_path(path: &Path) -> bool {
             .any(|end| text.len() > end.len() && text.ends_with(end))
     };
     let directories = path.parent().into_iter().flat_map(Path::iter);
+    let lower_stem = stem.to_ascii_lowercase();
     ends(stem, tests.stems)
+        || tests.prefixes.iter().any(|p| lower_stem.starts_with(p))
         || ends(&name.to_ascii_lowercase(), tests.names)
         || directories.filter_map(|part| part.to_str()).any(|part| {
             tests

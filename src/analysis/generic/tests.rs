@@ -56,25 +56,32 @@ fn test_files_are_found_by_each_language_s_conventions() {
         "app/src/androidTest/kotlin/LoginTest.kt",
         "shared/src/commonTest/kotlin/Api.kt",
         "server/src/main/kotlin/OrdersTest.kt",
-        "server/src/main/kotlin/OrdersSpec.kt",
         "Tests/VaporTests/Utilities/Checkpoint.swift",
         "Sources/AppUITests/Launch.swift",
         "Sources/App/RouterTests.swift",
-        "core/src/main/scala/CartSuite.scala",
+        "core/src/main/scala/CartIT.scala",
         "spec/cart_spec.lua",
         "lua/cart_spec.lua",
         "integration_test/app.dart",
         "test/deploy.bats",
         "src/parser_unittest.cc",
+        "test.c",
+        "testheap.c",
+        "linenoise-test.c",
+        "src/Test.cpp",
     ] {
         assert!(test_path(Path::new(path)), "{path}");
     }
     for path in [
         "app/src/main/kotlin/Contest.kt",
         "app/src/latest/kotlin/Api.kt",
+        // Production code takes Kotest's and ScalaTest's names too.
+        "app/shared/src/commonMain/kotlin/utils/AnimatedContentSpec.kt",
+        "core/src/main/scala/CartSuite.scala",
         "Sources/Vapor/Test.swift",
         "lib/spectrum.lua",
         "src/unittest.c",
+        "src/latest.c",
         "src/app/OrdersTest.java",
         "scripts/deploy.sh",
     ] {
