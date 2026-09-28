@@ -360,6 +360,12 @@ impl CheckArgs {
         self.base.is_some() && !self.whole_files
     }
 
+    /// The snapshot of the working tree an agent's turn began with, in the
+    /// agent hook's checks of a turn: `base`, when `worktree_snapshot` is set.
+    pub fn turn_start(&self) -> Option<&str> {
+        self.worktree_snapshot.as_ref().and(self.base.as_deref())
+    }
+
     /// Whether any documentation rule is selected, so instruction files are found.
     pub fn documentation(&self) -> bool {
         crate::catalog::DOCUMENTATION

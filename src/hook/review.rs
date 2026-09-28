@@ -1,17 +1,25 @@
 //! One check inside the hook: the repository's configuration, the files the
 //! turn changed, and the gate's levels, run on a worker thread so the hook
-//! answers the agent by its deadline whatever the provider does.
+//! answers the agent by its deadline whatever the provider does. Within a
+//! turn, the check reads jevgate.toml, the baseline and `jevgate: allow`
+//! comments as they were when the turn began: accepting a finding or
+//! loosening the gate is the person's decision, so the agent's edits to
+//! them count from the next turn, and the person is told of each.
 use crate::{
     check,
-    config::ConfigContext,
+    config::{Config, ConfigContext},
+    guards::{self, Guard},
+    init::CONFIG_FILE,
     inventory,
     options::{CheckArgs, Format},
+    revision,
     schema::{Finding, Report, Status, Strength},
     storage,
     transport::Evaluator,
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     sync::{Arc, mpsc},
     time::{Duration, Instant},
@@ -20,6 +28,8 @@ use std::{
 /// How long a check waits for another JevGate process in the repository (a
 /// check, `--watch` or a hook of a parallel edit) to release the session lock.
 const LOCK_WAIT: Duration = Duration::from_secs(10);
+/// jevgate.toml is read up to this size, as the baseline is.
+const CONFIG_BYTES: u64 = crate::baseline::BASELINE_BYTES;
 const LOCK_POLL: Duration = Duration::from_millis(100);
 /// The `command` of the reports the hook's checks publish: a few files a
 /// turn changed, which `baseline` must not take for the repository's.
@@ -45,6 +55,17 @@ pub(super) struct Flagged {
     pub path: PathBuf,
     pub finding: Finding,
     pub fails: bool,
+    /// Accepted by a baseline entry or `jevgate: allow` comment the turn
+    /// added, which counts from the next turn.
+    pub accepted_this_turn: bool,
+}
+
+/// What one hook check found: the findings the agent may act on, and what
+/// the change does to the checks around the code.
+#[derive(Debug, Default)]
+pub(super) struct Checked {
+    pub flagged: Vec<Flagged>,
+    pub guards: Vec<Guard>,
 }
 
 /// Check `scope` and wait for it until `deadline`. The error says why the
@@ -54,7 +75,7 @@ pub(super) fn check(
     scope: Scope,
     evaluators: Arc<Evaluators>,
     deadline: Instant,
-) -> std::result::Result<Vec<Flagged>, String> {
+) -> std::result::Result<Checked, String> {
     let started = Instant::now();
     // The wait for the lock ends first, so its reason reaches the reply.
     let lock_until =
@@ -63,7 +84,7 @@ pub(super) fn check(
     // The thread is left behind at the deadline; the process exits after the
     // reply, and the answers it received are already in the cache.
     std::thread::spawn(move || {
-        let checked = run(&context, scope, evaluators.as_ref(), lock_until);
+        let checked = run(context, scope, evaluators.as_ref(), lock_until);
         let _ = sender.send(checked.map_err(|e| format!("{e:#}")));
     });
     match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -77,30 +98,72 @@ pub(super) fn check(
 }
 
 /// The check itself: what `jevgate check` does with the repository's
-/// configuration, less the output.
+/// configuration (as the turn began, within a turn), less the output.
 fn run(
-    context: &ConfigContext,
+    mut context: ConfigContext,
     scope: Scope,
     evaluators: &Evaluators,
     lock_until: Instant,
-) -> Result<Vec<Flagged>> {
-    let args = arguments(context, scope)?;
-    let paths = inventory::scope(&args, context)?;
-    let inputs = inventory::collect(&args, context, &paths)?;
+) -> Result<Checked> {
+    if let Some((start, _)) = &scope.trees {
+        context.config = configuration_at(&context.root, start)?;
+    }
+    let args = arguments(&context, scope)?;
+    let paths = inventory::scope(&args, &context)?;
+    let inputs = inventory::collect(&args, &context, &paths)?;
     if inputs.is_empty() {
-        // Nothing the rules judge changed: no report replaces the last one.
-        return Ok(Vec::new());
+        // Nothing the rules judge changed: no report replaces the last one,
+        // but an edit to jevgate.toml or the baseline is still a guard.
+        let guards = guards::scan(&context.root, &args, &context.config, &paths).guards;
+        return Ok(Checked {
+            flagged: Vec::new(),
+            guards,
+        });
     }
     let store = open_store(&context.root, lock_until)?;
-    let (previous, mut report) = check::first_snapshot(&args, context, &inputs);
+    let (previous, mut report) = check::first_snapshot(&args, &context, &inputs);
     report.command = REPORT_COMMAND.into();
-    let mut evaluator = evaluators(&args, context)?;
-    let mut session = check::session(&args, context, &store, evaluator.as_mut());
+    let mut evaluator = evaluators(&args, &context)?;
+    let mut session = check::session(&args, &context, &store, evaluator.as_mut());
     check::judge(&mut session, &inputs, previous.as_ref(), &mut report)?;
     if !report.complete {
         bail!(incomplete(&report));
     }
-    Ok(flag(&report))
+    let accepted_now = match args.turn_start() {
+        Some(_) => accepted_now(&context.root, &report)?,
+        None => BTreeSet::new(),
+    };
+    Ok(Checked {
+        flagged: flag(&report, &accepted_now),
+        guards: std::mem::take(&mut report.guards),
+    })
+}
+
+/// jevgate.toml as it was in Git tree `start`, the turn's start; the
+/// defaults when it had none.
+fn configuration_at(root: &Path, start: &str) -> Result<Config> {
+    let path = Path::new(CONFIG_FILE);
+    match revision::blobs(root, start, &[path], CONFIG_BYTES)?.remove(path) {
+        Some(text) => toml::from_str(&text).context("Invalid jevgate.toml as the turn began"),
+        None => Ok(Config::default()),
+    }
+}
+
+/// The fingerprints of the findings the baseline and allow comments accept
+/// now, though not when the turn began: the turn's own edits accepted them.
+fn accepted_now(root: &Path, report: &Report) -> Result<BTreeSet<String>> {
+    let mut now = report.clone();
+    crate::suppress::apply(root, &mut now, &BTreeSet::new());
+    crate::baseline::apply(root, &mut now, None)?;
+    let then = report.files.iter().flat_map(|f| &f.findings);
+    Ok(now
+        .files
+        .iter()
+        .flat_map(|f| &f.findings)
+        .zip(then)
+        .filter(|(now, then)| now.accepted() && !then.accepted())
+        .map(|(now, _)| now.fingerprint.clone())
+        .collect())
 }
 
 /// `check`'s arguments with the repository's configuration, for `scope`.
@@ -157,10 +220,11 @@ fn incomplete(report: &Report) -> String {
     }
 }
 
-/// The findings the agent may act on: not notes and not accepted, those
-/// that fail the gate first, then reviews, then by rank. Whether one fails is
-/// what the check's own gate recorded on it.
-fn flag(report: &Report) -> Vec<Flagged> {
+/// The findings the agent may act on: not notes and not accepted (as the
+/// turn began, within a turn), those that fail the gate first, then reviews,
+/// then by rank. Whether one fails is what the check's own gate recorded on
+/// it; `accepted_now` are those the turn's own edits accepted.
+fn flag(report: &Report, accepted_now: &BTreeSet<String>) -> Vec<Flagged> {
     let mut flagged: Vec<Flagged> = report
         .files
         .iter()
@@ -171,6 +235,7 @@ fn flag(report: &Report) -> Vec<Flagged> {
                 .map(|finding| Flagged {
                     path: file.path.clone(),
                     fails: finding.fails_gate(),
+                    accepted_this_turn: accepted_now.contains(&finding.fingerprint),
                     finding: finding.clone(),
                 })
         })

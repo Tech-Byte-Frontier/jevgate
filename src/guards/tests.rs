@@ -79,6 +79,10 @@ fn a_change_reports_what_it_turns_off_and_the_tests_it_changes() {
     let changed = &scan.changed_tests[0];
     assert_eq!((changed.name.as_str(), changed.line), ("test_total", 4));
     assert!(changed.before.contains("== 3"));
+    assert_eq!(
+        summary(&scan.guards),
+        "adds 1 suppression, skips 1 test, removes tests, edits jevgate.toml and edits jevgate-baseline.json"
+    );
 }
 
 #[test]

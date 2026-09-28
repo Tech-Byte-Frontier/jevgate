@@ -5,6 +5,7 @@
 //! written to steer it. Guards are reported, never fail a check: most
 //! suppressions and skips are legitimate, JevGate cannot see the other
 //! tools' findings, and the two questions have no labels on unseen projects.
+//! What the agent hook does within a turn is in `hook`.
 mod cases;
 mod lines;
 mod markers;
@@ -148,6 +149,37 @@ impl Guard {
     }
 }
 
+/// What `guards` do, in a phrase: "adds 2 suppressions, skips 1 test and
+/// edits jevgate.toml".
+pub fn summary<'a>(guards: impl IntoIterator<Item = &'a Guard>) -> String {
+    let mut counts = BTreeMap::<Kind, usize>::new();
+    for guard in guards {
+        *counts.entry(guard.kind).or_default() += 1;
+    }
+    let of = |kind: Kind| counts.get(&kind).copied().unwrap_or(0);
+    // "verb N nouns", when some guard is of `kind`.
+    let counted = |kind: Kind, verb: &str, noun: &str| {
+        let n = of(kind);
+        (n > 0).then(|| format!("{verb} {}", output::count(n, noun)))
+    };
+    let named = |kind: Kind, phrase: &str| (of(kind) > 0).then(|| phrase.to_string());
+    let parts: Vec<String> = [
+        counted(Kind::Allow, "adds", "`jevgate: allow` comment"),
+        counted(Kind::Suppression, "adds", "suppression"),
+        counted(Kind::SkippedTest, "skips", "test"),
+        named(Kind::FocusedTest, "focuses tests"),
+        named(Kind::DeletedTest, "removes tests"),
+        counted(Kind::WeakerAssertion, "weakens", "test"),
+        named(Kind::Configuration, "edits jevgate.toml"),
+        named(Kind::Baseline, "edits jevgate-baseline.json"),
+        named(Kind::Steering, "holds text written to steer a reviewer"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    join(&parts)
+}
+
 /// "a", "a and b", "a, b and c".
 fn join(parts: &[String]) -> String {
     match parts {
@@ -263,6 +295,16 @@ impl<'c> Texts<'c> {
         scan.guards.extend(tests.guards());
         scan
     }
+}
+
+/// The `jevgate: allow` comments among `guards`: the files and lines of
+/// those a change added.
+pub(crate) fn added_allows(guards: &[Guard]) -> BTreeSet<(PathBuf, usize)> {
+    guards
+        .iter()
+        .filter(|g| g.kind == Kind::Allow)
+        .filter_map(|g| Some((g.path.clone(), g.line?)))
+        .collect()
 }
 
 /// Guards in the order of their files and lines.

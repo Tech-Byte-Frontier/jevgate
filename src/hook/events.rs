@@ -5,7 +5,7 @@
 use super::{
     Host,
     agents::{self, Event, Kind, Reply},
-    review::{self, Flagged},
+    review::{self, Checked, Flagged},
     text,
     turn::{self, Turn},
 };
@@ -168,24 +168,32 @@ impl<'a> Hook<'a> {
             },
             None => None,
         };
-        let found = match self.check(review::Scope {
+        let checked = match self.check(review::Scope {
             trees,
             paths: files,
         }) {
-            Ok(found) => found,
+            Ok(checked) => checked,
             Err(reason) => return failed(self.event, &named, &reason),
         };
         let Some(mut turn) = turn else {
+            let guards: Vec<_> = checked.guards.iter().collect();
             return Reply {
-                agent: text::after_edit(&shown, &found, &[]),
+                agent: text::after_edit(&shown, &checked.flagged, &[], &guards),
                 ..Reply::default()
             };
         };
-        let (known, new): (Vec<_>, Vec<_>) = found
+        let (known, new): (Vec<_>, Vec<_>) = checked
+            .flagged
             .into_iter()
             .partition(|f| turn.reported.contains(&f.finding.fingerprint));
-        let context = text::after_edit(&shown, &new, &known);
-        if turn.report(&new) {
+        let guards: Vec<_> = checked
+            .guards
+            .iter()
+            .filter(|g| !turn.reported.contains(&g.id))
+            .collect();
+        let context = text::after_edit(&shown, &new, &known, &guards);
+        let ids = new.iter().map(|f| f.finding.fingerprint.as_str());
+        if turn.report(ids.chain(guards.iter().map(|g| g.id.as_str()))) {
             let _ = turn::save(&self.root, &turn);
         }
         self.context(turn, context)
@@ -205,7 +213,7 @@ impl<'a> Hook<'a> {
             Err(error) => return self.unchecked(turn, &format!("{error:#}")),
         };
         match self.turn_findings(&turn, &now) {
-            Ok(found) => self.decide(turn, now, found),
+            Ok(checked) => self.decide(turn, now, checked),
             Err(reason) => self.unchecked(turn, &reason),
         }
     }
@@ -220,10 +228,10 @@ impl<'a> Hook<'a> {
         }
     }
 
-    /// The findings in what changed from the turn's start to `now`.
-    fn turn_findings(&self, turn: &Turn, now: &str) -> Result<Vec<Flagged>, String> {
+    /// The findings and guards in what changed from the turn's start to `now`.
+    fn turn_findings(&self, turn: &Turn, now: &str) -> Result<Checked, String> {
         if now == turn.tree {
-            return Ok(Vec::new());
+            return Ok(Checked::default());
         }
         self.check(review::Scope {
             trees: Some((turn.tree.clone(), now.to_string())),
@@ -233,10 +241,12 @@ impl<'a> Hook<'a> {
 
     /// Block while findings fail the gate: at most three times a turn, and
     /// not again when nothing changed since the last block. A stop that is
-    /// not blocked ends the turn.
-    fn decide(&self, turn: Turn, now: String, found: Vec<Flagged>) -> Reply {
+    /// not blocked ends the turn. The person hears of the turn's guards.
+    fn decide(&self, turn: Turn, now: String, checked: Checked) -> Reply {
         let blocks = if self.event.continued { turn.blocks } else { 0 };
-        let (failing, advisory): (Vec<_>, Vec<_>) = found.into_iter().partition(|f| f.fails);
+        let guards = text::guards_user(&checked.guards);
+        let (failing, advisory): (Vec<_>, Vec<_>) =
+            checked.flagged.into_iter().partition(|f| f.fails);
         let user = if failing.is_empty() {
             text::passed(blocks > 0, &advisory)
         } else if turn.blocked_tree.as_deref() == Some(now.as_str()) {
@@ -247,20 +257,29 @@ impl<'a> Hook<'a> {
         } else if blocks >= text::MAX_BLOCKS {
             Some(text::let_through(failing.len(), text::LetThrough::Cap))
         } else {
-            return self.block(turn, &failing, blocks + 1, now);
+            let user = text::joined(Some(text::blocked(failing.len(), blocks + 1)), guards, " ");
+            return self.block(turn, &failing, blocks + 1, now, user);
         };
         // The turn is over: the next one starts from here, which keeps a
         // setup without the turn-start hook checking one turn at a time.
         let _ = turn::save(&self.root, &Turn::begin(&self.event.session, now, None));
         Reply {
-            user,
+            user: text::joined(user, guards, " "),
             ..Reply::default()
         }
     }
 
-    /// Block the stop with `failing`, recording the block. A block that
-    /// cannot be recorded is not made, so the cap always holds.
-    fn block(&self, mut turn: Turn, failing: &[Flagged], block: u32, now: String) -> Reply {
+    /// Block the stop with `failing`, recording the block, and tell the
+    /// person `user`. A block that cannot be recorded is not made, so the
+    /// cap always holds.
+    fn block(
+        &self,
+        mut turn: Turn,
+        failing: &[Flagged],
+        block: u32,
+        now: String,
+        user: Option<String>,
+    ) -> Reply {
         let reason = text::block_reason(failing, block);
         turn.blocks = block;
         turn.block_line = reason.lines().next().map(str::to_string);
@@ -271,7 +290,7 @@ impl<'a> Hook<'a> {
         Reply {
             block: true,
             agent: Some(reason),
-            user: Some(text::blocked(failing.len(), block)),
+            user,
         }
     }
 
@@ -288,7 +307,7 @@ impl<'a> Hook<'a> {
     }
 
     /// Run one check with the repository's configuration.
-    fn check(&self, scope: review::Scope) -> Result<Vec<Flagged>, String> {
+    fn check(&self, scope: review::Scope) -> Result<Checked, String> {
         let context = config::ConfigContext::discover_in(&self.cwd, None)
             .map_err(|error| format!("{error:#}"))?;
         review::check(

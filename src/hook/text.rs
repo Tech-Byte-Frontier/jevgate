@@ -2,7 +2,11 @@
 //! agent reads whole, and short notes for the person. Context states facts;
 //! only the reason of a block, which the agent is meant to act on, instructs.
 use super::review::Flagged;
-use crate::{output, schema::Strength};
+use crate::{
+    guards::{self, Guard, Kind},
+    output,
+    schema::Strength,
+};
 use std::path::PathBuf;
 
 /// Findings listed in one reply; the rest are counted.
@@ -21,10 +25,36 @@ const REASON_CHARS: usize = 400;
 pub(super) const MAX_BLOCKS: u32 = 3;
 /// Where the person sees findings the hook did not send the agent.
 const LIST_THEM: &str = "`jevgate check --base HEAD` lists them.";
+/// Guards listed after an edit, and named in the person's note, at most.
+const SHOWN_GUARDS: usize = 5;
+const NAMED_GUARDS: usize = 3;
+/// A guard's line is cut at this length.
+const GUARD_CHARS: usize = 240;
 
 /// The context after an edit: the findings the agent was not given yet this
-/// turn, and a count of the `known` ones; nothing when there are none.
-pub(super) fn after_edit(files: &[PathBuf], new: &[Flagged], known: &[Flagged]) -> Option<String> {
+/// turn, a count of the `known` ones, and the `guards` it was not told of
+/// yet; nothing when there is none of them. Guards take their room first.
+pub(super) fn after_edit(
+    files: &[PathBuf],
+    new: &[Flagged],
+    known: &[Flagged],
+    guards: &[&Guard],
+) -> Option<String> {
+    let noticed = guards_noticed(guards);
+    let room = MAX_CHARS.saturating_sub(noticed.as_ref().map_or(0, |n| n.len() + 2));
+    joined(
+        findings_after_edit(files, (new, known), room),
+        noticed,
+        "\n\n",
+    )
+}
+
+/// The findings part of the context after an edit, within `room` characters.
+fn findings_after_edit(
+    files: &[PathBuf],
+    (new, known): (&[Flagged], &[Flagged]),
+    room: usize,
+) -> Option<String> {
     let reviewed = format!("JevGate reviewed {} after this edit:", named(files));
     let earlier = format!(
         "{} reported earlier this turn {} ({} the quality gate).",
@@ -64,7 +94,7 @@ pub(super) fn after_edit(files: &[PathBuf], new: &[Flagged], known: &[Flagged]) 
     } else {
         format!("{earlier}\n{blocks}")
     };
-    Some(list(&head, new, &tail))
+    Some(list(&head, new, &tail, room))
 }
 
 /// The reason a stop is blocked, which the agent reads as its next
@@ -76,11 +106,74 @@ pub(super) fn block_reason(failing: &[Flagged], block: u32) -> String {
         output::count(failing.len(), "finding"),
         if failing.len() == 1 { "fails" } else { "fail" }
     );
-    list(
-        &head,
-        failing,
+    let mut tail = String::from(
         "Fix them, then finish. If a finding is mistaken, keep the code as it is and say why in your reply; JevGate does not block again when nothing changed.",
-    )
+    );
+    if failing.iter().any(|f| f.accepted_this_turn) {
+        tail.push_str(" A finding accepted this turn, by a baseline entry or a `jevgate: allow` comment, counts until the next turn: accepting findings is the person's call, so leave that to them.");
+    }
+    list(&head, failing, &tail, MAX_CHARS)
+}
+
+/// The context after an edit about what the turn did to the checks around
+/// the code, and who is told; nothing when it did nothing.
+fn guards_noticed(guards: &[&Guard]) -> Option<String> {
+    if guards.is_empty() {
+        return None;
+    }
+    let mut text = format!(
+        "JevGate noticed that this turn {} so far:\n",
+        guards::summary(guards.iter().copied())
+    );
+    for guard in guards.iter().take(SHOWN_GUARDS) {
+        text.push_str(&format!("- {}\n", clip(&guard.describe(), GUARD_CHARS)));
+    }
+    if guards.len() > SHOWN_GUARDS {
+        text.push_str(&format!(
+            "{} not shown.\n",
+            output::count(guards.len() - SHOWN_GUARDS, "more")
+        ));
+    }
+    text.push_str("JevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, the baseline and `jevgate: allow` comments as they were when the turn began.");
+    Some(text)
+}
+
+/// The person's note on what a turn did to the checks around the code, and
+/// what the gate read when the turn edited them.
+pub(super) fn guards_user(guards: &[Guard]) -> Option<String> {
+    if guards.is_empty() {
+        return None;
+    }
+    let mut named: Vec<String> = guards
+        .iter()
+        .take(NAMED_GUARDS)
+        .map(|g| clip(&g.describe(), GUARD_CHARS))
+        .collect();
+    if guards.len() > NAMED_GUARDS {
+        named.push(format!("{} more", guards.len() - NAMED_GUARDS));
+    }
+    let mut text = format!(
+        "JevGate: this turn {} ({}).",
+        guards::summary(guards),
+        named.join("; ")
+    );
+    let edited = |g: &Guard| matches!(g.kind, Kind::Allow | Kind::Configuration | Kind::Baseline);
+    if guards.iter().any(edited) {
+        text.push_str(" Its gate read jevgate.toml, the baseline and `jevgate: allow` comments as they were when the turn began.");
+    }
+    Some(text)
+}
+
+/// Two optional texts, `between` them when both are there.
+pub(super) fn joined(
+    first: Option<String>,
+    second: Option<String>,
+    between: &str,
+) -> Option<String> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(format!("{first}{between}{second}")),
+        (first, second) => first.or(second),
+    }
 }
 
 /// The person's note on a block.
@@ -184,14 +277,14 @@ fn fail(n: usize) -> String {
     }
 }
 
-/// `head`, a line per finding while the text stays under its limits, how
-/// many were left out and where they are, then `tail`.
-fn list(head: &str, found: &[Flagged], tail: &str) -> String {
+/// `head`, a line per finding while the text stays under `room` characters,
+/// how many were left out and where they are, then `tail`.
+fn list(head: &str, found: &[Flagged], tail: &str, room: usize) -> String {
     let mut text = format!("{head}\n");
     let mut shown = 0;
     for flagged in found.iter().take(SHOWN) {
         let line = line(flagged);
-        if text.len() + line.len() + REST_CHARS + tail.len() >= MAX_CHARS {
+        if text.len() + line.len() + REST_CHARS + tail.len() >= room {
             break;
         }
         text.push_str(&line);
@@ -212,17 +305,18 @@ fn list(head: &str, found: &[Flagged], tail: &str) -> String {
 /// `- path:line level rule (fails the gate): why Next: step`.
 fn line(flagged: &Flagged) -> String {
     let finding = &flagged.finding;
+    let mark = match (flagged.fails, flagged.accepted_this_turn) {
+        (true, true) => " (fails the gate; accepted this turn)",
+        (true, false) => " (fails the gate)",
+        (false, true) => " (accepted this turn)",
+        (false, false) => "",
+    };
     format!(
-        "- {}:{} {} {}{}: {} Next: {}",
+        "- {}:{} {} {}{mark}: {} Next: {}",
         flagged.path.display(),
         finding.line,
         output::label(&finding.strength),
         finding.rule,
-        if flagged.fails {
-            " (fails the gate)"
-        } else {
-            ""
-        },
         sentence(&finding.message, WHY_CHARS),
         sentence(&finding.action, NEXT_CHARS)
     )

@@ -9,6 +9,7 @@ use crate::{
     tests::{Mock, Project, answer, function, long_function},
     transport::Evaluator,
 };
+mod guards;
 mod protocol;
 
 /// A Git repository with `lib.rs` committed, judged for function
@@ -448,8 +449,8 @@ fn outside_git_nothing_is_checked_blocked_or_written() {
 fn an_invalid_configuration_never_blocks() {
     let project = repository();
     let host = reviewing();
-    send(&project, &host, prompt("refactor"));
     project.write("jevgate.toml", "rules = [\"no-such-rule\"]\n");
+    send(&project, &host, prompt("refactor"));
     project.write("lib.rs", &long_function("f"));
     let reply = send(&project, &host, stop(false));
     assert!(reply.get("decision").is_none());

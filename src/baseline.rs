@@ -46,15 +46,31 @@ fn read_baseline(root: &Path) -> Result<Option<Baseline>> {
     }
     let text = crate::inventory::read_source(&path, BASELINE_BYTES)
         .with_context(|| format!("Cannot read {BASELINE_FILE}"))?;
-    let baseline: Baseline =
-        serde_json::from_str(&text).with_context(|| format!("Invalid {BASELINE_FILE}"))?;
-    ensure!(baseline.version == 1, "Unsupported {BASELINE_FILE} version");
-    Ok(Some(baseline))
+    parse(&text).map(Some)
 }
 
-/// Mark findings whose fingerprints the baseline accepted.
-pub fn apply(root: &Path, report: &mut Report) -> Result<()> {
-    let Some(baseline) = read_baseline(root)? else {
+/// The baseline in Git tree `tree`, such as an agent turn's start.
+fn baseline_in(root: &Path, tree: &str) -> Result<Option<Baseline>> {
+    let path = Path::new(BASELINE_FILE);
+    let mut texts = crate::revision::blobs(root, tree, &[path], BASELINE_BYTES)?;
+    texts.remove(path).as_deref().map(parse).transpose()
+}
+
+fn parse(text: &str) -> Result<Baseline> {
+    let baseline: Baseline =
+        serde_json::from_str(text).with_context(|| format!("Invalid {BASELINE_FILE}"))?;
+    ensure!(baseline.version == 1, "Unsupported {BASELINE_FILE} version");
+    Ok(baseline)
+}
+
+/// Mark findings whose fingerprints the baseline accepted: the committed
+/// one, or the one in Git tree `as_of` when given.
+pub fn apply(root: &Path, report: &mut Report, as_of: Option<&str>) -> Result<()> {
+    let baseline = match as_of {
+        Some(tree) => baseline_in(root, tree)?,
+        None => read_baseline(root)?,
+    };
+    let Some(baseline) = baseline else {
         return Ok(());
     };
     let accepted: BTreeSet<&str> = baseline

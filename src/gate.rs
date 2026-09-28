@@ -121,10 +121,19 @@ fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> 
     reasons
 }
 
-/// Apply the baseline and the gate policy to a settled report.
+/// Apply the baseline, allow comments and the gate policy to a settled
+/// report. Within an agent's turn, the baseline and allow comments accept
+/// findings as they did when the turn began: accepting a finding is the
+/// person's call, so what the agent wrote accepts nothing until the person
+/// has seen it (the report's guards list it).
 pub fn settle(root: &Path, report: &mut Report, args: &CheckArgs) -> Result<()> {
-    crate::suppress::apply(root, report);
-    crate::baseline::apply(root, report)?;
+    let turn_start = args.turn_start();
+    let ignored = match turn_start {
+        Some(_) => crate::guards::added_allows(&report.guards),
+        None => Default::default(),
+    };
+    crate::suppress::apply(root, report, &ignored);
+    crate::baseline::apply(root, report, turn_start)?;
     evaluate(report, args);
     Ok(())
 }

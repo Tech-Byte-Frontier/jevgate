@@ -1,7 +1,6 @@
 //! A session's turn under `.jevgate/turns/`: the working tree when the turn
 //! began, how often its stops were blocked, what the agent was already told
 //! and what it was not.
-use super::review::Flagged;
 use crate::{revision, schema, storage};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -35,8 +34,9 @@ pub(super) struct Turn {
     /// Why a stop was not checked, for the next event that can tell the agent.
     #[serde(default)]
     pub notice: Option<String>,
-    /// Fingerprints of the findings already given to the agent after an edit
-    /// this turn: a file edited ten times would otherwise repeat them ten times.
+    /// Fingerprints of the findings, and ids of the guards, already given to
+    /// the agent after an edit this turn: a file edited ten times would
+    /// otherwise repeat them ten times.
     #[serde(default)]
     pub reported: Vec<String>,
 }
@@ -60,15 +60,15 @@ impl Turn {
             .is_some_and(|line| prompt.contains(line.as_str()))
     }
 
-    /// Remember that `given` reached the agent; whether any was new. The
-    /// oldest are forgotten past [`MAX_REPORTED`], so the turn file stays
-    /// small, and a forgotten finding is only told again.
-    pub fn report(&mut self, given: &[Flagged]) -> bool {
+    /// Remember that findings and guards with these ids (fingerprints)
+    /// reached the agent; whether any was new. The oldest are forgotten past
+    /// [`MAX_REPORTED`], so the turn file stays small, and a forgotten one is
+    /// only told again.
+    pub fn report<'a>(&mut self, given: impl IntoIterator<Item = &'a str>) -> bool {
         let before = self.reported.len();
-        for flagged in given {
-            let fingerprint = &flagged.finding.fingerprint;
-            if !fingerprint.is_empty() && !self.reported.contains(fingerprint) {
-                self.reported.push(fingerprint.clone());
+        for id in given {
+            if !id.is_empty() && !self.reported.iter().any(|r| r == id) {
+                self.reported.push(id.to_string());
             }
         }
         let excess = self.reported.len().saturating_sub(MAX_REPORTED);
