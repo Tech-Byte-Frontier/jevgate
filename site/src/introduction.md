@@ -9,11 +9,12 @@ JevGate: consider · gate passed · 42 files · 118 API requests · 263410 input
 
 Consider (2):
   src/billing/invoices.ts:88 [maintainability/shared-logic] `createInvoice` and `createReceipt`
-    perform the same steps for the same purpose (0.93). Differences: `invoices`→`receipts`.
+    perform the same steps for the same purpose. Differences: `invoices`→`receipts`.
+    Right 59% of the time (129 labels).
     → Move the shared steps into one implementation
   src/api/search.py:41 [security/injection] `search_orders` places its parameters into a
     database query without binding, escaping or checking them; a caller passing outside
-    input would make it exploitable (0.88).
+    input would make it exploitable. Not yet measured.
     → Pass the values as bound query parameters
 ```
 
