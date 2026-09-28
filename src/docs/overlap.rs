@@ -4,7 +4,10 @@
 //! A section that pairs with two or more others heads a family: its members
 //! are asked against it alone, not against each other, so a section repeated
 //! in seven quickstarts is six questions, not twenty-one.
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 /// A pair is a candidate when this share of the smaller section recurs.
 pub const MIN_SHARE: f64 = 0.3;
@@ -117,6 +120,80 @@ fn sequences(text: &str) -> BTreeSet<String> {
     words.windows(3).map(|w| w.join(" ")).collect()
 }
 
+/// Locale codes a documentation tree or file name carries, such as `zh-cn`
+/// in `docs/zh-cn/` or `zh` in `README_zh.md`.
+const LOCALES: &[&str] = &[
+    "ar", "bg", "bn", "cn", "cs", "da", "de", "el", "en", "en-gb", "en-us", "es", "fa", "fi", "fr",
+    "he", "hi", "hu", "id", "it", "ja", "jp", "ko", "kr", "ms", "nb", "nl", "no", "pl", "pt",
+    "pt-br", "pt_br", "ro", "ru", "sv", "th", "tr", "tw", "uk", "vi", "zh", "zh-cn", "zh-hans",
+    "zh-hant", "zh-tw", "zh_cn", "zh_tw",
+];
+
+/// Codes that are also common words at the end of a file name, as in
+/// `user_id.md`; they name a locale only as a directory.
+const WORD_LOCALES: &[&str] = &["id", "it", "no"];
+
+/// The locale a document's path names, in lower case: a directory such as
+/// `docs/ja/`, or the last part of its file name after a dot or underscore,
+/// as in `README.zh-CN.md` or `README_zh.md`.
+fn locale(path: &Path) -> Option<String> {
+    let lower = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let mut parts: Vec<&str> = lower.split('/').collect();
+    let name = parts.pop()?;
+    if let Some(dir) = parts.iter().find(|d| LOCALES.contains(d)) {
+        return Some((*dir).to_string());
+    }
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    ['.', '_'].into_iter().find_map(|separator| {
+        let (_, suffix) = stem.rsplit_once(separator)?;
+        (LOCALES.contains(&suffix) && !WORD_LOCALES.contains(&suffix)).then(|| suffix.to_string())
+    })
+}
+
+/// Whether two documents are written for readers of different languages:
+/// their paths name different locales, not both English (`docs/en/` and
+/// `docs/zh-cn/`, `README.md` and `README_zh.md`, `ja/` and `zh/`), or
+/// their prose is written in different scripts. A translation repeats its
+/// original on purpose: freellmapi, cc-switch and rtk had 12 translated
+/// pairs reported as repetition, the translation question, which reads the
+/// two texts alone, answering from 0.04 to 0.71. No corpus finding pairs
+/// documents of two languages.
+pub fn other_language(a: (&Path, &str), b: (&Path, &str)) -> bool {
+    let english = |l: &Option<String>| {
+        l.as_deref()
+            .is_none_or(|l| l == "en" || l.starts_with("en-"))
+    };
+    let (x, y) = (locale(a.0), locale(b.0));
+    (x != y && !(english(&x) && english(&y))) || other_script(a.1, b.1)
+}
+
+/// Whether one text's prose is mostly in a script other than Latin, such as
+/// Han, Kana, Hangul or Cyrillic, and the other's almost never.
+fn other_script(a: &str, b: &str) -> bool {
+    let (x, y) = (non_latin_share(a), non_latin_share(b));
+    let (high, low) = if x > y { (x, y) } else { (y, x) };
+    high >= 0.3 && low < 0.05
+}
+
+/// The share of the letters outside program code that are not Latin.
+fn non_latin_share(text: &str) -> f64 {
+    let letters: Vec<char> = outside_code(text)
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .collect();
+    if letters.is_empty() {
+        return 0.0;
+    }
+    let other = letters
+        .iter()
+        .filter(|c| !c.is_ascii() && !matches!(**c, '\u{00C0}'..='\u{024F}'))
+        .count();
+    other as f64 / letters.len() as f64
+}
+
 /// A candidate pair: two indexes into the texts and their share.
 type Pair = (usize, usize, f64);
 
@@ -219,6 +296,46 @@ fn capped(texts: &[Text<'_>], found: Vec<Pair>) -> (Vec<Pair>, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn documents_for_readers_of_other_languages_are_translations() {
+        let pair = |a: &str, b: &str| {
+            other_language(
+                (Path::new(a), "Install the tool and run it."),
+                (Path::new(b), "Install the tool and run it."),
+            )
+        };
+        assert!(pair(
+            "docs/en/api/OVERVIEW.md",
+            "docs/zh-cn/api/OVERVIEW.md"
+        ));
+        assert!(pair("README.md", "README_zh.md"));
+        assert!(pair("README.md", "README.zh-CN.md"));
+        assert!(pair(
+            "docs/user-manual/ja/intro.md",
+            "docs/user-manual/zh/setup.md"
+        ));
+        assert!(
+            !pair("docs/en/guide.md", "docs/setup.md"),
+            "English either way"
+        );
+        assert!(!pair("README.zh-CN.md", "docs/next/README.zh-CN.md"));
+        assert!(
+            !pair("docs/user_id.md", "docs/guide.md"),
+            "`id` ends a file name as a word"
+        );
+        assert!(!pair("docs/guide.md", "docs/setup.md"));
+        assert!(other_language(
+            (
+                Path::new("docs/proxy.md"),
+                "## Scheme support\n\nHTTP and SOCKS5 proxies work."
+            ),
+            (
+                Path::new("docs/proxy-notes.md"),
+                "## 协议支持\n\n支持 HTTP 和 SOCKS5 代理。"
+            ),
+        ));
+    }
 
     #[test]
     fn repeated_sections_across_files_pair_up() {

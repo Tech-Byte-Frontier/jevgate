@@ -250,6 +250,9 @@ pub enum Detail {
         check: Option<FollowUp>,
         /// How the two sections relate, asked when the check stays undecided.
         settle: Option<FollowUp>,
+        /// The two documents are written for readers of different languages,
+        /// by their paths' locales or their scripts.
+        translated: bool,
     },
     /// A heading section of an agent instruction file.
     Section {

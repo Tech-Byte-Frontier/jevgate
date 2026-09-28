@@ -295,7 +295,16 @@ fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
         catalog::WORKFLOWS => workflows_outcome(&get),
         catalog::LARGE_DOCS => document_outcome(&get),
         catalog::DOC_STALENESS => staleness_outcome(&get, &unit.detail),
-        catalog::DOC_DUPLICATION => doc_pair_outcome(&get),
+        catalog::DOC_DUPLICATION => doc_pair_outcome(
+            &get,
+            matches!(
+                unit.detail,
+                Detail::DocPair {
+                    translated: true,
+                    ..
+                }
+            ),
+        ),
         catalog::AGENT_CONTEXT => {
             section_signals(&get).map(|s| strongest(&s.iter().map(|(_, o)| *o).collect::<Vec<_>>()))
         }

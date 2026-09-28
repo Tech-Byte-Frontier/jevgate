@@ -309,7 +309,16 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
     // Instruction sections and section pairs settle some signals by others.
     let settled_sections = match unit.rule {
         catalog::AGENT_CONTEXT => super::outcome::section_signals(&get),
-        catalog::DOC_DUPLICATION => super::outcome::pair_signals(&get),
+        catalog::DOC_DUPLICATION => super::outcome::pair_signals(
+            &get,
+            matches!(
+                unit.detail,
+                Detail::DocPair {
+                    translated: true,
+                    ..
+                }
+            ),
+        ),
         _ => None,
     };
     let mut questions: Vec<String> = match (settled_values, settled_sections) {
