@@ -877,8 +877,10 @@ fn a_slow_provider_is_cut_at_the_budget() {
         "the budget holds"
     );
     assert!(reply.get("decision").is_none());
+    // The message names what was left of the budget when the check asked,
+    // which a slow runner's snapshot and planning can cut to 1 s.
     assert!(
-        message(&reply).contains("the provider did not answer within 2 s"),
+        message(&reply).contains("the provider did not answer within"),
         "{reply}"
     );
     assert!(

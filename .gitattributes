@@ -1,0 +1,8 @@
+# Text the binary embeds (include_str!) or its tests compare byte for byte
+# stays LF in every checkout. With Git's Windows default (core.autocrlf), the
+# instructions `init --agent` manages were embedded with CRLF, so the block it
+# wrote never compared equal to the next run's, and the docs test found no
+# JSON example after its heading.
+src/setup/instructions.md text eol=lf
+src/setup/opencode.js text eol=lf
+site/src/*.md text eol=lf
