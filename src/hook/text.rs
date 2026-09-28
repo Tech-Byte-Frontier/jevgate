@@ -153,11 +153,18 @@ fn findings_after_edit(
 /// The reason a stop is blocked, which the agent reads as its next
 /// instruction. Its first line names the block, so a prompt that repeats it
 /// is known as this turn's continuation.
-pub(super) fn block_reason(failing: &[Flagged], block: u32) -> String {
+/// A `carried` turn began where one JevGate could not check did, so its
+/// changes are those since JevGate last checked.
+pub(super) fn block_reason(failing: &[Flagged], block: u32, carried: bool) -> String {
     let one = failing.len() == 1;
     let head = format!(
-        "JevGate blocked the end of this turn ({block} of at most {MAX_BLOCKS}): {} in code changed this turn {} the quality gate.",
+        "JevGate blocked the end of this turn ({block} of at most {MAX_BLOCKS}): {} in code changed {} {} the quality gate.",
         output::count(failing.len(), "finding"),
+        if carried {
+            "since JevGate last checked"
+        } else {
+            "this turn"
+        },
         if one { "fails" } else { "fail" }
     );
     let (them, a_finding) = if one {
@@ -306,6 +313,15 @@ pub(super) const UNCHECKED_TURN: &str = "JevGate did not check this turn: it has
 pub(super) fn failed_user(what: &str, why: &str) -> String {
     format!(
         "JevGate could not check {what}: {}. Nothing was blocked.",
+        reason(why)
+    )
+}
+
+/// What the agent is told at its next turn when the end of the last one
+/// could not be checked.
+pub(super) fn unchecked_turn(why: &str) -> String {
+    format!(
+        "JevGate could not check the last turn's changes ({}), so they were not reviewed; this is not a pass. JevGate checks them with this turn's changes when it ends.",
         reason(why)
     )
 }

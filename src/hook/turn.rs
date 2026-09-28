@@ -37,6 +37,13 @@ pub(super) struct Turn {
     /// Why a stop was not checked, for the next event that can tell the agent.
     #[serde(default)]
     pub notice: Option<String>,
+    /// Its stop could not be checked (an outage, a 402, the time ran out),
+    /// so the next turn begins where this one did and its stop checks both.
+    #[serde(default)]
+    pub unchecked: bool,
+    /// It began where an unchecked turn did, so its changes go back to then.
+    #[serde(default)]
+    pub carried: bool,
     /// Fingerprints of the findings, and ids of the guards, already given to
     /// the agent after an edit this turn: a file edited ten times would
     /// otherwise repeat them ten times.
@@ -53,6 +60,15 @@ impl Turn {
             started_at: schema::now(),
             notice,
             ..Self::default()
+        }
+    }
+
+    /// A turn that begins where `unchecked`, a turn whose stop could not be
+    /// checked, began, owing the agent its notice.
+    pub fn carry(session: &str, unchecked: Turn) -> Self {
+        Self {
+            carried: true,
+            ..Self::begin(session, unchecked.tree, unchecked.notice)
         }
     }
 

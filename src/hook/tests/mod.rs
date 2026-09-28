@@ -491,6 +491,40 @@ fn a_provider_failure_never_blocks_and_is_told_to_the_person_and_the_agent() {
 }
 
 #[test]
+fn a_turn_whose_stop_could_not_be_checked_is_checked_with_the_next() {
+    let project = repository();
+    let unreachable = host(|| Box::new(Failing(|| Unsent(&TYPESAFE).into())));
+    send(&project, &reviewing(), prompt("refactor"));
+    project.write("lib.rs", &long_function("f"));
+    let failed = send(&project, &unreachable, stop(false));
+    assert!(failed.get("decision").is_none(), "{failed}");
+    let next = send(&project, &reviewing(), prompt("add notes"));
+    assert!(
+        context(&next).ends_with("JevGate checks them with this turn's changes when it ends."),
+        "{next}"
+    );
+    project.write("NOTES.md", "# Notes\n");
+    let blocked = send(&project, &reviewing(), stop(false));
+    assert!(
+        blocked["reason"].as_str().unwrap_or_default().starts_with(
+            "JevGate blocked the end of this turn (1 of at most 3): 1 finding in code changed since JevGate last checked fails the quality gate.\n- lib.rs:1 review "
+        ),
+        "the last turn's function is judged: {blocked}"
+    );
+    project.write("lib.rs", &function("f"));
+    assert!(
+        send(&project, &reviewing(), stop(true))
+            .get("decision")
+            .is_none()
+    );
+    assert_eq!(
+        send(&project, &reviewing(), prompt("next")),
+        json!({}),
+        "a checked stop ends the carrying"
+    );
+}
+
+#[test]
 fn a_slow_provider_is_cut_at_the_budget() {
     let project = repository();
     let host = host(|| Box::new(Slow(Duration::from_secs(6))));

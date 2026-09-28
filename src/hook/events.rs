@@ -95,11 +95,20 @@ impl<'a> Hook<'a> {
     }
 
     /// A new turn begins, unless the prompt is this turn's block reason sent
-    /// back (Gemini CLI and Cursor continue a blocked turn that way).
+    /// back (Gemini CLI and Cursor continue a blocked turn that way). After
+    /// a stop that could not be checked, it begins where that turn did, so
+    /// the changes are checked once JevGate can check them.
     fn turn_start(&self) -> Reply {
         let previous = self.load();
         match previous {
             Some(turn) if turn.continued_by(&self.event.prompt) => self.context(turn, None),
+            Some(turn) if turn.unchecked => {
+                let turn = Turn::carry(&self.event.session, turn);
+                match turn::save(&self.root, &turn) {
+                    Ok(()) => self.context(turn, None),
+                    Err(error) => failed(self.event, "this turn", &format!("{error:#}")),
+                }
+            }
             _ => {
                 turn::prune(&self.root);
                 self.begin(previous.and_then(|turn| turn.notice))
@@ -295,7 +304,7 @@ impl<'a> Hook<'a> {
         now: String,
         user: Option<String>,
     ) -> Reply {
-        let reason = text::block_reason(failing, block);
+        let reason = text::block_reason(failing, block, turn.carried);
         turn.blocks = block;
         turn.block_line = reason.lines().next().map(str::to_string);
         turn.blocked_tree = Some(now);
@@ -311,9 +320,11 @@ impl<'a> Hook<'a> {
 
     /// A stop that could not be checked: the person is told now, and the
     /// agent at the next event that carries context. The turn keeps its
-    /// start, so the next check still covers these changes.
+    /// start, and the next turn begins there too, so the next check still
+    /// covers these changes.
     fn unchecked(&self, mut turn: Turn, reason: &str) -> Reply {
-        turn.notice = Some(text::failed_agent("the last turn's changes", reason));
+        turn.notice = Some(text::unchecked_turn(reason));
+        turn.unchecked = true;
         let _ = turn::save(&self.root, &turn);
         Reply {
             user: Some(text::failed_user("this turn", reason)),

@@ -240,7 +240,7 @@ fn failing(n: usize, words: usize) -> Vec<Flagged> {
 
 #[test]
 fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
-    let reason = text::block_reason(&failing(30, 200), 1);
+    let reason = text::block_reason(&failing(30, 200), 1, false);
     assert!(reason.chars().count() < 8_000, "{}", reason.len());
     let lines: Vec<&str> = reason.lines().filter(|l| l.starts_with("- ")).collect();
     assert_eq!(lines.len(), 10);
