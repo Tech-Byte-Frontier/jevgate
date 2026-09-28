@@ -81,6 +81,14 @@ impl Scope<'_> {
         });
         selected.chain(context)
     }
+
+    /// `scope_units` of the languages with analyzers of their own, which
+    /// the cross-file evidence of those languages reads: units of the
+    /// generic tier (`analysis::generic`) never change their requests.
+    pub(super) fn specific_units(&self) -> impl Iterator<Item = (&Path, &str, &Unit)> {
+        self.scope_units()
+            .filter(|(path, _, _)| crate::analysis::generic::of(path).is_none())
+    }
 }
 
 /// Plan every selected file's units; `root` is the repository, whose README

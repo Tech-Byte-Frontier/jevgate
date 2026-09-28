@@ -136,6 +136,9 @@ pub fn language(path: &Path) -> &'static str {
         // Only its inline scripts are parsed and judged.
         return "JavaScript";
     }
+    if let Some(generic) = crate::analysis::generic::of(path) {
+        return generic.name;
+    }
     match extension(path).as_str() {
         "rs" => "Rust",
         "py" => "Python",
@@ -144,23 +147,15 @@ pub fn language(path: &Path) -> &'static str {
         "go" => "Go",
         "java" => "Java",
         "bend" => crate::analysis::bend::LANGUAGE,
-        "kt" | "kts" => "Kotlin",
-        "scala" => "Scala",
-        "c" | "h" => "C",
-        "cpp" | "cc" | "cxx" | "hpp" => "C++",
         "cs" => "C#",
         "rb" => "Ruby",
         "php" | "phtml" => "PHP",
-        "swift" => "Swift",
-        "dart" => "Dart",
-        "lua" => "Lua",
-        "ex" | "exs" => "Elixir",
         "zig" => "Zig",
         "vue" => "Vue",
         "svelte" => "Svelte",
         "astro" => "Astro",
         "sql" => "SQL",
-        "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd" => "shell",
+        "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd" => "shell",
         _ => "unknown",
     }
 }
@@ -470,9 +465,40 @@ fn tests_prepared(path: &Path, args: &CheckArgs) -> Prepared {
     }
 }
 
+/// A file of a language the generic tier reads (`analysis::generic`): no
+/// test case is located in its code, so a test file, found by its path, is
+/// not judged, and any other file is application code.
+fn generic_prepared(language: &crate::analysis::generic::Language, test: bool) -> Prepared {
+    let name = language.name;
+    let (kind, gate, reason, action) = if test {
+        (
+            TESTS,
+            "excluded",
+            format!("Test file. JevGate does not judge {name} tests yet."),
+            Action::Skip,
+        )
+    } else {
+        (
+            "application",
+            "application",
+            format!(
+                "{name} support is generic: function simplification, file organization, shared logic and comments judge this file; the hardcoded-value, security and test rules do not read {name} yet."
+            ),
+            Action::Judge,
+        )
+    };
+    Prepared {
+        classification: classification(kind, "deterministic", gate, &reason, name),
+        action,
+    }
+}
+
 fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
-    let original = input.source.clone().unwrap_or_default();
     let path = &input.result.path;
+    if let Some(language) = crate::analysis::generic::of(path) {
+        return Ok(generic_prepared(language, input.result.role == "test"));
+    }
+    let original = input.source.clone().unwrap_or_default();
     let located = locate_tests(path, &original)?;
     // A Bend 2 test is a whole program, so on a test path a file that
     // defines `main` is one test, whether it ends in the output its run

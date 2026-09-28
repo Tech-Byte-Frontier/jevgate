@@ -118,7 +118,7 @@ fn grammar(path: &Path) -> Option<tree_sitter::Language> {
         "php" | "phtml" => tree_sitter_php::LANGUAGE_PHP,
         "java" => tree_sitter_java::LANGUAGE,
         "bend" => tree_sitter_bend2::LANGUAGE,
-        _ => return None,
+        _ => return crate::analysis::generic::of(path).map(|generic| generic.grammar()),
     };
     Some(language.into())
 }

@@ -68,6 +68,7 @@ impl Classifier {
             || name.ends_with(".rb") && under(&["spec", "step_definitions"])
             || phpunit_name(path)
             || java_test_name(path)
+            || crate::analysis::generic::test_path(path)
         {
             "test"
         } else {
@@ -178,8 +179,9 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
     let extension = file_extension(path);
     [
         "rs", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "kt",
-        "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "phtml", "swift",
-        "dart", "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "astro", "sql", "bend",
+        "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "cs", "rb", "php",
+        "phtml", "swift", "dart", "lua", "ex", "exs", "zig", "sh", "bats", "vue", "svelte",
+        "astro", "sql", "bend",
     ]
     .contains(&extension.as_str())
         || extra.contains(&extension)
@@ -231,6 +233,24 @@ mod tests {
         assert_eq!(
             classifier.role(Path::new("src/test/java/app/Fixtures.java")),
             "test"
+        );
+    }
+
+    #[test]
+    fn tests_of_the_generic_tier_s_languages_are_tests() {
+        let classifier = super::Classifier::new(&Default::default()).unwrap();
+        for path in [
+            "shared/src/commonMain/kotlin/OrdersTest.kt",
+            "shared/src/androidInstrumentedTest/kotlin/Login.kt",
+            "Sources/App/RouterTests.swift",
+            "lua/cart_spec.lua",
+            "bin/deploy.bats",
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), "test", "{path}");
+        }
+        assert_eq!(
+            classifier.role(Path::new("shared/src/commonMain/kotlin/Orders.kt")),
+            "source"
         );
     }
 

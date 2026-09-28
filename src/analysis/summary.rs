@@ -81,7 +81,7 @@ fn clean_comment(line: &str) -> String {
     if line.starts_with("#[") {
         return String::new();
     }
-    let mut line = line
+    let mut line = super::without_dashes(line)
         .trim_start_matches(['/', '*', '!', '#'])
         .trim_end_matches("*/")
         .to_string();

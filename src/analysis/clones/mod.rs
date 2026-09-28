@@ -4,7 +4,7 @@
 //! `apart` holds the copies that are never compared and `frame` the statements
 //! every tree walk repeats, which do not make a copy on their own.
 use super::{
-    fast_hash, is_comment, line_of, text,
+    fast_hash, generic, is_comment, line_of, text,
     units::{Kind, Unit},
 };
 use std::{
@@ -157,6 +157,7 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         .filter(|&((bx, _), (by, _), _)| {
             let (a, b) = (&files[blocks[bx].file], &files[blocks[by].file]);
             crate::packages::linked(a.package, b.package, &local)
+                && generic::family(a.path) == generic::family(b.path)
                 && !separate_examples(a.path, b.path)
                 && !separate_tests(a, b)
         })
@@ -198,8 +199,10 @@ fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block
             parsed.push(Parsed { tokens: Vec::new() });
             continue;
         };
+        let generic = generic::of(file.path);
         let mut tokens = Vec::new();
-        leaves(tree.root_node(), file.source, &mut tokens);
+        let literals = generic.map_or(LITERALS, |language| language.literals);
+        leaves(tree.root_node(), file.source, literals, &mut tokens);
         mark_recursion(&mut tokens, file.units, file.path);
         let bodies: Vec<Range<usize>> = file
             .units
@@ -207,7 +210,13 @@ fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block
             .filter(|u| !u.equality)
             .filter_map(|u| u.body.clone())
             .collect();
-        collect_blocks(tree.root_node(), file, index, &bodies, &tokens, &mut blocks);
+        let found = Found {
+            index,
+            bodies: &bodies,
+            tokens: &tokens,
+            statements: generic.map(|language| language.blocks),
+        };
+        collect_blocks(tree.root_node(), file, &found, &mut blocks);
         parsed.push(Parsed { tokens });
     }
     (parsed, blocks)
@@ -618,33 +627,36 @@ fn align(x: &[Token<'_>], y: &[Token<'_>]) -> Option<Vec<Difference>> {
     Some(differences)
 }
 
-fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
+/// Leaves holding literal values in the languages with their own analyzers;
+/// a language of the generic tier names its own (`analysis::generic`).
+const LITERALS: &[&str] = &[
+    "string_content",
+    "string_fragment",
+    "integer_literal",
+    "float_literal",
+    "char_literal",
+    "decimal_integer_literal",
+    "hex_integer_literal",
+    "octal_integer_literal",
+    "binary_integer_literal",
+    "decimal_floating_point_literal",
+    "hex_floating_point_literal",
+    "character_literal",
+    "number",
+    "integer",
+    "float",
+    "string_literal_content",
+    "raw_string_content",
+    "verbatim_string_literal",
+    "real_literal",
+];
+
+fn leaves<'a>(node: Node<'_>, source: &'a str, literals: &[&str], tokens: &mut Vec<Token<'a>>) {
     if is_comment(node) {
         return;
     }
     let kind = node.kind();
-    let literal = matches!(
-        kind,
-        "string_content"
-            | "string_fragment"
-            | "integer_literal"
-            | "float_literal"
-            | "char_literal"
-            | "decimal_integer_literal"
-            | "hex_integer_literal"
-            | "octal_integer_literal"
-            | "binary_integer_literal"
-            | "decimal_floating_point_literal"
-            | "hex_floating_point_literal"
-            | "character_literal"
-            | "number"
-            | "integer"
-            | "float"
-            | "string_literal_content"
-            | "raw_string_content"
-            | "verbatim_string_literal"
-            | "real_literal"
-    );
+    let literal = literals.contains(&kind);
     if node.child_count() == 0 || literal {
         let text = text(node, source);
         if text.trim().is_empty() {
@@ -672,24 +684,37 @@ fn leaves<'a>(node: Node<'_>, source: &'a str, tokens: &mut Vec<Token<'a>>) {
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        leaves(child, source, tokens);
+        leaves(child, source, literals, tokens);
     }
+}
+
+/// What finding a file's statement blocks reads: the file's index, the
+/// bodies of its units, its tokens, and for a language of the generic tier
+/// the kinds that hold its statements.
+struct Found<'f, 'a> {
+    index: usize,
+    bodies: &'f [Range<usize>],
+    tokens: &'f [Token<'a>],
+    statements: Option<&'static [&'static str]>,
 }
 
 fn collect_blocks(
     node: Node<'_>,
     file: &SourceFile<'_>,
-    index: usize,
-    bodies: &[Range<usize>],
-    tokens: &[Token<'_>],
+    found: &Found<'_, '_>,
     blocks: &mut Vec<Block>,
 ) {
-    if holds_statements(node)
-        && bodies
+    let holds = match found.statements {
+        Some(kinds) => kinds.contains(&node.kind()),
+        None => holds_statements(node),
+    };
+    if holds
+        && found
+            .bodies
             .iter()
             .any(|b| b.start <= node.start_byte() && node.end_byte() <= b.end)
     {
-        let all = block_statements(node, file, tokens);
+        let all = block_statements(node, file, found.tokens);
         // A Go body holds its statements in a `statement_list` inside the block.
         let body = node
             .parent()
@@ -705,7 +730,7 @@ fn collect_blocks(
             let statements: Vec<Statement> = statements.iter().flatten().cloned().collect();
             if !statements.is_empty() {
                 blocks.push(Block {
-                    file: index,
+                    file: found.index,
                     statements,
                     whole,
                 });
@@ -714,7 +739,7 @@ fn collect_blocks(
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_blocks(child, file, index, bodies, tokens, blocks);
+        collect_blocks(child, file, found, blocks);
     }
 }
 

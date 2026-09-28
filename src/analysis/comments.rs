@@ -224,9 +224,10 @@ fn last_line(source: &str, span: &Range<usize>) -> usize {
             .count()
 }
 
-/// The marker of a line comment: `//`, `///`, `//!` or `#`; none for a block.
+/// The marker of a line comment: `//`, `///`, `//!`, `#` or Lua's `--`;
+/// none for a block.
 fn line_marker(text: &str) -> Option<&str> {
-    ["///", "//!", "//", "#"]
+    ["///", "//!", "//", "#", "--"]
         .into_iter()
         .find(|m| text.starts_with(m))
 }
@@ -273,7 +274,8 @@ pub fn banner(text: &str) -> bool {
 pub fn prose(text: &str) -> String {
     text.lines()
         .map(|line| {
-            line.trim()
+            super::without_dashes(line.trim())
+                .trim()
                 .trim_start_matches(|c: char| "/*#!\"'=".contains(c))
                 .trim_end_matches("*/")
                 .trim_end_matches(['"', '\''])
@@ -362,6 +364,21 @@ const DIRECTIVES: &[&str] = &[
     "@generated",
     "rustfmt::",
     "clippy::",
+    // The linters, formatters and editors of the generic tier's languages;
+    // Xcode lists `// MARK:` comments in its jump bar, like `#region`.
+    "mark:",
+    "swiftlint:",
+    "swift-format-ignore",
+    "sourcery:",
+    "ktlint",
+    "detekt",
+    "noinspection",
+    "shellcheck ",
+    "luacheck:",
+    "credo:",
+    "ignore_for_file:",
+    "clang-format ",
+    "clang-tidy",
 ];
 
 /// Sphinx directives that record the release a behavior appeared or changed
@@ -836,6 +853,31 @@ mod tests {
         assert!(!comments[0].text.contains("versionchanged"));
         assert!(!comments[0].text.contains("Added the"));
         assert!(comments[0].text.contains(":param name:"));
+    }
+
+    #[test]
+    fn generic_languages_comments_merge_by_their_markers_and_skip_their_tools() {
+        let lua = "-- Utilities for carts.\nlocal M = {}\n\n--- Adds two numbers,\n-- the larger first.\nfunction M.add(a, b)\n  -- luacheck: ignore\n  return a + b\nend\n\nreturn M\n";
+        let comments = found("util.lua", lua);
+        let texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "-- Utilities for carts.",
+                "--- Adds two numbers,\n-- the larger first."
+            ]
+        );
+        assert_eq!(comments[1].placement, Placement::Declaration);
+        assert_eq!(comments[1].words, 6);
+        let swift = "// MARK: - Routing\n// swiftlint:disable line_length\nfunc route() {\n    // Retry once: the first request after a deploy is often refused.\n    send()\n}\n";
+        let texts: Vec<String> = found("Router.swift", swift)
+            .into_iter()
+            .map(|c| c.text)
+            .collect();
+        assert_eq!(
+            texts,
+            ["// Retry once: the first request after a deploy is often refused."]
+        );
     }
 
     #[test]

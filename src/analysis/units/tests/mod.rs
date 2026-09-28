@@ -2,6 +2,7 @@
 //! language measures the same way is here.
 mod bend;
 mod csharp;
+mod generic;
 mod go;
 mod java;
 mod javascript;
@@ -68,7 +69,11 @@ fn nesting_and_branch_chains_are_measured_without_counting_else_if_as_depth() {
 
 #[test]
 fn unsupported_languages_are_unparsed() {
-    assert!(!parse(Path::new("Main.kt"), "class Main {}").unwrap().parsed);
+    assert!(
+        !parse(Path::new("main.zig"), "pub fn main() void {}")
+            .unwrap()
+            .parsed
+    );
 }
 
 #[test]

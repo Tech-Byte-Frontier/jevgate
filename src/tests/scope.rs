@@ -7,7 +7,7 @@ fn unparseable_binary_and_unsupported_files_are_skipped_without_blocking_the_run
     let project = Project::new();
     project.write("large.rs", &function("too_large"));
     project.write("invalid.rs", "fn broken( {");
-    project.write("Main.kt", "class Main {\n    fun run() {}\n}\n");
+    project.write("main.zig", "pub fn main() void {}\n");
     project.write("ok.rs", &function("ok"));
     std::fs::write(project.0.join("latin1.rs"), b"fn caf\xe9() {}\n").unwrap();
     let mut options = args();
@@ -25,7 +25,7 @@ fn unparseable_binary_and_unsupported_files_are_skipped_without_blocking_the_run
             .unwrap()
     };
     assert_eq!(file("ok.rs").status, schema::Status::Clear);
-    for name in ["invalid.rs", "Main.kt", "latin1.rs"] {
+    for name in ["invalid.rs", "main.zig", "latin1.rs"] {
         assert_eq!(file(name).status, schema::Status::Skipped, "{name}");
         assert!(
             file(name).error.as_ref().unwrap().contains("not judged"),
@@ -116,4 +116,83 @@ fn context_limits_and_visibility_are_enforced_without_api_calls() {
     options.max_context_bytes = 100;
     std::fs::remove_file(project.0.join("contract.md")).unwrap();
     assert!(inventory::collect(&options, &project.context(), &[]).is_err());
+}
+
+/// A Kotlin function with five body lines and a comment, in `src/shop.kt`.
+const KOTLIN_SHOP: &str = "package shop\n\n// Totals the open orders, the larger first.\nfun openTotal(orders: List<Order>): Int {\n    val open = orders.filter { it.open }\n    val sorted = open.sortedByDescending { it.total }\n    var total = 0\n    for (order in sorted) {\n        total += order.total\n    }\n    return total\n}\n";
+
+#[test]
+fn a_generic_language_gets_only_the_rules_its_units_serve_and_its_tests_are_not_judged() {
+    let project = Project::new();
+    project.write("lib.rs", &function("a"));
+    project.write("src/shop.kt", KOTLIN_SHOP);
+    project.write(
+        "src/test/kotlin/ShopTest.kt",
+        "class ShopTest {\n    fun totals() {\n        check(openTotal(listOf()) == 0)\n    }\n}\n",
+    );
+    let mut options = args();
+    options.include_tests = true;
+    let mut mock = Mock::default();
+    let report = run(&project, &options, &mut mock);
+    assert!(report.complete, "{:?}", report.files);
+    let file = |name: &str| {
+        report
+            .files
+            .iter()
+            .find(|f| f.path.ends_with(name))
+            .unwrap()
+    };
+    let shop = file("shop.kt");
+    let rules: Vec<&str> = shop.dimensions.keys().map(String::as_str).collect();
+    assert_eq!(
+        rules,
+        [
+            "comments",
+            "file_organization",
+            "function_simplification",
+            "shared_logic"
+        ]
+    );
+    let reason = &shop.classification.as_ref().unwrap().reason;
+    assert!(
+        reason.contains("the hardcoded-value, security and test rules do not read Kotlin"),
+        "{reason}"
+    );
+    let test = file("ShopTest.kt");
+    assert_eq!(test.status, schema::Status::NotApplicable);
+    assert_eq!(
+        test.classification.as_ref().unwrap().reason,
+        "Test file. JevGate does not judge Kotlin tests yet."
+    );
+    let kotlin: Vec<&serde_json::Value> = mock
+        .requests
+        .iter()
+        .filter(|r| r["state"]["file"]["path"] == "src/shop.kt")
+        .collect();
+    assert!(!kotlin.is_empty());
+    assert!(
+        kotlin
+            .iter()
+            .all(|r| r["state"]["file"]["language"] == "Kotlin")
+    );
+    assert!(
+        mock.requests
+            .iter()
+            .all(|r| !r.to_string().contains("ShopTest")),
+        "a test file of the generic tier sends nothing, not even its purpose"
+    );
+    // The Rust file is asked exactly what it is asked alone.
+    let alone = Project::new();
+    alone.write("lib.rs", &function("a"));
+    let mut solo = Mock::default();
+    run(&alone, &options, &mut solo);
+    let rust = |requests: &[serde_json::Value]| -> Vec<String> {
+        requests
+            .iter()
+            .filter(|r| r["state"]["file"]["path"] == "lib.rs")
+            .map(|r| r.to_string())
+            .collect()
+    };
+    assert!(!rust(&solo.requests).is_empty());
+    assert_eq!(rust(&mock.requests), rust(&solo.requests));
 }

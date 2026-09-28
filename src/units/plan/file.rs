@@ -46,6 +46,11 @@ pub(super) fn plan_file(
     // What function simplification, hardcoded values and security ask about
     // each function, sent together once every rule has planned.
     let mut asks = Vec::new();
+    // A file of the generic tier gets the rules its units serve: function
+    // simplification, file organization, shared logic and comments. Values
+    // and security need per-language knowledge its tag query does not give,
+    // and its test files are not judged (`file_kind::generic_prepared`).
+    let generic = scope.units[&owner].generic;
     if shared.enabled(catalog::FUNCTION_SIMPLIFICATION) {
         asks = plan_functions(scope, &context, view, &lines, &cases, &mut file);
     }
@@ -60,6 +65,7 @@ pub(super) fn plan_file(
     let benchmark = crate::analysis::bend::file(context.path)
         && crate::analysis::clones::benchmark_code(context.path);
     if shared.enabled(catalog::HARDCODED_VALUES)
+        && !generic
         && view.application
         && !crate::analysis::clones::example_code(context.path)
         && !benchmark
@@ -92,7 +98,7 @@ pub(super) fn plan_file(
         .into_iter()
         .filter(|rule| shared.enabled(rule))
         .collect();
-    if !rules.is_empty() && view.application {
+    if !rules.is_empty() && !generic && view.application {
         asks.extend(plan_security(
             scope, shared, &context, &lines, &rules, &mut file, requests,
         ));

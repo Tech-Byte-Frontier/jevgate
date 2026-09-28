@@ -648,3 +648,29 @@ fn windows_of_the_same_two_functions_split_by_one_statement_are_one_pair() {
         1
     );
 }
+
+#[test]
+fn copies_pair_within_a_generic_language_s_family_only() {
+    let kotlin = |name: &str, value: &str| {
+        format!(
+            "fun {name}(items: List<Item>, discount: Int): Int {{\n    val open = items.filter {{ it.open && it.price > discount }}\n    val total = open.sumOf {{ it.price * {value} - discount }}\n    logger.info(\"total $total for ${{open.size}} open items\")\n    return total + open.size * discount\n}}\n"
+        )
+    };
+    let (a, b) = (kotlin("openTotal", "2"), kotlin("closedTotal", "3"));
+    let differences = differences_between(("a/Open.kt", &a), ("a/Closed.kt", &b));
+    assert_eq!(
+        differences,
+        [Difference {
+            a: "3".into(),
+            b: "2".into()
+        }]
+    );
+    // The same statements in C, C++ and Java: C and C++ are one family.
+    let body = "    int total = 0;\n    for (int i = 0; i < count; i++) {\n        total += prices[i] * weights[i] - discounts[i];\n    }\n    printf(\"%d items weigh %d in all\", count, total);\n    return total + count * shipping;\n";
+    let c = format!("int sum(int *prices, int *weights, int count) {{\n{body}}}\n");
+    let java = format!(
+        "class Sum {{\n  int sum(int[] prices, int[] weights, int count) {{\n{body}  }}\n}}\n"
+    );
+    assert_eq!(pairs_between(("a/sum.c", &c), ("a/sum.cpp", &c)), 1);
+    assert_eq!(pairs_between(("a/sum.c", &c), ("a/Sum.java", &java)), 0);
+}

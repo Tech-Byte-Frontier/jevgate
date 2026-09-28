@@ -2,6 +2,7 @@
 //! grouping, callee and subject lookup, and marking bodies too small to judge.
 mod callbacks;
 mod facts;
+mod generic;
 mod import_names;
 mod ruby_definitions;
 
@@ -142,6 +143,9 @@ pub struct FileUnits {
     pub setup: super::sites::Setup,
     /// False when no parser supports this language.
     pub parsed: bool,
+    /// Read by the generic tier (`analysis::generic`): only function
+    /// simplification, file organization, shared logic and comments judge it.
+    pub generic: bool,
     /// Whether it is Django code: Python that imports Django or Django REST
     /// framework, or a Django settings module.
     pub django: bool,
@@ -175,6 +179,16 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(FileUnits::default());
     };
+    if let Some(language) = super::generic::of(path) {
+        let mut file = FileUnits {
+            parsed: true,
+            generic: true,
+            ..Default::default()
+        };
+        generic::walk(language, tree.root_node(), source, &mut file);
+        calls_by_name(&mut file.units);
+        return Ok(file);
+    }
     let settings = super::django::settings_module(path, tree.root_node(), source);
     let mut file = FileUnits {
         parsed: true,

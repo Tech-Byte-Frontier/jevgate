@@ -7,6 +7,7 @@ pub mod clones;
 pub mod comments;
 pub mod django;
 pub mod errors;
+pub(crate) mod generic;
 pub mod groups;
 pub mod imports;
 pub mod literals;
@@ -135,4 +136,11 @@ pub(crate) fn fast_hash<T: std::hash::Hash + ?Sized>(value: &T) -> u64 {
 
 pub(crate) fn is_comment(node: Node<'_>) -> bool {
     node.kind().contains("comment")
+}
+
+/// A comment line without Lua's `--` marker or LuaDoc's `---`, which the
+/// other languages' markers (`//`, `#`, `*`) leave in place.
+pub(crate) fn without_dashes(line: &str) -> &str {
+    line.strip_prefix("--")
+        .map_or(line, |rest| rest.trim_start_matches('-'))
 }

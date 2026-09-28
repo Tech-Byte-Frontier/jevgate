@@ -99,10 +99,16 @@ fn recheck(
     id: &str,
     scope: &Scope<'_>,
 ) -> Option<(Value, Asked)> {
+    // Callees of one family: a Kotlin function's `map` is no Python `map`,
+    // and the other languages keep reading each other as before.
+    let family = crate::analysis::generic::family(file.path);
     let mut callees = Vec::new();
-    for (_, _, callee) in scope.scope_units() {
+    for (path, _, callee) in scope.scope_units() {
         if callees.len() == CALLEES {
             break;
+        }
+        if crate::analysis::generic::family(path) != family {
+            continue;
         }
         if unit.calls.contains(&callee.short_name)
             && callee.name != unit.name
