@@ -228,7 +228,10 @@ fn keys_are_read_from_the_environment_then_the_credential_file_then_the_saved_ke
         (Provider::Typesafe, "file-key"),
         "TypeSafe's key comes first in a file too"
     );
-    project.write(".env", "OPENROUTER_API_KEY=sk-or-file\nUNRELATED=keep-me\n");
+    project.write(
+        ".env",
+        "TYPESAFE_API_KEY=\nOPENROUTER_API_KEY=sk-or-file\nAI_GATEWAY_API_KEY=''\nUNRELATED=keep-me\n",
+    );
     let (provider, value, source) = found(located(&[], selected));
     assert_eq!(
         (provider, value.as_str()),

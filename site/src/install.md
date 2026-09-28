@@ -19,6 +19,6 @@ Reviewing needs an API key. Jev, the model JevGate asks, is served by TypeSafe a
 | OpenRouter | [openrouter.ai](https://openrouter.ai/settings/keys) | `OPENROUTER_API_KEY` | `typesafe/jev-1.13` |
 | Vercel AI Gateway | [the Vercel dashboard](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys) | `AI_GATEWAY_API_KEY` | `typesafe-ai/jev` |
 
-`jevgate auth login` asks which kind of key it is and saves it with its provider; in CI, set the variable from a secret. A check uses the first key it finds: the environment's (in the order above), then `--env-file`, then the saved key; `jevgate auth status` shows which one and the keys it leaves unused. Only TypeSafe offers a pinned version (`jev-1.13.0`): the gateways' names are aliases, whose cached answers expire after `cache_ttl_secs` (an hour by default).
+`jevgate auth login` asks which kind of key it is and saves it with its provider; in CI, set the variable from a secret. A check uses the first key it finds: the environment's (in the order above; an empty variable counts as unset), then `--env-file` or `TYPESAFE_API_KEY` in the repository's `.env`, then the saved key; `jevgate auth status` shows which one and the keys it leaves unused. Only TypeSafe offers a pinned version (`jev-1.13.0`): the gateways' names are aliases, whose cached answers expire after `cache_ttl_secs` (an hour by default).
 
 Git is needed only for `--base` and the staleness rule.

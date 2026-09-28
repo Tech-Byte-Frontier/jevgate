@@ -281,7 +281,9 @@ fn read_limited(path: &Path) -> Result<Option<zeroize::Zeroizing<String>>> {
 }
 
 /// The keys a credential file defines for `providers`, in the order a check
-/// reads them: each variable once, optionally exported or quoted.
+/// reads them: each variable once, optionally exported or quoted. An empty
+/// value counts as unset, as in the environment, so a template's
+/// `OPENROUTER_API_KEY=` beside a real key does not fail the file.
 fn parse_keys(text: &str, providers: &[Provider]) -> Result<Vec<(Provider, Secret)>> {
     let mut keys: Vec<(Provider, Secret)> = Vec::new();
     for line in text.lines() {
@@ -296,12 +298,15 @@ fn parse_keys(text: &str, providers: &[Provider]) -> Result<Vec<(Provider, Secre
         else {
             continue;
         };
+        let value = value.trim().trim_matches(['\'', '"']);
+        if value.is_empty() {
+            continue;
+        }
         ensure!(
             !keys.iter().any(|(found, _)| *found == provider),
             "Credential file contains duplicate {} definitions",
             provider.service().variable
         );
-        let value = value.trim().trim_matches(['\'', '"']);
         keys.push((provider, Secret::parse(value.to_owned())?));
     }
     keys.sort_by_key(|(provider, _)| Provider::ALL.iter().position(|p| p == provider));
