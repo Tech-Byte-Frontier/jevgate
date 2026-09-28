@@ -25,14 +25,18 @@ pub(super) struct FunctionAsk {
 }
 
 /// What one rule asks about a function, with the unit its answers are
-/// recorded on and the evidence it adds beside the function's source.
+/// recorded on and the evidence its questions read beside the function's
+/// name and source.
 pub(super) enum Ask {
     /// Function simplification: whether splitting it would help and, where
     /// its nesting is deep, whether flattening it would.
     Split { unit: usize, nested: bool },
-    /// Hardcoded values: whether its literal `values` change between
-    /// deployments, need a name, or special-case one identity.
-    Values { unit: usize, values: Vec<String> },
+    /// Hardcoded values: whether the literal values in `evidence` change
+    /// between deployments, need a name, or special-case one identity.
+    Values {
+        unit: usize,
+        evidence: Map<String, Value>,
+    },
     /// The presence questions of each enabled security rule, one unit per
     /// rule, with the framework facts its code is judged with.
     Presence {
@@ -47,6 +51,13 @@ impl Ask {
         match self {
             Self::Split { unit, .. } | Self::Values { unit, .. } => std::slice::from_ref(unit),
             Self::Presence { units, .. } => units,
+        }
+    }
+
+    fn evidence(&self) -> Option<&Map<String, Value>> {
+        match self {
+            Self::Split { .. } => None,
+            Self::Values { evidence, .. } | Self::Presence { evidence, .. } => Some(evidence),
         }
     }
 
@@ -96,14 +107,8 @@ impl Entry {
         let mut state = Map::new();
         state.insert("name".into(), json!(name));
         state.insert("source".into(), json!(source));
-        for ask in &asks {
-            match ask {
-                Ask::Split { .. } => {}
-                Ask::Values { values, .. } => {
-                    state.insert("values".into(), json!(values));
-                }
-                Ask::Presence { evidence, .. } => state.extend(evidence.clone()),
-            }
+        for evidence in asks.iter().filter_map(Ask::evidence) {
+            state.extend(evidence.clone());
         }
         Self {
             name,

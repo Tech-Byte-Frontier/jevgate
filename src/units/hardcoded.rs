@@ -15,7 +15,7 @@ use crate::{
     catalog::HARDCODED_VALUES,
     schema::Pass,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::path::Path;
 
 /// Plan a unit per function that holds literal values, each paired with its
@@ -37,7 +37,7 @@ pub(super) fn plan(
     let mut asks = Vec::new();
     for ((position, unit), id) in units.into_iter().zip(ids) {
         let source = unit.source(file.source);
-        let values: Vec<String> = unit.literals.iter().map(|l| l.text.clone()).collect();
+        let values: Vec<&str> = unit.literals.iter().map(|l| l.text.as_str()).collect();
         let state = json!({"name": unit.name, "source": source, "values": values});
         out.units.push(UnitPlan {
             rule: HARDCODED_VALUES,
@@ -75,7 +75,7 @@ pub(super) fn plan(
             source: source.to_string(),
             ask: Ask::Values {
                 unit: out.units.len() - 1,
-                values,
+                evidence: Map::from_iter([("values".to_string(), json!(values))]),
             },
         });
     }
