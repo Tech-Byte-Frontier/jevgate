@@ -110,8 +110,15 @@ fn project_doc(path: &Path) -> bool {
         RECORD_STEMS.contains(&d.as_str())
             || matches!(
                 d.as_str(),
-                "fixtures" | "__fixtures__" | "testdata" | "__snapshots__" | "archive" | "_build"
+                "fixtures"
+                    | "__fixtures__"
+                    | "testdata"
+                    | "__snapshots__"
+                    | "archive"
+                    | "_build"
+                    | "versioned_docs"
             )
+            || release_dir(d)
     });
     let documentation = dirs.is_empty()
         || stem.starts_with("readme")
@@ -123,6 +130,16 @@ fn project_doc(path: &Path) -> bool {
         && !hidden
         && !excluded
         && !RECORD_STEMS.contains(&stem.as_str())
+}
+
+/// A directory holding the docs of one release, such as `docs/versions/0.7.5`
+/// or `v1.2`: a frozen copy of the current docs, not a second source.
+fn release_dir(dir: &str) -> bool {
+    let number = dir.strip_prefix('v').unwrap_or(dir);
+    number.contains('.')
+        && number
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Claude Code skills, commands and subagent definitions: Markdown under
@@ -331,6 +348,11 @@ mod tests {
             ("tests/fixtures/readme.md", false),
             ("docs/changelog/v1.md", false),
             ("docs/archive/plan.md", false),
+            ("docs/versions/0.7.5/website/agents.mdx", false),
+            ("docs/v1.2/guide.md", false),
+            ("website/versioned_docs/version-2/intro.md", false),
+            ("docs/v2/guide.md", true),
+            ("docs/next/README.md", true),
         ] {
             assert_eq!(project_doc(Path::new(path)), expected, "{path}");
         }
