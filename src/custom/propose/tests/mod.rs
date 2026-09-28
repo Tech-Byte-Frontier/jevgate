@@ -67,17 +67,24 @@ impl Evaluator for Rules {
             let text = candidates[position.parse::<usize>().unwrap()]["text"]
                 .as_str()
                 .unwrap();
-            *slot = match question {
-                "convention" => {
-                    json!({"type": "noul", "noul": if text.starts_with("Never") { 0.95 } else { 0.05 }})
-                }
-                "unit" => likely("function", &PROPOSAL_UNITS),
-                _ if text.contains("characters per line") => likely("tool", &PROPOSAL_CHECKERS),
-                _ if text.contains("locales") => likely("run", &PROPOSAL_CHECKERS),
-                _ => likely("reviewer", &PROPOSAL_CHECKERS),
-            };
+            *slot = Rules::answer(question, text);
         }
         Ok(body)
+    }
+}
+
+impl Rules {
+    /// The answer to `question` about the line `text`.
+    fn answer(question: &str, text: &str) -> Value {
+        match question {
+            "convention" => {
+                json!({"type": "noul", "noul": if text.starts_with("Never") { 0.95 } else { 0.05 }})
+            }
+            "unit" => likely("function", &PROPOSAL_UNITS),
+            _ if text.contains("characters per line") => likely("tool", &PROPOSAL_CHECKERS),
+            _ if text.contains("locales") => likely("run", &PROPOSAL_CHECKERS),
+            _ => likely("reviewer", &PROPOSAL_CHECKERS),
+        }
     }
 }
 
