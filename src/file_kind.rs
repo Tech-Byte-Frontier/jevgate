@@ -131,6 +131,12 @@ pub fn unsent(path: &Path, named_source: &str, detail: &str) -> Classification {
     class
 }
 
+/// The language a file is read as: by its path, and for a `.h` header of
+/// the generic tier by its code (`analysis::generic::read`).
+pub fn read_language(path: &Path, source: &str) -> &'static str {
+    crate::analysis::generic::read(path, source).map_or_else(|| language(path), |g| g.name)
+}
+
 pub fn language(path: &Path) -> &'static str {
     if crate::components::server_template(path) {
         // Only its inline scripts are parsed and judged.
@@ -219,7 +225,8 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Resul
             test_lines: Vec::new(),
         }));
     }
-    let prepared = match crate::analysis::generic::of(&input.result.path) {
+    let source = input.source.as_deref().unwrap_or_default();
+    let prepared = match crate::analysis::generic::read(&input.result.path, source) {
         Some(language) => generic_prepared(language, input.result.role == "test"),
         None => prepare(input, args)?,
     };

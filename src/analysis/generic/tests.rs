@@ -88,3 +88,14 @@ fn test_files_are_found_by_each_language_s_conventions() {
         assert!(!test_path(Path::new(path)), "{path}");
     }
 }
+
+#[test]
+fn a_header_holding_cpp_code_is_read_as_cpp_and_a_c_header_as_c() {
+    let cpp = "#ifndef CACHE_H_\n#define CACHE_H_\n\nnamespace store {\nclass Cache;\n}  // namespace store\n\n#endif\n";
+    let c = "#ifndef UTIL_H\n#define UTIL_H\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\nint add(int a, int b);\n\n#ifdef __cplusplus\n}\n#endif\n#endif\n";
+    assert_eq!(read(Path::new("include/cache.h"), cpp).unwrap().name, "C++");
+    assert_eq!(read(Path::new("include/util.h"), c).unwrap().name, "C");
+    // Only a header's code decides: a `.c` file is C whatever it holds.
+    assert_eq!(read(Path::new("src/cache.c"), cpp).unwrap().name, "C");
+    assert_eq!(family(Path::new("include/cache.h")), Some("C"));
+}

@@ -350,6 +350,41 @@ pub(crate) fn of(path: &Path) -> Option<&'static Language> {
     })
 }
 
+/// The generic language a file is written in, by its extension and, for a
+/// `.h` header, by its code: C++ projects name their headers `.h` too, and
+/// read as C, 46 of leveldb's 56 headers had code left out and the comments
+/// in their classes read as top-level C code (5 considers, all wrong).
+pub(crate) fn read(path: &Path, source: &str) -> Option<&'static Language> {
+    let language = of(path)?;
+    let header = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("h"));
+    if header && cpp_code(source) {
+        return LANGUAGES.iter().find(|l| l.name == "C++");
+    }
+    Some(language)
+}
+
+/// Code only C++ writes: `std::`, or a line opening a namespace, a
+/// template, a class or an access section.
+fn cpp_code(source: &str) -> bool {
+    const OPENINGS: &[&str] = &[
+        "namespace ",
+        "template <",
+        "template<",
+        "class ",
+        "public:",
+        "protected:",
+        "private:",
+        "using namespace ",
+    ];
+    source.contains("std::")
+        || source
+            .lines()
+            .map(str::trim_start)
+            .any(|line| OPENINGS.iter().any(|opening| line.starts_with(opening)))
+}
+
 /// The family of a file's generic language; none for the other languages,
 /// which keep reading each other's code as they always have.
 pub(crate) fn family(path: &Path) -> Option<&'static str> {

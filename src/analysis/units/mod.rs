@@ -189,7 +189,7 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         return Ok(FileUnits::default());
     };
     let root = tree.root_node();
-    let mut file = match super::generic::of(path) {
+    let mut file = match super::generic::read(path, source) {
         Some(language) => tagged(language, root, source),
         None => walked(path, root, source),
     };

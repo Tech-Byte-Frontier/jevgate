@@ -241,7 +241,10 @@ fn file_context<'a>(
     FileContext {
         owner,
         path: &input.result.path,
-        language: crate::file_kind::language(&input.result.path),
+        language: crate::file_kind::read_language(
+            &input.result.path,
+            input.source.as_deref().unwrap_or(""),
+        ),
         source: input.source.as_deref().unwrap_or(""),
         source_hash: &input.result.source_hash,
         model: args.model(),

@@ -148,6 +148,19 @@ fn swift_computed_properties_and_subscripts_and_kotlin_members_are_units() {
 }
 
 #[test]
+fn a_cpp_header_named_h_is_read_and_named_as_cpp() {
+    let header = "#ifndef CACHE_H_\n#define CACHE_H_\n\nnamespace store {\n\n// A cache of blocks.\nclass Cache {\n public:\n  // Looks a key up, twice as fast as it reads.\n  int Get(int key) const {\n    return key * 2;\n  }\n};\n\n}  // namespace store\n\n#endif  // CACHE_H_\n";
+    let path = Path::new("include/cache.h");
+    let file = parse(path, header).unwrap();
+    assert!(!file.partial());
+    assert_eq!(
+        outline("include/cache.h", header),
+        owned(&[("Cache::Get", Kind::Method, 10)])
+    );
+    assert_eq!(crate::file_kind::read_language(path, header), "C++");
+}
+
+#[test]
 fn dart_and_scala_operators_are_units() {
     let dart = "class Money {\n  final int cents;\n  const Money(this.cents);\n\n  Money operator +(Money other) {\n    final sum = cents + other.cents;\n    return Money(sum);\n  }\n}\n";
     assert_eq!(

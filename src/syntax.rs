@@ -160,7 +160,10 @@ fn parsed_text(path: &Path, source: &str) -> Option<(tree_sitter::Language, Opti
         let (scripts, language) = crate::components::scripts("html", source);
         Some((language, Some(without_tags(&scripts, true))))
     } else {
-        let language = grammar(path)?;
+        let language = match crate::analysis::generic::read(path, source) {
+            Some(generic) => generic.grammar(),
+            None => grammar(path)?,
+        };
         Some((
             language,
             project_template(path).then(|| without_jinja(source)),

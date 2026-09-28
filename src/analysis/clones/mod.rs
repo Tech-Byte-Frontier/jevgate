@@ -199,7 +199,7 @@ fn statement_blocks<'a>(files: &[SourceFile<'a>]) -> (Vec<Parsed<'a>>, Vec<Block
             parsed.push(Parsed { tokens: Vec::new() });
             continue;
         };
-        let generic = generic::of(file.path);
+        let generic = generic::read(file.path, file.source);
         let mut tokens = Vec::new();
         let literals = generic.map_or(LITERALS, |language| language.literals);
         leaves(tree.root_node(), file.source, literals, &mut tokens);
