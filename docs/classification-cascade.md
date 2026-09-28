@@ -188,6 +188,16 @@ signatures, or one candidate pair.
    and asks the pack again. Two requests about the same state share their
    answers to the questions both ask, such as a hardcoded-value question
    asked alone and in a pack whose evidence is the same.
+   Custom questions (`custom/<id>`) are asked in the same dispatch. A unit
+   whose source a built-in first-pass request already sends (a function in
+   its pack, a test, a comment, an instruction section) is asked in that
+   request, found by the entry that holds its evidence, so the source goes
+   up once and, the state being the same, adding a question asks only that
+   question; the others go in requests of their own, packed as the built-in
+   stage packs the same units, a file or a changed hunk's parts apart. The
+   question names its unit by its literal state path, with its author's
+   background and guidance as labeled keys. Its answer is a finding at the
+   question's own threshold and level, and no follow-up is asked.
 4. **Follow-ups.** One recheck per uncertain unit, with callee signatures, the
    enclosing functions or the file's application source; a decisive recheck
    replaces the first answer and both are kept. A hardcoded-value unit is asked

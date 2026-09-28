@@ -37,8 +37,9 @@ rules = { security = "consider" }        # except these
 | `concurrency` | `6`, or `3` with a gateway's key | Most simultaneous requests; `--concurrency` can only lower it. JevGate sends at most 6 at once, so a higher value, which releases before 0.26 accepted up to 8, means 6, and `--concurrency` above 6 is lowered to 6 with a notice. Requests also start at least 50 ms apart, TypeSafe's limit of 1,200 a minute for an account. With an OpenRouter or Vercel AI Gateway key the default is 3: the gateway's account on TypeSafe is shared by its other customers |
 | `max_file_bytes` | `262144` | Files larger than this are reported as needs-context, never truncated; generated and vendored files are skipped instead |
 | `max_context_bytes` | `32768` | Ceiling on context bytes per request |
+| `[[question]]` | none | A [custom question](custom-questions.md): `id`, `question`, `background`, `guidance`, `unit`, `paths`, `threshold`, `level` and `next_step`. `.jevgate/questions/<id>.toml` holds one per file |
 
-Rules are named by ID (`maintainability/shared-logic`), key (`shared_logic`) or group (`maintainability`, `tests`, `security`, `documentation`, `default`, `all`). The same names work in `--rule`, `--skip-rule` and `--fail-on TARGET=LEVEL`, and the most specific entry wins.
+Rules are named by ID (`maintainability/shared-logic`), key (`shared_logic`) or group (`maintainability`, `tests`, `security`, `documentation`, `custom`, `default`, `all`). A custom question is named `custom/<id>`. The same names work in `--rule`, `--skip-rule` and `--fail-on TARGET=LEVEL`, and the most specific entry wins.
 
 ## What fails the check by default
 

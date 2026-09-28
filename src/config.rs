@@ -43,7 +43,7 @@ pub struct Config {
     pub include_tests: bool,
     /// Gate levels for the files some paths match, such as report-only tooling.
     pub scope: Vec<Scope>,
-    /// Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/<id>.toml` holds one per file.
+    /// Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/` holds one per file, named by its id.
     pub question: Vec<crate::custom::Spec>,
 }
 

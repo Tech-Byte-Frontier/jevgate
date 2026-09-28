@@ -29,7 +29,7 @@ pub fn directory(root: &Path) -> PathBuf {
 #[cfg_attr(test, derive(schemars::JsonSchema), schemars(rename = "Question"))]
 #[serde(deny_unknown_fields)]
 pub struct Spec {
-    /// Names the rule `custom/<id>`: lowercase letters, digits and single hyphens, starting with a letter. Required in jevgate.toml; a question file's name gives it.
+    /// Names the rule: `custom/` and the id, of lowercase letters, digits and single hyphens, starting with a letter. Required in jevgate.toml; a question file's name gives it.
     #[serde(default)]
     pub id: Option<String>,
     /// One yes/no question about each unit, ending in `?`; yes is a violation.

@@ -1,5 +1,7 @@
 # What it finds
 
+Beside these rules, a team can write its own conventions as [custom questions](custom-questions.md): yes/no questions asked of every function, file, test, comment, documentation section or changed hunk they name.
+
 **Maintainability** (on by default, except hardcoded values)
 
 | Rule | Example finding |

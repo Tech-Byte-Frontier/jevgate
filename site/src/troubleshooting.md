@@ -87,6 +87,19 @@ It reads every file before writing any, so when it stops, nothing was written.
 ## The agent accepted a finding and the hook still blocks
 
 Within a turn, the agent hook reads `jevgate.toml`, `jevgate-baseline.json` and `jevgate: allow` comments as they were when the turn began, so an agent cannot unblock itself by accepting its own findings or loosening the gate. Such a finding is marked `(fails the gate; accepted this turn)`, the person is told of the edit when the turn ends, and the edit counts from the next turn. If the finding is wrong, keep the accepting edit; if not, remove it. The same holds for a `jevgate.toml` or baseline the turn leaves unreadable (the person reads that it `does not parse`), and for a generated-code marker (`// @generated`, `DO NOT EDIT`) added to a file JevGate judged when the turn began: the file is judged this turn, and a guard says it is skipped from now on.
+## A custom question is not asked, or is ignored by Git
+
+**`jevgate: custom/<id> was not asked: it needs --base`** (or `--include-tests`)
+: A `hunk` question asks about what changed since a revision, and a `test` question about tests, which are judged only with `include_tests`. Run with the flag it names.
+
+**`jevgate: Git ignores .jevgate/questions (…), so its questions never reach a commit or CI`**
+: A `.gitignore` entry such as `/.jevgate/` hides the question files, and CI would never ask them. Replace it with `/.jevgate/*` and `!/.jevgate/questions/`; JevGate's own `.jevgate/.gitignore` already keeps `questions/` tracked.
+
+**`custom/<id> left N units unasked`**
+: A question asks at most 2,000 units a run. Narrow it with `paths`, or check the changed files with `--base`.
+
+**`Unknown rule or group: <id>; a custom question is named custom/<id>`**
+: Custom questions are named by their rule ID, or all together as `custom`.
 
 ## Many files are uncertain
 

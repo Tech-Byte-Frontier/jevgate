@@ -14,6 +14,7 @@
 - [Continuous integration](ci.md)
 - [Coding agents](coding-agents.md)
 - [Configuration](configuration.md)
+- [Custom questions](custom-questions.md)
 - [Output and exit codes](output.md)
 - [Privacy and cost](privacy-and-cost.md)
 - [Troubleshooting](troubleshooting.md)

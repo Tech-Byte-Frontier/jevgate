@@ -261,12 +261,13 @@ def configuration_page(schema_path):
     ]
     for name, spec in sorted(schema["properties"].items()):
         lines.append(f"| `{name}` | {kind(spec, schema)} | {cell(spec.get('description', ''))} |")
-    scope = schema["$defs"]["Scope"]
-    lines += ["", "## `[[scope]]`", "", cell(scope.get("description", "")), "", "| Key | Type | Meaning |", "|---|---|---|"]
-    for name, spec in sorted(scope["properties"].items()):
-        lines.append(f"| `{name}` | {kind(spec, schema)} | {cell(spec.get('description', ''))} |")
+    for table, definition in [("[[scope]]", "Scope"), ("[[question]]", "Question")]:
+        table_spec = schema["$defs"][definition]
+        lines += ["", f"## `{table}`", "", cell(table_spec.get("description", "")), "", "| Key | Type | Meaning |", "|---|---|---|"]
+        for name, spec in sorted(table_spec["properties"].items()):
+            lines.append(f"| `{name}` | {kind(spec, schema)} | {cell(spec.get('description', ''))} |")
     levels = schema["$defs"]["Level"]["anyOf"][0]["enum"]
-    names = schema["$defs"]["Scope"]["properties"]["rules"]["propertyNames"]["enum"]
+    names = schema["$defs"]["Scope"]["properties"]["rules"]["propertyNames"]["anyOf"][0]["enum"]
     lines += [
         "",
         "## Levels",
@@ -275,14 +276,16 @@ def configuration_page(schema_path):
         "",
         "## Rule names",
         "",
-        ", ".join(f"`{name}`" for name in names) + ".",
+        ", ".join(f"`{name}`" for name in names) + ", and `custom/<id>` for each custom question.",
     ]
     return "\n".join(lines) + "\n"
 
 
 def kind(spec, schema):
     if "$ref" in spec:
-        return "rules list or table"
+        target = schema["$defs"][spec["$ref"].rsplit("/", 1)[-1]]
+        values = target.get("enum") or [option["const"] for option in target.get("oneOf", []) if "const" in option]
+        return ", ".join(f"`{value}`" for value in values) if values else "rules list or table"
     if spec.get("type") == "array":
         items = spec.get("items", {})
         return "list of tables" if "$ref" in items else "list of " + items.get("type", "value") + "s"

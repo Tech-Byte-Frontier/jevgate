@@ -46,7 +46,7 @@
           "type": "string"
         },
         "id": {
-          "description": "Names the rule `custom/<id>`: lowercase letters, digits and single hyphens, starting with a letter. Required in jevgate.toml; a question file's name gives it.",
+          "description": "Names the rule: `custom/` and the id, of lowercase letters, digits and single hyphens, starting with a letter. Required in jevgate.toml; a question file's name gives it.",
           "maxLength": 48,
           "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
           "type": "string"
@@ -450,7 +450,7 @@
       "type": "string"
     },
     "question": {
-      "description": "Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/<id>.toml` holds one per file.",
+      "description": "Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/` holds one per file, named by its id.",
       "items": {
         "$ref": "#/$defs/Question"
       },

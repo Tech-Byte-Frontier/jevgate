@@ -12,7 +12,7 @@ A major release is needed to remove or change the meaning of:
 
 - **Commands and flags**, and the values they accept.
 - **Exit codes**: 0 gate passed, 1 gate failed, 2 run incomplete or invalid.
-- **`jevgate.toml` keys, levels and rule names.** Unknown keys are errors, so removing a key or a rule name would break configurations.
+- **`jevgate.toml` keys, levels and rule names**, and the keys of question files in `.jevgate/questions/`. Unknown keys are errors, so removing a key or a rule name would break configurations.
 - **The JSON report** (`--format json`, `.jevgate/latest.json`): its fields keep their names and meanings, and new fields can be added in any release. `schema_version` changes when a field is removed or changes meaning.
 - **`jevgate-baseline.json`** and finding fingerprints: an upgrade must not make accepted findings new. A release that changes how findings are fingerprinted carries the baseline over.
 - **SARIF, GitLab Code Quality and GitHub annotation output**, within what those formats define.

@@ -29,7 +29,7 @@ After the findings, the agent text gives each reason files failed or were skippe
 
 The agent text marks each finding that fails the gate with `(fails the gate)`, and says when reviews did not fail it because their rules are still being measured. The JSON report records how the gate counted each new finding in its `gate` field: `fails`, `measuring` (reported without failing: the level is `mature` and its rule and level are still being measured) or `advisory` (the level in force does not count it, as `review` does not count a consider). `fail_on_mature` says what `mature` stands for among the selected rules.
 
-A single finding can also be accepted where it is, with a comment on its line or directly above it (doc comments and attributes may sit in between). The comment names a rule ID (`security/injection`), its name (`injection`), its key or a group, and needs a reason; without one it is ignored and the finding says so:
+A single finding can also be accepted where it is, with a comment on its line or directly above it (doc comments and attributes may sit in between). The comment names a rule ID (`security/injection`), its name (`injection`), its key or a group (a [custom question](custom-questions.md) by its ID, `custom/no-body-logs`, or `custom`), and needs a reason; without one it is ignored and the finding says so:
 
 ```python
 # jevgate: allow(hardcoded_values) the protocol fixes this port
