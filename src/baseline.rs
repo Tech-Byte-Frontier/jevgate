@@ -87,58 +87,18 @@ pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Wr
         report.complete && !report.dry_run,
         "The last check was incomplete; rerun it before writing a baseline"
     );
-    let mut findings: Vec<Accepted> = report
-        .files
-        .iter()
-        .flat_map(|file| {
-            // A suppressed finding is accepted where its comment is; removing
-            // the comment brings it back.
-            file.findings
-                .iter()
-                .filter(|f| f.suppressed.is_none())
-                .map(|f| Accepted {
-                    fingerprint: f.fingerprint.clone(),
-                    rule: f.rule.clone(),
-                    path: file.path.clone(),
-                    line: Some(f.line),
-                    strength: Some(f.strength),
-                    message: f.message.clone(),
-                    reason,
-                })
-        })
-        .collect();
+    let mut findings = to_accept(&report, reason);
     let accepted = findings.len();
-    let mut kept = 0;
     let previous = read_baseline(root)?;
     if let Some(previous) = &previous {
-        let reasons: BTreeMap<&str, Disposition> = previous
-            .findings
-            .iter()
-            .filter_map(|f| Some((f.fingerprint.as_str(), f.reason?)))
-            .collect();
-        for finding in &mut findings {
-            if let Some(earlier) = reasons.get(finding.fingerprint.as_str()) {
-                finding.reason = Some(*earlier);
-            }
-        }
+        keep_reasons(&mut findings, previous);
     }
-    if merge && let Some(previous) = previous {
-        let whole = report.scope == Scope::WholeFiles;
-        let covered: BTreeSet<&Path> = report
-            .files
-            .iter()
-            .filter(|_| whole)
-            .map(|f| f.path.as_path())
-            .chain(report.deleted_files.iter().map(|p| p.as_path()))
-            .collect();
-        let earlier: Vec<Accepted> = previous
-            .findings
-            .into_iter()
-            .filter(|f| !covered.contains(f.path.as_path()))
-            .collect();
-        kept = earlier.len();
-        findings.extend(earlier);
-    }
+    let earlier = match previous {
+        Some(previous) if merge => uncovered(&report, previous),
+        _ => Vec::new(),
+    };
+    let kept = earlier.len();
+    findings.extend(earlier);
     findings.sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
     findings.dedup_by(|a, b| a.fingerprint == b.fingerprint);
     let path = save_baseline(
@@ -154,6 +114,61 @@ pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Wr
         accepted,
         kept,
     })
+}
+
+/// The check's findings to accept, each with `reason`. A suppressed finding
+/// is accepted where its comment is; removing the comment brings it back.
+fn to_accept(report: &Report, reason: Option<Disposition>) -> Vec<Accepted> {
+    report
+        .files
+        .iter()
+        .flat_map(|file| {
+            file.findings
+                .iter()
+                .filter(|f| f.suppressed.is_none())
+                .map(|f| Accepted {
+                    fingerprint: f.fingerprint.clone(),
+                    rule: f.rule.clone(),
+                    path: file.path.clone(),
+                    line: Some(f.line),
+                    strength: Some(f.strength),
+                    message: f.message.clone(),
+                    reason,
+                })
+        })
+        .collect()
+}
+
+/// Give each finding accepted before the reason it was accepted with.
+fn keep_reasons(findings: &mut [Accepted], previous: &Baseline) {
+    let reasons: BTreeMap<&str, Disposition> = previous
+        .findings
+        .iter()
+        .filter_map(|f| Some((f.fingerprint.as_str(), f.reason?)))
+        .collect();
+    for finding in findings {
+        if let Some(earlier) = reasons.get(finding.fingerprint.as_str()) {
+            finding.reason = Some(*earlier);
+        }
+    }
+}
+
+/// The earlier entries a merge keeps: those of files the check did not
+/// cover. A check of changed lines covers only the files it deleted.
+fn uncovered(report: &Report, previous: Baseline) -> Vec<Accepted> {
+    let whole = report.scope == Scope::WholeFiles;
+    let covered: BTreeSet<&Path> = report
+        .files
+        .iter()
+        .filter(|_| whole)
+        .map(|f| f.path.as_path())
+        .chain(report.deleted_files.iter().map(|p| p.as_path()))
+        .collect();
+    previous
+        .findings
+        .into_iter()
+        .filter(|f| !covered.contains(f.path.as_path()))
+        .collect()
 }
 
 fn save_baseline(root: &Path, baseline: &Baseline) -> Result<std::path::PathBuf> {

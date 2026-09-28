@@ -135,32 +135,13 @@ fn a_check_with_a_vercel_key_shows_the_gateway_and_an_unknown_cost() {
     );
 }
 
-/// A key saved as 0.25 saved it: the bare key in the owner-only file, with no
-/// provider recorded beside it.
-#[cfg(unix)]
-fn save_as_0_25(project: &Project, key: &str) {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-    let directory = project.0.join("isolated-auth");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .unwrap();
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(directory.join("credentials"))
-        .unwrap();
-    std::io::Write::write_all(&mut file, key.as_bytes()).unwrap();
-}
-
 #[cfg(unix)]
 #[test]
 fn a_gateway_key_exported_for_other_tools_does_not_replace_the_key_given_to_jevgate() {
     let project = Project::new();
     std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
     std::fs::write(project.0.join("ts.env"), "TYPESAFE_API_KEY=file-key\n").unwrap();
-    save_as_0_25(&project, "saved-key");
+    project.save_credential("saved-key");
     for (args, key) in [
         (&["--env-file", "ts.env"][..], "file-key"),
         (&[], "saved-key"),

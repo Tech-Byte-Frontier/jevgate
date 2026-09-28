@@ -69,6 +69,29 @@ impl Project {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
     }
+    /// `key` saved as `jevgate auth login` saved it before 0.26: bare, in the
+    /// owner-only file of the project's isolated configuration directory,
+    /// with no provider recorded beside it.
+    #[cfg(unix)]
+    fn save_credential(&self, key: &str) -> std::path::PathBuf {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let config = self.0.join("isolated-auth");
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&config)
+            .unwrap();
+        let saved = config.join("credentials");
+        std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&saved)
+            .unwrap()
+            .write_all(key.as_bytes())
+            .unwrap();
+        saved
+    }
 }
 
 /// A function large enough to judge: five body lines.

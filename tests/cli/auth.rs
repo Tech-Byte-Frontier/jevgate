@@ -105,7 +105,7 @@ fn auth_status_explains_precedence_without_loading_review_config_or_showing_keys
 #[test]
 fn saved_credential_is_shared_across_repositories() {
     let project = Project::new();
-    save_credential(&project);
+    project.save_credential("private-saved-key");
     for name in ["first-repository", "second-repository"] {
         let root = project.0.join(name);
         std::fs::create_dir(&root).unwrap();
@@ -132,7 +132,7 @@ fn saved_credential_is_shared_across_repositories() {
 #[test]
 fn logout_removes_the_saved_credential_and_names_remaining_overrides() {
     let project = Project::new();
-    let saved = save_credential(&project);
+    let saved = project.save_credential("private-saved-key");
     let local = "TYPESAFE_API_KEY=private-repo-key\nUNRELATED=keep\n";
     std::fs::write(project.0.join(".env"), local).unwrap();
     let output = project.command().args(["auth", "logout"]).output().unwrap();
@@ -155,28 +155,6 @@ fn logout_removes_the_saved_credential_and_names_remaining_overrides() {
         String::from_utf8_lossy(&output.stdout)
             .contains("Current override: TYPESAFE_API_KEY environment variable")
     );
-}
-
-/// A private saved credential in the project's isolated configuration directory.
-#[cfg(unix)]
-fn save_credential(project: &Project) -> std::path::PathBuf {
-    use std::io::Write;
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-    let config = project.0.join("isolated-auth");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&config)
-        .unwrap();
-    let saved = config.join("credentials");
-    std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(0o600)
-        .open(&saved)
-        .unwrap()
-        .write_all(b"private-saved-key")
-        .unwrap();
-    saved
 }
 
 #[test]

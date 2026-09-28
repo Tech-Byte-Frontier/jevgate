@@ -110,6 +110,9 @@ pub fn load(path: &Path) -> Result<Option<Zeroizing<String>>> {
     Ok(Some(value))
 }
 
+/// Write the saved credential's text, as `store` made it, to the owner-only
+/// file at `path`, replacing it whole. It holds an API key, which is sent to
+/// its provider as written, so it is kept as is: a hash could not be sent.
 pub fn save(path: &Path, text: &str) -> Result<()> {
     #[cfg(not(unix))]
     {
