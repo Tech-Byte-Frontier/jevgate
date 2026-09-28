@@ -34,6 +34,9 @@ fn versioned(text: &str, version: &str) -> String {
 
 #[test]
 fn the_plugin_and_the_npm_package_match_the_crate() {
+    if crate::tests::packaged() {
+        return;
+    }
     let write = std::env::var_os("JEVGATE_WRITE_PACKAGES").is_some();
     let read = |path: &str| {
         std::fs::read_to_string(format!("{ROOT}/{path}"))
@@ -80,6 +83,9 @@ fn init_finds_the_plugins_hooks() {
 
 #[test]
 fn the_docs_set_up_by_hand_the_hooks_init_writes() {
+    if crate::tests::packaged() {
+        return;
+    }
     let page = std::fs::read_to_string(format!("{ROOT}/{DOCS}")).unwrap_or_default();
     let example = page
         .split_once(BY_HAND)

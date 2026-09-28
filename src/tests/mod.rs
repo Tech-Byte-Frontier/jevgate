@@ -17,6 +17,17 @@ mod scope;
 #[path = "../../tests/support/temp_dir.rs"]
 mod temp_dir;
 
+/// Whether the crate is built from its published package, which holds the
+/// source and tests but not the repository's other files (`plugin/`,
+/// `npm/`, `site/`, `jevgate.schema.json`): tests that hold those files to
+/// the code have nothing to read there. Cargo adds `.cargo_vcs_info.json`
+/// only to a package.
+pub(super) fn packaged() -> bool {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".cargo_vcs_info.json")
+        .exists()
+}
+
 pub(super) struct Project(pub(super) temp_dir::TempDir);
 impl Project {
     pub(super) fn new() -> Self {

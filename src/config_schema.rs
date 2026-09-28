@@ -102,6 +102,9 @@ mod tests {
     /// them, rerun with `JEVGATE_WRITE_SCHEMA=1` to rewrite the file.
     #[test]
     fn checked_in_schema_matches_the_configuration() {
+        if crate::tests::packaged() {
+            return;
+        }
         let text = serde_json::to_string_pretty(&schema()).unwrap() + "\n";
         if std::env::var_os("JEVGATE_WRITE_SCHEMA").is_some() {
             std::fs::write(FILE, &text).unwrap();
