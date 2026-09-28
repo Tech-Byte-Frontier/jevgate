@@ -54,8 +54,9 @@ pub(crate) fn question_count(request: &Value) -> u64 {
 }
 
 /// Each of `request`'s answers in `body`, as the cache keeps them: given at
-/// `created_at`, with an even share of the body's usage, the remainder to
-/// the first, so the shares add up to what the request cost.
+/// `created_at` by the request `body` names, with an even share of the body's
+/// usage, the remainder to the first, so the shares add up to what the
+/// request cost; no input share when the body reported no usage.
 fn cached_answers<'r>(
     request: &'r Value,
     body: &Value,
@@ -63,8 +64,9 @@ fn cached_answers<'r>(
 ) -> Vec<(&'r String, &'r Value, CachedAnswer)> {
     let count = question_count(request).max(1);
     let share = |total: u64, index: u64| total / count + u64::from(index < total % count);
-    let input = response::input_tokens(body).unwrap_or(0);
+    let input = response::input_tokens(body);
     let output = response::output_tokens(body);
+    let request_id = crate::response_headers::request_id(body["request_id"].as_str());
     questions(request)
         .zip(0..)
         .map(|((name, question), index)| {
@@ -72,8 +74,9 @@ fn cached_answers<'r>(
                 created_at,
                 model: body["model"].as_str().unwrap_or_default().into(),
                 answer: response::typed_fields(&body["answers"][name], question),
-                input_tokens: share(input, index),
+                input_tokens: input.map(|total| share(total, index)),
                 output_tokens: share(output, index),
+                request_id: request_id.clone(),
             };
             (name, question, answer)
         })
@@ -85,7 +88,8 @@ fn cached_answers<'r>(
 fn usable(answer: &CachedAnswer, question: &Value, request: &Value) -> bool {
     response::validate_model(&answer.model, request).is_ok()
         && response::validate_answer(&answer.answer, question).is_ok()
-        && answer.input_tokens.max(answer.output_tokens) <= response::MAX_REPORTED_TOKENS
+        && answer.input_tokens.unwrap_or(0).max(answer.output_tokens)
+            <= response::MAX_REPORTED_TOKENS
 }
 
 /// The questions an invocation answered, by state key: with `--refresh` it
@@ -242,7 +246,8 @@ impl Lookup {
 
     /// A response body answering the planned request from the found answers,
     /// and when its newest answer was given: the answers by question name,
-    /// the model of the newest, and the sum of their usage shares.
+    /// the model of the newest, the sum of their usage shares (none when an
+    /// answer's usage is unknown), and the id of the request that gave each.
     pub(super) fn body(&self, request: &Value) -> (Value, u64) {
         let newest = self
             .found
@@ -257,13 +262,24 @@ impl Lookup {
             .iter()
             .map(|(name, answer)| (name.clone(), answer.answer.clone()))
             .collect();
-        let input: u64 = self.found.values().map(|a| a.input_tokens).sum();
-        let output: u64 = self.found.values().map(|a| a.output_tokens).sum();
-        let body = serde_json::json!({
+        let request_ids: Map<String, Value> = self
+            .found
+            .iter()
+            .filter_map(|(name, answer)| {
+                let id = crate::response_headers::request_id(answer.request_id.as_deref())?;
+                Some((name.clone(), Value::String(id)))
+            })
+            .collect();
+        let mut body = serde_json::json!({
             "model": model,
             "answers": answers,
-            "usage": {"input_tokens": input, "output_tokens": output},
+            "request_ids": request_ids,
         });
+        let input: Option<u64> = self.found.values().map(|a| a.input_tokens).sum();
+        if let Some(input) = input {
+            let output: u64 = self.found.values().map(|a| a.output_tokens).sum();
+            body["usage"] = serde_json::json!({"input_tokens": input, "output_tokens": output});
+        }
         (body, newest.map_or(0, |answer| answer.created_at))
     }
 }
@@ -322,8 +338,9 @@ mod tests {
             created_at: schema::now() - 7200,
             model: "jev-1.13.0".into(),
             answer: json!({"type":"noul","noul":0.1}),
-            input_tokens: 1,
+            input_tokens: Some(1),
             output_tokens: 0,
+            request_id: None,
         };
         store
             .save_answers("state", [("q".to_string(), answer)].into())
@@ -392,6 +409,45 @@ mod tests {
     }
 
     #[test]
+    fn an_answer_without_usage_is_kept_without_it_and_with_its_request_id() {
+        let mut request = request();
+        request["model"] = json!("typesafe-ai/jev");
+        request["questions"]["b"] = request["questions"]["a"].clone();
+        let body = json!({"model":"typesafe-ai/jev","request_id":"req_1",
+            "answers":{"a":{"type":"noul","noul":0.1},"b":{"type":"noul","noul":0.2}}});
+        let found: BTreeMap<String, CachedAnswer> = cached_answers(&request, &body, 7)
+            .into_iter()
+            .map(|(name, _, answer)| (name.clone(), answer))
+            .collect();
+        for answer in found.values() {
+            assert_eq!(answer.input_tokens, None);
+            assert_eq!(answer.request_id.as_deref(), Some("req_1"));
+        }
+        let stored = serde_json::to_value(&found["a"]).unwrap();
+        assert!(stored.get("input_tokens").is_none(), "{stored}");
+        let lookup = Lookup {
+            state: state_key(&request),
+            found,
+            carried: BTreeMap::new(),
+            missing: Vec::new(),
+        };
+        let (answered, created_at) = lookup.body(&request);
+        assert!(
+            answered.get("usage").is_none(),
+            "unknown, not free: {answered}"
+        );
+        assert_eq!(answered["request_ids"], json!({"a": "req_1", "b": "req_1"}));
+        assert_eq!(created_at, 7);
+        assert!(response::validate(&answered, &request).is_ok());
+        // An answer saved before request ids were kept per answer still reads.
+        let earlier: CachedAnswer = serde_json::from_value(json!({"created_at": 1,
+            "model": "jev-1.13.0", "answer": {"type": "noul", "noul": 0.1},
+            "input_tokens": 5, "output_tokens": 0}))
+        .unwrap();
+        assert_eq!((earlier.input_tokens, earlier.request_id), (Some(5), None));
+    }
+
+    #[test]
     fn usage_is_shared_among_the_questions_it_paid_for() {
         let mut request = request();
         for name in ["b", "c"] {
@@ -400,7 +456,10 @@ mod tests {
         let body = json!({"model":"jev-1.13.0","usage":{"input_tokens":301,"output_tokens":2},
             "answers":{"a":{"type":"noul","noul":0.1,"extra":1},"b":{"type":"noul","noul":0.2},"c":{"type":"noul","noul":0.3}}});
         let answers = cached_answers(&request, &body, 7);
-        let inputs: Vec<u64> = answers.iter().map(|(_, _, a)| a.input_tokens).collect();
+        let inputs: Vec<u64> = answers
+            .iter()
+            .filter_map(|(_, _, a)| a.input_tokens)
+            .collect();
         let outputs: Vec<u64> = answers.iter().map(|(_, _, a)| a.output_tokens).collect();
         assert_eq!((inputs, outputs), (vec![101, 100, 100], vec![1, 1, 0]));
         assert_eq!(answers[0].2.answer, json!({"type":"noul","noul":0.1}));

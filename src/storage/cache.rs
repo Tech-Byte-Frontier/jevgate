@@ -29,9 +29,14 @@ pub struct CachedAnswer {
     pub model: String,
     /// The typed answer's fields.
     pub answer: Value,
-    /// Its share of the usage of the request that asked it.
-    pub input_tokens: u64,
+    /// Its share of the usage of the request that asked it; no input share
+    /// when the response reported no usage, which a gateway need not send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
     pub output_tokens: u64,
+    /// The provider's id for the request that answered, to quote to its support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 /// The answers about one state, by question key.
@@ -181,8 +186,9 @@ mod tests {
             created_at: now(),
             model: "jev-1.13.0".into(),
             answer: json!({"type": "noul", "noul": 0.5, "padding": "x".repeat(padding)}),
-            input_tokens: 1,
+            input_tokens: Some(1),
             output_tokens: 0,
+            request_id: None,
         }
     }
 
