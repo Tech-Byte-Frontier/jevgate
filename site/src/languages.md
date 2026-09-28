@@ -61,13 +61,13 @@ Other files, such as Zig, are listed as skipped with the reason and never fail t
 
 | Language | Level | Unseen projects | Reviews right | Considers right |
 |---|---|---:|---:|---:|
-| Rust | supported | 7 | 69% (37 of 54) | 64% (129 of 202) |
-| Python | supported | 4 | 51% (18 of 35) | 52% (43 of 82) |
-| Go | supported | 3 | 8 of 10 | 57% (24 of 42) |
-| TypeScript | supported | 4 | 2 of 4 | 58% (14 of 24) |
-| PHP | supported | 2 | 1 of 6 | 11 of 18 |
-| Java | supported | 2 | 1 of 3 | 4 of 12 |
-| JavaScript | supported | 3 | 1 of 1 | 1 of 5 |
+| Rust | supported | 7 | 69% (37 of 54) | 66% (124 of 188) |
+| Python | supported | 4 | 51% (18 of 35) | 54% (42 of 78) |
+| Go | supported | 3 | 8 of 10 | 58% (23 of 40) |
+| TypeScript | supported | 4 | 2 of 4 | 70% (14 of 20) |
+| PHP | supported | 2 | 1 of 6 | 10 of 16 |
+| Java | supported | 2 | 1 of 3 | 4 of 10 |
+| JavaScript | supported | 3 | 1 of 1 | 0 of 4 |
 | C#, Ruby, Bend 2 | supported | none | not measured | not measured |
 | C | preview | 4 | 64% (16 of 25) | 44% (15 of 34) |
 | C++ | preview | 6 | 58% (23 of 40) | 42% (22 of 52) |
@@ -81,8 +81,8 @@ Other files, such as Zig, are listed as skipped with the reason and never fail t
 
 A finding is right when a person reading the code agrees with it; a debatable one counts as not right. A percentage is shown from 20 labels on. The counts are for the four rules every language gets: function simplification, file organization, shared logic and comments.
 
-- The supported languages' counts are 0.25.0's reviews and considers on the 25 projects JevGate was never tuned on (11 held out, 14 fresh), each labeled by hand from the code. Those projects hold no C#, Ruby or Bend 2 finding of these rules, so those three rest on the projects used for tuning.
-- The preview languages' counts are 0.30's first run of the same four rules on 37 well-known projects chosen for them and never used for tuning, with all 598 of its findings labeled by hand. Shared-logic considers are counted as the same-steps threshold of [0.28](changelog.md) reports them, fitted on the supported languages: of the 104 that run reported, it makes 40 notes, 31 of them not right, and the other 64 were right 26 times, where all 104 were right 35 times. A language's projects are the ones holding a labeled finding in its files: dio's Flutter runners count for C++ and Swift, and leveldb's C++ headers, which that run read as C, count for C.
+- The supported languages' counts are 0.25.0's reviews and considers on the 25 projects JevGate was never tuned on (11 held out, 14 fresh), each labeled by hand from the code, with 0.28's shared-logic threshold applied, as [accuracy](accuracy.md) counts them. Those projects hold no C#, Ruby or Bend 2 finding of these rules, so those three rest on the projects used for tuning.
+- The preview languages' counts are 0.30's first run of the same four rules on 37 well-known projects chosen for them and never used for tuning, with all 598 of its findings labeled by hand. Shared-logic considers are counted as that threshold reports them too, fitted on the supported languages: of the 104 that run reported, it makes 40 notes, 31 of them not right, and the other 64 were right 26 times, where all 104 were right 35 times. A language's projects are the ones holding a labeled finding in its files: dio's Flutter runners count for C++ and Swift, and leveldb's C++ headers, which that run read as C, count for C.
 
 Maturity is judged per rule and level, which the pooled rows hide:
 
