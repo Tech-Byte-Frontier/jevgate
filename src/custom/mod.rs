@@ -10,6 +10,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 mod examples;
+pub mod gallery;
 mod ignored;
 pub mod propose;
 

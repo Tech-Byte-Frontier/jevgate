@@ -87,7 +87,8 @@ pub enum JevCommand {
     ///
     /// `rules test` asks custom questions about their examples, `rules propose`
     /// proposes custom questions from the project's agent instruction files,
-    /// and `rules accept` adds a proposal to them.
+    /// `rules accept` adds a proposal to them, and `rules add` copies measured
+    /// custom questions from the gallery.
     #[command(args_conflicts_with_subcommands = true, after_long_help = RULES_EXAMPLES)]
     Rules {
         /// `table` for people; `json` adds scope, evidence unit, version, labels per level and decision policy
@@ -185,7 +186,8 @@ Examples:
   jevgate rules test                                Ask custom questions about their examples
   jevgate rules test --rule custom/no-body-logs     One question's examples
   jevgate rules propose                             Propose questions from agent instruction files
-  jevgate rules accept no-body-logs                 Move a proposal into .jevgate/questions/";
+  jevgate rules accept no-body-logs                 Move a proposal into .jevgate/questions/
+  jevgate rules add swallowed-errors                Add a measured question from the gallery";
 
 /// Why a finding was accepted into the baseline.
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -247,6 +249,7 @@ Workflow:
   jevgate baseline --merge                  Accept a partial check's findings, keeping the rest
   jevgate baseline mark wrong PATH[:LINE]   Record why a finding was accepted; `baseline stats` counts them
   jevgate rules propose                     Propose custom questions from AGENTS.md and other instruction files
+  jevgate rules add NAME                    Add a measured custom question from the gallery
 
 For agents and CI:
   jevgate init --agent claude                        Hooks for Claude Code (also codex, cursor, gemini, opencode)

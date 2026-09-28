@@ -1,0 +1,10 @@
+# swallowed-errors: an error caught, or returned by a call, and then dropped.
+# From JevGate's question gallery, which gives how often it was right on real code:
+# https://tech-byte-frontier.github.io/jevgate/question-gallery.html#swallowed-errors
+question = "Does this function catch or receive an error that means something went wrong, and then drop it without logging, returning, rethrowing or reporting it?"
+background = "An error dropped in silence turns a failure into a wrong result nobody can trace. The convention: every error is handled, passed on or logged, and an error ignored on purpose says why in a comment."
+guidance = "A violation: a failure such as an I/O, network, database, parse or decode error, or any exception caught broadly, that is dropped: an empty catch or except block, `except Exception: pass`, `.catch(() => {})`, a Go error assigned to `_` or checked and then ignored, a Rust `let _ =` or `.ok()` that discards it, or a fallback value that hides it without a log. Not a violation: an exception used for an expected case that the catch handles as intended, such as a division by zero returning 0, a lookup that finds nothing returning None or an empty result, or a missing optional file giving defaults; an error that is logged, rethrown, returned, wrapped, reported or shown to the user; a comment beside the ignore that says why it is safe; best-effort work whose failure changes nothing, such as cleanup or reading the terminal width; a function that handles no error."
+unit = "function"
+threshold = 0.8
+level = "review"
+next_step = "Log the error, return it, or rethrow it; if ignoring it is right, say why in a comment."

@@ -133,7 +133,8 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 
 # Custom questions: a team convention as a yes/no question whose yes is a
 # finding, the rule custom/<id>. It fails the gate at its level. One question
-# per file also works, in .jevgate/questions/<id>.toml.
+# per file also works, in .jevgate/questions/<id>.toml, where
+# `jevgate rules add` copies measured questions from the gallery.
 # [[question]]
 # id = "no-body-logs"
 # question = "Does this function write a request body, or a field of one, to a log?"

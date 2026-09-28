@@ -1,0 +1,10 @@
+# n-plus-one: a query or network call once per item of a loop, where one call would do.
+# From JevGate's question gallery, which gives how often it was right on real code:
+# https://tech-byte-frontier.github.io/jevgate/question-gallery.html#n-plus-one
+question = "Does this function run a database query or a network call once per item inside a loop, where one query or call could handle all the items?"
+background = "One query per item (the N+1 problem) is fast with ten rows and slow with ten thousand. It is the most common performance bug in web applications, and it stays invisible until it meets production data."
+guidance = "Count: a query, ORM lookup, lazily loaded association, `fetch`, HTTP client call or RPC inside a `for`, `while`, `each`, `map`, `forEach` or comprehension, once per element, when the elements could be loaded or sent together (an `IN` query, a join, eager loading, a bulk insert or a batch endpoint). Fine: a loop over a handful of known items; pages of a paginated API fetched in order; retries; calls that must run one at a time to be correct; work that already batches; a loop that only builds one query sent after it; calls on objects already in memory."
+unit = "function"
+threshold = 0.8
+level = "consider"
+next_step = "Load or send the items together: one query with IN or a join, eager loading, or a bulk call."

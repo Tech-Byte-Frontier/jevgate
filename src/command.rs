@@ -20,13 +20,25 @@ pub fn run(command: JevCommand) -> Result<u8> {
         JevCommand::Init { force, .. } => init(force),
         JevCommand::Mcp => mcp::run().map(|()| 0),
         JevCommand::Hook(args) => hook::run(&args),
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Add { names, force }),
+            ..
+        } => crate::custom::gallery::run(&repository()?, &names, force),
         command => configured(command),
     }
 }
 
-/// `init` runs before configuration is read, so an invalid file can be replaced.
+/// The repository around the working directory, for the commands that run
+/// before its configuration is read: `init`, so an invalid file can be
+/// replaced, and `rules add`, so a question file that no longer loads can.
+fn repository() -> Result<std::path::PathBuf> {
+    Ok(config::repository_root(
+        &std::env::current_dir()?.canonicalize()?,
+    ))
+}
+
 fn init(force: bool) -> Result<u8> {
-    let root = config::repository_root(&std::env::current_dir()?.canonicalize()?);
+    let root = repository()?;
     let (path, allow) = init::run(&root, force)?;
     say!("Wrote {}", path.display());
     if allow.is_empty() {
@@ -55,7 +67,11 @@ fn configured(command: JevCommand) -> Result<u8> {
         | JevCommand::Completions { .. }
         | JevCommand::Man { .. }
         | JevCommand::Mcp
-        | JevCommand::Hook(_) => {
+        | JevCommand::Hook(_)
+        | JevCommand::Rules {
+            action: Some(options::RulesAction::Add { .. }),
+            ..
+        } => {
             unreachable!("handled before repository configuration")
         }
         JevCommand::Check(mut args) => {

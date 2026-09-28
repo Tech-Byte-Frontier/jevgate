@@ -1,0 +1,10 @@
+# resource-leak: a file, connection, stream or lock not released on every path.
+# From JevGate's question gallery, which gives how often it was right on real code:
+# https://tech-byte-frontier.github.io/jevgate/question-gallery.html#resource-leak
+question = "Does this function open a file, connection, cursor, stream or lock that it does not close or release on every path, including when an error is raised, and does not hand to its caller?"
+background = "A resource released only on the happy path leaks when an error is raised midway: file handles, sockets and pooled connections run out under load, and a lock left held stops every other caller."
+guidance = "Count: `open()` without `with` or a `finally` that closes it; a connection, cursor, response body, stream or lock acquired, used and released later in the same function with a `return` or a call that can raise in between; Go without `defer x.Close()` or `defer mu.Unlock()`; Java or C# without try-with-resources or `using`. Fine: `with`, `using`, `defer`, try-with-resources and `finally`; Rust values closed when they are dropped; resources returned, stored in a field or passed on for the caller to close; resources a framework opens and closes around a request."
+unit = "function"
+threshold = 0.8
+level = "review"
+next_step = "Release it on every path: with, using, defer, try-with-resources or finally."

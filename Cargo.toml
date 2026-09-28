@@ -10,7 +10,7 @@ documentation = "https://tech-byte-frontier.github.io/jevgate/"
 readme = "README.md"
 keywords = ["code-review", "ci", "static-analysis", "maintainability", "security"]
 categories = ["command-line-utilities", "development-tools"]
-include = ["/src/**", "/tests/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE-*", "/NOTICE"]
+include = ["/src/**", "/tests/**", "/gallery/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE-*", "/NOTICE"]
 license = "MIT OR Apache-2.0"
 
 # `cargo binstall jevgate` downloads the archives the release workflow attaches.

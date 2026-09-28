@@ -1,0 +1,10 @@
+# todo-without-owner: a TODO or FIXME that names neither an owner nor an issue.
+# From JevGate's question gallery, which gives how often it was right on real code:
+# https://tech-byte-frontier.github.io/jevgate/question-gallery.html#todo-without-owner
+question = "Is this a TODO, FIXME, HACK or XXX comment that names neither a person or team to do the work nor an issue, ticket or link that tracks it?"
+background = "An anonymous TODO outlives everyone who remembers it. The convention: each one names an owner or links the issue that tracks it, so it can be scheduled or deleted."
+guidance = "Tracked: a person or team, such as `TODO(maria)`, `@maria` or `FIXME(payments):`, or an issue, ticket or link, such as `#123`, `JIRA-88`, `gh-45` or a URL. Not tracked: a TODO with only a description, however detailed. Not a TODO: comments without one of these markers, and the word used in another sense, such as a to-do list feature."
+unit = "comment"
+threshold = 0.95
+level = "review"
+next_step = "Name who will do it or link the issue that tracks it, or do it now and delete the comment."

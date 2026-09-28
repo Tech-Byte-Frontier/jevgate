@@ -1,9 +1,12 @@
 //! The rules actions: `rules test` (which custom questions to ask about
 //! their examples, and how), `rules propose` (which instruction files to
-//! read, and how to print what is proposed) and `rules accept` (which
-//! proposals to accept).
+//! read, and how to print what is proposed), `rules accept` (which
+//! proposals to accept) and `rules add` (which gallery questions to add).
 use super::RulesFormat;
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{
+    Args, Subcommand, ValueEnum,
+    builder::{PossibleValue, PossibleValuesParser},
+};
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
@@ -44,6 +47,22 @@ pub enum RulesAction {
     Accept {
         #[arg(required = true, value_name = "ID")]
         ids: Vec<String>,
+    },
+    /// Add measured questions from JevGate's question gallery to .jevgate/questions/
+    ///
+    /// Each NAME is a custom question JevGate measured on real projects: the
+    /// docs' question gallery page gives how often each was right. It
+    /// is written to `.jevgate/questions/NAME.toml`, a file the project owns:
+    /// adapt its guidance and paths to the code, and commit it. Like any
+    /// custom question, it fails the gate at its own level.
+    #[command(after_long_help = RULES_ADD_EXAMPLES)]
+    Add {
+        /// Gallery questions to add
+        #[arg(required = true, value_name = "NAME", value_parser = gallery())]
+        names: Vec<String>,
+        /// Replace question files of the same names, edits included
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -150,3 +169,19 @@ Examples:
   jevgate rules propose --format toml             Print [[question]] tables for jevgate.toml
   jevgate rules propose --format json             Every line with Jev's answers
   jevgate rules accept never-log-request-bodies   Accept one after editing it";
+
+/// The gallery's names, each with what it catches, for help and completions.
+fn gallery() -> PossibleValuesParser {
+    PossibleValuesParser::new(
+        crate::custom::gallery::ENTRIES
+            .iter()
+            .map(|entry| PossibleValue::new(entry.name).help(entry.summary())),
+    )
+}
+
+const RULES_ADD_EXAMPLES: &str = "\
+Examples:
+  jevgate rules add swallowed-errors resource-leak   Two questions, as .jevgate/questions/*.toml
+  jevgate check --rule custom --dry-run              What they would ask, offline
+  jevgate check --fail-on custom=report              Ask them without failing the gate while you try them
+  jevgate rules add --force n-plus-one               Restore the gallery's wording of one";

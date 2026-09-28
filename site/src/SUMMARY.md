@@ -15,6 +15,7 @@
 - [Coding agents](coding-agents.md)
 - [Configuration](configuration.md)
 - [Custom questions](custom-questions.md)
+- [Question gallery](question-gallery.md)
 - [Output and exit codes](output.md)
 - [Privacy and cost](privacy-and-cost.md)
 - [Troubleshooting](troubleshooting.md)

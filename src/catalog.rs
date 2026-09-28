@@ -465,7 +465,7 @@ pub fn table(questions: &'static [crate::custom::Question]) -> String {
     ));
     lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests. --fail-on and [rules] levels replace the default gate.".into());
     lines.push(format!(
-        "Custom questions come from [[question]] in jevgate.toml and {}/*.toml.",
+        "Custom questions come from [[question]] in jevgate.toml and {}/*.toml; `jevgate rules add` copies measured ones from the gallery.",
         crate::custom::DIRECTORY
     ));
     lines.push(format!(
