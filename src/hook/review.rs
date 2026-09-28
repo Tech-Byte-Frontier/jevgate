@@ -343,7 +343,7 @@ fn run(
         flagged: flag(&report, &accepted_now),
         undecided: undecided(&report, &args),
         guards: std::mem::take(&mut report.guards),
-        unreviewed: unreviewed(&report),
+        unreviewed: unreviewed(&report, &args),
     })
 }
 
@@ -426,11 +426,13 @@ fn incomplete(report: &Report) -> String {
 
 /// The files of code in `report` that the check skipped or could not send
 /// whole, with the reason the report gives.
-fn unreviewed(report: &Report) -> Vec<Unreviewed> {
-    report
+fn unreviewed(report: &Report, args: &CheckArgs) -> Vec<Unreviewed> {
+    let files = report
         .files
         .iter()
-        .filter(|f| matches!(f.status, Status::Skipped | Status::NeedsContext))
+        .filter(|f| {
+            matches!(f.status, Status::Skipped | Status::NeedsContext) || unjudged_tests(f, args)
+        })
         .filter(|f| {
             matches!(
                 f.role.as_str(),
@@ -445,8 +447,33 @@ fn unreviewed(report: &Report) -> Vec<Unreviewed> {
                 .or_else(|| f.classification.as_ref().map(|c| c.reason.clone()))
                 .filter(|why| !why.is_empty())
                 .unwrap_or_else(|| "it was not judged".into()),
-        })
-        .collect()
+        });
+    // Code the parser could not read in the files it judged: the check
+    // names only what the turn touched, so each is the agent's to know of.
+    let units = crate::output::left_out(report)
+        .into_iter()
+        .map(|(path, entry)| Unreviewed {
+            path: path.to_path_buf(),
+            why: format!(
+                "{} at line {} was left out, the rest of the file judged: {}",
+                crate::output::left_out_unit(entry),
+                entry.start_line,
+                entry.reason
+            ),
+        });
+    files.chain(units).collect()
+}
+
+/// Whether `file` is a test file the check did not judge although tests
+/// were asked for: a preview language's, whose tests JevGate does not
+/// judge yet.
+fn unjudged_tests(file: &crate::schema::FileResult, args: &CheckArgs) -> bool {
+    args.include_tests
+        && file.status == Status::NotApplicable
+        && file
+            .classification
+            .as_ref()
+            .is_some_and(|c| c.kind == crate::file_kind::TESTS && c.gate == "excluded")
 }
 
 /// The units whose undecided results fail the gate, as `gate` counts their

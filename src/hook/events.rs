@@ -413,7 +413,7 @@ impl<'a> Hook<'a> {
         let undecided = checked.undecided;
         let (failed, unsure) = (failing.len(), undecided.len());
         let user = if failed + unsure == 0 {
-            text::passed(blocks > 0, &advisory)
+            text::passed(blocks > 0, &advisory, !checked.unreviewed.is_empty())
         } else if turn.blocked_tree.as_deref() == Some(now.as_str()) {
             Some(text::let_through(
                 failed,

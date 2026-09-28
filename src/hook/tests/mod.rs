@@ -214,6 +214,59 @@ fn an_edit_to_a_preview_language_s_file_is_checked_and_its_findings_never_block(
 }
 
 #[test]
+fn code_the_parser_could_not_read_is_named_and_a_blocked_turn_is_not_called_fixed() {
+    let project = repository();
+    let host = reviewing();
+    send(&project, &host, prompt("grow f"));
+    // `g` is too small to judge, but whole.
+    let g = "fn g() {}\n";
+    project.write("lib.rs", &format!("{g}{}", long_function("f")));
+    assert_eq!(send(&project, &host, stop(false))["decision"], "block");
+    // An unreadable line inside `f` leaves it out, so its review is gone;
+    // `g` is still judged.
+    let unread = long_function("f").replace(
+        "    let doubled = total * 2;\n",
+        "    let doubled = total * 2;\n    let _ = values[0] +* ;\n",
+    );
+    project.write("lib.rs", &format!("{g}{unread}"));
+    let edited = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited).contains("JevGate did not review lib.rs: f at line 2 was left out, the rest of the file judged: The Rust parser could not read line "),
+        "{edited}"
+    );
+    let stopped = send(&project, &host, stop(true));
+    assert!(stopped.get("decision").is_none(), "{stopped}");
+    assert!(
+        message(&stopped).starts_with("JevGate: no finding of this turn fails the gate now, but some of the code it changed was not reviewed. JevGate did not review 1 file this turn changed: lib.rs (f at line 2 was left out"),
+        "{stopped}"
+    );
+}
+
+#[test]
+fn a_preview_language_s_test_file_is_named_when_tests_are_judged() {
+    let project = repository();
+    project.write(
+        "jevgate.toml",
+        "rules = [\"function-simplification\"]\ninclude_tests = true\n",
+    );
+    project.git(&["commit", "-qam", "judge tests"]);
+    let host = reviewing();
+    send(&project, &host, prompt("test the shop"));
+    project.write("src/test/kotlin/ShopTest.kt", &long_kotlin_function("adds"));
+    let edited = send(
+        &project,
+        &host,
+        edit(&project, "src/test/kotlin/ShopTest.kt"),
+    );
+    assert!(
+        context(&edited).contains(
+            "JevGate did not review src/test/kotlin/ShopTest.kt: Test file. JevGate does not judge Kotlin tests yet."
+        ),
+        "{edited}"
+    );
+}
+
+#[test]
 fn a_baseline_is_not_replaced_by_the_few_files_a_hook_checked() {
     let project = repository();
     let host = reviewing();

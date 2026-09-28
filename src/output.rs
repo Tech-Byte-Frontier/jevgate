@@ -643,14 +643,39 @@ fn emit_preview(out: &mut impl Write, report: &Report) -> Result<()> {
     Ok(())
 }
 
-/// The units the parser could not read in judged files, one line each
-/// (`path:line unit: reason`), the first `TOP_LEFT_OUT` unless `verbose`.
-fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
-    let entries: Vec<(&Path, &LeftOut)> = report
+/// The units the parser could not read in judged files, each with its file.
+pub(crate) fn left_out(report: &Report) -> Vec<(&Path, &LeftOut)> {
+    report
         .files
         .iter()
         .flat_map(|f| f.left_out.iter().map(move |l| (f.path.as_path(), l)))
-        .collect();
+        .collect()
+}
+
+/// A unit left out, as a line names it: `name`, `lines 4-9` or `line 4`.
+pub(crate) fn left_out_unit(entry: &LeftOut) -> String {
+    match (entry.unit.as_str(), entry.end_line > entry.start_line) {
+        ("", true) => format!("lines {}-{}", entry.start_line, entry.end_line),
+        ("", false) => format!("line {}", entry.start_line),
+        (name, _) => name.to_string(),
+    }
+}
+
+/// `path:line unit: reason`, the line that names a unit left out.
+pub(crate) fn left_out_line(path: &Path, entry: &LeftOut) -> String {
+    format!(
+        "{}:{} {}: {}",
+        path.display(),
+        entry.start_line,
+        left_out_unit(entry),
+        entry.reason
+    )
+}
+
+/// The units the parser could not read in judged files, one line each
+/// (`path:line unit: reason`), the first `TOP_LEFT_OUT` unless `verbose`.
+fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
+    let entries = left_out(report);
     if entries.is_empty() {
         return Ok(());
     }
@@ -667,18 +692,7 @@ fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result
     )?;
     let shown = if verbose { entries.len() } else { TOP_LEFT_OUT };
     for (path, entry) in entries.iter().take(shown) {
-        let unit = match (entry.unit.as_str(), entry.end_line > entry.start_line) {
-            ("", true) => format!("lines {}-{}", entry.start_line, entry.end_line),
-            ("", false) => format!("line {}", entry.start_line),
-            (name, _) => name.to_string(),
-        };
-        writeln!(
-            out,
-            "  {}:{} {unit}: {}",
-            path.display(),
-            entry.start_line,
-            entry.reason
-        )?;
+        writeln!(out, "  {}", left_out_line(path, entry))?;
     }
     if entries.len() > shown {
         writeln!(

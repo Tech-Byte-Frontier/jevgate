@@ -371,10 +371,15 @@ pub(super) fn let_through(failing: usize, undecided: usize, why: LetThrough) -> 
 
 /// The person's note on a stop that passes: whether the findings of a block
 /// are fixed, and the findings that do not fail the gate.
-pub(super) fn passed(after_block: bool, advisory: &[Flagged]) -> Option<String> {
+pub(super) fn passed(after_block: bool, advisory: &[Flagged], unreviewed: bool) -> Option<String> {
     let mut notes = Vec::new();
     if after_block {
-        notes.push("JevGate: the findings that blocked this turn are fixed.".to_string());
+        // A blocked unit the parser can no longer read is not fixed.
+        notes.push(if unreviewed {
+            "JevGate: no finding of this turn fails the gate now, but some of the code it changed was not reviewed.".to_string()
+        } else {
+            "JevGate: the findings that blocked this turn are fixed.".to_string()
+        });
     }
     if !advisory.is_empty() {
         let reviews = advisory

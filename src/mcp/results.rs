@@ -100,6 +100,13 @@ pub(super) struct Structured<'r> {
     errors: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     skipped: Vec<String>,
+    /// Code the parser could not read in files judged otherwise, as the
+    /// agent text names it (`path:line unit: reason`), at most
+    /// [`SHOWN_GUARDS`] of them; `total_left_out` counts them all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    left_out: Vec<String>,
+    #[serde(skip_serializing_if = "is_zero")]
+    total_left_out: usize,
     usage: Usage,
     #[serde(skip_serializing_if = "Option::is_none")]
     planned: Option<output::Preview>,
@@ -109,6 +116,11 @@ pub(super) struct Structured<'r> {
     total_verify: usize,
     guards: Vec<&'r Guard>,
     total_guards: usize,
+}
+
+/// Whether a count is zero, and left out of the result.
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize)]
@@ -131,6 +143,11 @@ pub(super) fn structured<'r>(
         .iter()
         .filter(|guard| selection.includes(&guard.path))
         .collect();
+    let left_out: Vec<String> = output::left_out(report)
+        .into_iter()
+        .filter(|(path, _)| selection.includes(path))
+        .map(|(path, entry)| output::left_out_line(path, entry))
+        .collect();
     let lines = |status: Status, label: &str| -> Vec<String> {
         output::reasons(report, status)
             .into_iter()
@@ -151,6 +168,8 @@ pub(super) fn structured<'r>(
             .chain(lines(Status::Error, "Failed"))
             .collect(),
         skipped: lines(Status::Skipped, "Skipped"),
+        total_left_out: left_out.len(),
+        left_out: left_out.into_iter().take(SHOWN_GUARDS).collect(),
         usage: Usage {
             api_requests: report.api_requests,
             input_tokens: report.paid_input_tokens,
@@ -756,6 +775,33 @@ mod tests {
             (json["complete"].as_bool(), json["exit_code"].as_u64()),
             (Some(false), Some(2))
         );
+    }
+
+    #[test]
+    fn code_the_parser_could_not_read_comes_back_as_left_out() {
+        let mut report = report(Vec::new(), Vec::new());
+        assert!(
+            value(&structured(&report, &all(), 0))
+                .get("left_out")
+                .is_none()
+        );
+        report.files[0].left_out.push(crate::schema::LeftOut {
+            unit: "h".into(),
+            start_line: 32,
+            end_line: 44,
+            reason: "The Rust parser could not read line 33.".into(),
+        });
+        let json = value(&structured(&report, &all(), 0));
+        let path = report.files[0].path.display().to_string();
+        assert_eq!(
+            json["left_out"],
+            json!([format!(
+                "{path}:32 h: The Rust parser could not read line 33."
+            )])
+        );
+        assert_eq!(json["total_left_out"], 1);
+        let schema = &super::super::tools::list()[0]["outputSchema"];
+        super::super::tools::assert_conforms(&json, schema);
     }
 
     #[test]

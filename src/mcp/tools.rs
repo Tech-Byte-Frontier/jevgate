@@ -95,6 +95,8 @@ fn result_schema() -> Value {
             },
             "errors": {"type": "array", "items": {"type": "string"}, "description": "The run's errors, then `Failed N: reason` for files that failed"},
             "skipped": {"type": "array", "items": {"type": "string"}, "description": "`Skipped N: reason` for files that were not judged, such as a syntax error"},
+            "left_out": {"type": "array", "items": {"type": "string"}, "description": "`path:line unit: reason` for code the parser could not read in files judged otherwise, at most 20; that code was not reviewed"},
+            "total_left_out": {"type": "integer", "description": "Units left out in all, when any was"},
             "usage": {
                 "type": "object",
                 "properties": {
