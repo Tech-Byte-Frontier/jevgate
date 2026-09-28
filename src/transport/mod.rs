@@ -14,8 +14,23 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Attempts per request, including the first send.
-const ATTEMPTS: u32 = 4;
+/// Sends of a request the provider answered with a status worth retrying
+/// (a rate limit, overload, or a server or gateway error), the first
+/// included. On 2026-09-28 TypeSafe answered 503 to about two attempts in
+/// three for at least ten minutes, directly (22 of 34) and through OpenRouter
+/// (141 of 224), each failed attempt taking about 10 s: with 4 sends, 1 of
+/// 13 TypeSafe requests and 16 of 99 OpenRouter ones gave up, and every run
+/// ended incomplete. Simulating this queue, 6 sends leave 6% of such
+/// requests unanswered instead of 16%; when 1 attempt in 5 fails, a
+/// 1,000-request run completes 95% of the time instead of 21%; and a
+/// provider failing every attempt is outlasted for 26 s instead of 8. It
+/// costs time only while attempts fail: a hard outage takes up to three
+/// times as long to end a run incomplete, 8 minutes instead of 3 for 100
+/// requests.
+const ANSWERED_ATTEMPTS: u32 = 6;
+/// Sends of a request whose connection failed before anything was sent, as
+/// on a machine without a network: 4 as before, so such a run ends no later.
+const UNSENT_ATTEMPTS: u32 = 4;
 /// Attempts after a timeout or dropped connection: the provider may have run
 /// (and billed) the first send, so it is repeated only once.
 const INTERRUPTED_ATTEMPTS: u32 = 2;
@@ -254,8 +269,12 @@ const JITTER_RETRY_STEP: u64 = 101;
 const JITTER_RANGE: u64 = 250;
 const PER_MILLE: u32 = 1000;
 
-/// The first pause after a rate-limit or overload response; later ones grow from it.
-const FIRST_BACKOFF: Duration = Duration::from_millis(500);
+/// The first pause after an answer worth retrying; each later one doubles
+/// the one before, up to [`LONGEST_BACKOFF`]: 1, 2, 4, 8 and 8 s.
+const FIRST_BACKOFF: Duration = Duration::from_secs(1);
+/// The longest pause before its jitter. A pause holds every worker, so a
+/// longer one would stall the whole run for one request's last send.
+const LONGEST_BACKOFF: Duration = Duration::from_secs(8);
 
 /// Reject further uploads in this review only after a typed account/access failure.
 /// Completed and in-flight requests keep their individual results; caches bypass this gate.
@@ -377,11 +396,15 @@ impl ProviderAccess {
     }
 
     /// Exponential backoff with deterministic jitter, so reruns are reproducible
-    /// while concurrent requests still spread out.
+    /// while concurrent requests still spread out; `retry` counts from 1.
     fn backoff(&self, index: usize, retry: u32) -> Duration {
         let jitter = (index as u64 * JITTER_INDEX_STEP + u64::from(retry) * JITTER_RETRY_STEP)
             % JITTER_RANGE;
-        self.backoff * 2u32.pow(retry) * (PER_MILLE + jitter as u32) / PER_MILLE
+        let pause = self
+            .backoff
+            .saturating_mul(2u32.saturating_pow(retry.saturating_sub(1)))
+            .min(LONGEST_BACKOFF);
+        pause * (PER_MILLE + jitter as u32) / PER_MILLE
     }
 
     fn send_with_retries(
@@ -468,13 +491,19 @@ impl ProviderAccess {
 /// retried.
 fn retry_delay(error: &anyhow::Error) -> Option<(Option<Duration>, u32)> {
     if let Some(error) = error.downcast_ref::<ProviderError>() {
-        return retryable(error.status)
-            .then(|| (error.retry_after.map(|p| p.min(RETRY_AFTER_CAP)), ATTEMPTS));
+        return retryable(error.status).then(|| {
+            (
+                error.retry_after.map(|p| p.min(RETRY_AFTER_CAP)),
+                ANSWERED_ATTEMPTS,
+            )
+        });
     }
     if error.downcast_ref::<Interrupted>().is_some() {
         return Some((None, INTERRUPTED_ATTEMPTS));
     }
-    error.downcast_ref::<Unsent>().map(|_| (None, ATTEMPTS))
+    error
+        .downcast_ref::<Unsent>()
+        .map(|_| (None, UNSENT_ATTEMPTS))
 }
 
 impl Outcome {

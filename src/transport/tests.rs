@@ -70,7 +70,12 @@ fn rate_limits_retry_after_the_requested_pause_and_count_retries() {
     assert_eq!((calls, outcome.retries), (2, 1), "connection never opened");
     assert_eq!(
         retry_delay(&failed(429, None, Some(3600)).into()),
-        Some((Some(RETRY_AFTER_CAP), ATTEMPTS))
+        Some((Some(RETRY_AFTER_CAP), ANSWERED_ATTEMPTS))
+    );
+    assert_eq!(
+        retry_delay(&failed(503, None, Some(20)).into()),
+        Some((Some(Duration::from_secs(20)), ANSWERED_ATTEMPTS)),
+        "a pause longer than the longest backoff is still the provider's"
     );
 }
 
@@ -114,14 +119,42 @@ fn validation_transport_and_account_errors_are_sent_once() {
 
 #[test]
 fn persistent_overload_stops_after_the_attempt_limit() {
-    let failures = (0..ATTEMPTS + 2)
+    let failures = (0..ANSWERED_ATTEMPTS + 2)
         .map(|_| Err(failed(503, None, None).into()))
         .collect();
     let (outcome, calls) = sends(&fast(), failures);
-    assert_eq!(calls, ATTEMPTS as usize);
-    assert_eq!(outcome.retries, ATTEMPTS - 1);
+    assert_eq!(calls, ANSWERED_ATTEMPTS as usize);
+    assert_eq!(outcome.retries, ANSWERED_ATTEMPTS - 1);
     let message = outcome.result.unwrap_err().to_string();
-    assert!(message.contains("HTTP 503") && message.contains("gave up after 4 attempts"));
+    assert!(message.contains("HTTP 503") && message.contains("gave up after 6 attempts"));
+    let unsent = (0..ANSWERED_ATTEMPTS)
+        .map(|_| Err(Unsent(&TYPESAFE).into()))
+        .collect();
+    let (outcome, calls) = sends(&fast(), unsent);
+    assert_eq!(
+        calls, UNSENT_ATTEMPTS as usize,
+        "an offline run ends as soon as before"
+    );
+    let message = outcome.result.unwrap_err().to_string();
+    assert!(message.contains("was not sent; gave up after 4 attempts"));
+}
+
+#[test]
+fn pauses_double_from_one_second_to_at_most_eight() {
+    let access = ProviderAccess::default();
+    let pauses: Vec<_> = (1..ANSWERED_ATTEMPTS)
+        .map(|retry| access.backoff(0, retry).as_millis())
+        .collect();
+    // 1, 2, 4, 8 and 8 s, each lengthened by its jitter; the first three are
+    // the pauses 0.25 made.
+    assert_eq!(pauses, [1101, 2404, 4212, 9232, 8040]);
+    for (retry, seconds) in (1..ANSWERED_ATTEMPTS).zip([1, 2, 4, 8, 8]) {
+        let base = Duration::from_secs(seconds);
+        for index in 0..MAX_WORKERS * 4 {
+            let pause = access.backoff(index, retry);
+            assert!(pause >= base && pause < base * 5 / 4, "{retry} {index}");
+        }
+    }
 }
 
 #[test]
@@ -498,20 +531,73 @@ fn queued(agent: &ureq::Agent, endpoint: &Endpoint) -> Outcome {
 }
 
 #[test]
-fn a_rate_limit_waits_the_milliseconds_the_provider_asks_for() {
-    let (provider, endpoint) = mock_first(|_| {
-        Reply::json(429, &json!({}))
-            .header("retry-after-ms", "400")
-            .header("retry-after", "30")
+fn a_rate_limit_or_overload_waits_the_milliseconds_the_provider_asks_for() {
+    for status in [429, 503] {
+        let (provider, endpoint) = mock_first(move |_| {
+            Reply::json(status, &json!({}))
+                .header("retry-after-ms", "400")
+                .header("retry-after", "30")
+        });
+        let start = Instant::now();
+        let outcome = queued(&agent(ATTEMPT_TIMEOUT), &endpoint);
+        assert!(outcome.result.is_ok(), "{status}");
+        assert_eq!((outcome.retries, provider.received().len()), (1, 2));
+        let waited = start.elapsed();
+        assert!(
+            waited >= Duration::from_millis(400) && waited < Duration::from_secs(30),
+            "{status}: {waited:?}"
+        );
+    }
+}
+
+/// Sends 0.25 made of a request answered with an overload; after as many,
+/// the canaries through OpenRouter gave up on 2026-09-28.
+const SENDS_IN_0_25: usize = 4;
+
+#[test]
+fn a_gateway_answering_503_to_the_first_sends_of_every_request_completes() {
+    let sends = Mutex::new(std::collections::HashMap::<String, usize>::new());
+    let provider = MockProvider::start(move |received| {
+        let request = received.json();
+        let mut sends = sends.lock().unwrap();
+        let sent = sends.entry(request["state"].to_string()).or_default();
+        *sent += 1;
+        if *sent <= SENDS_IN_0_25 {
+            let overloaded = json!({"error": {"code": 503,
+                "metadata": {"error_type": "provider_overloaded"}}});
+            return Reply::json(503, &overloaded);
+        }
+        answered(received)
     });
-    let start = Instant::now();
-    let outcome = queued(&agent(ATTEMPT_TIMEOUT), &endpoint);
-    assert!(outcome.result.is_ok());
-    assert_eq!((outcome.retries, provider.received().len()), (1, 2));
-    let waited = start.elapsed();
-    assert!(
-        waited >= Duration::from_millis(400) && waited < Duration::from_secs(30),
-        "{waited:?}"
+    let endpoint = Endpoint::custom(&crate::provider::OPENROUTER, &provider.url).unwrap();
+    let requests: Vec<Value> = (0..3)
+        .map(|i| {
+            let mut request = question();
+            request["state"] = json!(format!("unit {i}"));
+            request
+        })
+        .collect();
+    let batch: Vec<&Value> = requests.iter().collect();
+    let agent = agent(ATTEMPT_TIMEOUT);
+    let mut outcomes = Vec::new();
+    fast().evaluate_queue(
+        &batch,
+        crate::provider::GATEWAY_CONCURRENCY as usize,
+        &|_| Ok(()),
+        |request| send(&agent, &endpoint, "sk-or-v1-test", request),
+        &mut |_, outcome| outcomes.push(outcome),
+    );
+    assert_eq!(outcomes.len(), requests.len());
+    for outcome in outcomes {
+        assert!(outcome.result.is_ok(), "{:?}", outcome.result.err());
+        assert_eq!(
+            outcome.retries as usize, SENDS_IN_0_25,
+            "answered on the send after the last one 0.25 made"
+        );
+    }
+    assert_eq!(
+        provider.received().len(),
+        requests.len() * (SENDS_IN_0_25 + 1)
     );
 }
 

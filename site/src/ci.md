@@ -36,7 +36,7 @@ The action installs a checked release binary, keeps `.jevgate/cache` in the Acti
 
 - **Forks:** GitHub withholds secrets from pull requests opened from forks, so there the run exits 2 with "No API key configured". Skip the job for forks, or run it only on branches of the repository.
 - **Budgets:** `max_requests` caps the API attempts of one run. Reaching it leaves the run incomplete instead of passing on partial evidence. `--dry-run` counts the planned requests the cache already answers, so its estimate covers only what the cache lacks; follow-ups depend on answers and are not counted.
-- **Transient failures:** rate limits, overload and server or edge errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts; an attempt that has not answered in 20 seconds, or whose connection drops, is retried once, since the first send may have run.
+- **Transient failures:** rate limits, overload and server or edge errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to six attempts, with pauses of 1 to 8 seconds; an attempt that has not answered in 20 seconds, or whose connection drops, is retried once, since the first send may have run. A provider that fails every attempt ends a run of 100 requests incomplete after 8 minutes or more (16 with a gateway's key, which sends 3 requests at once).
 - **Report-only paths:** give tooling its own level with `[[scope]]` (below), so scripts are reported while product code gates.
 
 Before each commit, with [pre-commit](https://pre-commit.com), review what is staged:

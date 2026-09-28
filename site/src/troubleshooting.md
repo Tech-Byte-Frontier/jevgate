@@ -22,6 +22,9 @@ Exit code 2 means the run could not finish, or the configuration or command line
 **`Cannot connect to TypeSafe; request was not sent`**
 : A network problem before anything was sent. Rerun; cached answers are kept.
 
+**`OpenRouter HTTP 503; gave up after 6 attempts`**, or **`TypeSafe HTTP 503; gave up after 6 attempts`**
+: The provider stayed overloaded through six attempts and 23 seconds or more of pauses. On 2026-09-28 TypeSafe answered 503 to about two attempts in three for at least ten minutes, directly and through OpenRouter alike. The run exits 2 and keeps the answers it received: rerun later, and only the unanswered units are asked.
+
 **`TypeSafe HTTP 402 (credits exhausted; add credits or turn on auto-refill at https://console.typesafe.ai)`**
 : The account's prepaid credits ran out. The run stops sending requests and exits 2; the answers it received are kept in the cache. Add credits and rerun: only the unanswered units are asked.
 
@@ -36,7 +39,7 @@ A provider error ends with the provider's request id when it sent one (`; reques
 **`Another JevGate session owns latest.json`**
 : Another `check` or `--watch` is running in the same repository. Stop it first.
 
-Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts before the run gives up, waiting as long as the provider asks (`retry-after-ms`, or `Retry-After` in seconds or as a date, at most 30 seconds). An attempt that has not answered within 20 seconds, or whose connection drops, is retried once. Requests start at least 50 ms apart, within TypeSafe's limit of 1,200 a minute, and at most 6 are sent at once with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key (`--concurrency` or `concurrency` sets it).
+Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to six attempts before the run gives up, pausing 1, 2, 4, 8 and 8 seconds (each up to a quarter longer, so requests spread out), or as long as the provider asks when that is longer (`retry-after-ms`, or `Retry-After` in seconds or as a date, at most 30 seconds). A pause holds every request of the run. An attempt that has not answered within 20 seconds, or whose connection drops, is retried once, and a connection that fails before anything is sent is tried four times. Requests start at least 50 ms apart, within TypeSafe's limit of 1,200 a minute, and at most 6 are sent at once with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key (`--concurrency` or `concurrency` sets it).
 
 ## Many files are uncertain
 
