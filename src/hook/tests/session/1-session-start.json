@@ -1,0 +1,7 @@
+{
+  "session_id": "5b9e2c1a-7d4f-4e8b-9a3c-2f1e0d6c8b7a",
+  "transcript_path": "~/.claude/projects/-home-dev-shop/5b9e2c1a-7d4f-4e8b-9a3c-2f1e0d6c8b7a.jsonl",
+  "cwd": "$PROJECT",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+}

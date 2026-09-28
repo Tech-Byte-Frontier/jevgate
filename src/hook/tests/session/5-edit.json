@@ -1,0 +1,22 @@
+{
+  "session_id": "5b9e2c1a-7d4f-4e8b-9a3c-2f1e0d6c8b7a",
+  "prompt_id": "c7f3a9d2-4b1e-4f6a-8e2d-9b5c3a1f7e40",
+  "transcript_path": "~/.claude/projects/-home-dev-shop/5b9e2c1a-7d4f-4e8b-9a3c-2f1e0d6c8b7a.jsonl",
+  "cwd": "$PROJECT",
+  "permission_mode": "acceptEdits",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "$PROJECT/src/receipt.ts",
+    "old_string": "export function receiptLines(order: Order, code: string): string[] {\n  if (order.items.length === 0) {\n    throw new Error(`order ${order.id} has no items`);\n  }\n  const lines: string[] = [];\n  let subtotal = 0;\n  for (const item of order.items) {\n    if (item.quantity <= 0) {\n      throw new Error(`order ${order.id}: bad quantity for ${item.sku}`);\n    }\n    const amount = item.quantity * item.unitPrice;\n    subtotal += amount;\n    lines.push(`${item.name} x${item.quantity}  ${amount.toFixed(2)}`);\n  }\n  lines.push(`Subtotal  ${subtotal.toFixed(2)}`);\n  const rate = DISCOUNTS[code] ?? 0;\n  const discount = Math.round(subtotal * rate * 100) / 100;\n  if (discount > 0) {\n    lines.push(`Discount ${code}  -${discount.toFixed(2)}`);\n  } else if (code !== \"\") {\n    lines.push(`Code ${code} does not apply`);\n  }\n  const taxable = subtotal - discount;\n  const tax = Math.round(taxable * TAX_RATES[order.region] * 100) / 100;\n  lines.push(`Tax ${order.region}  ${tax.toFixed(2)}`);\n  lines.push(`Total  ${(taxable + tax).toFixed(2)}`);\n  return lines;\n}",
+    "new_string": "export function receiptLines(order: Order, code: string): string[] {\n  const subtotal = subtotalOf(order);\n  const discount = cents(subtotal * (DISCOUNTS[code] ?? 0));\n  const tax = cents((subtotal - discount) * TAX_RATES[order.region]);\n  return [\n    ...order.items.map((item) => `${item.name} x${item.quantity}  ${(item.quantity * item.unitPrice).toFixed(2)}`),\n    `Subtotal  ${subtotal.toFixed(2)}`,\n    ...discountLines(code, discount),\n    `Tax ${order.region}  ${tax.toFixed(2)}`,\n    `Total  ${(subtotal - discount + tax).toFixed(2)}`,\n  ];\n}\n\nfunction subtotalOf(order: Order): number {\n  if (order.items.length === 0) {\n    throw new Error(`order ${order.id} has no items`);\n  }\n  let subtotal = 0;\n  for (const item of order.items) {\n    if (item.quantity <= 0) {\n      throw new Error(`order ${order.id}: bad quantity for ${item.sku}`);\n    }\n    subtotal += item.quantity * item.unitPrice;\n  }\n  return subtotal;\n}\n\nfunction discountLines(code: string, discount: number): string[] {\n  if (discount > 0) {\n    return [`Discount ${code}  -${discount.toFixed(2)}`];\n  }\n  return code === \"\" ? [] : [`Code ${code} does not apply`];\n}\n\nfunction cents(amount: number): number {\n  return Math.round(amount * 100) / 100;\n}",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "$PROJECT/src/receipt.ts",
+    "userModified": false,
+    "replaceAll": false
+  },
+  "tool_use_id": "toolu_01K8wP3nZ6qR1tV5xB9mC2dF",
+  "duration_ms": 11
+}

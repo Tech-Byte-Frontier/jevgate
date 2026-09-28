@@ -1,7 +1,8 @@
 //! The hook end to end in Git repositories, with scripted evaluators: turn
 //! baselines, findings after an edit, blocks at the end of a turn and their
 //! limits, and every way a check can fail without blocking the agent. What
-//! each agent sends and reads is in `protocol`.
+//! each agent sends and reads is in `protocol`; a whole Claude Code session,
+//! replayed from its events, is in `session`.
 use super::*;
 use crate::{
     provider::TYPESAFE,
@@ -11,6 +12,7 @@ use crate::{
 };
 mod guards;
 mod protocol;
+mod session;
 
 /// A Git repository with `lib.rs` committed, judged for function
 /// simplification only: a long `lib.rs` is a review that fails the gate
