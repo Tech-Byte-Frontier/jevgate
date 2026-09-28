@@ -83,6 +83,25 @@ signatures, or one candidate pair.
    cookiecutter-django's files had been skipped. Generator templates
    (under `templates/`, or holding ERB tags or `//#if` conditions) keep the
    strict rule, since their placeholders are not the language's syntax.
+   C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir and Lua are read by a
+   generic tier (`src/analysis/generic`): one tag query per language, in
+   the captures GitHub's code navigation uses, finds functions, methods,
+   types and calls, and a table names the nodes that hold statements, nest
+   control flow and hold literals. The grammars' own `tags.scm` tag what
+   names a definition (a C prototype's declarator, a Swift method's whole
+   class), so the queries are JevGate's, with the definition itself as the
+   captured node. These files get function simplification, file
+   organization, shared logic and comments; values and security need a
+   language's own sites and sources and are not asked. Their tests are
+   found by path (a `…Test` class, a Kotlin source set such as
+   `androidTest`, a Swift test target such as `VaporTests`, busted's
+   `spec/`, `*.bats`) and not judged yet, with no file-purpose request. No
+   imports are resolved, so an outline has no `used_by` and a function's
+   callees are found by name within its language. Their units stay out of
+   the other languages' evidence (test subjects, security traces, error
+   handlers), their copies pair only within one family (C and C++), and
+   they take only the places of the run's 64 copies the other languages
+   leave: ranked together, C benchmarks took a place from a Bend copy.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
    and control-flow nesting; callbacks registered through calls, including
    module-level route handlers named by their registration
