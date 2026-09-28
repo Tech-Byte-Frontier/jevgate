@@ -214,26 +214,11 @@ impl ConfigContext {
     /// less `off` entries and `--skip-rule`. Every name must exist.
     fn configure_rules(&self, args: &mut CheckArgs) -> Result<()> {
         let rules = self.rules();
-        let default = [catalog::DEFAULT_GROUP.to_string()];
-        let mut enabled = BTreeSet::new();
-        if !args.rules.is_empty() {
-            enabled.extend(expand(&rules, &args.rules)?);
+        let mut enabled = if args.rules.is_empty() {
+            configured_rules(&rules, &self.config.rules)?
         } else {
-            match &self.config.rules {
-                Rules::List(names) if !names.is_empty() => enabled.extend(expand(&rules, names)?),
-                Rules::List(_) => enabled.extend(expand(&rules, &default)?),
-                Rules::Levels(levels) => {
-                    enabled.extend(expand(&rules, &default)?);
-                    for rule in &rules {
-                        match most_specific(levels, rule) {
-                            Some(level) if level.off() => enabled.remove(rule.key),
-                            Some(_) => enabled.insert(rule.key),
-                            None => false,
-                        };
-                    }
-                }
-            }
-        }
+            expand(&rules, &args.rules)?.into_iter().collect()
+        };
         for skipped in expand(&rules, &args.skip_rules)? {
             enabled.remove(skipped);
         }
@@ -443,6 +428,27 @@ fn expand(rules: &[catalog::Rule], names: &[String]) -> Result<Vec<&'static str>
         keys.extend(selected);
     }
     Ok(keys)
+}
+
+/// Keys of `rules` that `[rules]` enables: those its list names, else the
+/// `default` group with each rule turned on or off by its most specific
+/// level.
+fn configured_rules(rules: &[catalog::Rule], configured: &Rules) -> Result<BTreeSet<&'static str>> {
+    let default = [catalog::DEFAULT_GROUP.to_string()];
+    let (names, levels) = match configured {
+        Rules::List(names) if !names.is_empty() => (names.as_slice(), None),
+        Rules::List(_) => (&default[..], None),
+        Rules::Levels(levels) => (&default[..], Some(levels)),
+    };
+    let mut enabled: BTreeSet<_> = expand(rules, names)?.into_iter().collect();
+    for rule in rules {
+        match levels.and_then(|levels| most_specific(levels, rule)) {
+            Some(level) if level.off() => enabled.remove(rule.key),
+            Some(_) => enabled.insert(rule.key),
+            None => false,
+        };
+    }
+    Ok(enabled)
 }
 
 /// Why `name` names no rule, with the names that would: the custom
