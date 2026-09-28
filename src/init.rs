@@ -118,8 +118,8 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 
 # Unset, the default rules run and only rule levels measured right at least
 # 80% of the time on projects JevGate was never tuned on fail the check
-# ("mature"; `jevgate rules` shows them); other findings are reported without
-# failing it. A group or rule ID set to a level is judged, every rule of a
+# ("mature"; `jevgate rules` shows them), never in a preview language; other
+# findings are reported without failing it. A group or rule ID set to a level is judged, every rule of a
 # group included, and fails the check at exactly that level: "review",
 # "consider" (also fails on review), "mature", "uncertain", "report" (judge,
 # never fail) or "off". A rule's own entry wins over its group's. Test rules
@@ -226,6 +226,10 @@ mod tests {
         };
         assert!(levels(config).is_empty(), "the default rules and gate");
         assert!(text.contains("hardcoded-values (opt-in)"), "{text}");
+        assert!(
+            text.contains("shows them), never in a preview language;"),
+            "{text}"
+        );
         let uncommented: Vec<&str> = text
             .lines()
             .map(|line| {
