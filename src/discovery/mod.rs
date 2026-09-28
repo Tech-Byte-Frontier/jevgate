@@ -168,10 +168,12 @@ fn file_extension(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+/// Scripts of shells no parser reads. Bash (`.sh`, `.bash`) is read by the
+/// generic tier (`analysis::generic`) and judged like other source.
 fn script_extension(path: &Path) -> bool {
     matches!(
         file_extension(path).as_str(),
-        "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd"
+        "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd"
     )
 }
 
@@ -180,7 +182,7 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
     [
         "rs", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "kt",
         "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "cs", "rb", "php",
-        "phtml", "swift", "dart", "lua", "ex", "exs", "zig", "sh", "bats", "vue", "svelte",
+        "phtml", "swift", "dart", "lua", "ex", "exs", "zig", "sh", "bash", "bats", "vue", "svelte",
         "astro", "sql", "bend",
     ]
     .contains(&extension.as_str())
@@ -237,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn tests_of_the_generic_tier_s_languages_are_tests() {
+    fn tests_of_the_generic_tier_s_languages_are_tests_and_bash_is_source() {
         let classifier = super::Classifier::new(&Default::default()).unwrap();
         for path in [
             "shared/src/commonMain/kotlin/OrdersTest.kt",
@@ -248,10 +250,13 @@ mod tests {
         ] {
             assert_eq!(classifier.role(Path::new(path)), "test", "{path}");
         }
-        assert_eq!(
-            classifier.role(Path::new("shared/src/commonMain/kotlin/Orders.kt")),
-            "source"
-        );
+        for (path, role) in [
+            ("shared/src/commonMain/kotlin/Orders.kt", "source"),
+            ("scripts/deploy.sh", "source"),
+            ("scripts/deploy.zsh", "script"),
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), role, "{path}");
+        }
     }
 
     #[test]

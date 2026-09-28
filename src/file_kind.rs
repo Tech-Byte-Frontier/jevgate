@@ -706,14 +706,15 @@ mod tests {
     }
 
     #[test]
-    fn scripts_and_declarations_are_reported_and_not_judged() {
+    fn scripts_of_shells_without_a_parser_and_declarations_are_reported_and_not_judged() {
         let project = Project::new();
+        project.write("deploy.zsh", "echo ready\n");
+        project.write("tool.fish", "echo ready\n");
         project.write("deploy.sh", "echo ready\n");
-        project.write("tool.bash", "echo ready\n");
         project.write("types.d.ts", "export type Id = string;\n");
         project.write("src/lib.rs", "pub fn live() -> i32 { 1 }\n");
         let mut options = args();
-        options.source_extension = vec!["bash".into()];
+        options.source_extension = vec!["zsh".into(), "fish".into()];
         let inputs = crate::inventory::collect(&options, &project.context(), &[]).unwrap();
         let file = |suffix: &str| {
             inputs
@@ -721,7 +722,7 @@ mod tests {
                 .find(|input| input.result.path.ends_with(suffix))
                 .unwrap()
         };
-        let script = file("deploy.sh");
+        let script = file("deploy.zsh");
         assert_eq!(script.result.role, "script");
         assert_eq!(script.result.status, Status::Skipped);
         assert!(script.source.is_none());
@@ -733,9 +734,13 @@ mod tests {
                 .unwrap()
                 .contains("Operational script")
         );
-        assert_eq!(file("tool.bash").result.status, Status::Skipped);
+        assert_eq!(file("tool.fish").result.status, Status::Skipped);
         assert_eq!(file("types.d.ts").result.status, Status::Skipped);
         assert!(file("lib.rs").result.status == Status::Pending);
+        // Bash is read by the generic tier, as source.
+        let bash = &file("deploy.sh").result;
+        assert_eq!(bash.role, "source");
+        assert!(bash.status == Status::Pending);
     }
 
     #[test]
