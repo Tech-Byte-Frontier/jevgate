@@ -68,6 +68,19 @@ pub struct OpenQuestion {
     pub answer: Answer,
 }
 
+/// A unit a syntax error left out of the judgment, or code outside every
+/// unit holding one; the rest of its file was judged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LeftOut {
+    /// A function, method, type, law or test by name, `outline` for the
+    /// file's outline, or empty for code outside every unit.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct UnitCounts {
     pub judged: usize,
@@ -229,6 +242,9 @@ pub struct FileResult {
     pub judgments: Vec<Judgment>,
     pub findings: Vec<Finding>,
     pub error: Option<String>,
+    /// Units syntax errors left out, while the rest of the file was judged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<LeftOut>,
     /// Base file classification used to choose what the gates judge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::file_kind::Classification>,

@@ -269,7 +269,8 @@ fn opened(node: Node<'_>) -> Option<Node<'_>> {
 }
 
 /// A top-level statement outside every unit that calls something (or, in a
-/// settings module, assigns a setting), other than a Ruby `require`.
+/// settings module, assigns a setting), other than a Ruby `require`, and
+/// holding no syntax error (`units::LeftOut`).
 fn setup_statement(node: Node<'_>, source: &str, units: &[Range<usize>], settings: bool) -> bool {
     let range = node.byte_range();
     // Settings modules also choose values in `try` blocks, such as a
@@ -277,6 +278,7 @@ fn setup_statement(node: Node<'_>, source: &str, units: &[Range<usize>], setting
     let statement =
         SETUP_STATEMENTS.contains(&node.kind()) || settings && node.kind() == "try_statement";
     statement
+        && !node.has_error()
         && super::ruby::required(node, source).is_none()
         && !units
             .iter()
@@ -332,7 +334,8 @@ pub fn inline_script(root: Node<'_>, source: &str, units: &[Range<usize>]) -> Se
     page(nodes, root, source, units)
 }
 
-/// A page's statements outside every unit, judged like a function.
+/// A page's statements outside every unit and holding no syntax error,
+/// judged like a function.
 fn page<'t>(nodes: Vec<Node<'t>>, root: Node<'t>, source: &str, units: &[Range<usize>]) -> Setup {
     let mut statements = Vec::new();
     let mut best = BTreeMap::<usize, (Priority, Node<'_>)>::new();
@@ -342,9 +345,10 @@ fn page<'t>(nodes: Vec<Node<'t>>, root: Node<'t>, source: &str, units: &[Range<u
     };
     for node in nodes {
         let range = node.byte_range();
-        if units
-            .iter()
-            .any(|u| u.start < range.end && range.start < u.end)
+        if node.has_error()
+            || units
+                .iter()
+                .any(|u| u.start < range.end && range.start < u.end)
         {
             continue;
         }
@@ -364,8 +368,9 @@ fn page<'t>(nodes: Vec<Node<'t>>, root: Node<'t>, source: &str, units: &[Range<u
 }
 
 /// The setup of a framework configuration file such as `next.config.mjs`:
-/// every top-level statement that holds an object literal, whether or not it
-/// calls something, since settings like `headers()` are plain objects. Its
+/// every top-level statement that holds an object literal and no syntax
+/// error, whether or not it calls something, since settings like
+/// `headers()` are plain objects. Its
 /// sites are the innermost objects (`{ key: 'Access-Control-Allow-Origin',
 /// value: '*' }`) and the settings of the outermost object that hold a
 /// single value, so a finding can point at the setting.
@@ -381,6 +386,7 @@ pub fn config_setup(root: Node<'_>, source: &str) -> Setup {
                 | "variable_declaration"
                 | "export_statement"
         ) || !holds_object(node)
+            || node.has_error()
         {
             continue;
         }

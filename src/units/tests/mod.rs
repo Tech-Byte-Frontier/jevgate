@@ -13,6 +13,7 @@ mod hardcoded;
 mod laws;
 mod nextjs;
 mod organization;
+mod partial;
 mod pipeline;
 mod security;
 mod test_rules;

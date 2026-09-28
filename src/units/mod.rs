@@ -417,6 +417,8 @@ pub struct FilePlan {
     pub steering: Vec<Steering>,
     /// The custom questions among `rules`, which say what their units are.
     pub questions: Vec<&'static crate::custom::Question>,
+    /// What syntax errors left out of this file's units, as the report names it.
+    pub left_out: Vec<crate::schema::LeftOut>,
 }
 
 impl UnitPlan {

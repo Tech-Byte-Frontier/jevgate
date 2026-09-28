@@ -45,6 +45,36 @@ fn unparseable_binary_and_unsupported_files_are_skipped_without_blocking_the_run
 }
 
 #[test]
+fn a_partly_broken_file_is_judged_for_its_intact_units_and_names_the_rest() {
+    let project = Project::new();
+    // tree-sitter-rust reads snapbox's `str![…]` as the type `str`.
+    let misread = function("broken").replace(
+        "let doubled = total * 2;",
+        "let doubled = str![[\"x\"]].len() as i32 * total;",
+    );
+    project.write("lib.rs", &format!("{}{misread}", function("kept")));
+    let mut mock = Mock::default();
+    let report = run(&project, &args(), &mut mock);
+    assert!(report.complete);
+    let file = &report.files[0];
+    assert_eq!(file.status, schema::Status::Clear);
+    assert_eq!(
+        file.left_out,
+        [schema::LeftOut {
+            unit: "broken".into(),
+            start_line: 9,
+            end_line: 16,
+            reason: "Syntax error at line 14.".into(),
+        }]
+    );
+    assert!(
+        mock.requests
+            .iter()
+            .all(|r| !r.to_string().contains("fn broken"))
+    );
+}
+
+#[test]
 fn a_function_too_large_for_one_request_is_needs_context_and_not_sent() {
     let project = Project::new();
     let mut body = String::from("fn huge() -> usize {\n    let mut total = 0;\n");

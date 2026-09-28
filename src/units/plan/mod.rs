@@ -38,6 +38,7 @@ use std::{
 
 mod file;
 mod laws;
+mod left_out;
 mod security_units;
 mod settings_modules;
 mod shared;
@@ -135,6 +136,7 @@ pub fn plan(
         .collect();
     access::plan(&sql, args, budget, &mut result.files, &mut result.requests);
     plan_workflows(&scope, args, budget, &mut result);
+    skip_left_out(&scope, &mut result);
     for &owner in &scope.documents {
         let file = plan_document(
             (owner, &inputs[owner]),
@@ -225,6 +227,21 @@ fn chosen_when_planned(unit: &UnitPlan) -> bool {
     )
 }
 
+/// A file whose syntax errors left no unit of any rule to judge is skipped
+/// whole, as before partial parses: never reported empty and clear.
+fn skip_left_out(scope: &Scope<'_>, result: &mut Plan) {
+    for owner in &scope.owners {
+        if scope.units[owner].partial()
+            && result.files.get(owner).is_some_and(|f| f.units.is_empty())
+        {
+            result.files.remove(owner);
+            result
+                .skipped
+                .insert(*owner, crate::syntax::SYNTAX_ERRORS.into());
+        }
+    }
+}
+
 /// Each GitHub Actions workflow file's jobs.
 fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: Limits<'_>, result: &mut Plan) {
     for &owner in &scope.configuration {
@@ -277,8 +294,9 @@ fn plan_document(
 }
 
 /// Parse every selected file and the explicit context. Files without a parser
-/// or with syntax errors are skipped with a reason, unless a custom question
-/// that needs no parser reads a file without one.
+/// or that the parser could not read are skipped with a reason, unless a
+/// custom question that needs no parser reads a file without one; syntax
+/// errors elsewhere leave out the units holding them, test cases included.
 fn parsed_scope<'a>(
     inputs: &'a [Input],
     views: &'a BTreeMap<usize, View>,
@@ -313,7 +331,10 @@ fn parsed_scope<'a>(
         }
         let source = input.source.as_deref().unwrap_or("");
         match parsed::parse(&input.result.path, source) {
-            Ok(units) if units.parsed => {
+            Ok(mut units) if units.parsed => {
+                if units.partial() {
+                    leave_out_tests(input, view, &mut units);
+                }
                 scope.units.insert(owner, units);
                 scope.owners.push(owner);
             }
@@ -339,4 +360,27 @@ fn parsed_scope<'a>(
         }
     }
     scope
+}
+
+/// Leave out the test cases a partial parse broke, where test rules or the
+/// test outline judge them: inside a test view's lines, or anywhere in a
+/// test file.
+fn leave_out_tests(input: &Input, view: &View, units: &mut FileUnits) {
+    let tests_kind = view.classification.kind == crate::file_kind::TESTS;
+    if !view.tests && !tests_kind {
+        return;
+    }
+    let source = input.source.as_deref().unwrap_or("");
+    let broken = crate::analysis::test_map::broken_cases(&input.result.path, source)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|case| {
+            tests_kind
+                || view
+                    .test_lines
+                    .iter()
+                    .any(|r| (r.start_line..=r.end_line).contains(&case.line))
+        })
+        .collect();
+    units.leave_out_tests(broken, source);
 }

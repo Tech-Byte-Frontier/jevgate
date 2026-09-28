@@ -4,6 +4,7 @@ mod callbacks;
 mod facts;
 mod generic;
 mod import_names;
+mod left_out;
 mod ruby_definitions;
 
 use super::{bend, is_comment, line_of, summary, text};
@@ -11,6 +12,7 @@ use anyhow::Result;
 use callbacks::{callback, csharp_callbacks, registered_callbacks};
 use facts::Facts;
 use import_names::{csharp_import, go_imports, imports, java_import};
+pub use left_out::LeftOut;
 use ruby_definitions::{ruby_assignment, ruby_call};
 use std::{collections::BTreeSet, ops::Range, path::Path};
 use tree_sitter::Node;
@@ -159,6 +161,11 @@ pub struct FileUnits {
     pub template_code: super::sites::Setup,
     /// In Bend 2 code, the names that tell its proofs apart.
     bend: Option<BendNames>,
+    /// Units whose syntax holds an error, left out of every rule, in source
+    /// order (`left_out`).
+    pub left_out: Vec<LeftOut>,
+    /// Syntax errors outside every unit left out, as `syntax::error_regions`.
+    errors: Vec<Range<usize>>,
 }
 
 /// A Bend 2 file's claims (laws a proof must hold), the laws that give a
@@ -174,7 +181,9 @@ struct BendNames {
 }
 
 /// Units of a supported language. Unsupported languages return an unparsed,
-/// empty result; syntax errors are an error, never an empty clear file.
+/// empty result. A unit holding a syntax error is left out and recorded
+/// (`left_out`); a file the parser could not read is an error, never an
+/// empty clear file.
 pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(FileUnits::default());
@@ -186,6 +195,10 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
             ..Default::default()
         };
         generic::walk(language, tree.root_node(), source, &mut file);
+        file.errors = left_out::outside(
+            crate::syntax::error_regions(tree.root_node()),
+            &file.left_out,
+        );
         calls_by_name(&mut file.units);
         return Ok(file);
     }
@@ -197,6 +210,10 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         ..Default::default()
     };
     walk(tree.root_node(), source, "", &mut file);
+    file.errors = left_out::outside(
+        crate::syntax::error_regions(tree.root_node()),
+        &file.left_out,
+    );
     if let Some(names) = &file.bend {
         unaliased_calls(&mut file.units, &names.aliases);
     }
@@ -207,6 +224,14 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         }
     }
     file.constants = super::literals::constants(tree.root_node(), source);
+    if file.partial() {
+        let left_out = file.left_out_code(source);
+        file.constants.retain(|c| {
+            !left_out
+                .iter()
+                .any(|l| l.line <= c.end_line && c.line <= l.end_line)
+        });
+    }
     let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
     file.setup = setup_of(path, tree.root_node(), source, &spans, settings);
     if crate::components::server_template(path) {
@@ -722,13 +747,14 @@ fn object_functions(object: Node<'_>, source: &str, owner: &str, file: &mut File
 }
 
 /// A type named `name` whose body holds its members: each member is a unit
-/// the type owns, and a type without any is one unit itself.
+/// the type owns, and a type without any is one unit itself. Members left
+/// out over syntax errors are still its members.
 fn owning_type(node: Node<'_>, name: &str, source: &str, file: &mut FileUnits) {
-    let before = file.units.len();
+    let before = (file.units.len(), file.left_out.len());
     if let Some(body) = node.child_by_field_name("body") {
         children(body, source, name, file);
     }
-    if file.units.len() == before && !name.is_empty() {
+    if (file.units.len(), file.left_out.len()) == before && !name.is_empty() {
         push(Definition::whole(node), name, "", Kind::Type, source, file);
     }
 }
@@ -802,12 +828,26 @@ fn push(
     source: &str,
     file: &mut FileUnits,
 ) {
-    // A definition holding a syntax error is not judged: the rest of its
-    // file can be, when its errors are few (`syntax::parse`).
-    if short_name.is_empty() || definition.outer.has_error() {
+    if short_name.is_empty() {
         return;
     }
-    let Definition { node, body, .. } = definition;
+    let placed = Unit::placed(definition, (short_name, owner), kind, source);
+    let Definition { outer, node, body } = definition;
+    // A definition holding a syntax error is left out and named; the rest
+    // of its file is judged.
+    if outer.has_error() {
+        let error = crate::syntax::error_regions(outer)
+            .first()
+            .map_or(outer.start_byte(), |region| region.start);
+        file.left_out.push(LeftOut {
+            name: placed.name,
+            span: placed.span,
+            line: placed.line,
+            end_line: placed.end_line,
+            error_line: line_of(source, error),
+        });
+        return;
+    }
     let (facts, refs) = references(node, (short_name, owner), kind, &file.imports, source);
     let equality = equality_override(node, short_name, source);
     let literals = body
@@ -831,7 +871,7 @@ fn push(
         joins_text,
         statement: bend::statement(node, source),
         mentions: facts.idents,
-        ..Unit::placed(definition, (short_name, owner), kind, source)
+        ..placed
     };
     file.units.push(unit);
 }

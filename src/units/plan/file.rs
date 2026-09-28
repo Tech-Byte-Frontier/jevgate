@@ -1,6 +1,6 @@
 //! Planning one selected code file: every rule's units and requests, with
 //! the facts of the file and the scope each rule needs.
-use super::{Scope, Shared, plan_security};
+use super::{Scope, Shared, left_out, plan_security};
 use crate::{
     analysis::{
         imports::Links,
@@ -39,6 +39,7 @@ pub(super) fn plan_file(
     let context = file_context(input, owner, args, budget);
     let mut file = FilePlan {
         path: input.result.path.clone(),
+        left_out: left_out::entries(&scope.units[&owner], context.source),
         ..Default::default()
     };
     let lines = scope.test_lines(owner);
@@ -270,7 +271,8 @@ fn file_context<'a>(
     }
 }
 
-/// An application file's members outside tests, or a test file's cases.
+/// An application file's members outside tests, or a test file's cases;
+/// none when syntax errors leave too little of the file to describe it.
 /// With a change judged, the outline is asked only when the change adds a
 /// member: editing a body leaves the file's layout as it was.
 fn plan_outline(
@@ -286,7 +288,8 @@ fn plan_outline(
     if crate::analysis::bend::law_file(context.path) {
         return;
     }
-    let units = &scope.units[&owner].units;
+    let parsed = &scope.units[&owner];
+    let units = &parsed.units;
     if view.application {
         let members: Vec<usize> = (0..units.len())
             .filter(|&i| !lines.iter().any(|l| units[i].overlaps(l)))
@@ -295,9 +298,11 @@ fn plan_outline(
         let listed = members
             .iter()
             .map(|&i| (units[i].name.as_str(), units[i].line));
-        if members.len() >= 2 && context.adds(listed, unit_names) {
+        if members.len() >= 2
+            && context.adds(listed, unit_names)
+            && left_out::outline_covered(parsed, context.source, file)
+        {
             let callers = callers(scope, &shared.links, owner);
-            let parsed = &scope.units[&owner];
             outline::plan(context, parsed, &members, &callers, file, requests);
         }
     } else if view.classification.kind == crate::file_kind::TESTS {
@@ -307,7 +312,9 @@ fn plan_outline(
             .iter()
             .map(|c| (c.name.as_str(), c.line))
             .chain(units.iter().map(|u| (u.name.as_str(), u.line)));
-        if !context.adds(listed, test_names) {
+        if !context.adds(listed, test_names)
+            || !left_out::outline_covered(parsed, context.source, file)
+        {
             return;
         }
         shared.link_routes(&mut cases);
@@ -315,7 +322,7 @@ fn plan_outline(
         if java(context.path) {
             shared.qualify_subjects(&mut cases);
         }
-        outline::plan_tests(context, &scope.units[&owner], &cases, file, requests);
+        outline::plan_tests(context, parsed, &cases, file, requests);
     }
 }
 
@@ -404,7 +411,8 @@ fn plan_laws(
     laws::plan(context, &units, &shared.propositions, &defs, file, requests);
 }
 
-/// Comments outside tests.
+/// Comments outside tests and outside what syntax errors left out: a
+/// comment in a left-out function would read as top-level code's.
 /// `teaching` when the project writes its comments for learners.
 fn plan_comments(
     parsed: &FileUnits,
@@ -418,7 +426,7 @@ fn plan_comments(
         .unwrap_or_default();
     let found: Vec<_> = found
         .into_iter()
-        .filter(|c| !lines.iter().any(|l| l.contains(&c.line)))
+        .filter(|c| !lines.iter().any(|l| l.contains(&c.line)) && parsed.intact(&c.span))
         .collect();
     comments::plan(context, (&parsed.units, teaching), &found, file, requests);
 }

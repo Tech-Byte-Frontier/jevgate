@@ -440,6 +440,7 @@ fn pending_result(
         judgments: Vec::new(),
         findings: Vec::new(),
         error: None,
+        left_out: Vec::new(),
         classification: None,
     }
 }

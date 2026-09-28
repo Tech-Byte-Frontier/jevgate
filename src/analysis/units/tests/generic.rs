@@ -178,12 +178,13 @@ fn dart_scala_elixir_and_lua_definitions_are_units() {
 }
 
 #[test]
-fn a_generic_file_with_syntax_errors_fails_instead_of_returning_no_units() {
+fn a_generic_file_of_nothing_but_an_error_leaves_no_unit_and_says_so() {
     for (path, source) in [
         ("broken.kt", "fun broken( {"),
         ("broken.c", "int broken( {"),
         ("broken.swift", "func broken( {"),
     ] {
-        assert!(parse(Path::new(path), source).is_err(), "{path}");
+        let file = parse(Path::new(path), source).unwrap();
+        assert!(file.units.is_empty() && file.partial(), "{path}");
     }
 }

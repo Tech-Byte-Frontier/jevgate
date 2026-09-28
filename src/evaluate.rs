@@ -168,9 +168,7 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
         }
     }
     let plan = crate::units::plan(inputs, &views, args, budget, root);
-    for (owner, reason) in &plan.skipped {
-        skip(&mut report.files[*owner], reason);
-    }
+    record_plan(&plan, report);
     planned.extend(plan.requests.into_iter().map(|p| p.request));
     count_planned(report, args, root, budget, planned);
 }
@@ -290,9 +288,7 @@ impl Session<'_> {
         }
         let mut plan =
             crate::units::plan(inputs, &views, self.args, &self.budget, &self.context.root);
-        for (owner, reason) in &plan.skipped {
-            skip(&mut report.files[*owner], reason);
-        }
+        record_plan(&plan, report);
         for &owner in plan.files.keys() {
             report.files[owner].cached = true;
         }
@@ -770,6 +766,17 @@ fn fail(file: &mut FileResult, error: anyhow::Error) {
     file.status = Status::Error;
     file.cached = false;
     file.error = Some(error.to_string());
+}
+
+/// Skip the files planning skipped, and record what syntax errors left out
+/// of the others.
+fn record_plan(plan: &crate::units::Plan, report: &mut Report) {
+    for (owner, reason) in &plan.skipped {
+        skip(&mut report.files[*owner], reason);
+    }
+    for (&owner, file) in &plan.files {
+        report.files[owner].left_out.clone_from(&file.left_out);
+    }
 }
 
 /// Unsupported or unparseable files are reported with a reason and never make a run incomplete.

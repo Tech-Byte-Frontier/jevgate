@@ -4,7 +4,7 @@ use anyhow::{Result, bail, ensure};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
-    ops::ControlFlow,
+    ops::{ControlFlow, Range},
     path::Path,
     time::{Duration, Instant},
 };
@@ -154,6 +154,11 @@ fn parsed_text(path: &Path, source: &str) -> Option<(tree_sitter::Language, Opti
     }
 }
 
+/// The tree of a file in a supported language, none for other files. Its
+/// syntax errors leave out the units that hold them (`error_regions`); the
+/// file fails only when the parser could not read its top level, when it is
+/// a generator template holding any error, when it is Bend 1 code, or when
+/// its parse takes longer than `PARSE_TIME`.
 pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     let extension = extension(path);
     let server_template = crate::components::server_template(path);
@@ -193,7 +198,7 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         if template(path, source) && !server_template {
             !tree.root_node().has_error()
         } else {
-            tolerable(tree.root_node(), source.len())
+            !tree.root_node().is_error()
         },
         "Syntax errors: semantic evaluation was not attempted"
     );
@@ -215,11 +220,6 @@ fn parse_in_time(parser: &mut Parser, text: &str) -> Option<Tree> {
     let options = ParseOptions::new().progress_callback(&mut progress);
     parser.parse_with_options(&mut read, None, Some(options))
 }
-
-/// Error regions a file may hold and still be judged, and the part of its
-/// source they may cover in all: one byte in eight.
-const ERROR_REGIONS: usize = 3;
-const ERROR_SHARE: usize = 8;
 
 /// A generator template, whose placeholders are no syntax of its language:
 /// a file under a `templates` directory, or one holding ERB tags (`<%=`)
@@ -292,28 +292,24 @@ fn without_tags(source: &str, server: bool) -> String {
     String::from_utf8(out).unwrap_or_else(|_| source.to_string())
 }
 
-/// Whether a tree's syntax errors are few and small enough to judge the
-/// rest of the file. Grammars miss some valid code: tree-sitter-typescript
-/// reads a call signature that starts with `<T>` on the line after another
-/// as its continuation, which left four of zustand's source files
-/// unjudged, and tree-sitter-go flags a `const (…)` group closed on a raw
-/// string's line. At most three error regions, an eighth of the source in
-/// all; units holding an error are left out (`analysis::units`).
-fn tolerable(root: Node<'_>, len: usize) -> bool {
-    if !root.has_error() {
-        return true;
-    }
-    if root.is_error() {
-        return false;
-    }
+/// The smallest nodes that hold a syntax error, as byte ranges in source
+/// order: what the parser could not read, and the tokens it assumed missing
+/// (empty ranges). A unit holding one is left out and the rest of its file
+/// is judged (`analysis::units::LeftOut`), since most errors are grammar
+/// gaps rather than broken code: tree-sitter-typescript reads a call
+/// signature that starts with `<T>` on the line after another as its
+/// continuation, tree-sitter-rust reads snapbox's `str![…]` as the type
+/// `str` (one error in each of 12 mdbook test files), and tree-sitter-bend2
+/// lacks Bend 2's erased binders (`for ~a: T`) and typed lets.
+pub(crate) fn error_regions(root: Node<'_>) -> Vec<Range<usize>> {
     let mut regions = Vec::new();
-    error_regions(root, &mut regions);
-    let bytes: usize = regions.iter().map(|r| r.len()).sum();
-    regions.len() <= ERROR_REGIONS && bytes * ERROR_SHARE <= len
+    if root.has_error() {
+        holding_errors(root, &mut regions);
+    }
+    regions
 }
 
-/// The smallest nodes that hold a syntax error.
-fn error_regions(node: Node<'_>, out: &mut Vec<std::ops::Range<usize>>) {
+fn holding_errors(node: Node<'_>, out: &mut Vec<Range<usize>>) {
     let mut cursor = node.walk();
     let holding: Vec<Node<'_>> = node
         .children(&mut cursor)
@@ -324,7 +320,7 @@ fn error_regions(node: Node<'_>, out: &mut Vec<std::ops::Range<usize>>) {
         return;
     }
     for child in holding {
-        error_regions(child, out);
+        holding_errors(child, out);
     }
 }
 
@@ -350,7 +346,11 @@ mod tests {
         .unwrap();
         assert!(!tree.root_node().has_error());
         assert!(
-            parse(Path::new("app/tasks.py"), source).is_err(),
+            parse(Path::new("app/tasks.py"), source)
+                .unwrap()
+                .unwrap()
+                .root_node()
+                .has_error(),
             "outside a template its tags are syntax errors"
         );
     }
@@ -378,7 +378,13 @@ mod tests {
             collect(path, changed, Path::new(".")).unwrap().1,
             vec![("after".into(), 2)]
         );
-        assert!(parse(path, "function before( {").is_err());
+        assert!(
+            parse(path, "function before( {")
+                .unwrap()
+                .unwrap()
+                .root_node()
+                .has_error()
+        );
         assert_eq!(
             collect(path, source, Path::new(".")).unwrap().1,
             vec![("before".into(), 1)]
@@ -450,7 +456,8 @@ mod tests {
     fn the_extension_selects_the_grammar() {
         let jsx = "const view = <div/>;";
         assert!(parse(Path::new("view.tsx"), jsx).unwrap().is_some());
-        assert!(parse(Path::new("view.ts"), jsx).is_err());
+        let ts = parse(Path::new("view.ts"), jsx).unwrap().unwrap();
+        assert!(ts.root_node().has_error());
         assert!(parse(Path::new("view.txt"), jsx).unwrap().is_none());
         assert!(
             parse(Path::new("page.php"), "<?php echo $x; ?>\n<p>hi</p>\n")
