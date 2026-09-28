@@ -31,11 +31,14 @@ use std::{
 /// The stage of custom questions' own requests.
 const STAGE: &str = "custom";
 
-/// Units one question asks about in one run, at most; the rest of a broad
-/// question on a large repository are counted as omitted. Beside the
-/// built-in questions a unit adds its question's text, about 60 to 600
-/// tokens, so the cap holds a question to about 1.2 million new input
-/// tokens a run ($0.05); asked of whole files, about $0.2.
+/// Units one question asks about in a run of the whole repository, at most;
+/// the rest of a broad question on a large repository are counted as
+/// omitted. Beside the built-in questions a unit adds its question's text,
+/// about 60 to 600 tokens, so the cap holds a question to about 1.2 million
+/// new input tokens a run ($0.05); asked of whole files, about $0.2. A check
+/// with `--base`, the agent hook's included, asks every unit the change
+/// touched: the change bounds them, and one left unasked could hold the
+/// violation the check is there to catch, while the run passed as complete.
 pub(crate) const MAX_UNITS: usize = 2_000;
 
 /// What a code file offers custom questions.
@@ -79,6 +82,8 @@ pub(super) struct Planner {
     changes: Option<hunks::Changes>,
     /// Units each question asked so far in this run.
     asked: BTreeMap<&'static str, usize>,
+    /// Whether [`MAX_UNITS`] holds: in a run without `--base`.
+    capped: bool,
 }
 
 impl Planner {
@@ -90,6 +95,7 @@ impl Planner {
             questions,
             changes,
             asked: BTreeMap::new(),
+            capped: args.base.is_none(),
         }
     }
 
@@ -158,7 +164,11 @@ impl Planner {
                 },
             };
             let judged = judged(file, question, found);
-            let room = MAX_UNITS - self.asked.get(question.rule.as_str()).copied().unwrap_or(0);
+            let room = if self.capped {
+                MAX_UNITS - self.asked.get(question.rule.as_str()).copied().unwrap_or(0)
+            } else {
+                judged.len()
+            };
             let taken = judged.len().min(room);
             *out.rules.entry(&question.rule).or_default() += judged.len() - taken;
             out.questions.push(question);

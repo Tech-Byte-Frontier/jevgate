@@ -675,6 +675,21 @@ fn one_question_asks_about_at_most_the_cap_of_units_in_a_run() {
         crate::units::custom::MAX_UNITS
     );
     assert_eq!(file.rules["custom/body-logs"], 3, "counted as omitted");
+    // A change bounds what a check with a base asks: every unit it touched.
+    project.write("lib.rs", "fn f0() {}\n");
+    git(&project, &["init", "-q"]);
+    git(&project, &["add", "."]);
+    git(&project, &["commit", "-qm", "base"]);
+    project.write("lib.rs", &source);
+    let mut options = options;
+    options.base = Some(crate::revision::resolve(&project.0, "HEAD").unwrap());
+    let (_, plan) = planned(&project, &options);
+    assert_eq!(
+        custom_units(&plan, "lib.rs").len(),
+        crate::units::custom::MAX_UNITS + 2,
+        "every function but the unchanged one"
+    );
+    assert_eq!(file_plan(&plan, "lib.rs").rules["custom/body-logs"], 0);
 }
 
 #[test]

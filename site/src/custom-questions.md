@@ -166,7 +166,7 @@ Beside the default rules, 1,792 functions rode in function-simplification reques
 
 `jevgate rules test` asks one request per example, or per eight of its units: about 280 tokens beyond the example's text and the question. The 23 examples above took 29,258 input tokens ($0.0012), and each rerun from the cache none.
 
-`paths` is the way to keep a question to the code it is about. A question also asks at most 2,000 units a run; the rest are counted as omitted, and the output says how many each question left unasked. `max_requests` still bounds the whole run.
+`paths` is the way to keep a question to the code it is about. A question also asks at most 2,000 units in a run of the whole repository; the rest are counted as omitted, and the output says how many each question left unasked. A check with `--base`, and the agent hook, ask every unit the change touched, since one left unasked could hold the violation. `max_requests` still bounds the whole run.
 
 ## Where questions live
 
