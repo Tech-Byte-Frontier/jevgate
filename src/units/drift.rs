@@ -263,6 +263,10 @@ impl<'a> Shared<'a> {
                 other,
                 check: fits.then(|| (request, asked).into()),
                 settle: fits.then(|| settle.into()),
+                translated: crate::docs::overlap::other_language(
+                    (file.path, &section.text),
+                    (other_path, &other_section.text),
+                ),
             },
             recheck: None,
         }

@@ -10,16 +10,25 @@ use super::{documentation::kind_share, *};
 /// is a note. Sections about different subjects settle what stays
 /// undecided, and so does the pair's relation, asked apart: a repetition
 /// or a contradiction it rules out clears that check.
-pub(super) fn doc_pair_outcome<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Option<Outcome> {
-    let signals: Vec<Outcome> = pair_signals(get)?.into_iter().map(|(_, o)| o).collect();
+pub(super) fn doc_pair_outcome<'a>(
+    get: &impl Fn(&str) -> Option<&'a Answer>,
+    translated: bool,
+) -> Option<Outcome> {
+    let signals: Vec<Outcome> = pair_signals(get, translated)?
+        .into_iter()
+        .map(|(_, o)| o)
+        .collect();
     Some(strongest(&signals))
 }
 
-/// Each check of a section pair with its settled outcome.
+/// Each check of a section pair with its settled outcome; `translated` when
+/// the documents' paths or scripts show different languages.
 pub(in crate::units) fn pair_signals<'a>(
     get: &impl Fn(&str) -> Option<&'a Answer>,
+    translated: bool,
 ) -> Option<Vec<(&'static str, Outcome)>> {
-    let translated = get("translation").is_some_and(|a| matches!(noul(a), Outcome::Review(_)));
+    let translated =
+        translated || get("translation").is_some_and(|a| matches!(noul(a), Outcome::Review(_)));
     let covers = if translated {
         &[][..]
     } else {
