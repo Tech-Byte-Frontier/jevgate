@@ -62,61 +62,58 @@ signatures, or one candidate pair.
    page once one reads the request. RailsGoat's `raw cookies[:font]` and
    JavaVulnerableLab's scriptlet queries were read by no rule. A template
    holding neither is not selected.
-   A syntax error leaves out the unit it sits in, not its file, since
-   grammars miss some valid code: tree-sitter-typescript reads a call
-   signature starting with `<T>` on the line after another as its
-   continuation, tree-sitter-rust reads snapbox's `str![…]` as the type
-   `str`, and tree-sitter-bend2 lacks Bend 2's erased binders (`for ~a: T`).
-   A definition or test whose syntax holds an error is left out with the
-   comments inside it (a Bend 2 test is its whole program), and so are
-   module constants and top-level statements that hold one; errors outside
-   every unit are left out by their lines, and the report names all of it
-   (`left_out`). The outline, the one question about the whole file, is
-   asked only when 90% or more of the file's non-blank lines parsed:
-   leaving out whole members of 55 clean outlines, the first answer moved
-   as little as with one small member missing above 90% (its top level
-   0.03 on average, 46 of 48 keeping their finding or its absence), twice
-   as much from 70% to 90% (10 of 99 flipped) and 0.10 to 0.18 below. A
-   file with no intact unit is skipped, as is one whose top level the
-   parser could not read, and one whose syntax nests more than 1,000
+   A syntax error leaves out the unit it sits in, not its file, since grammars
+   miss some valid code: tree-sitter-typescript reads a call signature
+   starting with `<T>` on the line after another as its continuation,
+   tree-sitter-rust reads snapbox's `str![…]` as the type `str`, and
+   tree-sitter-bend2 lacks Bend 2's erased binders (`for ~a: T`). A definition
+   or test whose syntax holds an error is left out with the comments inside it
+   (a Bend 2 test is its whole program), and so are module constants and
+   top-level statements that hold one; errors outside every unit are left out
+   by their lines, and the report names all of it (`left_out`). The outline,
+   the one question about the whole file, is asked only when 90% or more of
+   the file's non-blank lines parsed: leaving out whole members of 55 clean
+   outlines, the first answer moved as little as with one small member missing
+   above 90% (its top level 0.03 on average, 46 of 48 keeping their finding or
+   its absence), twice as much from 70% to 90% (10 of 99 flipped) and 0.10 to
+   0.18 below. A file with no intact unit is skipped, as is one whose top
+   level the parser could not read, and one whose syntax nests more than 1,000
    levels (the corpus's deepest nests 405), before any walk that could
-   overflow. What is left out is reported as code the parser could not
-   read, not as broken code: nearly every such error is a grammar gap. Generator templates (under `templates/`,
-   holding `//#if` conditions, or holding an ERB tag in their code rather
-   than in a string or comment, which a C format such as `"<%d>"` is not)
-   keep the strict rule, since their placeholders are not the language's
-   syntax.
-   C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir and Lua are read by a
-   generic tier (`src/analysis/generic`), in preview until measured on
-   projects never used for tuning. One tag query per language, in the
-   captures GitHub's code navigation uses, finds functions, methods, types
-   and calls (C++ members defined outside their class or returning a
-   reference or pointer, and operators; Swift computed properties and
-   subscripts; Kotlin `init` blocks, constructors and accessors), and a
+   overflow. What is left out is reported as code the parser could not read,
+   not as broken code: nearly every such error is a grammar gap. Generator
+   templates (under `templates/`, holding `//#if` conditions, or holding an
+   ERB tag in their code rather than in a string or comment, which a C format
+   such as `"<%d>"` is not) keep the strict rule, since their placeholders are
+   not the language's syntax. C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir
+   and Lua are read by a generic tier (`src/analysis/generic`), in preview
+   until measured on projects never used for tuning. One tag query per
+   language, in the captures GitHub's code navigation uses, finds functions,
+   methods, types and calls (C++ members defined outside their class or
+   returning a reference or pointer, and operators; Swift computed properties
+   and subscripts; Kotlin `init` blocks, constructors and accessors), and a
    table names the nodes that hold statements, nest control flow and hold
-   literals. A `.h` header is read as C++ when its code is only C++
-   (`std::`, a namespace, a template, a class), and as C otherwise. The grammars' own `tags.scm` tag what
-   names a definition (a C prototype's declarator, a Swift method's whole
-   class), so the queries are JevGate's, with the definition itself as the
-   captured node. These files get function simplification, file
+   literals. A `.h` header is read as C++ when its code is only C++ (`std::`,
+   a namespace, a template, a class), and as C otherwise. The grammars' own
+   `tags.scm` tag what names a definition (a C prototype's declarator, a Swift
+   method's whole class), so the queries are JevGate's, with the definition
+   itself as the captured node. These files get function simplification, file
    organization, shared logic and comments; values and security need a
-   language's own sites and sources and are not asked. Their tests are
-   found by path (a `…Test` class, a C file named `test…` or `…-test`, a
-   Kotlin source set such as `androidTest`, a Swift test target such as
-   `VaporTests`, busted's `spec/`, `*.bats`) and not judged yet, with no
-   file-purpose request; copied dependencies (`Pods`, `third_party`,
-   `deps`), Flutter's platform runners and Dart's generated files are
-   skipped. No
-   imports are resolved, so an outline has no `used_by` and a function's
-   callees are found by name within its language. Their units stay out of
-   the other languages' evidence (test subjects, security traces, error
-   handlers), their copies pair only within one family (C and C++), and
-   they take only the places of the run's 64 copies the other languages
-   leave: ranked together, C benchmarks took a place from a Bend copy. A
-   Bash script runs on its own, so its copies pair with another script's
-   only when one reads the other in (`source`) or both read in the same
-   script of the project: 31 of the 45 Bash copies labeled on projects
-   never used for tuning paired standalone scripts, none of them right.
+   language's own sites and sources and are not asked. Their tests are found
+   by path (a `…Test` class, a C file named `test…` or `…-test`, a Kotlin
+   source set such as `androidTest`, a Swift test target such as `VaporTests`,
+   busted's `spec/`, `*.bats`) and not judged yet, with no file-purpose
+   request; copied dependencies (`Pods`, `third_party`, `deps`), Flutter's
+   platform runners and Dart's generated files are skipped. No imports are
+   resolved, so an outline has no `used_by` and a function's callees are found
+   by name within its language. Their units stay out of the other languages'
+   evidence (test subjects, security traces, error handlers), their copies
+   pair only within one family (C and C++), and they take only the places of
+   the run's 64 copies the other languages leave: ranked together, C
+   benchmarks took a place from a Bend copy. A Bash script runs on its own, so
+   its copies pair with another script's only when one reads the other in
+   (`source`) or both read in the same script of the project: 31 of the 45
+   Bash copies labeled on projects never used for tuning paired standalone
+   scripts, none of them right.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
    and control-flow nesting; callbacks registered through calls, including
    module-level route handlers named by their registration
