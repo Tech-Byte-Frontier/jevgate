@@ -61,12 +61,15 @@ impl Changes {
 
     /// The hunks of `path`, whose text is now `source`: none when it did
     /// not change, and all of it when Git does not track it yet. External
-    /// diff and text conversion helpers never run.
+    /// diff and text conversion helpers never run, and a blank line of
+    /// context keeps its space whatever `diff.suppressBlankEmpty` says.
     pub(super) fn hunks(&self, path: &Path, source: &str) -> Vec<Hunk> {
         let Some(previous) = self.paths.get(path) else {
             return Vec::new();
         };
         let mut args = vec![
+            "-c",
+            "diff.suppressBlankEmpty=false",
             "diff",
             "--no-ext-diff",
             "--no-textconv",
@@ -96,7 +99,9 @@ impl Changes {
 }
 
 /// The hunks of one file's unified diff, parts of at most `MAX_LINES`
-/// lines each; `lines` is how many lines the file has now.
+/// lines each; `lines` is how many lines the file has now. An empty line
+/// inside a hunk is a blank line of context, as Git prints one when
+/// `diff.suppressBlankEmpty` is set.
 pub(super) fn parse(diff: &str, lines: usize) -> Vec<Hunk> {
     let mut hunks = Vec::new();
     let mut open: Option<(usize, Option<String>, Vec<&str>)> = None;
@@ -109,6 +114,7 @@ pub(super) fn parse(diff: &str, lines: usize) -> Vec<Hunk> {
         } else if let Some((_, _, body)) = open.as_mut() {
             match line.as_bytes().first() {
                 Some(b' ' | b'+' | b'-') => body.push(line),
+                None => body.push(" "),
                 // "\ No newline at end of file"
                 Some(b'\\') => {}
                 _ => split(open.take().unwrap(), lines, &mut hunks),
@@ -125,14 +131,10 @@ pub(super) fn parse(diff: &str, lines: usize) -> Vec<Hunk> {
 /// headers, or with none, one change from line 1. An empty line is an
 /// unchanged blank line, since editors strip the space a diff gives it.
 pub(super) fn example(diff: &str) -> Vec<Hunk> {
-    let lines: Vec<&str> = diff
-        .lines()
-        .map(|line| if line.is_empty() { " " } else { line })
-        .collect();
-    let headed = lines.iter().any(|line| line.starts_with("@@ "));
+    let headed = diff.lines().any(|line| line.starts_with("@@ "));
     let header = if headed { "" } else { "@@ -1 +1 @@\n" };
     // No line count to keep within: the example is all the file there is.
-    parse(&format!("{header}{}", lines.join("\n")), usize::MAX)
+    parse(&format!("{header}{diff}"), usize::MAX)
 }
 
 /// A new file's text as hunks that add every line.
@@ -223,6 +225,17 @@ mod tests {
         );
         assert_eq!(parse(diff, 41)[1].start, 41, "at most the file's last line");
         assert!(parse("Binary files a/x.png and b/x.png differ\n", 1).is_empty());
+    }
+
+    #[test]
+    fn a_blank_line_of_context_printed_empty_stays_in_its_hunk() {
+        // As Git prints it with `diff.suppressBlankEmpty` set.
+        let diff = "@@ -1,5 +1,5 @@ def charge(order):\n def charge(order):\n-    x = 1\n+    x = 2\n\n-    y = 2\n+    y = log(order.body)\n     return x + y\n";
+        let hunks = parse(diff, 5);
+        assert_eq!(hunks.len(), 1);
+        assert_eq!((hunks[0].start, hunks[0].end), (2, 4));
+        assert!(hunks[0].changed.ends_with("+    y = log(order.body)"));
+        assert!(hunks[0].diff.contains("+    x = 2\n \n-    y = 2"));
     }
 
     #[test]

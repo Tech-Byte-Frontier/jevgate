@@ -505,3 +505,31 @@ paths = ["src/api/**"]
         "a file the question already read, moved untouched"
     );
 }
+
+#[test]
+fn a_hunk_keeps_its_blank_lines_however_git_is_set_to_print_them() {
+    let toml = r#"
+[[question]]
+id = "no-body-logs"
+question = "Does this change log a request body?"
+unit = "hunk"
+"#;
+    let project = Project::new();
+    project.write(
+        "m.py",
+        "def charge(order):\n    x = 1\n\n    y = 2\n    return x + y\n",
+    );
+    project.commit_all();
+    project.git(&["config", "diff.suppressBlankEmpty", "true"]);
+    project.write(
+        "m.py",
+        "def charge(order):\n    x = 2\n\n    y = log(order.body)\n    return x + y\n",
+    );
+    let (_, plan) = planned(&project, &custom_since_head(toml));
+    assert_eq!(unit_names(&plan, "m.py"), ["lines 2–4"]);
+    let diff = &plan.requests[0].request["state"]["hunks"][0]["diff"];
+    assert!(
+        diff.as_str().unwrap().contains("+    y = log(order.body)"),
+        "{diff}"
+    );
+}
