@@ -35,7 +35,7 @@ mod workflows;
 
 use answers::Questions;
 pub use answers::{Asked, record};
-pub(crate) use custom::{MAX_UNITS as MAX_CUSTOM_UNITS, examples};
+pub(crate) use custom::{KEY_PREFIX as CUSTOM_KEY_PREFIX, MAX_UNITS as MAX_CUSTOM_UNITS, examples};
 pub(crate) use evidence::pack_runs;
 use evidence::{FileContext, compact, identity, pack, request, unique_ids};
 pub use follow_ups::{doc_checks, kinds, locates, parts, rechecks, settles, traces, value_kinds};

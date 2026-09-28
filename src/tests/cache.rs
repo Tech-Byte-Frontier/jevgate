@@ -166,6 +166,40 @@ fn whole_request_answers_of_an_earlier_version_keep_answering() {
     assert_eq!(asked(&mock), [["long"]]);
 }
 
+#[test]
+fn a_custom_question_riding_in_a_request_an_earlier_version_kept_whole_is_asked_alone() {
+    let project = Project::new();
+    let options = args();
+    let request = three_questions();
+    save_whole(&project, &request, schema::now() - 60);
+    let mut ridden = request.clone();
+    ridden["questions"]["custom_0_body_logs"] =
+        json!({"type":"noul","instructions":{"question":"Does `source` log a request body?"}});
+    let price = |options: &CheckArgs| requests::unanswered(&project.0, options, &ridden);
+    let sent = price(&options).unwrap();
+    let keys: Vec<&String> = sent["questions"].as_object().unwrap().keys().collect();
+    assert_eq!(
+        keys,
+        ["custom_0_body_logs"],
+        "a dry run prices only the question"
+    );
+    let mut mock = Mock::default();
+    let receipts = ask(&project, &options, &mut mock, &[&ridden]);
+    assert_eq!(
+        asked(&mock),
+        [["custom_0_body_logs"]],
+        "no version before 0.29 sent a custom question, so the built-in answers are the earlier entry's"
+    );
+    assert_eq!(
+        (
+            receipts[0].metrics.asked_questions,
+            receipts[0].metrics.cached_questions
+        ),
+        (1, 3)
+    );
+    assert!(price(&options).is_none(), "each answer is kept apart now");
+}
+
 /// Answers its first request at the bottom of every scale and the others at the top.
 #[derive(Default)]
 struct Shifting {

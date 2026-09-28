@@ -412,9 +412,13 @@ fn list(kind: Kind) -> &'static str {
     }
 }
 
+/// What the key of every custom question in a request starts with; no
+/// built-in question's does.
+pub(crate) const KEY_PREFIX: &str = "custom_";
+
 /// The key of a question about the unit at `index` of its request.
 fn key(index: usize, question: &Question) -> String {
-    format!("custom_{index}_{}", question.id().replace('-', "_"))
+    format!("{KEY_PREFIX}{index}_{}", question.id().replace('-', "_"))
 }
 
 /// A custom question as a Noul about the unit at `index`, named by its

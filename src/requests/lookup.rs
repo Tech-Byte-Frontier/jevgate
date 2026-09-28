@@ -49,6 +49,21 @@ fn questions(request: &Value) -> impl Iterator<Item = (&String, &Value)> {
     request["questions"].as_object().into_iter().flatten()
 }
 
+/// `request` without the custom questions riding in it, when one does: the
+/// request as JevGate sent it before custom questions.
+fn without_custom(request: &Value) -> Option<Value> {
+    let custom = |name: &String| name.starts_with(crate::units::CUSTOM_KEY_PREFIX);
+    questions(request).any(|(name, _)| custom(name)).then(|| {
+        let mut built_in = request.clone();
+        built_in["questions"] = questions(request)
+            .filter(|(name, _)| !custom(name))
+            .map(|(name, question)| (name.clone(), question.clone()))
+            .collect::<Map<String, Value>>()
+            .into();
+        built_in
+    })
+}
+
 pub(crate) fn question_count(request: &Value) -> u64 {
     questions(request).count() as u64
 }
@@ -149,19 +164,35 @@ impl Lookup {
                 None => lookup.missing.push(name.clone()),
             }
         }
-        if !lookup.missing.is_empty()
-            && !args.refresh
-            && let Some((body, created_at)) = cache
-                .request(&request_key(request), lookup.ttl)
-                .filter(|(body, _)| response::validate(body, request).is_ok())
-        {
-            lookup.carry(request, &body, created_at);
+        if !lookup.missing.is_empty() && !args.refresh {
+            lookup.carry_earlier(cache, request);
         }
         lookup
     }
 
-    /// Answer the missing questions from a valid whole-request `body` given
-    /// at `created_at`: an alias's answer does not live longer by being copied.
+    /// Answer the missing questions from the request's whole entry of an
+    /// earlier version; for a request custom questions ride in, from the
+    /// entry of the request without them, since no version before 0.29 sent
+    /// one: a question added to a project whose cache an earlier version
+    /// wrote is then asked alone, as it is once each answer is kept apart.
+    fn carry_earlier(&mut self, cache: &CacheReader, request: &Value) {
+        let built_in = without_custom(request);
+        for earlier in std::iter::once(request).chain(built_in.as_ref()) {
+            if self.missing.is_empty() {
+                return;
+            }
+            if let Some((body, created_at)) = cache
+                .request(&request_key(earlier), self.ttl)
+                .filter(|(body, _)| response::validate(body, earlier).is_ok())
+            {
+                self.carry(earlier, &body, created_at);
+            }
+        }
+    }
+
+    /// Answer the missing questions of `request` from a valid whole-request
+    /// `body` given at `created_at`: an alias's answer does not live longer
+    /// by being copied.
     fn carry(&mut self, request: &Value, body: &Value, created_at: u64) {
         for (name, question, answer) in cached_answers(request, body, created_at) {
             if self.missing.contains(name) {
@@ -170,7 +201,8 @@ impl Lookup {
                 self.found.insert(name.clone(), answer);
             }
         }
-        self.missing.clear();
+        let found = &self.found;
+        self.missing.retain(|name| !found.contains_key(name));
     }
 
     /// Take the provider's `body` answering `sent`, given at `created_at`,
