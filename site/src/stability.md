@@ -34,7 +34,7 @@ These are judgments or presentation, and any release can change them; the change
 
 ## Reruns of an unchanged commit
 
-A check asks Jev only what its answer cache cannot answer. The cache keeps each answer under a hash of the exact request: the unit's source and evidence, the questions and the model. With a TypeSafe key the default model is a pinned version, `jev-1.13.0`, whose answers never expire, and code, not the model, turns the answers into findings. So with the same version and cache, a rerun of an unchanged commit sends no request, costs nothing and reports the same findings, down to each answer's probabilities.
+A check asks Jev only what its answer cache cannot answer. The cache keeps each answer under a hash of what it was asked about and of its question: the unit's source and evidence, the question and the model. With a TypeSafe key the default model is a pinned version, `jev-1.13.0`, whose answers never expire, and code, not the model, turns the answers into findings. So with the same version and cache, a rerun of an unchanged commit sends no request, costs nothing and reports the same findings, down to each answer's probabilities.
 
 [`rerun.sh`](rerun.sh) shows it on your repository. It runs `jevgate check` twice with the arguments you give it, prints each run's headline, and compares the two reports: whether each run finished, the gate, and each file's status, findings and raw answers. It needs `jq`, and exits 0 when the rerun sent no request and matched, 1 when it sent requests or differed, and 2 when a check did not finish.
 
