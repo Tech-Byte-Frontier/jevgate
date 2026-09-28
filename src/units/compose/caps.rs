@@ -2,17 +2,18 @@
 //! its answers are composed, each set from findings labeled on the corpus.
 use super::*;
 
-/// A unit's outcome under the caps its rule and facts put on it: an
-/// unnamed or single-use value, a value that only needs a name, security
-/// code at a test path or resting on what lies outside the function, a
-/// short outline or section, an outline naming no group, and comments too
-/// few to act on.
+/// A unit's outcome under the caps its rule and facts put on it: a level set
+/// below its question's measured threshold, an unnamed or single-use value,
+/// a value that only needs a name, security code at a test path or resting
+/// on what lies outside the function, a short outline or section, an outline
+/// naming no group, and comments too few to act on.
 pub(super) fn capped(
     unit: &UnitPlan,
     judgments: &[Judgment],
     few: &BTreeSet<&str>,
     outcome: Outcome,
 ) -> Outcome {
+    let outcome = calibrated(unit, judgments, outcome);
     if unnamed_value(unit, judgments) {
         return lowered(lowered(outcome));
     }
@@ -33,6 +34,44 @@ pub(super) fn capped(
         || unnamed_outline(unit, judgments)
         || few.contains(unit.id.as_str());
     if lower { lowered(outcome) } else { outcome }
+}
+
+/// One level lower when a question with a measured threshold
+/// (`policy::CALIBRATED`) set the unit's level below it: the unit's outcome
+/// is exactly what that question's answer gives under the shared thresholds,
+/// so its probability is the finding's. Caps come after the follow-ups are
+/// chosen, so a measured threshold never changes what is asked.
+pub(super) fn calibrated(unit: &UnitPlan, judgments: &[Judgment], outcome: Outcome) -> Outcome {
+    let Some((level, p)) = strength_of(outcome) else {
+        return outcome;
+    };
+    let below: Vec<&str> = crate::policy::CALIBRATED
+        .iter()
+        .filter(|entry| {
+            entry.rule == unit.rule
+                && entry.level == level
+                && !crate::policy::probability_at_least(p, entry.threshold)
+        })
+        .map(|entry| entry.question)
+        .collect();
+    if below.is_empty() {
+        return outcome;
+    }
+    let (_, answers) = resolved(unit, judgments);
+    let own = |answer: &Answer| match answer {
+        Answer::Noul { .. } => noul(answer),
+        _ => score(answer),
+    };
+    let set_by = |question: &&str| {
+        answers
+            .get(question)
+            .is_some_and(|answer| own(answer) == outcome)
+    };
+    if below.iter().any(set_by) {
+        lowered(outcome)
+    } else {
+        outcome
+    }
 }
 
 /// Such a consider whose value, asked what it is, clearly reads for itself

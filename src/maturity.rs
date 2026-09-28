@@ -77,11 +77,12 @@ const fn row(rule: &'static str, level: Strength, unseen: [u32; 2], tuned: [u32;
 }
 
 /// Measured on 2026-09-28 from the corpus's hand labels
-/// (`evaluation/labels`, joined by fingerprint) and JevGate 0.25.0's findings,
-/// replayed from the answer cache over the 94 labeled projects outside Bend 2;
-/// the few files whose 0.25.0 requests the cache lacked keep their 0.24.1
-/// findings. Unseen: [right, labeled] on the 11 held-out and 14 fresh projects
-/// never used for tuning (22 of them have findings); tuned: on the other 72.
+/// (`evaluation/labels`, joined by fingerprint) and JevGate's findings with the
+/// shared-logic consider threshold of `policy::CALIBRATED`, replayed from the
+/// answer cache over the 94 labeled projects outside Bend 2; the few files
+/// whose requests the cache lacked keep their 0.24.1 findings. Unseen:
+/// [right, labeled] on the 11 held-out and 14 fresh projects never used for
+/// tuning (22 of them have findings); tuned: on the other 72.
 /// `docs/research/2026-09-28/scripts/maturity.py` in the maintainer's clone
 /// prints these rows. Two are mature: function-simplification reviews (20 of
 /// 23) and agent-context considers (22 of 24). The gap between the columns is
@@ -98,7 +99,7 @@ const TABLE: [Measure; 26] = [
         [147, 197],
     ),
     row(catalog::SHARED_LOGIC, Review, [46, 85], [181, 240]),
-    row(catalog::SHARED_LOGIC, Consider, [85, 158], [146, 244]),
+    row(catalog::SHARED_LOGIC, Consider, [76, 129], [121, 190]),
     row(catalog::HARDCODED_VALUES, Review, [1, 8], [15, 28]),
     row(catalog::HARDCODED_VALUES, Consider, [5, 29], [32, 57]),
     row(catalog::INJECTION, Review, [3, 4], [81, 96]),

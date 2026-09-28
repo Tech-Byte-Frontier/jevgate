@@ -292,7 +292,7 @@ pub fn rule_version(key: &str) -> &'static str {
     match key {
         FILE_ORGANIZATION => "23",
         FUNCTION_SIMPLIFICATION => "16",
-        SHARED_LOGIC => "22",
+        SHARED_LOGIC => "23",
         TEST_VALUE => "7",
         TEST_REDUNDANCY => "4",
         INJECTION => "13",
@@ -373,9 +373,19 @@ pub fn id(key: &str) -> &'static str {
     find(key).map_or("unknown", |r| r.id)
 }
 
+/// The thresholds and floors findings are decided with, as the report and
+/// `jevgate rules --format json` record them; a threshold measured for one
+/// question is named by its rule, question and level.
 pub fn policy() -> BTreeMap<String, f64> {
     use crate::policy::REVIEW_PROBABILITY;
-    BTreeMap::from([
+    let calibrated = crate::policy::CALIBRATED.iter().map(|entry| {
+        let level = crate::output::label(&entry.level);
+        (
+            format!("{}_{}_{level}_probability", entry.rule, entry.question),
+            entry.threshold,
+        )
+    });
+    let mut policy = BTreeMap::from([
         ("review_probability".into(), REVIEW_PROBABILITY),
         ("clear_probability".into(), REVIEW_PROBABILITY),
         ("consider_probability".into(), REVIEW_PROBABILITY),
@@ -415,7 +425,9 @@ pub fn policy() -> BTreeMap<String, f64> {
             "long_branch_chain".into(),
             crate::analysis::nesting::LONG_CHAIN as f64,
         ),
-    ])
+    ]);
+    policy.extend(calibrated);
+    policy
 }
 
 /// One line per rule: ID, whether it runs by default, whether it needs

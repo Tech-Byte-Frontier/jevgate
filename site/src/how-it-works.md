@@ -3,7 +3,7 @@
 1. **Local analysis, nothing uploaded.** Tree-sitter parsers find functions, methods, types and registered callbacks, such as route handlers written inline in `app.post('/pages', async (c) => …)`. They measure nesting, group a file's members, find renamed copies, map tests to the functions they call, and list the statements where a value reaches another program. This evidence locates and scopes; it never decides a finding.
 2. **Small, literal questions.** Each request covers one small unit and asks a few questions, such as "Would splitting this function make it easier to understand?" or "Does this function put a variable into the text of an SQL query instead of binding it?"
 3. **Follow-ups only where needed.** When an answer is split, JevGate gathers more evidence (callee signatures, callers, a specific check) and asks once more instead of guessing.
-4. **Composition in code.** Answers become `review`, `consider`, `note`, `clear` or `uncertain` at a 0.80 threshold. Raw probabilities stay in the JSON report.
+4. **Composition in code.** Answers become `review`, `consider`, `note`, `clear` or `uncertain` at a 0.80 threshold, or at one measured for a single question where the labeled findings showed 0.80 did not fit it. Raw probabilities stay in the JSON report.
 
 The rest of this page describes the evidence units and composition rules in detail.
 
@@ -774,7 +774,16 @@ signatures, or one candidate pair.
    cases are one level lower, and copies in their fixtures, helpers and setup
    at most a consider. Copies of three lines or fewer are at most a
    consider: in Java such a copy was as often an idiom, a pooled builder
-   borrowed and released around one call, as a missing helper. A test that
+   borrowed and released around one call, as a missing helper. A consider
+   that rests on the same-steps Score's middle-or-top mass needs 0.90 there,
+   not 0.80: with a tenth to a fifth of the mass on "different work that only
+   looks alike", 25 of 54 such considers were right on the projects used for
+   tuning and 9 of 29 on projects never used for it, against 32 of 44 and 13
+   of 23 above, most of the wrong ones spans too small to share. A threshold
+   measured for one question like this is kept in `policy::CALIBRATED` only
+   when, fitted on the tuned projects, it removes at least as many wrong
+   findings as right ones on the unseen projects too; every other question
+   uses the shared ones. A test that
    checks several unrelated behaviors is at most a note: on labeled tests,
    tables of inputs and browser journeys rated as high as tests that really
    mix behaviors. A test said to assert internal details is asked, with the

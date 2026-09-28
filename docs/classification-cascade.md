@@ -707,7 +707,16 @@ signatures, or one candidate pair.
    cases are one level lower, and copies in their fixtures, helpers and setup
    at most a consider. Copies of three lines or fewer are at most a
    consider: in Java such a copy was as often an idiom, a pooled builder
-   borrowed and released around one call, as a missing helper. A test that
+   borrowed and released around one call, as a missing helper. A consider
+   that rests on the same-steps Score's middle-or-top mass needs 0.90 there,
+   not 0.80: with a tenth to a fifth of the mass on "different work that only
+   looks alike", 25 of 54 such considers were right on the projects used for
+   tuning and 9 of 29 on projects never used for it, against 32 of 44 and 13
+   of 23 above, most of the wrong ones spans too small to share. A threshold
+   measured for one question like this is kept in `policy::CALIBRATED` only
+   when, fitted on the tuned projects, it removes at least as many wrong
+   findings as right ones on the unseen projects too; every other question
+   uses the shared ones. A test that
    checks several unrelated behaviors is at most a note: on labeled tests,
    tables of inputs and browser journeys rated as high as tests that really
    mix behaviors. A test said to assert internal details is asked, with the

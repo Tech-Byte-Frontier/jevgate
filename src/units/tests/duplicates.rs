@@ -129,6 +129,59 @@ fn short_copies_are_at_most_a_consider() {
 }
 
 #[test]
+fn a_consider_from_the_same_steps_answer_needs_its_measured_threshold() {
+    let short_copy = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\treturn StringUtil.releaseBuilder(builder);\n";
+    let mut options = args();
+    only(&mut options, catalog::SHARED_LOGIC);
+    let strength = |files: &[(String, String)], same: Value| {
+        let project = Project::new();
+        for (path, text) in files {
+            project.write(path, text);
+        }
+        let mut answers = scripted(2);
+        answers
+            .overrides
+            .push(("required", json!({"type":"noul","noul":0.05})));
+        answers.overrides.push(("same", same));
+        let report = run(&project, &options, &mut answers);
+        report
+            .files
+            .iter()
+            .flat_map(|f| &f.findings)
+            .map(|f| f.strength)
+            .next()
+    };
+    let copies = [
+        ("a.rs".to_string(), LOAD.to_string()),
+        (
+            "b.rs".to_string(),
+            LOAD.replace("load_user", "load_team")
+                .replace("\"name\"", "\"title\""),
+        ),
+    ];
+    // 0.15 on "different work that only looks alike": a note.
+    assert_eq!(
+        strength(&copies, spread(0.15, 0.35, 0.5)),
+        Some(Strength::Note)
+    );
+    assert_eq!(
+        strength(&copies, spread(0.1, 0.4, 0.5)),
+        Some(Strength::Consider)
+    );
+    // A short copy's review lowered to a consider: the top level set it.
+    let java = ["Attribute", "Attributes"].map(|class| {
+        (
+            format!("src/main/java/app/{class}.java"),
+            format!("package app;\n\nclass {class} {{\n\tString html() {{\n{short_copy}\t}}\n}}\n"),
+        )
+    });
+    assert_eq!(
+        strength(&java, spread(0.15, 0.0, 0.85)),
+        Some(Strength::Consider)
+    );
+}
+
+#[test]
 fn duplicate_pairs_across_files_quote_both_sites_and_respect_required_repetition() {
     let project = Project::new();
     project.write("a.rs", LOAD);

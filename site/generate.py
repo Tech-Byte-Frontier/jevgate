@@ -79,7 +79,7 @@ def rules_page(binary):
         "",
         "## Decision policy",
         "",
-        "Answers become findings in code, at the same thresholds for every rule:",
+        "Answers become findings in code at these thresholds; one named after a rule and question was measured for that question from labeled findings and replaces the shared one there:",
         "",
         "| Setting | Value |",
         "|---|---|",
