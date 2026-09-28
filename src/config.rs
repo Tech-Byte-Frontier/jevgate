@@ -132,7 +132,12 @@ impl ConfigContext {
         let config = if required || file.exists() {
             let text = std::fs::read_to_string(&file)
                 .with_context(|| format!("Cannot read {}", file.display()))?;
-            toml::from_str(&text).with_context(|| format!("Invalid {}", file.display()))?
+            let config =
+                toml::from_str(&text).with_context(|| format!("Invalid {}", file.display()))?;
+            if let Some(notice) = written_before_mature(&text) {
+                note!("jevgate: {notice}");
+            }
+            config
         } else {
             Config::default()
         };
@@ -396,6 +401,49 @@ fn most_specific<'a, T>(entries: &'a BTreeMap<String, T>, rule: &catalog::Rule) 
         .map(|(_, value)| value)
 }
 
+/// The groups `jevgate init` gave a `review` level before 0.26: every group
+/// whose rules all ran by default.
+const INIT_REVIEW_GROUPS: [&str; 2] = ["maintainability", "tests"];
+
+/// What to tell a user whose jevgate.toml still holds the `[rules]` lines
+/// `jevgate init` wrote before 0.26, such as `maintainability = "review"  #
+/// file-organization, …`. They keep every review of those groups failing
+/// the check and judge hardcoded values, which 0.26's measured default gate
+/// and rules leave out, and most configurations were written that way. The
+/// comment listing the group's rules tells them from a level set by hand,
+/// so deleting it keeps the level without the notice.
+fn written_before_mature(text: &str) -> Option<String> {
+    let groups: Vec<&str> = INIT_REVIEW_GROUPS
+        .into_iter()
+        .filter(|group| {
+            text.lines().any(|line| {
+                line.trim()
+                    .strip_prefix(group)
+                    .is_some_and(|rest| rest.starts_with(" = \"review\"  # "))
+            })
+        })
+        .collect();
+    let (them, their) = match groups.len() {
+        0 => return None,
+        1 => ("it", "its comment"),
+        _ => ("them", "their comments"),
+    };
+    let lines: Vec<String> = groups
+        .iter()
+        .map(|group| format!("`{group} = \"review\"`"))
+        .collect();
+    let hardcoded = if groups.contains(&"maintainability") {
+        ", and hardcoded values is judged"
+    } else {
+        ""
+    };
+    Some(format!(
+        "jevgate.toml keeps {} as `jevgate init` wrote {them} before 0.26: every {} review fails the check{hardcoded}. Delete {them} for the default rules and gate, which fails only on rule levels measured right at least 80% of the time; to keep {them}, delete {their} and this notice stops.",
+        lines.join(" and "),
+        groups.join(" and "),
+    ))
+}
+
 pub fn repository_root(invocation_dir: &Path) -> PathBuf {
     invocation_dir
         .ancestors()
@@ -457,6 +505,36 @@ mod tests {
         );
         let error = configured("", &["file-organisation"], &[]).unwrap_err();
         assert!(error.to_string().contains("`jevgate rules`"), "{error}");
+    }
+
+    #[test]
+    fn the_levels_init_wrote_before_0_26_are_named_until_their_comments_go() {
+        // What `jevgate init` wrote from 0.3 to 0.25, less its comments.
+        let before = "[rules]\n\
+            maintainability = \"review\"  # file-organization, function-simplification, hardcoded-values, shared-logic\n\
+            tests = \"review\"  # test-value, test-redundancy\n\
+            # security = \"consider\"  # injection, sensitive-data (opt-in)\n";
+        let notice = written_before_mature(before).unwrap();
+        assert!(
+            notice.starts_with(
+                "jevgate.toml keeps `maintainability = \"review\"` and `tests = \"review\"` as `jevgate init` wrote them before 0.26: every maintainability and tests review fails the check, and hardcoded values is judged. Delete them"
+            ),
+            "{notice}"
+        );
+        let tests_only = written_before_mature("tests = \"review\"  # test-value\n").unwrap();
+        assert!(
+            tests_only.contains("every tests review fails the check. Delete it"),
+            "{tests_only}"
+        );
+        let project = crate::tests::Project::new();
+        let (written, _) = crate::init::run(&project.0, false).unwrap();
+        for kept in [
+            "[rules]\nmaintainability = \"review\"\ntests = \"review\"\n".to_string(),
+            "[rules]\nmaintainability = \"consider\"  # file-organization\n".to_string(),
+            std::fs::read_to_string(written).unwrap(),
+        ] {
+            assert_eq!(written_before_mature(&kept), None, "{kept}");
+        }
     }
 
     #[test]
