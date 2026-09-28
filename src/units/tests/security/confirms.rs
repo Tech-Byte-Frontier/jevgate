@@ -16,10 +16,7 @@ fn a_path_finding_is_a_note_when_its_paths_stay_in_their_directory() {
         .units
         .iter()
         .find_map(|u| match &u.detail {
-            Detail::Security {
-                checked: Some(checked),
-                ..
-            } => Some(checked.request()),
+            Detail::Security { confirms, .. } => confirms.checked.as_ref().map(|c| c.request()),
             _ => None,
         })
         .expect("an injection unit with a confirm of its checks");
@@ -74,7 +71,7 @@ fn a_log_line_an_operator_turns_on_to_log_tokens_is_a_note() {
     let logs = [
         "plain", "identity", "operator", "secret", "personal", "none",
     ];
-    let when = ["always", "debug", "none", "opt_in"];
+    let when = ["always", "debug", "none", "opt_in", "output"];
     let mut judged = |chosen: &str| {
         let mut eval = scripted(0);
         eval.overrides = vec![
@@ -179,3 +176,193 @@ pub(super) const MARKUP_VALUES: [&str; 5] = ["encoded", "own", "raw", "typed", "
 
 /// The options of the Choice on where a redirect finding's targets lead.
 pub(super) const REACH: [&str; 4] = ["anywhere", "checked", "none", "own_site"];
+
+/// The options of the Choice on what an SQL, command or code finding's
+/// values hold where they enter it.
+pub(super) const QUERY_VALUES: [&str; 6] = ["allowed", "fixed", "own", "raw", "typed", "unknown"];
+
+/// A route building `ORDER BY` from one of two clauses its preset selects.
+pub(super) const PRESET: &str = "fn sorted(conn: &Connection, preset: &str) -> Result<Vec<i64>> {\n    let order = match preset {\n        \"speed\" => \"speed ASC\",\n        \"rank\" => \"rank ASC\",\n        _ => return Err(unknown()),\n    };\n    conn.query(&format!(\"SELECT id FROM models ORDER BY {order}\"))\n}\n";
+
+#[test]
+fn a_query_finding_is_a_note_when_its_values_are_fixed_text() {
+    let judged = |choice: Value| {
+        let (project, options) = security_project(PRESET);
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("interpreted", noul_at(0.95)),
+            ("sql", noul_at(0.95)),
+            ("origin", spread(0.0, 0.0, 1.0)),
+            ("query_values", choice),
+        ];
+        let report = run(&project, &options, &mut eval);
+        report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.rule == "security/injection")
+            .map(|f| (f.strength, f.message.clone()))
+            .unwrap()
+    };
+    assert_eq!(judged(choice_of("raw", &QUERY_VALUES)).0, Strength::Review);
+    let (strength, message) = judged(choice_of("fixed", &QUERY_VALUES));
+    assert_eq!(
+        strength,
+        Strength::Note,
+        "one of two clauses written in the code"
+    );
+    assert!(message.contains("cannot change the syntax"), "{message}");
+}
+
+#[test]
+fn a_markup_consider_on_parameters_is_a_note_when_its_values_arrive_escaped() {
+    let judged = |choice: Value| {
+        let (project, options) = security_project(ENCODED);
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("interpreted", noul_at(0.95)),
+            ("markup", noul_at(0.95)),
+            ("origin", spread(0.0, 1.0, 0.0)),
+            ("values", choice_of("outside", &VALUES)),
+            ("markup_values", choice),
+        ];
+        let report = run(&project, &options, &mut eval);
+        report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.rule == "security/injection")
+            .map(|f| f.strength)
+            .unwrap()
+    };
+    assert_eq!(judged(choice_of("raw", &MARKUP_VALUES)), Strength::Consider);
+    assert_eq!(
+        judged(choice_of("encoded", &MARKUP_VALUES)),
+        Strength::Note,
+        "text another party wrote, escaped before it enters the markup"
+    );
+}
+
+/// A React component writing a syntax highlighter's output as raw HTML.
+pub(super) const HIGHLIGHTED: &str = "export function CodeBlock({ code }) {\n  const html = highlight(code)\n  return <code dangerouslySetInnerHTML={{ __html: html }} />\n}\n";
+
+#[test]
+fn unescaped_html_is_a_note_when_the_library_that_built_it_escaped_it() {
+    let markup = MARKUP_VALUES;
+    let judged = |choice: Value| {
+        let (report, _) = settings_run(
+            "code-block.jsx",
+            HIGHLIGHTED,
+            &[("weakened", 0.95), ("escape", 0.95)],
+            Some(("raw_html", choice)),
+        );
+        report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.rule == "security/unsafe-settings")
+            .map(|f| (f.strength, f.message.clone()))
+            .unwrap()
+    };
+    assert_eq!(judged(choice_of("raw", &markup)).0, Strength::Review);
+    let (strength, message) = judged(choice_of("encoded", &markup));
+    assert_eq!(strength, Strength::Note, "the highlighter escapes the code");
+    assert!(message.contains("escaped or sanitized"), "{message}");
+}
+
+/// The options of the Choice on who reads a function's error text.
+pub(super) const READERS: [&str; 5] = ["local", "operator", "own_services", "public", "unknown"];
+
+#[test]
+fn error_details_only_their_own_user_reads_are_a_note_asked_with_the_readme() {
+    let (project, mut options) = security_project(QUERY);
+    project.write(
+        "README.md",
+        "# Proxy\n\n[![CI](https://example.org/badge.svg)](https://example.org)\n<img src=\"logo.png\">\n\nA proxy you run on your own machine for your coding agent.\n",
+    );
+    let boundary = |deny: &[&str]| {
+        let config = crate::config::Config {
+            upload_deny: deny.iter().map(|d| d.to_string()).collect(),
+            ..Default::default()
+        };
+        crate::boundary::Boundary::new(&config).unwrap()
+    };
+    assert_eq!(
+        crate::docs::project_opening(&project.0, &boundary(&["README.md"])),
+        None,
+        "a README the upload boundary denies is not sent"
+    );
+    options.project = crate::docs::project_opening(&project.0, &boundary(&[]));
+    assert_eq!(
+        options.project.as_deref(),
+        Some("# Proxy\nA proxy you run on your own machine for your coding agent."),
+        "badges and HTML are left out"
+    );
+    let (_, plan) = planned(&project, &options);
+    let readers = plan.files[&0]
+        .units
+        .iter()
+        .find_map(|u| match &u.detail {
+            Detail::Security { confirms, .. } => confirms.readers.as_ref().map(|c| c.request()),
+            _ => None,
+        })
+        .expect("a sensitive-data unit asked who reads its errors");
+    assert_eq!(
+        readers["state"]["project"]["readme_opening"],
+        json!(options.project)
+    );
+    let mut judged = |chosen: &str| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("error_details", noul_at(0.95)),
+            ("destination", to_client().1),
+            ("error_readers", choice_of(chosen, &READERS)),
+        ];
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        report.files[0]
+            .findings
+            .iter()
+            .find(|f| f.rule == "security/sensitive-data")
+            .map(|f| (f.strength, f.message.clone()))
+            .unwrap()
+    };
+    assert_eq!(judged("public").0, Strength::Review);
+    let (strength, message) = judged("local");
+    assert_eq!(
+        strength,
+        Strength::Note,
+        "the person running it reads its logs anyway"
+    );
+    assert!(
+        message.contains("see the program's logs anyway"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_value_shown_as_the_output_its_user_asked_for_is_no_logged_secret() {
+    let (project, options) = security_project(TOKENS);
+    let logs = [
+        "plain", "identity", "operator", "secret", "personal", "none",
+    ];
+    let when = ["always", "debug", "none", "opt_in", "output"];
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("logs_secret", noul_at(0.95)),
+        ("logs_object_secret", noul_at(0.95)),
+        ("logged", choice_of("secret", &logs)),
+        ("logged_when", choice_of("output", &when)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    let finding = report.files[0]
+        .findings
+        .iter()
+        .find(|f| f.rule == "security/sensitive-data")
+        .unwrap();
+    assert_eq!(finding.strength, Strength::Note);
+    assert!(
+        finding
+            .message
+            .contains("shows the value only to the person who asked"),
+        "{}",
+        finding.message
+    );
+}

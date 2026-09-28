@@ -69,11 +69,18 @@ pub(in crate::units) fn injection_outcome<'a>(
 
 /// The kinds of injection whose values a confirm Choice asks about after
 /// the finding, with its question and the options that make it a note.
-const CONFIRMED: [(&str, &str, &[&str]); 3] = [
+const CONFIRMED: [(&str, &str, &[&str]); 6] = [
     ("path", "paths", &questions::CONFINED_PATHS),
     ("markup", "markup_values", &questions::HARMLESS_MARKUP),
     ("redirect", "redirect_reach", &questions::OWN_SITE),
+    ("sql", "query_values", &questions::HARMLESS_QUERY),
+    ("shell", "query_values", &questions::HARMLESS_QUERY),
+    ("code", "query_values", &questions::HARMLESS_QUERY),
 ];
+
+/// The kinds whose confirm Choice is `query_values`, sent in a request of
+/// its own; the others share the `checked` request.
+pub(in crate::units) const QUERIED: [&str; 3] = ["sql", "shell", "code"];
 
 /// The one kind of injection a finding rests on, when every check that
 /// found a variable placed unhandled is that kind and a confirm Choice asks
@@ -101,7 +108,13 @@ pub(in crate::units) fn confirmable<'a>(
 /// put at most 0.22 on values that cannot open a tag, and vaultwarden's
 /// percent-encoded username 0.56; the 6 redirect findings labeled right put
 /// at most 0.44 on staying on the site, and vaultwarden's admin path and
-/// shiori's login page 0.68 and 0.58.
+/// shiori's login page 0.68 and 0.58. Asked too of markup considers on the
+/// function's parameters, it made notes of 11 labeled wrong (escaped
+/// before, typed, or the program's own markup) and 1 labeled right, a JSP
+/// header writing a session value, at 0.69; the other 44 labeled right put
+/// at most 0.47 there. SQL, command and code findings are asked what their
+/// text can hold: fixed clauses a key selects, parsed ids, or a query the
+/// sender may run anyway.
 pub(in crate::units) fn harmless<'a>(
     get: &impl Fn(&str) -> Option<&'a Answer>,
 ) -> Option<&'static str> {

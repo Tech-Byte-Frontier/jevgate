@@ -23,6 +23,9 @@ pub(super) struct FileContext<'a> {
     /// What a web framework makes of the file, such as a Next.js route
     /// handler or Server Actions module, sent beside its path.
     pub framework: Option<String>,
+    /// The opening of the repository's README, sent only with the question
+    /// who reads a program's error text.
+    pub project: Option<&'a str>,
 }
 
 impl FileContext<'_> {

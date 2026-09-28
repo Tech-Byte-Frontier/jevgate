@@ -48,29 +48,61 @@ pub fn unsettled(unit: &UnitPlan, judgments: &[Judgment]) -> BTreeSet<&'static s
 }
 
 /// Security units whose finding a confirm Choice of their own follows, not
-/// yet asked: an injection finding whose one concern is a path (what its
-/// paths can hold), or markup or a redirect unless its values are asked
-/// already (what they hold, where they lead), and a sensitive-data finding
-/// its log checks raised (when the log line runs).
+/// yet asked: an injection finding whose one concern is a path or markup
+/// (what its paths or values can hold), or a redirect unless its values are
+/// asked already (where it leads), and a sensitive-data finding its log
+/// checks raised (when the log line runs). A markup consider on the
+/// function's parameters is asked both what its values can hold and what
+/// they hold where they enter the markup: escaped text another party wrote
+/// is harmless there.
 pub fn unconfirmed_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    confirm_due(plan, judgments, |u, outcome, resolved| {
+        let Detail::Security { confirms, .. } = &u.detail else {
+            return false;
+        };
+        let get = |q: &str| resolved.get(q).copied();
+        let kind = confirmable(&get).filter(|k| !QUERIED.contains(k));
+        confirms.checked.is_some()
+            && kind.is_some_and(|k| k == "path" || k == "markup" || !values_due(outcome, resolved))
+            || confirms.logging.is_some() && logs_found(&get)
+    })
+}
+
+/// Injection findings whose one concern is SQL, a command or evaluated code,
+/// not yet asked what their values hold where they enter it, unless what
+/// their values can hold is asked already; weak-settings findings their
+/// escaping check raised, not yet asked what the unescaped HTML holds; and
+/// sensitive-data findings their error-detail checks raised, not yet asked
+/// who reads the error text.
+pub fn unqueried_units(plan: &FilePlan, judgments: &[Judgment]) -> BTreeSet<String> {
+    confirm_due(plan, judgments, |u, outcome, resolved| {
+        let Detail::Security { confirms, .. } = &u.detail else {
+            return false;
+        };
+        let get = |q: &str| resolved.get(q).copied();
+        confirms.queried.is_some()
+            && confirmable(&get).is_some_and(|k| QUERIED.contains(&k))
+            && !values_due(outcome, resolved)
+            || confirms.rendered.is_some() && escape_found(&get)
+            || confirms.readers.is_some() && errors_found(&get)
+    })
+}
+
+/// Judged units with no locate answer yet whose outcome is a review or
+/// consider and that `due` selects.
+fn confirm_due(
+    plan: &FilePlan,
+    judgments: &[Judgment],
+    due: impl Fn(&UnitPlan, Outcome, &Answers<'_>) -> bool,
+) -> BTreeSet<String> {
     plan.units
         .iter()
         .filter(|u| u.presence == Presence::Judged)
         .filter(|u| answers(judgments, &u.id, Pass::Locate).is_empty())
         .filter(|u| {
-            let Detail::Security {
-                checked, logging, ..
-            } = &u.detail
-            else {
-                return false;
-            };
             let (outcome, resolved) = resolved(u, judgments);
-            let get = |q: &str| resolved.get(q).copied();
-            let kind = confirmable(&get);
             matches!(outcome, Outcome::Review(_) | Outcome::Consider(_))
-                && (checked.is_some()
-                    && (kind == Some("path") || kind.is_some() && !values_due(outcome, &resolved))
-                    || logging.is_some() && logs_found(&get))
+                && due(u, outcome, &resolved)
         })
         .map(|u| u.id.clone())
         .collect()
@@ -119,9 +151,7 @@ pub(super) fn locate_due(unit: &UnitPlan, judgments: &[Judgment]) -> bool {
         // An injection consider rests on the function's parameters unless
         // its origin was another party; one that rests on a path is asked
         // what its paths can hold instead.
-        Detail::Security {
-            confirm: Some(_), ..
-        } => {
+        Detail::Security { confirms, .. } if confirms.values.is_some() => {
             values_due(outcome, &resolved)
                 && confirmable(&|q| resolved.get(q).copied()) != Some("path")
         }

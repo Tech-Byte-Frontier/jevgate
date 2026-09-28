@@ -92,15 +92,45 @@ impl crate::transport::Evaluator for Scripted {
     }
 }
 
-/// Replace every answer whose key ends with an override's suffix.
+/// Replace every answer whose key ends with an override's suffix: the
+/// longest suffix wins, so `markup_values` is not answered as `values`, and
+/// a later override wins over an earlier one of the same length.
 fn apply(overrides: &[(&'static str, Value)], body: &mut Value) {
-    for (suffix, value) in overrides {
-        for (key, slot) in body["answers"].as_object_mut().unwrap() {
-            if key.ends_with(suffix) {
-                *slot = value.clone();
-            }
+    for (key, slot) in body["answers"].as_object_mut().unwrap() {
+        if let Some((_, value)) = overrides
+            .iter()
+            .filter(|(suffix, _)| key.ends_with(suffix))
+            .max_by_key(|(suffix, _)| suffix.len())
+        {
+            *slot = value.clone();
         }
     }
+}
+
+/// Answers to the Choices asked after a security finding that keep it
+/// standing: raw query values or markup, unescaped HTML another party wrote
+/// and error text public readers see. Scripted answers otherwise pick `none`
+/// or the first option, which clears these findings.
+fn standing() -> Vec<(&'static str, Value)> {
+    let markup = ["encoded", "own", "raw", "typed", "unknown"];
+    vec![
+        (
+            "query_values",
+            choice_of(
+                "raw",
+                &["allowed", "fixed", "own", "raw", "typed", "unknown"],
+            ),
+        ),
+        ("markup_values", choice_of("raw", &markup)),
+        ("raw_html", choice_of("raw", &markup)),
+        (
+            "error_readers",
+            choice_of(
+                "public",
+                &["local", "operator", "own_services", "public", "unknown"],
+            ),
+        ),
+    ]
 }
 
 /// Rechecks carry more evidence: callees, enclosing functions or file source.
@@ -314,7 +344,9 @@ fn hardcoded_file(path: &str, strength: &str, values: &[&str]) -> crate::schema:
 /// unit produces goes to a remote client, so the settle Choice clears nothing.
 fn run_with_nouls(project: &Project, options: &CheckArgs, nouls: &[(&'static str, f64)]) -> Report {
     let mut eval = scripted(0);
-    eval.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
+    eval.overrides = standing();
+    eval.overrides
+        .extend(nouls.iter().map(|&(q, p)| (q, noul_at(p))));
     eval.overrides.push(to_client());
     eval.overrides.push(logs_a_secret());
     run(project, options, &mut eval)

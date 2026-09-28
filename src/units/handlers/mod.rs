@@ -54,6 +54,7 @@ pub(super) fn plan(
             source_hash: &input.result.source_hash,
             model: args.model(),
             budget,
+            project: args.project.as_deref(),
             framework: super::nextjs::describe(
                 &input.result.path,
                 input.source.as_deref().unwrap_or(""),

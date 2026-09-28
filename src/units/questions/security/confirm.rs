@@ -119,6 +119,75 @@ pub fn markup_values(code: &str, callers: bool) -> Value {
 /// The options of `markup_values` that cannot open a tag or attribute.
 pub const HARMLESS_MARKUP: [&str; 3] = ["encoded", "typed", "own"];
 
+/// What the values of a finding whose one concern is SQL, a shell command or
+/// evaluated code hold where they enter that text, asked only after such a
+/// finding. freellmapi builds an `ORDER BY` from a map of fixed clauses keyed
+/// by a route parameter, rejecting other keys, and a `WHERE` from one of two
+/// literals; multica embeds option ids only after `uuid.Parse` accepts them.
+/// The query check reads a variable joined into the text, whatever it can
+/// hold. Those four answered 0.53 to 0.66 on the harmless options; on the
+/// corpus, the 23 such findings labeled right put at most 0.12 there, and
+/// one labeled wrong, a JSP page parsing its parameter as a number, 0.82.
+pub fn query_values(code: &str, callers: bool, types: bool) -> Value {
+    let types_note = if types {
+        " `types_named_in_parameters` holds the definitions of the project's types that its parameters name, with their attributes."
+    } else {
+        ""
+    };
+    let note = if callers {
+        format!("{CALLERS}{types_note} {EVIDENCE}")
+    } else {
+        format!("{} {EVIDENCE}", types_note.trim_start())
+            .trim_start()
+            .to_string()
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What can the values that `{code}` joins into the text of a query, command or evaluated code hold where they enter it?"),
+            "note": note,
+        },
+        "criteria": {
+            "fixed": "Only text written in the code: literals or constants, or one of a fixed set of strings chosen by a key, such as a map, object or switch of fixed clauses, where any other key gets no text or is rejected, even when the key comes from a request.",
+            "typed": "Numbers, booleans, dates, or ids such as UUIDs, parsed or validated as that type before they are joined, so they cannot hold quotes, spaces or syntax.",
+            "own": "Names the program keeps for itself, such as its own table and column names, or values from its configuration.",
+            "allowed": "A query, command or script that the person sending it may run anyway, with their own rights, such as the query box of a database client or the console of an admin tool.",
+            "raw": "Text another party or a caller wrote, which can hold quotes, spaces or the syntax of the query, command or code.",
+            "unknown": "Values whose origin or handling is not shown.",
+        },
+    })
+}
+
+/// The options of `query_values` that cannot change the text's syntax.
+pub const HARMLESS_QUERY: [&str; 4] = ["fixed", "typed", "own", "allowed"];
+
+/// What the HTML a weak-settings finding writes without escaping holds,
+/// asked only after a finding its escaping check raised. freellmapi's code
+/// block renders highlight.js output, escaped by the highlighter, cc-switch's
+/// provider icon renders SVG bundled with the app, and multica's math view
+/// renders KaTeX output: the check reads markup written unescaped, whatever
+/// it holds. They answered 0.93, 0.81 and 0.56 on the inert options; the
+/// three such corpus findings labeled right put at most 0.18 there.
+pub fn raw_html(code: &str) -> Value {
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("What does the HTML or SVG that `{code}` writes without escaping hold?"),
+            "note": EVIDENCE,
+        },
+        "criteria": {
+            "encoded": "Markup a library or function built from text it escaped or sanitized first, such as a syntax highlighter's or math renderer's output, HTML passed through a sanitizer such as DOMPurify, or Markdown rendered with raw HTML turned off.",
+            "own": "Markup the program ships itself: its own templates or strings, or icons and images bundled with it.",
+            "typed": "Numbers, dates, booleans or ids, or names chosen from a fixed list.",
+            "raw": "HTML or text as another party or a caller wrote it, which can hold tags, attributes or scripts.",
+            "unknown": "Markup whose origin or handling is not shown.",
+        },
+    })
+}
+
+/// The options of `raw_html` whose markup cannot carry another party's tags.
+pub const INERT_HTML: [&str; 3] = ["encoded", "own", "typed"];
+
 /// Where a redirect finding's targets can lead, asked only after a finding
 /// whose one concern is a redirect. vaultwarden's admin login redirects to
 /// its admin path followed by the form's value, and shiori's to its login
@@ -155,7 +224,11 @@ pub const OWN_SITE: [&str; 3] = ["own_site", "checked", "none"];
 /// finding raised by its log checks. vaultwarden logs SSO tokens inside
 /// `if CONFIG.sso_debug_tokens()`, a setting off by default and documented
 /// for logging them while troubleshooting: logging an identifier instead,
-/// as the finding says, would remove the feature.
+/// as the finding says, would remove the feature. rtk's `env` command and
+/// freellmapi's setup notes print the user's own values as the output they
+/// asked for, which the log checks read as a log. On the corpus, the two
+/// such findings labeled wrong answered 0.96 and 0.98 on `output`, and the
+/// twelve labeled right at most 0.43.
 pub fn logged_when(code: &str) -> Value {
     json!({
         "type": "choice",
@@ -167,6 +240,7 @@ pub fn logged_when(code: &str) -> Value {
             "always": "Whenever that code runs, at a level the program logs at in normal operation, such as info, warning or error.",
             "debug": "Only at debug or trace level, which an operator may turn on to troubleshoot.",
             "opt_in": "Only when an operator turns on a setting, off by default, whose purpose is to log these values for troubleshooting, such as an option named for logging tokens or request bodies.",
+            "output": "Never to a log: it shows the value to the person who asked for it, as the output of a command they ran on their own machine or a page they requested.",
             "none": "It writes no secret or personal value to a log.",
         },
     })
@@ -174,3 +248,44 @@ pub fn logged_when(code: &str) -> Value {
 
 /// The option of `logged_when` for a setting whose purpose is the logging.
 pub const OPT_IN_LOGGING: &str = "opt_in";
+
+/// Who reads the error text of an error-detail finding, asked only after
+/// such a finding, with the opening of the project's README. The corpus's
+/// error-detail findings labeled wrong or debatable were most often read only
+/// by the project's own services (14 of 46), and headroom, a proxy its users
+/// run on their own machine for their coding agents, had 28 reviews returning
+/// an upstream error to that user's own tools. Error text is a leak when
+/// people who could not read the program's logs see it. Offered as "the
+/// person running it on their own machine" alone, the option took govwa, a
+/// training web app, at 0.72: web applications meant for others are named in
+/// both options.
+pub fn error_readers(code: &str, project: bool) -> Value {
+    let note = if project {
+        format!(
+            "`project.readme_opening` is the start of the repository's README, which says what the program is and who runs it. {EVIDENCE}"
+        )
+    } else {
+        EVIDENCE.to_string()
+    };
+    json!({
+        "type": "choice",
+        "instructions": {
+            "question": format!("Who reads the error text that `{code}` sends in its responses?"),
+            "note": note,
+        },
+        "criteria": {
+            "public": "People outside the team that runs the program: visitors and users of a website or web application, including one made for training, customers or users of a hosted service, members of other accounts, organizations or tenants, or third-party clients of a public API.",
+            "operator": "Only the person or team that runs this install, such as the admin console of a self-hosted tool one owner uses, who can read the server's logs anyway.",
+            "own_services": "Only other parts of the same project in one deployment, such as a back-end service that only the project's own front end or services call.",
+            "local": "Only the person running the program on their own machine, through a server, proxy or back end it starts for their own tools, such as a local proxy for their coding agent or a desktop app's back end; not a web application whose pages are meant for other people, even when someone runs it on their own machine.",
+            "unknown": "The readers are not shown.",
+        },
+    })
+}
+
+/// The options of `error_readers` whose readers can read the logs anyway.
+pub const PRIVATE_READERS: [&str; 3] = ["operator", "own_services", "local"];
+
+/// The option of `logged_when` for a value shown as the output a person
+/// asked for.
+pub const SHOWN_NOT_LOGGED: &str = "output";

@@ -158,6 +158,10 @@ impl ConfigContext {
         args.include_tests |= self.config.include_tests;
         args.model = args.model.take().or_else(|| self.config.model.clone());
         args.cache_ttl_secs = args.cache_ttl_secs.or(self.config.cache_ttl_secs);
+        args.project = crate::docs::project_opening(
+            &self.root,
+            &crate::boundary::Boundary::new(&self.config)?,
+        );
         self.configure_rules(args)?;
         self.configure_gate(args)?;
         self.configure_budgets(args)

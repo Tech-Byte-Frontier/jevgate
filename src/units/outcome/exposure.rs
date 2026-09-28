@@ -72,6 +72,50 @@ pub(in crate::units) fn opted_in<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) 
     choice_mass(get("logged_when"), &[questions::OPT_IN_LOGGING]).is_some_and(at_least)
 }
 
+/// Whether the log line of a logging finding leans toward no log at all: the
+/// value is the output a person asked for, such as a command printing their
+/// own environment. Its log signals are then at most a note.
+pub(in crate::units) fn not_logged<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    choice_mass(get("logged_when"), &[questions::SHOWN_NOT_LOGGED])
+        .is_some_and(|p| probability_at_least(p, LEADING_PROBABILITY))
+}
+
+/// Whether the escaping check found markup written unescaped: its HTML is
+/// then asked what it holds.
+pub(in crate::units) fn escape_found<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    matches!(get("escape").map(noul), Some(Outcome::Review(_)))
+}
+
+/// Whether the HTML written unescaped leans toward markup that cannot carry
+/// another party's tags: escaped or sanitized by the library that built it,
+/// shipped with the program, or typed values. Its escaping signal is then a
+/// note that no longer names a setting to change.
+pub(in crate::units) fn inert_html<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    choice_mass(get("raw_html"), &questions::INERT_HTML)
+        .is_some_and(|p| probability_at_least(p, LEADING_PROBABILITY))
+}
+
+/// Whether an error-detail check found error text sent to a client: who
+/// reads it is then asked.
+pub(in crate::units) fn errors_found<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    ERROR_SIGNALS
+        .iter()
+        .any(|q| matches!(get(q).map(noul), Some(Outcome::Review(_))))
+}
+
+/// Whether the readers of a function's error text are, at the threshold,
+/// people who can read the program's logs anyway: its operator, the
+/// project's own services, or the person running it on their own machine.
+/// Its error-detail signals are then at most a note. Leaning was not enough:
+/// multica's handlers that the users of its hosted service call, for skills,
+/// issues and source context, put 0.50 to 0.59 on those readers. At the threshold, 2 of the 44
+/// corpus findings labeled wrong or debatable are notes and none of the 51
+/// labeled right, which put at most 0.46 there; so are headroom's 24
+/// local-proxy reviews and 6 of multica's daemon and runtime endpoints.
+pub(in crate::units) fn private_readers<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> bool {
+    choice_mass(get("error_readers"), &questions::PRIVATE_READERS).is_some_and(at_least)
+}
+
 /// A judged exposure answer and how far it leans toward its concern.
 type Signal = (Outcome, f64);
 
@@ -112,12 +156,22 @@ fn exposure_signals<'a>(
         .then(|| messages(get))
         .flatten();
     let away = rule == catalog::SENSITIVE_DATA && away_from_clients(get);
-    let opted_in = rule == catalog::SENSITIVE_DATA && opted_in(get);
+    let opted_in = rule == catalog::SENSITIVE_DATA && (opted_in(get) || not_logged(get));
+    let inert = rule == catalog::UNSAFE_SETTINGS && inert_html(get);
+    let private = rule == catalog::SENSITIVE_DATA && private_readers(get);
     let judge = |question: &str, answer: &Answer| {
         let signal = exposure_signal(question, answer, own, away);
         match signal {
             (Outcome::Review(p) | Outcome::Consider(p), lean)
                 if opted_in && LOG_SIGNALS.contains(&question) =>
+            {
+                (Outcome::Note(p), lean)
+            }
+            (Outcome::Review(p) | Outcome::Consider(p), _) if inert && question == "escape" => {
+                (Outcome::Note(p), 0.0)
+            }
+            (Outcome::Review(p) | Outcome::Consider(p), lean)
+                if private && ERROR_SIGNALS.contains(&question) =>
             {
                 (Outcome::Note(p), lean)
             }

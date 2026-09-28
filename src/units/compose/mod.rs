@@ -7,10 +7,10 @@
 use super::{
     Access, Block, Detail, FilePlan, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, at_most_note, benefit, checks, choice, choice_mass, confirmable,
-        document_split, logs_found, lowered, noul, open, organization_outcome, origin_outcome,
-        part_answers, score, separable_part, settled_checks, several_kind, unit_outcome,
-        value_signals,
+        Answers, Outcome, QUERIED, at_most_note, benefit, checks, choice, choice_mass, confirmable,
+        document_split, errors_found, escape_found, logs_found, lowered, noul, open,
+        organization_outcome, origin_outcome, part_answers, score, separable_part, settled_checks,
+        several_kind, unit_outcome, value_signals,
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
@@ -40,7 +40,7 @@ use caps::*;
 use comments::*;
 pub use due::{
     finished_plans, uncertain_units, unconfirmed_units, unkinded_units, unkinded_values,
-    unlocated_units, unparted_units, unsettled, untraced_units,
+    unlocated_units, unparted_units, unqueried_units, unsettled, untraced_units,
 };
 use located::*;
 use redundant::*;

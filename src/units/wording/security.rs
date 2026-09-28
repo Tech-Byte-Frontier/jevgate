@@ -437,7 +437,8 @@ fn script_wording(
 
 /// A note whose confirm Choice found values that can do no harm where they
 /// go: a path that stays in its directory, markup values already escaped or
-/// encoded, a redirect that stays on the site.
+/// encoded, a redirect that stays on the site, query or command text that is
+/// fixed, typed or the program's own.
 fn confirmed_wording(kind: &str, subject: &str, noun: &str) -> Option<Wording> {
     Some(match kind {
         "path" => (
@@ -448,9 +449,15 @@ fn confirmed_wording(kind: &str, subject: &str, noun: &str) -> Option<Wording> {
         ),
         "markup" => (
             format!(
-                "{subject} places a variable into {noun}, but it was likely escaped or encoded before, so it cannot open a tag or attribute."
+                "{subject} places a variable into {noun}, but it likely holds text escaped or encoded before, typed values or the program's own markup, so it cannot open a tag or attribute."
             ),
             "Optional: confirm the value is escaped on every path that reaches the markup",
+        ),
+        "sql" | "shell" | "code" => (
+            format!(
+                "{subject} joins a variable into {noun}, but it likely holds only fixed text, a typed value or the program's own names, so it cannot change the syntax."
+            ),
+            "Optional: pass the value as a bound parameter or argument anyway",
         ),
         "redirect" => (
             format!(
@@ -524,6 +531,46 @@ fn exposure_wording(
         );
     let decided = crate::policy::probability_at_least(p, crate::policy::REVIEW_PROBABILITY);
     let opted_in = category.starts_with("CWE-532") && crate::units::outcome::opted_in(&get);
+    if strength == Strength::Note
+        && category.starts_with("CWE-532")
+        && !opted_in
+        && crate::units::outcome::not_logged(&get)
+    {
+        return (
+            (
+                format!(
+                    "{subject} likely shows the value only to the person who asked for it, as the output of their command or page, rather than writing it to a log."
+                ),
+                "Optional: confirm the value never reaches a log file",
+            ),
+            category.to_string(),
+        );
+    }
+    if strength == Strength::Note
+        && category.starts_with("CWE-209")
+        && crate::units::outcome::private_readers(&get)
+    {
+        return (
+            (
+                format!(
+                    "{subject} sends internal error details, but likely only to readers who can see the program's logs anyway: the person running it, its operator or the project's own services."
+                ),
+                "Optional: return a generic message if other people can reach this code",
+            ),
+            category.to_string(),
+        );
+    }
+    if strength == Strength::Note && crate::units::outcome::inert_html(&get) {
+        return (
+            (
+                format!(
+                    "{subject} writes HTML without escaping it, but the markup likely comes escaped or sanitized from the library that built it, or ships with the program."
+                ),
+                "Optional: confirm no path writes text another party wrote without escaping it",
+            ),
+            category.to_string(),
+        );
+    }
     if strength == Strength::Note && opted_in {
         return (
             (

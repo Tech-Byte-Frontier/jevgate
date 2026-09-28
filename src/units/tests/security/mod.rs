@@ -65,14 +65,19 @@ fn clear_presence_needs_no_trace_and_clears_every_security_rule() {
 fn an_unhandled_value_from_another_party_is_a_located_injection_review() {
     let (project, options) = security_project(QUERY);
     let mut eval = scripted(0);
-    eval.overrides = vec![
+    eval.overrides = standing();
+    eval.overrides.extend([
         ("interpreted", noul_at(0.95)),
         ("sql", noul_at(0.95)),
         ("origin", spread(0.0, 0.1, 0.9)),
         ("site", site("S1")),
-    ];
+    ]);
     let report = run(&project, &options, &mut eval);
-    assert_eq!(eval.stages, ["first", "first"], "one trace, no recheck");
+    assert_eq!(
+        eval.stages,
+        ["first", "first", "first"],
+        "one trace and what the query's values hold, no recheck"
+    );
     let finding = &report.files[0].findings[0];
     assert_eq!(finding.rule, "security/injection");
     assert_eq!(finding.strength, Strength::Review);
@@ -403,7 +408,9 @@ fn settled_status(
     settle: (&'static str, Value),
 ) -> (Status, u64) {
     let mut eval = scripted(0);
-    eval.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
+    eval.overrides = standing();
+    eval.overrides
+        .extend(nouls.iter().map(|&(q, p)| (q, noul_at(p))));
     eval.overrides.push(("origin", spread(0.0, 0.9, 0.1)));
     eval.overrides
         .push(("values", choice_of("unknown", &VALUES)));

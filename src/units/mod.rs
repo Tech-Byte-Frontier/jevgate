@@ -133,6 +133,32 @@ impl From<(Value, Asked)> for FollowUp {
     }
 }
 
+/// The Choices a security unit's finding is asked after it is raised, each
+/// only for the findings it serves.
+#[derive(Clone, Debug, Default)]
+pub struct Confirms {
+    /// For injection, what the values it places can hold, asked only after a
+    /// consider that rests on its parameters.
+    pub values: Option<FollowUp>,
+    /// For injection, what the values of a path, markup or redirect finding
+    /// can hold or where they lead, asked only after a finding whose one
+    /// concern is one of those.
+    pub checked: Option<FollowUp>,
+    /// For injection, what the values of an SQL, command or code finding hold
+    /// where they enter it, asked only after a finding whose one concern is
+    /// one of those.
+    pub queried: Option<FollowUp>,
+    /// For weak settings, what the HTML written without escaping holds, asked
+    /// only after a finding its escaping check raised.
+    pub rendered: Option<FollowUp>,
+    /// For sensitive data, who reads its error text, asked only after a
+    /// finding its error-detail checks raised.
+    pub readers: Option<FollowUp>,
+    /// For sensitive data, when its log line runs, asked only after a finding
+    /// its log checks raised.
+    pub logging: Option<FollowUp>,
+}
+
 #[derive(Clone, Debug)]
 pub enum Detail {
     Function {
@@ -207,16 +233,9 @@ pub enum Detail {
         /// trace and recheck, such as where its URLs come from or its output
         /// goes; each is asked only while its checks are undecided.
         settles: Vec<Settle>,
-        /// For injection, what the values it places can hold, asked only
-        /// after a consider that rests on its parameters.
-        confirm: Option<FollowUp>,
-        /// For injection, what the values of a path, markup or redirect
-        /// finding can hold or where they lead, asked only after a finding
-        /// whose one concern is one of those.
-        checked: Option<FollowUp>,
-        /// For sensitive data, when its log line runs, asked only after a
-        /// finding its log checks raised.
-        logging: Option<FollowUp>,
+        /// The Choices asked after a finding, each only for the findings it
+        /// serves.
+        confirms: Box<Confirms>,
         /// Django code, asked the Django checks: a weak setting must be
         /// named by one of them.
         django: bool,

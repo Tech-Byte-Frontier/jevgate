@@ -9,19 +9,34 @@ use std::collections::BTreeSet;
 /// per hardcoded-value function raised to a review or consider, per redundant
 /// test pair raised to a review, per test that asserts internal details, per
 /// injection consider that rests on its parameters, per injection finding
-/// that rests on a path and per logging finding.
+/// that rests on a path, markup, a redirect, SQL, a command or code, per
+/// weak-settings finding that rests on unescaped HTML and per logging
+/// finding.
 pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     let mut planned = follow_ups(
         plan,
         files,
         compose::unconfirmed_units,
         |unit| match &unit.detail {
-            Detail::Security {
-                checked, logging, ..
-            } => checked.as_ref().or(logging.as_ref()),
+            Detail::Security { confirms, .. } => {
+                confirms.checked.as_ref().or(confirms.logging.as_ref())
+            }
             _ => None,
         },
     );
+    planned.extend(follow_ups(
+        plan,
+        files,
+        compose::unqueried_units,
+        |unit| match &unit.detail {
+            Detail::Security { confirms, .. } => confirms
+                .queried
+                .as_ref()
+                .or(confirms.rendered.as_ref())
+                .or(confirms.readers.as_ref()),
+            _ => None,
+        },
+    ));
     planned.extend(follow_ups(
         plan,
         files,
@@ -31,9 +46,8 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
             | Detail::Document { locate, .. }
             | Detail::Values { locate, .. }
             | Detail::Constants { locate, .. } => locate.as_ref(),
-            Detail::TestPair { confirm, .. }
-            | Detail::Test { confirm }
-            | Detail::Security { confirm, .. } => confirm.as_ref(),
+            Detail::TestPair { confirm, .. } | Detail::Test { confirm } => confirm.as_ref(),
+            Detail::Security { confirms, .. } => confirms.values.as_ref(),
             _ => None,
         },
     ));
