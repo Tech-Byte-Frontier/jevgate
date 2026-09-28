@@ -178,8 +178,9 @@ pub struct Finding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<Gating>,
     /// How often findings of its rule and level were right on projects
-    /// JevGate was never tuned on: labels, as `jevgate rules` counts them. None for notes, which are never labeled, and before the gate is
-    /// applied.
+    /// JevGate was never tuned on: labels, as `jevgate rules` counts them,
+    /// in a preview language that language's own. None for notes, which are
+    /// never labeled, and before the gate is applied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precision: Option<crate::maturity::Labels>,
 }
@@ -204,7 +205,7 @@ pub enum Gating {
     /// It fails the gate.
     Fails,
     /// Reported without failing: the level is `mature`, and this rule and
-    /// level is still being measured.
+    /// level is still being measured, or its file's language is in preview.
     Measuring,
     /// Reported without failing: the level does not count it, as `review`
     /// does not count a consider and `none` counts nothing.

@@ -275,7 +275,7 @@ fn the_agent_text_says_what_reads_a_preview_language_and_what_does_not() {
     let text = String::from_utf8(out).unwrap();
     assert!(
         text.contains(
-            "\nPreview languages, read only by function simplification, file organization, shared logic and comments: Kotlin (1 file; 1 test file not judged yet).\n"
+            "\nPreview languages, read only by function simplification, file organization, shared logic and comments, whose findings never fail the default gate: Kotlin (1 file; 1 test file not judged yet).\n"
         ),
         "{text}"
     );

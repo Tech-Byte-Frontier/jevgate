@@ -30,10 +30,10 @@ fn issue(path: &Path, finding: &Finding) -> Value {
         .map_or(finding.line, |l| l.end_line.max(finding.line));
     let mut description = format!(
         "{} Next step: {}",
-        output::claim(finding, output::Style::PLAIN),
+        output::claim(path, finding, output::Style::PLAIN),
         finding.action
     );
-    if let Some(note) = output::measuring_note(finding) {
+    if let Some(note) = output::measuring_note(path, finding) {
         description.push_str(&format!(" {note}"));
     }
     json!({

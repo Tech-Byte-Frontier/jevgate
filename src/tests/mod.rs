@@ -130,11 +130,27 @@ pub(super) fn finding_of(rule: &str, strength: crate::schema::Strength) -> crate
     }
 }
 
+/// A Kotlin file, `src/Shop.kt`: a preview language's, whose findings never
+/// fail the default gate.
+pub(super) const KOTLIN_FILE: (&str, &str) = (
+    "src/Shop.kt",
+    "fun total(values: List<Int>): Int {\n    var sum = 0\n    for (value in values) {\n        sum += value\n    }\n    return sum * 2 + 1\n}\n",
+);
+
 /// A complete report of one judged file, `src/lib.rs`, holding `findings`,
 /// with the gate applied as `options` set it.
 pub(super) fn gated(findings: Vec<crate::schema::Finding>, options: &CheckArgs) -> schema::Report {
+    gated_at(("src/lib.rs", &function("f")), findings, options)
+}
+
+/// [`gated`] for the file at `path` holding `source`.
+pub(super) fn gated_at(
+    (path, source): (&str, &str),
+    findings: Vec<crate::schema::Finding>,
+    options: &CheckArgs,
+) -> schema::Report {
     let project = Project::new();
-    project.write("src/lib.rs", &function("f"));
+    project.write(path, source);
     let (_, mut report) = snapshot(&project, options);
     report.files[0].findings = findings;
     report.complete = true;

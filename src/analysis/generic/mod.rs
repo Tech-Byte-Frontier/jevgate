@@ -5,9 +5,10 @@
 //! `analysis::units::generic` turns the query's captures into units. Only
 //! the rules those units can serve judge these files: function
 //! simplification, file organization, shared logic and comments. Every
-//! language here is in preview: it becomes supported once two projects
-//! JevGate was never tuned on meet the maturity bar (a rule and level right
-//! at least 80% of the time over at least 20 labeled findings).
+//! language here starts in preview (`Language::preview`): its findings are
+//! reported but never fail the default gate, until two projects JevGate was
+//! never tuned on meet the maturity bar (a rule and level right at least 80%
+//! of the time over at least 20 labeled findings) and it becomes supported.
 //!
 //! The queries are JevGate's own, written in the captures GitHub's code
 //! navigation uses (`@definition.function`, `@definition.class`, `@name`,
@@ -30,6 +31,10 @@ pub(crate) struct Language {
     pub name: &'static str,
     /// Languages whose code can be shared between their files: C and C++.
     pub family: &'static str,
+    /// In preview: its findings never fail the default gate, and each says
+    /// how often its own rule and level were right in this language
+    /// (`maturity::preview`), not the other languages' share.
+    pub preview: bool,
     extensions: &'static [&'static str],
     grammar: fn() -> tree_sitter::Language,
     /// The tag query: definitions (`@definition.function`, `.method`,
@@ -108,6 +113,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "C",
         family: "C",
+        preview: true,
         extensions: &["c", "h"],
         grammar: || tree_sitter_c::LANGUAGE.into(),
         tags: include_str!("queries/c.scm"),
@@ -122,6 +128,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "C++",
         family: "C",
+        preview: true,
         extensions: &["cpp", "cc", "cxx", "hpp", "hh", "hxx"],
         grammar: || tree_sitter_cpp::LANGUAGE.into(),
         tags: include_str!("queries/cpp.scm"),
@@ -153,6 +160,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "Kotlin",
         family: "Kotlin",
+        preview: true,
         extensions: &["kt", "kts"],
         grammar: || tree_sitter_kotlin_ng::LANGUAGE.into(),
         tags: include_str!("queries/kotlin.scm"),
@@ -183,6 +191,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "Swift",
         family: "Swift",
+        preview: true,
         extensions: &["swift"],
         grammar: || tree_sitter_swift::LANGUAGE.into(),
         tags: include_str!("queries/swift.scm"),
@@ -217,6 +226,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "Bash",
         family: "Bash",
+        preview: true,
         extensions: &["sh", "bash", "bats"],
         grammar: || tree_sitter_bash::LANGUAGE.into(),
         tags: include_str!("queries/bash.scm"),
@@ -240,6 +250,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "Dart",
         family: "Dart",
+        preview: true,
         extensions: &["dart"],
         grammar: || tree_sitter_dart::LANGUAGE.into(),
         tags: include_str!("queries/dart.scm"),
@@ -274,6 +285,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "Scala",
         family: "Scala",
+        preview: true,
         extensions: &["scala"],
         grammar: || tree_sitter_scala::LANGUAGE.into(),
         tags: include_str!("queries/scala.scm"),
@@ -305,6 +317,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "Elixir",
         family: "Elixir",
+        preview: true,
         extensions: &["ex", "exs"],
         grammar: || tree_sitter_elixir::LANGUAGE.into(),
         tags: include_str!("queries/elixir.scm"),
@@ -319,6 +332,7 @@ static LANGUAGES: [Language; 9] = [
     Language {
         name: "Lua",
         family: "Lua",
+        preview: true,
         extensions: &["lua"],
         grammar: || tree_sitter_lua::LANGUAGE.into(),
         tags: include_str!("queries/lua.scm"),
@@ -391,6 +405,15 @@ fn cpp_code(source: &str) -> bool {
 /// which keep reading each other's code as they always have.
 pub(crate) fn family(path: &Path) -> Option<&'static str> {
     of(path).map(|language| language.family)
+}
+
+/// The preview language a file is written in, by its path; none for a
+/// supported language. Its path decides, as the measurement behind
+/// `maturity::preview` counted files (leveldb's `.h` headers as C).
+pub(crate) fn preview(path: &Path) -> Option<&'static str> {
+    of(path)
+        .filter(|language| language.preview)
+        .map(|language| language.name)
 }
 
 /// Whether a file of a generic language is a test, by where it is and how

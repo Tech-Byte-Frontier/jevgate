@@ -525,7 +525,7 @@ fn line(flagged: &Flagged) -> String {
         finding.line,
         output::label(&finding.strength),
         finding.rule,
-        output::claimed(&why, &flagged.finding, output::Style::PLAIN),
+        output::claimed(&why, &flagged.path, &flagged.finding, output::Style::PLAIN),
         sentence(finding.action, NEXT_CHARS)
     )
 }

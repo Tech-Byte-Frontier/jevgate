@@ -24,7 +24,7 @@ const VERSIONS: [&str; 4] = ["2025-06-18", "2025-11-25", "2025-03-26", "2024-11-
 
 const INSTRUCTIONS: &str = "JevGate reviews code by asking TypeSafe Jev small questions about functions, files, tests and docs. \
 Call jevgate_check with `base` (such as origin/main) to review what changed; it uses the repository's jevgate.toml and the API key `jevgate auth status` shows, and paid requests only for code the answer cache lacks. \
-Fix each finding marked to fail the gate (`gate: fails`): they decide the exit code, and by default only rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail it, with the repository's custom questions at their own level. \
+Fix each finding marked to fail the gate (`gate: fails`): they decide the exit code. By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail it, never in a preview language such as Kotlin or Swift, and the repository's custom questions fail it at their own level. \
 Weigh the other `review` and `consider` findings: fix one when it is right, or say why the code should stay. \
 Each finding's message ends with how often findings of its rule and level were right on projects JevGate was never tuned on, or that it is not yet measured, and its `precision` holds the counts (right of labeled); weigh a finding by it, not by its `probability`. \
 Each `verify` item is a question Jev left undecided about a unit, with the evidence it named and the probability of each answer: read the code there and change it only if you agree it should change. Verify items fail the gate only where jevgate.toml puts `uncertain` among a rule's levels (the gate then gives the reason), never by default. \

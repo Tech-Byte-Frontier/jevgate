@@ -66,10 +66,10 @@ fn annotation(path: &Path, finding: &Finding) -> String {
         .map_or(String::new(), |l| format!(",endLine={}", l.end_line));
     let mut message = format!(
         "{}\n→ {}",
-        output::claim(finding, output::Style::PLAIN),
+        output::claim(path, finding, output::Style::PLAIN),
         finding.action
     );
-    if let Some(note) = output::measuring_note(finding) {
+    if let Some(note) = output::measuring_note(path, finding) {
         message.push_str(&format!("\n{note}"));
     }
     format!(
@@ -146,7 +146,7 @@ fn findings_table(shown: &[(&Path, &Finding)]) -> String {
             cell(&path.to_string_lossy()),
             finding.line,
             finding.rule,
-            cell(&output::claim(finding, output::Style::PLAIN)),
+            cell(&output::claim(path, finding, output::Style::PLAIN)),
             cell(&finding.action)
         )
     });

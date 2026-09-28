@@ -7,11 +7,12 @@
 //! projects, reviews were right 55%, 46%, 56% and 61% of the time with a
 //! probability below 0.90, below 0.95, below 0.98 and above.
 use crate::{
-    catalog,
+    catalog::{self, COMMENTS, FILE_ORGANIZATION, FUNCTION_SIMPLIFICATION, SHARED_LOGIC},
     schema::Strength::{self, Consider, Review},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::path::Path;
 
 /// Labeled findings a rule and level needs on unseen projects to be mature.
 pub const MIN_LABELS: u32 = 20;
@@ -49,11 +50,21 @@ impl Labels {
     /// time (23 labels)", or "not yet measured" below [`MIN_LABELS`], where a
     /// share says little.
     pub fn in_words(self) -> String {
+        self.words("")
+    }
+
+    /// [`Labels::in_words`] for one language's own labels: "right 73% of
+    /// the time in Swift (30 labels)", or "not yet measured in Kotlin".
+    pub fn in_words_in(self, language: &str) -> String {
+        self.words(&format!(" in {language}"))
+    }
+
+    fn words(self, place: &str) -> String {
         match self.percent() {
             Some(p) if self.labeled >= MIN_LABELS => {
-                format!("right {p}% of the time ({} labels)", self.labeled)
+                format!("right {p}% of the time{place} ({} labels)", self.labeled)
             }
-            _ => "not yet measured".into(),
+            _ => format!("not yet measured{place}"),
         }
     }
 }
@@ -138,6 +149,125 @@ const TABLE: [Measure; 26] = [
     row(catalog::COMMENTS, Consider, [39, 72], [97, 150]),
 ];
 
+/// One preview language's labels at a rule and level, on projects never
+/// used for tuning.
+struct PreviewMeasure {
+    language: &'static str,
+    /// The rule's catalog key.
+    rule: &'static str,
+    level: Strength,
+    unseen: Labels,
+}
+
+const fn preview_row(
+    language: &'static str,
+    rule: &'static str,
+    level: Strength,
+    unseen: [u32; 2],
+) -> PreviewMeasure {
+    PreviewMeasure {
+        language,
+        rule,
+        level,
+        unseen: Labels {
+            right: unseen[0],
+            labeled: unseen[1],
+        },
+    }
+}
+
+/// The preview languages' labels, measured on 2026-09-28 by 0.30's first run
+/// of the four rules they get on 37 well-known projects chosen for them and
+/// never used for tuning (3 to 8 a language), all 598 reviews and considers
+/// labeled by hand from the code, a debatable one counting as not right
+/// (`evaluation/labels/parts/0.30-*.jsonl` in the maintainer's clone), as
+/// `languages.md` tabulates them. A finding counts for the language its path
+/// names, as `analysis::generic::preview` names it; a rule and level without
+/// a row had no finding there. The ten supported languages' shares in
+/// [`TABLE`] say little of these: Bash's shared-logic reviews were right 4
+/// times in 34 and its function-simplification reviews 25 in 28, where the
+/// ten's were right 46 in 85 and 20 in 23.
+const PREVIEW: [PreviewMeasure; 53] = [
+    preview_row("C", FUNCTION_SIMPLIFICATION, Review, [10, 11]),
+    preview_row("C", FUNCTION_SIMPLIFICATION, Consider, [13, 19]),
+    preview_row("C", SHARED_LOGIC, Review, [6, 14]),
+    preview_row("C", SHARED_LOGIC, Consider, [4, 10]),
+    preview_row("C", COMMENTS, Consider, [0, 8]),
+    preview_row("C", FILE_ORGANIZATION, Consider, [0, 1]),
+    preview_row("C++", FUNCTION_SIMPLIFICATION, Review, [11, 11]),
+    preview_row("C++", FUNCTION_SIMPLIFICATION, Consider, [19, 37]),
+    preview_row("C++", SHARED_LOGIC, Review, [12, 29]),
+    preview_row("C++", SHARED_LOGIC, Consider, [3, 18]),
+    preview_row("C++", COMMENTS, Consider, [1, 6]),
+    preview_row("C++", FILE_ORGANIZATION, Consider, [1, 3]),
+    preview_row("Kotlin", FUNCTION_SIMPLIFICATION, Review, [1, 1]),
+    preview_row("Kotlin", FUNCTION_SIMPLIFICATION, Consider, [6, 7]),
+    preview_row("Kotlin", SHARED_LOGIC, Review, [6, 7]),
+    preview_row("Kotlin", SHARED_LOGIC, Consider, [2, 3]),
+    preview_row("Kotlin", COMMENTS, Consider, [1, 2]),
+    preview_row("Kotlin", FILE_ORGANIZATION, Review, [1, 1]),
+    preview_row("Swift", FUNCTION_SIMPLIFICATION, Review, [10, 10]),
+    preview_row("Swift", FUNCTION_SIMPLIFICATION, Consider, [22, 30]),
+    preview_row("Swift", SHARED_LOGIC, Review, [17, 23]),
+    preview_row("Swift", SHARED_LOGIC, Consider, [18, 40]),
+    preview_row("Swift", COMMENTS, Consider, [4, 4]),
+    preview_row("Swift", FILE_ORGANIZATION, Review, [1, 1]),
+    preview_row("Swift", FILE_ORGANIZATION, Consider, [2, 2]),
+    preview_row("Bash", FUNCTION_SIMPLIFICATION, Review, [25, 28]),
+    preview_row("Bash", FUNCTION_SIMPLIFICATION, Consider, [34, 50]),
+    preview_row("Bash", SHARED_LOGIC, Review, [4, 34]),
+    preview_row("Bash", SHARED_LOGIC, Consider, [0, 11]),
+    preview_row("Bash", COMMENTS, Consider, [22, 28]),
+    preview_row("Bash", FILE_ORGANIZATION, Review, [0, 2]),
+    preview_row("Bash", FILE_ORGANIZATION, Consider, [0, 2]),
+    preview_row("Dart", FUNCTION_SIMPLIFICATION, Review, [5, 5]),
+    preview_row("Dart", FUNCTION_SIMPLIFICATION, Consider, [9, 10]),
+    preview_row("Dart", SHARED_LOGIC, Review, [3, 7]),
+    preview_row("Dart", SHARED_LOGIC, Consider, [3, 4]),
+    preview_row("Dart", COMMENTS, Consider, [2, 4]),
+    preview_row("Dart", FILE_ORGANIZATION, Consider, [1, 1]),
+    preview_row("Scala", FUNCTION_SIMPLIFICATION, Review, [2, 3]),
+    preview_row("Scala", FUNCTION_SIMPLIFICATION, Consider, [5, 11]),
+    preview_row("Scala", SHARED_LOGIC, Review, [1, 2]),
+    preview_row("Scala", SHARED_LOGIC, Consider, [1, 3]),
+    preview_row("Scala", COMMENTS, Consider, [3, 5]),
+    preview_row("Scala", FILE_ORGANIZATION, Consider, [0, 3]),
+    preview_row("Elixir", FUNCTION_SIMPLIFICATION, Consider, [7, 8]),
+    preview_row("Elixir", SHARED_LOGIC, Review, [4, 5]),
+    preview_row("Elixir", SHARED_LOGIC, Consider, [3, 7]),
+    preview_row("Elixir", FILE_ORGANIZATION, Review, [1, 1]),
+    preview_row("Lua", FUNCTION_SIMPLIFICATION, Review, [11, 12]),
+    preview_row("Lua", FUNCTION_SIMPLIFICATION, Consider, [18, 22]),
+    preview_row("Lua", SHARED_LOGIC, Review, [8, 9]),
+    preview_row("Lua", SHARED_LOGIC, Consider, [1, 8]),
+    preview_row("Lua", COMMENTS, Consider, [1, 10]),
+];
+
+/// The preview language whose own labels weigh a finding of `rule` in the
+/// file at `path`, and whose findings never fail the default gate: the
+/// file's language when it is in preview (`analysis::generic`). None for a
+/// supported language, and for a custom question, which its team measures
+/// by its examples and which fails at its own level in every language.
+pub fn preview_language(path: &Path, rule: &str) -> Option<&'static str> {
+    crate::analysis::generic::preview(path).filter(|_| !catalog::custom(rule))
+}
+
+/// The labels a finding of `rule` at `level` in the file at `path`
+/// carries: in a preview language that language's own ([`PREVIEW`]), none
+/// labeled where it has none; elsewhere [`precision`].
+pub fn precision_at(path: &Path, rule: &str, level: Strength) -> Option<Labels> {
+    let Some(language) = preview_language(path, rule) else {
+        return precision(rule, level);
+    };
+    let key = catalog::find(rule).map(|found| found.key);
+    (level != Strength::Note).then(|| {
+        PREVIEW
+            .iter()
+            .find(|m| m.language == language && Some(m.rule) == key && m.level == level)
+            .map_or_else(Labels::default, |m| m.unseen)
+    })
+}
+
 /// The labels of a rule, by ID, name or key, at one level.
 pub fn measure(rule: &str, level: Strength) -> Option<&'static Measure> {
     let key = catalog::find(rule)?.key;
@@ -176,9 +306,13 @@ pub fn dataset(rule: &str) -> String {
 }
 
 /// How often findings of `rule` with `labels` were right, for a reader:
-/// [`Labels::in_words`], and for a law finding, which has none, that its
-/// labels are Bend 2's: "not yet measured" alone would say none were made.
-pub fn precision_in_words(rule: &str, labels: Labels) -> String {
+/// [`Labels::in_words`], in a preview `language` naming it, since the labels
+/// are its own; and for a law finding, which has none, that its labels are
+/// Bend 2's: "not yet measured" alone would say none were made.
+pub fn precision_in_words(rule: &str, labels: Labels, language: Option<&str>) -> String {
+    if let Some(language) = language {
+        return labels.in_words_in(language);
+    }
     let words = labels.in_words();
     if labels.labeled == 0 && bend_2_only(rule) {
         format!("{words}: {BEND_2_ONLY}")
@@ -322,6 +456,96 @@ mod tests {
     }
 
     #[test]
+    fn a_preview_language_s_finding_carries_that_language_s_own_labels() {
+        let at = |path: &str, rule, level| precision_at(Path::new(path), rule, level);
+        let labels = |right, labeled| Some(Labels { right, labeled });
+        assert_eq!(
+            at("View.swift", catalog::FUNCTION_SIMPLIFICATION, Consider),
+            labels(22, 30)
+        );
+        assert_eq!(
+            at("Shop.kt", catalog::COMMENTS, Review),
+            labels(0, 0),
+            "no such finding there"
+        );
+        assert_eq!(
+            at("src/lib.rs", catalog::FUNCTION_SIMPLIFICATION, Review),
+            labels(20, 23),
+            "a supported language's are the table's"
+        );
+        assert_eq!(at("Shop.kt", catalog::SHARED_LOGIC, Strength::Note), None);
+        assert_eq!(
+            preview_language(Path::new("Shop.kt"), "custom/body-logs"),
+            None,
+            "a team's question is measured by its examples"
+        );
+        assert_eq!(
+            precision_in_words(
+                catalog::SHARED_LOGIC,
+                Labels {
+                    right: 22,
+                    labeled: 30
+                },
+                Some("Swift")
+            ),
+            "right 73% of the time in Swift (30 labels)"
+        );
+        assert_eq!(
+            Labels {
+                right: 1,
+                labeled: 1
+            }
+            .in_words_in("Kotlin"),
+            "not yet measured in Kotlin"
+        );
+    }
+
+    #[test]
+    fn the_preview_table_sums_to_each_language_s_published_counts() {
+        // `languages.md`'s support levels: reviews, then considers, right of
+        // labeled; and a file of each language's.
+        let published = [
+            ("C", "x.c", [16, 25], [17, 38]),
+            ("C++", "x.cpp", [23, 40], [24, 64]),
+            ("Kotlin", "x.kt", [8, 9], [9, 12]),
+            ("Swift", "x.swift", [28, 34], [46, 76]),
+            ("Bash", "x.sh", [29, 64], [56, 91]),
+            ("Dart", "x.dart", [8, 12], [15, 19]),
+            ("Scala", "x.scala", [3, 5], [9, 22]),
+            ("Elixir", "x.ex", [5, 6], [10, 15]),
+            ("Lua", "x.lua", [19, 21], [20, 40]),
+        ];
+        let keys = catalog::keys();
+        for m in &PREVIEW {
+            assert!(keys.contains(&m.rule), "{}", m.rule);
+            assert!(
+                published
+                    .iter()
+                    .any(|(language, ..)| *language == m.language)
+            );
+        }
+        for (language, file, reviews, considers) in published {
+            assert_eq!(
+                crate::analysis::generic::preview(Path::new(file)),
+                Some(language)
+            );
+            let sum = |level: Strength| {
+                PREVIEW
+                    .iter()
+                    .filter(|m| m.language == language && m.level == level)
+                    .fold([0, 0], |[right, labeled], m| {
+                        [right + m.unseen.right, labeled + m.unseen.labeled]
+                    })
+            };
+            assert_eq!(
+                (sum(Review), sum(Consider)),
+                (reviews, considers),
+                "{language}"
+            );
+        }
+    }
+
+    #[test]
     fn a_finding_carries_its_levels_labels_and_a_reader_sees_them_from_twenty() {
         let labels = |rule, level| precision(rule, level).unwrap();
         assert_eq!(
@@ -340,12 +564,12 @@ mod tests {
         assert_eq!(never, Labels::default(), "no row: none labeled");
         assert_eq!(never.in_words(), "not yet measured");
         assert_eq!(
-            precision_in_words(catalog::LAWS, never),
+            precision_in_words(catalog::LAWS, never, None),
             "not yet measured: labeled only on Bend 2 projects, which the maturity table leaves out"
         );
         let none = labels(catalog::ACCESS_CONTROL, Consider);
         assert_eq!(
-            precision_in_words(catalog::ACCESS_CONTROL, none),
+            precision_in_words(catalog::ACCESS_CONTROL, none, None),
             "not yet measured"
         );
         assert_eq!(precision(catalog::SHARED_LOGIC, Strength::Note), None);

@@ -204,11 +204,20 @@ fn a_function_question_reaches_the_functions_of_a_preview_language() {
         assert_eq!(request["state"]["functions"][0]["name"], name, "{stage}");
     }
     let report = run(&project, &options, &mut Custom { yes: 0.9 });
-    let found: Vec<_> = findings_of(&report, "custom/body-logs")
-        .iter()
-        .map(|f| f.symbol.as_deref())
-        .collect();
-    assert_eq!(found, [Some("charge"), Some("id")]);
+    let found = findings_of(&report, "custom/body-logs");
+    let symbols: Vec<_> = found.iter().map(|f| f.symbol.as_deref()).collect();
+    assert_eq!(symbols, [Some("charge"), Some("id")]);
+    // A team's question fails the gate at its own level in a preview
+    // language too, and borrows no language's labels.
+    assert!(found.iter().all(|f| f.fails_gate()));
+    assert_eq!(
+        crate::output::claim(
+            std::path::Path::new("Shop.kt"),
+            found[0],
+            crate::output::Style::PLAIN
+        ),
+        "`charge`: Does this function write a request body to a log? Yes. Not yet measured."
+    );
 }
 
 #[test]
@@ -263,10 +272,18 @@ fn yes_at_the_threshold_is_a_finding_at_the_question_level_that_fails_the_gate()
         "labeled on no project"
     );
     assert!(
-        crate::output::claim(finding, crate::output::Style::PLAIN)
-            .ends_with("Yes. Not yet measured."),
+        crate::output::claim(
+            std::path::Path::new("lib.rs"),
+            finding,
+            crate::output::Style::PLAIN
+        )
+        .ends_with("Yes. Not yet measured."),
         "{}",
-        crate::output::claim(finding, crate::output::Style::PLAIN)
+        crate::output::claim(
+            std::path::Path::new("lib.rs"),
+            finding,
+            crate::output::Style::PLAIN
+        )
     );
     assert_eq!(finding.action, "Log the request id instead.");
     assert_eq!(finding.rule_version, options.questions[0].version);

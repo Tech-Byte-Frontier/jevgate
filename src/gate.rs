@@ -32,11 +32,13 @@ pub fn exit_code(report: &Report) -> u8 {
 
 /// Record each finding's measured precision and how the gate counts it, then
 /// decide the gate for a complete run. Both read the maturity table, once
-/// every level is final: grouping across files turns some findings into notes.
+/// every level is final: grouping across files turns some findings into
+/// notes. A finding in a preview language carries its language's own labels.
 pub fn evaluate(report: &mut Report, args: &CheckArgs) {
     for file in &mut report.files {
         for finding in &mut file.findings {
-            finding.precision = crate::maturity::precision(&finding.rule, finding.strength);
+            finding.precision =
+                crate::maturity::precision_at(&file.path, &finding.rule, finding.strength);
             finding.gate = gating(finding, &file.path, args);
         }
     }
@@ -66,7 +68,8 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
 /// path: none for notes and accepted findings. Consider counts every finding
 /// and review only reviews; `mature` counts the rule's mature levels (a
 /// custom question's own level), and a finding it leaves out is still being
-/// measured.
+/// measured. A preview language's findings are measured in that language
+/// apart from the ten supported ones, so `mature` counts none of them.
 fn gating(finding: &Finding, path: &Path, args: &CheckArgs) -> Option<Gating> {
     if finding.accepted() || finding.strength == Strength::Note {
         return None;
@@ -76,6 +79,7 @@ fn gating(finding: &Finding, path: &Path, args: &CheckArgs) -> Option<Gating> {
     let counted = levels.contains(&FailOn::Consider)
         || (finding.strength == Strength::Review && levels.contains(&FailOn::Review))
         || (mature
+            && crate::maturity::preview_language(path, &finding.rule).is_none()
             && args
                 .mature_levels(&finding.rule)
                 .contains(&finding.strength));

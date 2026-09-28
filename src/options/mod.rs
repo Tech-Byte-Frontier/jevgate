@@ -42,8 +42,8 @@ pub enum FailOn {
     /// New review or consider findings
     Consider,
     /// New findings of the rule's mature levels, measured right at least 80%
-    /// of the time on projects JevGate was never tuned on, or of a custom
-    /// question's own level (the default)
+    /// of the time on projects JevGate was never tuned on, outside the
+    /// preview languages, or of a custom question's own level (the default)
     Mature,
     /// Files whose answers stayed undecided or that need context
     Uncertain,
@@ -186,9 +186,9 @@ pub struct CheckArgs {
     /// LEVEL is review, consider (also fails on review), mature, uncertain, or
     /// none (advisory; `report` is accepted as a synonym). `mature` fails only
     /// on the levels of a rule measured right at least 80% of the time on
-    /// projects JevGate was never tuned on, and on a custom question's own
-    /// level (`jevgate rules` shows them); other findings are reported without
-    /// failing. TARGET is a rule ID, key or
+    /// projects JevGate was never tuned on, never in a preview language, and
+    /// on a custom question's own level (`jevgate rules` shows them); other
+    /// findings are reported without failing. TARGET is a rule ID, key or
     /// group, for example `security=consider`; the most specific target wins.
     /// Flags replace `fail_on` and `[rules]` levels from jevgate.toml for the
     /// rules they address. Notes and baselined findings never fail the gate.

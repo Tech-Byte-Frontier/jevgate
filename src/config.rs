@@ -33,7 +33,7 @@ pub struct Config {
     pub max_file_bytes: Option<u64>,
     /// Ceiling on context bytes per request. Default: 32768.
     pub max_context_bytes: Option<u64>,
-    /// The level for rules without their own, like `--fail-on`. Default: ["mature"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on, and on a custom question's own level; `jevgate rules` shows them.
+    /// The level for rules without their own, like `--fail-on`. Default: ["mature"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on, never in a preview language, and on a custom question's own level; `jevgate rules` shows them.
     pub fail_on: Vec<String>,
     /// Model, as the key's provider names it; a pinned version keeps results repeatable. `--model` overrides it. Default: `jev-1.13.0` with a TypeSafe key, `typesafe/jev-1.13` with an OpenRouter key, `typesafe-ai/jev` with a Vercel AI Gateway key.
     pub model: Option<String>,

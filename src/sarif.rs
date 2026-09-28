@@ -151,10 +151,10 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
         .collect();
     let mut text = format!(
         "{}\n\nNext step: {}",
-        output::claim(finding, output::Style::PLAIN),
+        output::claim(path, finding, output::Style::PLAIN),
         finding.action
     );
-    if let Some(note) = output::measuring_note(finding) {
+    if let Some(note) = output::measuring_note(path, finding) {
         text.push_str(&format!("\n\n{note}"));
     }
     let mut value = json!({

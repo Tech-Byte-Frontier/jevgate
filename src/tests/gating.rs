@@ -438,6 +438,88 @@ fn agent_text_marks_what_fails_and_says_why_the_rest_did_not() {
 }
 
 #[test]
+fn a_preview_language_s_findings_never_fail_the_default_gate() {
+    use crate::maturity::Labels;
+    use schema::{Gating::*, Strength::*};
+    let findings = vec![
+        finding_of(SIMPLIFICATION, Review),
+        finding_of(SHARED_LOGIC, Consider),
+    ];
+    let report = gated_at(KOTLIN_FILE, findings.clone(), &args());
+    assert_eq!(
+        gates(&report),
+        [Some(Measuring), Some(Measuring)],
+        "a mature rule and level too"
+    );
+    assert!(report.gate.as_ref().unwrap().passed);
+    // Kotlin's own labels, not the ten supported languages' 20 of 23.
+    let precision: Vec<_> = report.files[0]
+        .findings
+        .iter()
+        .map(|f| f.precision)
+        .collect();
+    let labels = |right, labeled| Some(Labels { right, labeled });
+    assert_eq!(precision, [labels(1, 1), labels(2, 3)]);
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("[maintainability/function-simplification] Copies: 50% alike,\nsee `b` Not yet measured in Kotlin.\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n1 review and 1 consider in Kotlin files did not fail the gate: Kotlin is in preview, and by default a preview language's findings never fail it. `--fail-on review` makes every review fail the gate.\n"),
+        "{text}"
+    );
+    assert!(!text.contains("theirs are still being measured"), "{text}");
+    // An explicit level replaces the default exactly as it says.
+    let mut options = args();
+    options.fail_on = vec![options::FailOn::Review];
+    let report = gated_at(KOTLIN_FILE, findings, &options);
+    assert_eq!(gates(&report), [Some(Fails), Some(Advisory)]);
+    // A language's own labels, from 20 on, give a share: Swift's
+    // function-simplification considers were right 22 times in 30.
+    let swift = gated_at(
+        ("Sources/View.swift", "func id() -> Int { 1 }\n"),
+        vec![finding_of(SIMPLIFICATION, Consider)],
+        &args(),
+    );
+    let mut out = Vec::new();
+    output::agent(&mut out, &swift, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("see `b` Right 73% of the time in Swift (30 labels).\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn sarif_says_a_preview_language_s_findings_are_measured_in_it() {
+    use schema::Strength::*;
+    let report = gated_at(
+        KOTLIN_FILE,
+        vec![finding_of(SIMPLIFICATION, Review)],
+        &args(),
+    );
+    let mut out = Vec::new();
+    crate::sarif::emit(&mut out, &report, &[]).unwrap();
+    let log: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let result = &log["runs"][0]["results"][0];
+    assert_eq!(result["level"], "warning");
+    assert_eq!(result["properties"]["gate"], "measuring");
+    assert_eq!(
+        result["properties"]["precision"],
+        json!({"right": 1, "labeled": 1})
+    );
+    let message = result["message"]["text"].as_str().unwrap();
+    assert!(
+        message.contains("Not yet measured in Kotlin.")
+            && message.ends_with("Does not fail the gate: Kotlin is in preview, and by default a preview language's findings never fail it."),
+        "{message}"
+    );
+}
+
+#[test]
 fn a_capped_list_shows_the_findings_that_fail_the_gate_first() {
     use schema::Strength::*;
     let failing = schema::Finding {

@@ -211,16 +211,7 @@ pub fn summary<'a>(guards: impl IntoIterator<Item = &'a Guard>) -> String {
     .into_iter()
     .flatten()
     .collect();
-    join(&parts)
-}
-
-/// "a", "a and b", "a, b and c".
-fn join(parts: &[String]) -> String {
-    match parts {
-        [] => String::new(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
+    crate::output::join(&parts)
 }
 
 /// What a check's change does to the checks around the code, found without

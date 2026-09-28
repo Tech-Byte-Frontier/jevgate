@@ -1,6 +1,6 @@
 //! Edits to `jevgate.toml`, custom question files and the baseline, compared
 //! by what they say: comments, layout and the baseline's time are not an edit.
-use super::{Guard, Kind, join};
+use super::{Guard, Kind};
 use crate::{baseline::BASELINE_FILE, init::CONFIG_FILE, output};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -241,6 +241,6 @@ fn baseline_edit(before: &str, after: &str) -> Edit {
     if parts.is_empty() {
         Edit::Same
     } else {
-        Edit::Named(join(&parts))
+        Edit::Named(crate::output::join(&parts))
     }
 }

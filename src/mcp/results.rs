@@ -542,6 +542,31 @@ mod tests {
     }
 
     #[test]
+    fn a_preview_language_s_finding_is_measured_in_it_and_never_fails_the_default_gate() {
+        let report = crate::tests::gated_at(
+            crate::tests::KOTLIN_FILE,
+            vec![crate::tests::finding_of(
+                "maintainability/function-simplification",
+                Strength::Review,
+            )],
+            &crate::tests::args(),
+        );
+        let result = value(&structured(&report, &all(), 0));
+        let finding = &result["findings"][0];
+        assert_eq!(finding["path"], "src/Shop.kt");
+        assert_eq!(finding["gate"], "measuring");
+        assert_eq!(finding["precision"], json!({"right": 1, "labeled": 1}));
+        assert!(
+            finding["message"]
+                .as_str()
+                .unwrap()
+                .ends_with("Not yet measured in Kotlin."),
+            "{finding}"
+        );
+        assert_eq!(result["gate"]["passed"], true);
+    }
+
+    #[test]
     fn a_findings_message_ends_with_how_often_findings_like_it_were_right() {
         let said = |rule: &str, strength: Strength| Finding {
             message: "It mixes jobs.".into(),

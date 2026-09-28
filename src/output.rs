@@ -24,6 +24,15 @@ pub fn count(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
+/// "a", "a and b", "a, b and c".
+pub(crate) fn join(parts: &[String]) -> String {
+    match parts {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// The headline's cost: estimated dollars, or unknown, never a guessed $0.
 pub(crate) fn cost(usd: Option<f64>) -> String {
     usd.map_or(" · cost unknown".into(), |usd| format!(" · ~${usd:.4}"))
@@ -408,63 +417,103 @@ fn emit_section(
     Ok(())
 }
 
-/// Why reviews did not fail the gate when their rules and levels are still
-/// being measured, with the considers beside them and how to make every
-/// review fail it; none when no review is left out that way.
+/// Why reviews did not fail the gate: their rules and levels are still
+/// being measured, or their files' languages are in preview. Each reason
+/// comes with the considers beside its reviews and how to make every review
+/// fail the gate; none when no review is left out either way.
 pub(crate) fn measuring(report: &Report) -> Option<String> {
-    let left_out = |strength: Strength| {
-        report
-            .files
-            .iter()
-            .flat_map(|f| &f.findings)
-            .filter(|f| f.strength == strength && f.gate == Some(Gating::Measuring))
-            .count()
-    };
-    let (reviews, considers) = (left_out(Strength::Review), left_out(Strength::Consider));
-    if reviews == 0 {
-        return None;
-    }
-    let considers = if considers > 0 {
-        format!(" and {}", count(considers, "consider"))
-    } else {
-        String::new()
-    };
-    Some(format!(
-        "{}{considers} did not fail the gate: by default only rules and levels right at least {}% of the time on projects JevGate was never tuned on fail it, and theirs are still being measured. `jevgate rules` shows each one's precision; `--fail-on review` makes every review fail the gate.",
-        count(reviews, "review"),
+    let (preview, measured): (Vec<_>, Vec<_>) = report
+        .files
+        .iter()
+        .flat_map(|f| {
+            f.findings
+                .iter()
+                .map(move |finding| (f.path.as_path(), finding))
+        })
+        .filter(|(_, f)| f.gate == Some(Gating::Measuring))
+        .partition(|(path, f)| crate::maturity::preview_language(path, &f.rule).is_some());
+    let measured = reviews_and_considers(&measured).map(|findings| format!(
+        "{findings} did not fail the gate: by default only rules and levels right at least {}% of the time on projects JevGate was never tuned on fail it, and theirs are still being measured. `jevgate rules` shows each one's precision; `--fail-on review` makes every review fail the gate.",
         crate::maturity::MIN_PERCENT_RIGHT
-    ))
+    ));
+    let preview = reviews_and_considers(&preview).map(|findings| {
+        let mut languages: Vec<String> = preview
+            .iter()
+            .filter_map(|(path, f)| crate::maturity::preview_language(path, &f.rule))
+            .map(str::to_string)
+            .collect();
+        languages.sort();
+        languages.dedup();
+        let which = match languages.as_slice() {
+            [one] => format!("{one} is"),
+            _ => "those languages are".into(),
+        };
+        format!(
+            "{findings} in {} files did not fail the gate: {which} in preview, and by default a preview language's findings never fail it. `--fail-on review` makes every review fail the gate.",
+            join(&languages)
+        )
+    });
+    let reasons: Vec<String> = [measured, preview].into_iter().flatten().collect();
+    (!reasons.is_empty()).then(|| reasons.join("\n\n"))
 }
 
-/// Why a finding still being measured does not fail the gate; none for any
-/// other finding. Its claim already says how often its rule and level were
-/// right.
-pub(crate) fn measuring_note(finding: &Finding) -> Option<String> {
+/// "2 reviews and 1 consider" of `findings`; none without a review, which
+/// alone would have failed the default gate.
+fn reviews_and_considers(findings: &[(&Path, &Finding)]) -> Option<String> {
+    let of = |strength: Strength| {
+        findings
+            .iter()
+            .filter(|(_, f)| f.strength == strength)
+            .count()
+    };
+    let (reviews, considers) = (of(Strength::Review), of(Strength::Consider));
+    (reviews > 0).then(|| match considers {
+        0 => count(reviews, "review"),
+        _ => format!(
+            "{} and {}",
+            count(reviews, "review"),
+            count(considers, "consider")
+        ),
+    })
+}
+
+/// Why a finding in `path` still being measured does not fail the gate:
+/// its rule and level are not yet mature, or its file's language is in
+/// preview; none for any other finding. Its claim already says how often its
+/// rule and level were right.
+pub(crate) fn measuring_note(path: &Path, finding: &Finding) -> Option<String> {
     (finding.gate == Some(Gating::Measuring)).then(|| {
-        format!(
-            "Does not fail the gate: by default only rules and levels right at least {}% of the time over at least {} labels on projects JevGate was never tuned on fail it.",
-            crate::maturity::MIN_PERCENT_RIGHT,
-            crate::maturity::MIN_LABELS
-        )
+        match crate::maturity::preview_language(path, &finding.rule) {
+            Some(language) => format!(
+                "Does not fail the gate: {language} is in preview, and by default a preview language's findings never fail it."
+            ),
+            None => format!(
+                "Does not fail the gate: by default only rules and levels right at least {}% of the time over at least {} labels on projects JevGate was never tuned on fail it.",
+                crate::maturity::MIN_PERCENT_RIGHT,
+                crate::maturity::MIN_LABELS
+            ),
+        }
     })
 }
 
 /// A finding's message, then how often findings of its rule and level were
 /// right on projects JevGate was never tuned on, in place of the probability
 /// of the answer that set its level: "… Right 87% of the time (23 labels)."
-/// or "… Not yet measured."; a note's message alone.
-pub(crate) fn claim(finding: &Finding, style: Style) -> String {
-    claimed(&finding.message, finding, style)
+/// or "… Not yet measured."; in a preview language, its own: "… Not yet
+/// measured in Kotlin."; a note's message alone.
+pub(crate) fn claim(path: &Path, finding: &Finding, style: Style) -> String {
+    claimed(&finding.message, path, finding, style)
 }
 
 /// `why`, the finding's message or a cut of it, then how often findings of
 /// its rule and level were right, as [`claim`] ends it: the agent hook cuts
 /// a long message, never the sentence a reader weighs the finding by.
-pub(crate) fn claimed(why: &str, finding: &Finding, style: Style) -> String {
+pub(crate) fn claimed(why: &str, path: &Path, finding: &Finding, style: Style) -> String {
     let Some(labels) = finding.precision else {
         return why.to_string();
     };
-    let words = crate::maturity::precision_in_words(&finding.rule, labels);
+    let language = crate::maturity::preview_language(path, &finding.rule);
+    let words = crate::maturity::precision_in_words(&finding.rule, labels, language);
     let mut chars = words.chars();
     let sentence = chars.next().map_or_else(String::new, |first| {
         format!("{}{}.", first.to_uppercase(), chars.as_str())
@@ -544,8 +593,9 @@ fn emit_capped(out: &mut impl Write, report: &Report) -> Result<()> {
 }
 
 /// The files of the preview languages (`analysis::generic`) and what reads
-/// them, by language: four rules read their code, and none their test
-/// files yet. Without it, a `--rule security` check of a Kotlin project
+/// them, by language: four rules and any custom question read their code,
+/// none their test files yet, and the rules' findings never fail the
+/// default gate. Without it, a `--rule security` check of a Kotlin project
 /// passed with no word that security does not read Kotlin.
 fn emit_preview(out: &mut impl Write, report: &Report) -> Result<()> {
     // Per language: files read, and test files not judged.
@@ -580,9 +630,14 @@ fn emit_preview(out: &mut impl Write, report: &Report) -> Result<()> {
             ),
         })
         .collect();
+    let readers = if report.rules.iter().any(|rule| crate::catalog::custom(rule)) {
+        "function simplification, file organization, shared logic, comments and custom questions, whose built-in rules' findings"
+    } else {
+        "function simplification, file organization, shared logic and comments, whose findings"
+    };
     writeln!(
         out,
-        "\nPreview languages, read only by function simplification, file organization, shared logic and comments: {}.",
+        "\nPreview languages, read only by {readers} never fail the default gate: {}.",
         listed.join(", ")
     )?;
     Ok(())
@@ -693,7 +748,7 @@ fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Sty
         "  {} {} {fails}{}",
         style.paint(BOLD, &location),
         style.paint(DIM, &rule),
-        claim(finding, style)
+        claim(path, finding, style)
     )?;
     writeln!(out, "    {} {}", style.paint(CYAN, "→"), finding.action)?;
     Ok(())

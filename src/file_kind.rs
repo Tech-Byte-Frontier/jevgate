@@ -475,9 +475,11 @@ fn tests_prepared(path: &Path, args: &CheckArgs) -> Prepared {
     }
 }
 
-/// A file of a language the generic tier reads (`analysis::generic`), in
-/// preview: no test case is located in its code, so a test file, found by
-/// its path, is not judged, and any other file is application code.
+/// A file of a language the generic tier reads (`analysis::generic`): no
+/// test case is located in its code, so a test file, found by its path, is
+/// not judged, and any other file is application code. The reason says
+/// when the language is in preview, whose findings never fail the default
+/// gate.
 fn generic_prepared(language: &crate::analysis::generic::Language, test: bool) -> Prepared {
     let name = language.name;
     let (kind, gate, reason, action) = if test {
@@ -488,11 +490,16 @@ fn generic_prepared(language: &crate::analysis::generic::Language, test: bool) -
             Action::Skip,
         )
     } else {
+        let level = if language.preview {
+            " and in preview, so its findings never fail the default gate"
+        } else {
+            ""
+        };
         (
             "application",
             "application",
             format!(
-                "{name} support is generic and in preview: function simplification, file organization, shared logic and comments judge this file; the hardcoded-value, security and test rules do not read {name} yet."
+                "{name} support is generic{level}: function simplification, file organization, shared logic and comments judge this file; the hardcoded-value, security and test rules do not read {name} yet."
             ),
             Action::Judge,
         )

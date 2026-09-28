@@ -59,7 +59,7 @@ impl<'r> FindingView<'r> {
                 .map_or(finding.line, |l| l.end_line),
             rule: &finding.rule,
             strength: finding.strength,
-            message: output::claim(finding, Style::PLAIN),
+            message: output::claim(path, finding, Style::PLAIN),
             action: &finding.action,
             probability: rounded(finding.concern_probability),
             precision: finding.precision,

@@ -33,8 +33,23 @@ pub fn render(report: &Report) -> Result<String> {
                 .iter()
                 .map(|(rule, d)| dimension(rule, d))
                 .collect();
+            // A preview language's findings say so: their precision is that
+            // language's own, and they never fail the default gate.
+            let findings: Vec<Value> = file
+                .findings
+                .iter()
+                .map(|finding| {
+                    let mut value = json!(finding);
+                    if let Some(language) =
+                        crate::maturity::preview_language(&file.path, &finding.rule)
+                    {
+                        value["preview"] = json!(language);
+                    }
+                    value
+                })
+                .collect();
             json!({"path":file.path,"status":file.status,"cached":file.cached,"checks":checks,
-            "findings":file.findings,"limitations":file.context_limitations,
+            "findings":findings,"limitations":file.context_limitations,
             "error":file.error,"left_out":file.left_out,
             "classification":file.classification.as_ref().and_then(|class| {
                 (class.reason.as_str() != file.error.as_deref().unwrap_or("")).then_some(class.reason.clone())
@@ -188,5 +203,31 @@ mod tests {
         report.estimated_usd = None;
         assert!(batch_cost(&report).is_none());
         assert!(!html.contains("def value()"));
+    }
+
+    /// The page's data, as its script reads it.
+    fn data(html: &str) -> Value {
+        let data = html
+            .split("<script id=\"data\" type=\"application/json\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</script>").next())
+            .unwrap();
+        serde_json::from_str(data).unwrap()
+    }
+
+    #[test]
+    fn a_preview_language_s_finding_names_its_language() {
+        use crate::schema::Strength::Review;
+        let finding =
+            || crate::tests::finding_of("maintainability/function-simplification", Review);
+        let options = crate::tests::args();
+        let kotlin = crate::tests::gated_at(crate::tests::KOTLIN_FILE, vec![finding()], &options);
+        let decoded = data(&render(&kotlin).unwrap());
+        let shown = &decoded["files"][0]["findings"][0];
+        assert_eq!(shown["preview"], "Kotlin");
+        assert_eq!(shown["gate"], "measuring");
+        let rust = crate::tests::gated(vec![finding()], &options);
+        let decoded = data(&render(&rust).unwrap());
+        assert!(decoded["files"][0]["findings"][0].get("preview").is_none());
     }
 }
