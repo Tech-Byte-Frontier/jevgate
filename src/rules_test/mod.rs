@@ -20,7 +20,7 @@ use crate::{
     units::{Asked, Planned, examples},
 };
 use anyhow::{Result, anyhow, ensure};
-use report::{Planned as PlannedCounts, Report, Usage};
+use report::{Estimate, Report, Usage};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -66,7 +66,7 @@ fn examine(
     let limits = Limits::new(&budget, &unanswered);
     let (mut cases, requests) = plan(&questions, args, context, limits)?;
     let usage = if args.dry_run {
-        Usage::planned(PlannedCounts::of(&requests, &budget, &unanswered))
+        Usage::planned(Estimate::of(&requests, &budget, &unanswered))
     } else {
         ask(&mut cases, &requests, (args, context), (budget, evaluator))?
     };

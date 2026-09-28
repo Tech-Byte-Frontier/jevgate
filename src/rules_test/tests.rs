@@ -327,10 +327,10 @@ fn a_dry_run_counts_what_the_cache_lacks_and_writes_nothing() {
         2,
         "a dry run checks every example can be asked"
     );
+    let text = table(&report);
     assert!(
-        table(&report).contains("  error  failing 1            src/a.rs: it holds no function"),
-        "{}",
-        table(&report)
+        text.contains("): 1 of 1 example cannot be asked\n  error  failing 1            src/a.rs: it holds no function"),
+        "{text}"
     );
 }
 

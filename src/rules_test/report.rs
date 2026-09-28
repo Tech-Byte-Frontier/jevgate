@@ -32,7 +32,7 @@ const READY: &str = "ready";
 
 /// The requests a dry run would send.
 #[derive(Clone, Copy, Default, Serialize)]
-pub(super) struct Planned {
+pub(super) struct Estimate {
     /// Requests the examples need.
     pub requests: usize,
     /// Of those, the ones the cache answers.
@@ -42,7 +42,7 @@ pub(super) struct Planned {
     pub new_input_tokens: u64,
 }
 
-impl Planned {
+impl Estimate {
     /// What `requests` take beyond the answers the cache holds.
     pub(super) fn of(
         requests: &[crate::units::Planned],
@@ -71,7 +71,7 @@ pub(super) struct Usage {
     /// Dollars, priced by the model that answered each request; none when
     /// unknown.
     usd: Option<f64>,
-    planned: Option<Planned>,
+    planned: Option<Estimate>,
 }
 
 impl Usage {
@@ -84,7 +84,7 @@ impl Usage {
         }
     }
 
-    pub(super) fn planned(planned: Planned) -> Self {
+    pub(super) fn planned(planned: Estimate) -> Self {
         Self {
             planned: Some(planned),
             ..Self::default()
@@ -111,7 +111,7 @@ pub(super) struct Report {
     /// for a dry run by the requested one; null when unknown.
     estimated_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    planned: Option<Planned>,
+    planned: Option<Estimate>,
     questions: Vec<Tested>,
     /// Selected questions without examples.
     untested: Vec<String>,
@@ -252,7 +252,7 @@ impl Report {
                 "\n{} ({}): {}",
                 tested.rule,
                 tested.summary,
-                tested.status()
+                tested.status(self.dry_run)
             )?;
             for example in &tested.examples {
                 writeln!(out, "  {}", example.line(tested.threshold))?;
@@ -323,8 +323,9 @@ impl Tested {
         }
     }
 
-    /// How many of its examples it got right, or which it did not.
-    fn status(&self) -> String {
+    /// How many of its examples it got right, or which it did not; in a
+    /// dry run, how many cannot be asked.
+    fn status(&self, dry_run: bool) -> String {
         let total = self.examples.len();
         let count = |result: &str| self.examples.iter().filter(|e| e.result == result).count();
         let of =
@@ -333,6 +334,7 @@ impl Tested {
             (0, 0, 0) => output::count(total, "example"),
             (0, 0, _) => format!("all {} right", output::count(total, "example")),
             (0, wrong, _) => of(wrong, "wrong"),
+            (errors, _, _) if dry_run => of(errors, "cannot be asked"),
             (errors, _, _) => of(errors, "not answered"),
         }
     }
