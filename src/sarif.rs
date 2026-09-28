@@ -258,7 +258,7 @@ mod tests {
         let custom = Finding {
             rule: "custom/body-logs".into(),
             gate: Some(Gating::Fails),
-            ..finding(Strength::Review)
+            ..crate::tests::finding(Strength::Review)
         };
         let args = crate::tests::args();
         let path = Path::new("src/a.rs");
