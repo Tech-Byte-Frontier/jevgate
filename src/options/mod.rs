@@ -234,8 +234,8 @@ pub struct CheckArgs {
     /// ceiling this flag can only lower.
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000), help_heading = BUDGETS)]
     pub max_requests: Option<u32>,
-    /// Maximum simultaneous requests (1-6)
-    #[arg(long, value_name = "N", default_value_t = MAX_CONCURRENCY, value_parser = clap::value_parser!(u32).range(1..=MAX_CONCURRENCY as i64), help_heading = BUDGETS)]
+    /// Maximum simultaneous requests, at most 6; a higher value is lowered to 6
+    #[arg(long, value_name = "N", default_value_t = MAX_CONCURRENCY, value_parser = clap::value_parser!(u32).range(1..), help_heading = BUDGETS)]
     pub concurrency: u32,
     /// Per-file read limit; a larger file is reported as needs-context, never truncated
     #[arg(long, value_name = "BYTES", default_value_t = DEFAULT_MAX_FILE_BYTES, value_parser = clap::value_parser!(u64).range(1..=1048576), help_heading = BUDGETS)]
@@ -292,7 +292,8 @@ pub struct PathLevels {
 /// Upper bound on simultaneous requests, and the default: six workers made 18
 /// to 20 requests a second on the corpus's largest runs (0.3 s a request),
 /// just under TypeSafe's limit of 1,200 a minute; eight would make about 27.
-/// Rate-limit retries share one cooldown.
+/// Rate-limit retries share one cooldown. A higher `--concurrency` or
+/// `concurrency` is lowered to it with a notice, since 0.25 accepted up to 8.
 pub const MAX_CONCURRENCY: u32 = 6;
 
 /// Default read limit per file. Units are sent separately, so this bounds

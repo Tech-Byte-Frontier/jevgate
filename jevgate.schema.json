@@ -268,7 +268,7 @@
       "type": "integer"
     },
     "concurrency": {
-      "description": "Ceiling on simultaneous requests (1-6). Default: 6.",
+      "description": "Ceiling on simultaneous requests, at most 6; a higher value is lowered to 6 with a notice. Default: 6.",
       "maximum": 6,
       "minimum": 1,
       "type": "integer"

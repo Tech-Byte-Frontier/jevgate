@@ -27,7 +27,7 @@ pub struct Config {
     pub rules: Rules,
     /// Ceiling on API attempts per invocation; flags can only lower it. Default: unlimited.
     pub max_requests: Option<u32>,
-    /// Ceiling on simultaneous requests (1-6). Default: 6.
+    /// Ceiling on simultaneous requests, at most 6; a higher value is lowered to 6 with a notice. Default: 6.
     pub concurrency: Option<u32>,
     /// Files larger than this are reported as needs-context, never truncated. Default: 262144.
     pub max_file_bytes: Option<u64>,
@@ -280,13 +280,10 @@ impl ConfigContext {
             args.max_requests = Some(args.max_requests.map_or(n, |limit| limit.min(n)));
         }
         if let Some(n) = self.config.concurrency {
-            ensure!(
-                (1..=crate::options::MAX_CONCURRENCY).contains(&n),
-                "Concurrency must be between 1 and {}",
-                crate::options::MAX_CONCURRENCY
-            );
+            ensure!(n > 0, "Concurrency must be at least 1");
             args.concurrency = args.concurrency.min(n);
         }
+        cap_concurrency(args);
         if let Some(n) = self.config.max_file_bytes {
             args.max_file_bytes = args.max_file_bytes.min(n);
         }
@@ -298,6 +295,22 @@ impl ConfigContext {
             "Budgets must be positive"
         );
         Ok(())
+    }
+}
+
+/// Lower a concurrency above [`MAX_CONCURRENCY`] to it, saying so on stderr:
+/// 0.25 accepted up to 8, and a configuration or script valid then keeps
+/// working.
+///
+/// [`MAX_CONCURRENCY`]: crate::options::MAX_CONCURRENCY
+fn cap_concurrency(args: &mut CheckArgs) {
+    let most = crate::options::MAX_CONCURRENCY;
+    if args.concurrency > most {
+        note!(
+            "jevgate: concurrency {} lowered to {most}, the most requests JevGate sends at once",
+            args.concurrency
+        );
+        args.concurrency = most;
     }
 }
 
@@ -631,8 +644,14 @@ mod tests {
             configured("concurrency = 2", &[], &[]).unwrap().concurrency,
             2
         );
-        for invalid in ["concurrency = 0", "concurrency = 7", "concurrency = 8"] {
-            assert!(configured(invalid, &[], &[]).is_err(), "{invalid}");
+        for valid_in_0_25 in ["concurrency = 7", "concurrency = 8"] {
+            let args = configured(valid_in_0_25, &[], &[]).unwrap();
+            assert_eq!(args.concurrency, 6, "{valid_in_0_25} is lowered");
         }
+        assert!(configured("concurrency = 0", &[], &[]).is_err());
+        let mut flagged = crate::tests::args();
+        flagged.concurrency = 8;
+        cap_concurrency(&mut flagged);
+        assert_eq!(flagged.concurrency, 6, "--concurrency 8 is lowered too");
     }
 }

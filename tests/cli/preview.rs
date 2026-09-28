@@ -253,3 +253,30 @@ fn sarif_is_a_log_on_stdout_and_not_a_watch_format() {
     assert_eq!(watch.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&watch.stderr).contains("--format jsonl"));
 }
+
+#[test]
+fn a_concurrency_above_six_is_lowered_with_a_notice() {
+    let project = Project::new();
+    std::fs::write(project.0.join("jevgate.toml"), "concurrency = 8\n").unwrap();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+    let output = project
+        .command()
+        .args([
+            "check",
+            "--dry-run",
+            "--format",
+            "json",
+            "--concurrency",
+            "7",
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("concurrency 7 lowered to 6"),
+        "values 0.25 accepted keep working: {stderr}"
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["concurrency"], 6);
+}
