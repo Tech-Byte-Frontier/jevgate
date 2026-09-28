@@ -3,7 +3,7 @@
 use anyhow::{Result, bail, ensure};
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     ops::{ControlFlow, Range},
     path::Path,
     time::{Duration, Instant},
@@ -19,17 +19,27 @@ const CACHE_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 /// parentheses, which it parses in no time once it knows the file is Bend 1.
 const PARSE_TIME: Duration = Duration::from_secs(10);
 
+/// Syntax nested deeper than this is not read: the analyses walk trees
+/// recursively, and a C function of 8,000 nested `if` blocks (142 KB, under
+/// the default file limit) overflowed the stack and aborted the whole run,
+/// as a JavaScript expression of 20,000 terms did before. The deepest trees
+/// of the corpus's 23,700 code files nest 405 levels (a Bend 2 game's
+/// server) and 100 outside Bend 2.
+const MAX_DEPTH: usize = 1_000;
+
 /// Why a file of a supported language was not judged, as its skip reason.
 pub(crate) const SYNTAX_ERRORS: &str = "Syntax errors; this file was not judged.";
 pub(crate) const BEND1: &str = "Bend 1 syntax: JevGate reads Bend 2 (bendlang/bend 2.0.x), a different language that shares the .bend extension; this file was not judged.";
 pub(crate) const SLOW_PARSE: &str =
     "The parser did not finish within 10 seconds; this file was not judged.";
+pub(crate) const TOO_DEEP: &str =
+    "Its syntax nests more than 1,000 levels deep; this file was not judged.";
 
 /// The skip reason of a parse error: its message when it is one of the
 /// reasons above, and syntax errors otherwise.
 pub(crate) fn skip_reason(error: &anyhow::Error) -> &'static str {
     let message = error.to_string();
-    [BEND1, SLOW_PARSE]
+    [BEND1, SLOW_PARSE, TOO_DEEP]
         .into_iter()
         .find(|reason| message == *reason)
         .unwrap_or(SYNTAX_ERRORS)
@@ -46,8 +56,9 @@ struct ParseCache {
     entries: BTreeMap<(String, String), Parsed>,
     bytes: usize,
     clock: u64,
-    /// Sources whose parse was stopped, so later callers skip them at once.
-    stopped: BTreeSet<(String, String)>,
+    /// Sources whose parse was stopped or whose tree is too deep to walk,
+    /// with the reason, so later callers skip them at once.
+    refused: BTreeMap<(String, String), &'static str>,
 }
 
 impl ParseCache {
@@ -176,21 +187,33 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         bail!(BEND1);
     }
     let key = (kind, crate::schema::hash(source.as_bytes()));
-    if PARSES.with(|cache| cache.borrow().stopped.contains(&key)) {
-        bail!(SLOW_PARSE);
+    if let Some(reason) = PARSES.with(|cache| cache.borrow().refused.get(&key).copied()) {
+        bail!(reason);
     }
     let tree = match PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
         Some(tree) => tree,
         None => {
             let mut parser = Parser::new();
             parser.set_language(&language)?;
-            let Some(tree) = parse_in_time(&mut parser, scripts.as_deref().unwrap_or(source))
-            else {
-                PARSES.with(|cache| cache.borrow_mut().stopped.insert(key));
-                bail!(SLOW_PARSE);
-            };
-            PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
-            tree
+            let tree = parse_in_time(&mut parser, scripts.as_deref().unwrap_or(source))
+                .ok_or(SLOW_PARSE)
+                .and_then(|tree| {
+                    if deeper_than(&tree, MAX_DEPTH) {
+                        Err(TOO_DEEP)
+                    } else {
+                        Ok(tree)
+                    }
+                });
+            match tree {
+                Ok(tree) => {
+                    PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
+                    tree
+                }
+                Err(reason) => {
+                    PARSES.with(|cache| cache.borrow_mut().refused.insert(key, reason));
+                    bail!(reason);
+                }
+            }
         }
     };
     // Whether errors are tolerable depends on the path, not only the source.
@@ -200,6 +223,27 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         "Syntax errors: semantic evaluation was not attempted"
     );
     Ok(Some(tree))
+}
+
+/// Whether a tree nests more than `limit` levels, found without recursion.
+fn deeper_than(tree: &Tree, limit: usize) -> bool {
+    let mut cursor = tree.walk();
+    let mut depth = 0;
+    loop {
+        if cursor.goto_first_child() {
+            depth += 1;
+            if depth > limit {
+                return true;
+            }
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return false;
+            }
+            depth -= 1;
+        }
+    }
 }
 
 /// The tree of `text`, or none when parsing takes longer than `PARSE_TIME`.
@@ -379,6 +423,24 @@ mod tests {
         assert!(parse(path, &format!("/* <%= banner %> */\n{c}")).is_ok());
         // In code, a tag is a generator template's placeholder.
         assert!(parse(path, &format!("int <%= name %>(void);\n{c}")).is_err());
+    }
+
+    #[test]
+    fn syntax_nested_deeper_than_code_is_written_is_refused_before_any_walk() {
+        let nested = |depth: usize| {
+            format!(
+                "int f(int x) {{\n{}{}}}\n",
+                "if (x) {\n".repeat(depth),
+                "}\n".repeat(depth)
+            )
+        };
+        let path = Path::new("deep.c");
+        assert!(parse(path, &nested(100)).unwrap().is_some());
+        // Each `if` nests two levels: 1,200 in all.
+        for _ in 0..2 {
+            let error = parse(path, &nested(600)).unwrap_err();
+            assert_eq!(skip_reason(&error), TOO_DEEP);
+        }
     }
 
     #[test]
