@@ -62,7 +62,7 @@ pub(super) fn plan(
                 } else {
                     BTreeMap::new()
                 },
-                units: Vec::new(),
+                ..FilePlan::default()
             },
         );
         projects

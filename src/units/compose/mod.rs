@@ -131,6 +131,14 @@ impl<'p> Tally<'p> {
         }
         let (outcome, answers) = resolved(unit, judgments);
         let outcome = capped(unit, judgments, few, outcome);
+        // Text written to steer the reviewer keeps the unit that sends it
+        // from clearing: its answers may be the text's, not the code's.
+        let steered = steered(plan, unit, judgments)
+            .filter(|_| matches!(outcome, Outcome::Clear | Outcome::Note(_)));
+        let outcome = match steered {
+            Some(_) => Outcome::Uncertain(outcome.concern()),
+            None => outcome,
+        };
         // Two tests that check one behavior with different inputs are a note
         // on their own; three or more linked by such pairs are grouped into a
         // consider below. Labeled by hand on just, express, gson and
@@ -164,10 +172,15 @@ impl<'p> Tally<'p> {
             None if outcome == Outcome::Clear => count.clear += 1,
             None => {
                 count.uncertain += 1;
-                self.undecided
-                    .entry(unit.rule)
-                    .or_default()
-                    .push(undecided_unit(plan, unit, &answers, quotes));
+                let mut undecided = undecided_unit(plan, unit, &answers, quotes);
+                if let Some(line) = steered {
+                    // Undecided for the text, not for its questions: a verify
+                    // item names the text in their place.
+                    undecided.questions =
+                        vec![format!("text written to steer a reviewer (line {line})")];
+                    undecided.open.clear();
+                }
+                self.undecided.entry(unit.rule).or_default().push(undecided);
             }
         }
         if let (
@@ -186,6 +199,17 @@ impl<'p> Tally<'p> {
             });
         }
     }
+}
+
+/// The line of a text sent with `unit` that Jev read, at 0.80, as written
+/// to steer its reviewer: a comment or string telling it the code is safe or
+/// to ignore it.
+fn steered(plan: &FilePlan, unit: &UnitPlan, judgments: &[Judgment]) -> Option<usize> {
+    plan.steering
+        .iter()
+        .filter(|s| s.units.contains(&unit.id))
+        .find(|s| s.answer(judgments).is_some_and(super::outcome::at_least))
+        .map(|s| s.line)
 }
 
 /// Counts a unit that is too small, needs context or was left unasked under

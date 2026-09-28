@@ -35,7 +35,7 @@ use answers::Questions;
 pub use answers::{Asked, record};
 use evidence::{FileContext, compact, identity, pack, pack_runs, request, unique_ids};
 pub use follow_ups::{doc_checks, kinds, locates, parts, rechecks, settles, traces, value_kinds};
-pub use guards::{weaker_answer, weaker_request};
+pub use guards::{Steering, weaker_answer, weaker_request};
 use plan::Scope;
 pub use plan::plan;
 pub use spacetimedb::spacetimedb_module;
@@ -405,6 +405,9 @@ pub struct FilePlan {
     /// Rules that apply to this file, with the candidates omitted by caps.
     pub rules: BTreeMap<&'static str, usize>,
     pub units: Vec<UnitPlan>,
+    /// Comments and strings addressed to a reviewer that some request of
+    /// the file sends, each asked whether it is written to steer the reviewer.
+    pub steering: Vec<Steering>,
 }
 
 #[derive(Default)]

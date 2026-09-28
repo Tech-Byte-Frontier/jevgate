@@ -17,6 +17,7 @@ pub mod routes;
 pub mod ruby;
 pub mod sites;
 pub mod sql;
+pub mod steering;
 mod summary;
 pub mod template_code;
 pub mod test_map;

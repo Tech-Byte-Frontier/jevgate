@@ -1,9 +1,10 @@
 //! Guards: what a change does to the checks around the code. Code finds new
 //! suppressions, skipped, focused or deleted tests, and edits to
 //! `jevgate.toml` or the baseline; Jev is asked only whether a changed
-//! assertion now checks less. Guards are reported, never fail a check:
-//! most suppressions and skips are legitimate, JevGate cannot see the
-//! other tools' findings, and the question has no labels on unseen projects.
+//! assertion now checks less and whether text addressed to a reviewer is
+//! written to steer it. Guards are reported, never fail a check: most
+//! suppressions and skips are legitimate, JevGate cannot see the other
+//! tools' findings, and the two questions have no labels on unseen projects.
 mod cases;
 mod lines;
 mod markers;
@@ -44,6 +45,8 @@ pub enum Kind {
     WeakerAssertion,
     Configuration,
     Baseline,
+    /// Text addressed to a reviewer that Jev reads as written to steer it.
+    Steering,
 }
 
 /// One guard: where, what was found and what it does.
@@ -105,6 +108,24 @@ impl Guard {
         })
     }
 
+    /// The text at `line` of `path`, when Jev read it at 0.80 as written to
+    /// steer a reviewer.
+    fn steering(path: &Path, line: usize, text: &str, probability: f64) -> Option<Self> {
+        raised(probability).then(|| Self {
+            probability: Some(probability),
+            ..Self::new(
+                Kind::Steering,
+                path,
+                Some(line),
+                text,
+                format!(
+                    "holds text written to steer a reviewer ({}), so no unit sent with it can clear",
+                    percent(probability)
+                ),
+            )
+        })
+    }
+
     /// `path:line message: text`, one line, for the agent text and the hook.
     pub fn describe(&self) -> String {
         let location = match self.line {
@@ -113,7 +134,11 @@ impl Guard {
         };
         let quoted = matches!(
             self.kind,
-            Kind::Allow | Kind::Suppression | Kind::SkippedTest | Kind::FocusedTest
+            Kind::Allow
+                | Kind::Suppression
+                | Kind::SkippedTest
+                | Kind::FocusedTest
+                | Kind::Steering
         );
         if quoted {
             format!("{location} {}: {}", self.message, self.text)
@@ -243,6 +268,23 @@ impl<'c> Texts<'c> {
 /// Guards in the order of their files and lines.
 pub(crate) fn sort(guards: &mut [Guard]) {
     guards.sort_by(|a, b| (&a.path, a.line, a.kind).cmp(&(&b.path, b.line, b.kind)));
+}
+
+/// The texts Jev read, at 0.80, as written to steer a reviewer, from each
+/// file's plan and answers.
+pub(crate) fn steering(
+    plan: &crate::units::Plan,
+    files: &[crate::schema::FileResult],
+) -> Vec<Guard> {
+    plan.files
+        .iter()
+        .flat_map(|(&owner, file)| {
+            file.steering.iter().filter_map(move |text| {
+                let p = text.answer(&files[owner].judgments)?;
+                Guard::steering(&file.path, text.line, &text.text, p)
+            })
+        })
+        .collect()
 }
 
 /// Whether Jev's answer raises a guard: at 0.80, the bar of a review.

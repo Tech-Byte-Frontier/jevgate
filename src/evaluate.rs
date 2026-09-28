@@ -305,7 +305,7 @@ impl Session<'_> {
             }
         }
         compose_files(&plan, report);
-        self.guard(report);
+        self.guard(&plan, report);
         if self.observed.1 > 0 {
             self.budget.observe(self.observed.0, self.observed.1);
             self.budget.save(self.store)?;
@@ -314,13 +314,14 @@ impl Session<'_> {
     }
 
     /// What the change does to the checks around the code (`guards`): what
-    /// code finds, and the tests whose rewritten assertions Jev reads as
-    /// checking less.
-    fn guard(&mut self, report: &mut Report) {
+    /// code finds, the tests whose rewritten assertions Jev reads as checking
+    /// less, and the text it reads as written to steer a reviewer.
+    fn guard(&mut self, plan: &crate::units::Plan, report: &mut Report) {
         let scope = crate::inventory::scope(self.args, self.context).unwrap_or_default();
         let scan = crate::guards::scan(&self.context.root, self.args, &self.context.config, &scope);
         let mut guards = scan.guards;
         guards.extend(self.weaker_tests(&scan.changed_tests, report));
+        guards.extend(crate::guards::steering(plan, &report.files));
         crate::guards::sort(&mut guards);
         report.guards = guards;
     }

@@ -115,7 +115,7 @@ mod tests {
             test_rules(),
             security(),
             documentation(),
-            vec![weaker()],
+            vec![steers(), weaker()],
         ]
         .concat()
     }

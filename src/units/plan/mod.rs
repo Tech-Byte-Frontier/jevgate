@@ -108,6 +108,9 @@ pub fn plan(
         };
         handlers::plan(&scope, &evidence, args, budget, &mut result);
     }
+    for &owner in &scope.owners {
+        file::plan_steering(&scope, owner, args, budget, &mut result);
+    }
     let drift = drift::Shared::new(
         inputs,
         &scope.documents,

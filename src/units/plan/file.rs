@@ -13,8 +13,8 @@ use crate::{
     options::CheckArgs,
     token_budget::Limits,
     units::{
-        FileContext, FilePlan, Planned, comments, duplicates, functions, hardcoded, laws, outline,
-        spacetimedb, test_units,
+        FileContext, FilePlan, Plan, Planned, comments, duplicates, functions, guards, hardcoded,
+        laws, outline, spacetimedb, test_units,
     },
 };
 use std::{
@@ -127,6 +127,32 @@ pub(super) fn plan_file(
         plan_module(shared, &context, framework, &mut file, requests);
     }
     file
+}
+
+/// Ask about the text addressed to a reviewer in one selected code file,
+/// once every rule has planned its requests: only text a request sends can
+/// move an answer.
+pub(super) fn plan_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    args: &CheckArgs,
+    budget: Limits<'_>,
+    plan: &mut Plan,
+) {
+    let input = &scope.inputs[owner];
+    let source = input.source.as_deref().unwrap_or("");
+    let tests = scope.test_lines(owner);
+    // A string in test code is the test's data: JevGate's own tests of this
+    // check hold steering examples, all read as steering.
+    let texts: Vec<_> = crate::analysis::steering::texts(&input.result.path, source)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|text| !(text.string && tests.iter().any(|lines| lines.contains(&text.line))))
+        .collect();
+    if let (false, Some(file)) = (texts.is_empty(), plan.files.get_mut(&owner)) {
+        let context = file_context(input, owner, args, budget);
+        guards::plan_steering(&context, texts, file, &mut plan.requests);
+    }
 }
 
 /// One selected code file's facts, with the role a web framework gives it.
