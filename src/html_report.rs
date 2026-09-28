@@ -56,7 +56,8 @@ pub fn render(report: &Report) -> Result<String> {
         "status":report.status,"complete":report.complete,"settled":report.settled,
         "refresh":report.watcher_pid.is_some(),"model":report.requested_model,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
-        "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
+        "cost":batch_cost(report),"unmetered":report.unmetered_requests,
+        "gate":report.gate,"fail_on":report.fail_on,
         "fail_on_mature":report.fail_on_mature,
         "errors":report.errors,"deleted":report.deleted_files,"base":report.base_revision,
         "scope":report.scope,"files":files,"rules":rules,
@@ -163,6 +164,7 @@ mod tests {
             serde_json::json!({"right": 20, "labeled": 23})
         );
         assert_eq!(decoded["scope"], "whole-files");
+        assert_eq!(decoded["unmetered"], 0);
         assert!(!html.contains("id=\"root\""));
         assert_eq!(batch_cost(&report).unwrap()["estimated_usd"], 0.0);
         report.estimated_usd = Some(0.042);
