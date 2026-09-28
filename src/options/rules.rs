@@ -45,6 +45,7 @@ pub enum RulesAction {
     /// proposal is a note, which never fails the gate, until its `level` says
     /// otherwise.
     Accept {
+        /// Proposals to accept: their file names in .jevgate/proposals/, without .toml
         #[arg(required = true, value_name = "ID")]
         ids: Vec<String>,
     },

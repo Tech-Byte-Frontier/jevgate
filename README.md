@@ -23,6 +23,7 @@ JevGate 0.28.0 on [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424
 | Tests | Test value (mock-only checks, expected values recomputed with the code's own logic), test redundancy | with `--include-tests` |
 | Security | Injection, sensitive data, unsafe settings, SQL access control, GitHub workflows; each finding names a CWE | `--rule security` |
 | Documentation | Agent instruction files, large and stale docs, duplicated sections, code comments | `--rule documentation` |
+| Custom | Your team's conventions as yes/no questions in `jevgate.toml` or `.jevgate/questions/`, drafted from `AGENTS.md` by `jevgate rules propose` or added from a measured gallery with `jevgate rules add` ([custom questions](https://tech-byte-frontier.github.io/jevgate/custom-questions.html)) | once defined |
 
 It reads Rust, Python, JavaScript, TypeScript, Go, C#, Ruby, PHP, Java and Bend 2, the scripts of Astro, Vue and Svelte files and the inline scripts of server templates (ERB, EJS, JSP, Handlebars, Jinja and others), SQL for PostgreSQL and Supabase, GitHub Actions workflows, and Markdown, MDX, reStructuredText and AsciiDoc, and knows the routes, handlers and settings of frameworks from Express, Next.js and SvelteKit to Django, Laravel, ASP.NET Core and Spring MVC. [What it finds](https://tech-byte-frontier.github.io/jevgate/what-it-finds.html) and [supported languages and frameworks](https://tech-byte-frontier.github.io/jevgate/languages.html) have the details; `jevgate rules` prints every rule with the question it asks.
 
@@ -88,7 +89,7 @@ It reviews only what the pull request changed (the functions, tests and comments
 | 1 | Gate failed |
 | 2 | Run incomplete, invalid configuration or invalid usage |
 
-Findings are `review` (act on it), `consider` (worth a look) or `note` (optional). A file whose answers stay undecided is `uncertain`, never hidden or counted as clear. By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the gate (`jevgate rules` shows them); the other findings are reported without failing it. `--fail-on` and `jevgate.toml` set what fails the gate, per rule and per path. `jevgate baseline` accepts today's findings, and a `jevgate: allow(RULE) reason` comment accepts one where it is.
+Findings are `review` (act on it), `consider` (worth a look) or `note` (optional). A file whose answers stay undecided is `uncertain`, never hidden or counted as clear. By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the gate (`jevgate rules` shows them), and custom questions at their own level; the other findings are reported without failing it. `--fail-on` and `jevgate.toml` set what fails the gate, per rule and per path. `jevgate baseline` accepts today's findings, and a `jevgate: allow(RULE) reason` comment accepts one where it is.
 
 ## Privacy and cost
 

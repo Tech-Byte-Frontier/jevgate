@@ -88,9 +88,11 @@ use options::JevCommand;
 /// and undecided answers are reported as uncertain instead of hidden.
 ///
 /// Rule groups: maintainability (on by default, except hardcoded values),
-/// tests (with --include-tests), and the opt-in security and documentation
-/// groups. By default only rules and levels measured right at least 80% of
-/// the time on projects JevGate was never tuned on fail the check.
+/// tests (with --include-tests), the opt-in security and documentation
+/// groups, and custom: a team's own conventions, written as questions. By
+/// default only rules and levels measured right at least 80% of the time on
+/// projects JevGate was never tuned on fail the check, and custom questions
+/// at their own level.
 #[derive(Parser)]
 #[command(version, after_long_help = options::OVERVIEW)]
 pub struct Cli {

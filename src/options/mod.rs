@@ -169,8 +169,9 @@ pub struct CheckArgs {
     pub question_directory: Option<PathBuf>,
     /// Select a rule ID, name, key or group (repeatable) [default: the `default` group]
     ///
-    /// Groups: maintainability, tests, security, documentation, default (every
-    /// rule on by default) and all. Naming any rule replaces the configured
+    /// Groups: maintainability, tests, security, documentation, custom (the
+    /// custom questions; one is `custom/<id>`), default (every rule on by
+    /// default) and all. Naming any rule replaces the configured
     /// selection, so add `--rule default` to keep the defaults. Test rules also
     /// need --include-tests. `jevgate rules` lists every rule.
     #[arg(long = "rule", value_name = "RULE", help_heading = RULES)]

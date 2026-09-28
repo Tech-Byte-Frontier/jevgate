@@ -76,8 +76,9 @@ pub enum JevCommand {
     ///
     /// A rule is named by its ID (`maintainability/shared-logic`), its key
     /// (`shared_logic`) or its group (`maintainability`, `tests`, `security`,
-    /// `documentation`, plus `default` and `all`) anywhere a rule is accepted:
-    /// `--rule`, `--skip-rule`, `--fail-on TARGET=LEVEL` and `[rules]`.
+    /// `documentation`, `custom`, plus `default` and `all`) anywhere a rule is
+    /// accepted: `--rule`, `--skip-rule`, `--fail-on TARGET=LEVEL` and
+    /// `[rules]`. A custom question is named `custom/<id>`.
     ///
     /// Each rule shows how often its reviews and considers were right on
     /// projects JevGate was never tuned on, from findings labeled from the
@@ -272,6 +273,7 @@ Exit codes:
 Files (at the repository root):
   jevgate.toml            Configuration; `jevgate init` writes a commented one
   jevgate-baseline.json   Accepted findings; commit it
+  .jevgate/questions/     Custom questions, one per file; commit them
   .jevgate/cache/         Answers by state and question; safe to restore and save in CI
   .jevgate/latest.json    The last report, the same JSON as --format json
   .jevgate/report.html    HTML dashboard, with --report
