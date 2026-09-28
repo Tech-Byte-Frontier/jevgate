@@ -604,6 +604,32 @@ pub fn has_tree(root: &Path, id: &str) -> bool {
     is_object_id(id) && git(root, &["cat-file", "-e", &format!("{id}^{{tree}}")]).is_ok()
 }
 
+/// The entries directly in `directory` (relative to `root`) of `revision`, a
+/// commit or tree, relative to `root`, each with whether it is a regular
+/// file (not a link, directory or submodule); none when the revision has no
+/// such directory.
+pub(crate) fn tree_entries(
+    root: &Path,
+    revision: &str,
+    directory: &Path,
+) -> Result<Vec<(PathBuf, bool)>> {
+    let inside = format!("{}/", directory.to_string_lossy().replace('\\', "/"));
+    let listed = git(root, &["ls-tree", "-z", revision, "--", &inside])?;
+    listed
+        .split(|b| *b == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            // `<mode> <type> <object>\t<path>`
+            let entry = std::str::from_utf8(entry)?;
+            let (header, path) = entry
+                .split_once('\t')
+                .with_context(|| format!("Git printed an unexpected tree entry: {entry}"))?;
+            let regular = header.starts_with("100644 ") || header.starts_with("100755 ");
+            Ok((PathBuf::from(path), regular))
+        })
+        .collect()
+}
+
 /// The text of each of `paths` (relative to `root`) in `revision`, a commit
 /// or tree, read by one Git process: a path the revision lacks, or whose
 /// blob is larger than `limit`, not UTF-8 or holds NUL bytes, is left out.

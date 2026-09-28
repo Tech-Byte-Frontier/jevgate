@@ -285,23 +285,67 @@ pub fn load(
 ) -> Result<Vec<Question>> {
     let shown =
         |path: &Path| crate::discovery::relative(path, root).unwrap_or_else(|_| path.to_path_buf());
-    let mut questions = Vec::new();
-    for (index, spec) in specs.iter().enumerate() {
-        let id = spec.id.as_deref().ok_or_else(|| {
-            anyhow!(
-                "Question {} in {} needs an id",
-                index + 1,
-                shown(file).display()
-            )
-        })?;
-        questions.push(validate(spec, id, shown(file))?);
-    }
-    for path in directory
+    let files = directory
         .map(question_files)
         .transpose()?
-        .unwrap_or_default()
-    {
-        questions.push(read_file(&path, shown(&path))?);
+        .unwrap_or_default();
+    let filed = files.iter().map(|path| read_file(path, shown(path)));
+    gather((&shown(file), specs), filed)
+}
+
+/// The questions of a configuration as Git tree or commit `revision` holds
+/// them: the `[[question]]` tables of `file` (read from that revision by
+/// the caller) and the question files of [`DIRECTORY`] there, held to what
+/// [`load`] holds them to. The agent hook judges a turn by the questions as
+/// the turn began, so deleting, lowering or breaking one counts from the
+/// next turn.
+pub fn load_at(
+    root: &Path,
+    revision: &str,
+    (file, specs): (&Path, &[Spec]),
+) -> Result<Vec<Question>> {
+    let listed = crate::revision::tree_entries(root, revision, Path::new(DIRECTORY))?;
+    let (files, links): (Vec<_>, Vec<_>) = listed
+        .into_iter()
+        .filter(|(path, _)| question_file(path))
+        .partition(|(_, regular)| *regular);
+    if let Some((link, _)) = links.first() {
+        anyhow::bail!(
+            "Cannot read {}: a link is not a question file",
+            link.display()
+        );
+    }
+    let paths: Vec<&Path> = files.iter().map(|(path, _)| path.as_path()).collect();
+    let mut texts = crate::revision::blobs(root, revision, &paths, FILE_BYTES)?;
+    let filed = paths.iter().map(|path| {
+        let text = texts.remove(*path).with_context(|| {
+            format!(
+                "Cannot read {}: larger than {FILE_BYTES} bytes, or not text",
+                path.display()
+            )
+        })?;
+        from_text(&text, &stem(path), path.to_path_buf())
+    });
+    gather((file, specs), filed)
+}
+
+/// The questions of `specs`, the `[[question]]` tables of `file`, then the
+/// `filed` ones, each from its own file. An id defined twice is an error
+/// naming both places.
+fn gather(
+    (file, specs): (&Path, &[Spec]),
+    filed: impl IntoIterator<Item = Result<Question>>,
+) -> Result<Vec<Question>> {
+    let mut questions = Vec::new();
+    for (index, spec) in specs.iter().enumerate() {
+        let id = spec
+            .id
+            .as_deref()
+            .ok_or_else(|| anyhow!("Question {} in {} needs an id", index + 1, file.display()))?;
+        questions.push(validate(spec, id, file.to_path_buf())?);
+    }
+    for question in filed {
+        questions.push(question?);
     }
     for (at, question) in questions.iter().enumerate() {
         if let Some(earlier) = questions[..at].iter().find(|q| q.rule == question.rule) {
@@ -329,15 +373,29 @@ pub(crate) fn question_files(directory: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in entries {
         let path = entry?.path();
-        let visible = path
-            .file_name()
-            .is_some_and(|name| !name.to_string_lossy().starts_with('.'));
-        if visible && path.extension().is_some_and(|e| e == "toml") && path.is_file() {
+        if question_file(&path) && path.is_file() {
             files.push(path);
         }
     }
     files.sort();
     Ok(files)
+}
+
+/// Whether a file of the questions directory is read as a question: a
+/// `.toml` file whose name does not start with a dot, as editors name their
+/// backups.
+fn question_file(path: &Path) -> bool {
+    let visible = path
+        .file_name()
+        .is_some_and(|name| !name.to_string_lossy().starts_with('.'));
+    visible && path.extension().is_some_and(|e| e == "toml")
+}
+
+/// A file's name without its extension, which names a question file's id.
+fn stem(path: &Path) -> String {
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// One question file, whose name is its id. It is read as sources are, so a
@@ -346,20 +404,22 @@ pub(crate) fn question_files(directory: &Path) -> Result<Vec<PathBuf>> {
 pub(crate) fn read_file(path: &Path, shown: PathBuf) -> Result<Question> {
     let text = crate::inventory::read_source(path, FILE_BYTES)
         .with_context(|| format!("Cannot read {}", shown.display()))?;
+    from_text(&text, &stem(path), shown)
+}
+
+/// A question file's `text`, whose file name without `.toml` is `stem`, its
+/// id; `shown` names the file in errors.
+fn from_text(text: &str, stem: &str, shown: PathBuf) -> Result<Question> {
     let spec: Spec =
-        toml::from_str(&text).with_context(|| format!("Invalid {}", shown.display()))?;
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        toml::from_str(text).with_context(|| format!("Invalid {}", shown.display()))?;
     if let Some(id) = &spec.id {
         ensure!(
-            *id == stem,
+            id == stem,
             "Question id {id:?} in {} does not match its file name; name the file {id}.toml or remove the id",
             shown.display()
         );
     }
-    validate(&spec, &stem, shown)
+    validate(&spec, stem, shown)
 }
 
 /// A question checked field by field; every error names it and its file.

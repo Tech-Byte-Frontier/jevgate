@@ -1,8 +1,8 @@
 //! Snapshots of the working tree for the agent hook's turns: a Git tree of
-//! the tracked and untracked files under the root, less ignored ones,
-//! written through a copy of the repository's index, so its own index and
-//! stash list are never touched. Every Git process a snapshot runs is stopped
-//! at the event's deadline.
+//! the tracked and untracked files under the root, less ignored ones but the
+//! custom question files, written through a copy of the repository's index,
+//! so its own index and stash list are never touched. Every Git process a
+//! snapshot runs is stopped at the event's deadline.
 use super::{is_object_id, object_id};
 use anyhow::{Context, Result, bail, ensure};
 use std::{
@@ -122,6 +122,7 @@ impl Snapshot<'_> {
         let listed = self.git(&args, None)?;
         let large = self.large(&listed);
         self.add(&large)?;
+        self.add_questions()?;
         if !large.is_empty() {
             self.stand_ins(&large)?;
         }
@@ -160,10 +161,37 @@ impl Snapshot<'_> {
         for skipped in skipped_directories() {
             pathspecs.extend(format!("{skipped}\0").bytes());
         }
+        self.add_listed("--all", pathspecs)
+    }
+
+    /// Record the custom question files, even those Git ignores: the hook's
+    /// gate reads them as the turn began, and `jevgate check` asks them from
+    /// the working tree when a `.gitignore` entry such as `/.jevgate/` hides
+    /// them, so the turn is judged by the same questions.
+    fn add_questions(&self) -> Result<()> {
+        let files =
+            crate::custom::question_files(&crate::custom::directory(self.root)).unwrap_or_default();
+        let pathspecs: Vec<u8> = files
+            .iter()
+            .filter_map(|file| file.strip_prefix(self.root).ok())
+            .flat_map(|file| {
+                let name = file.to_string_lossy().replace('\\', "/");
+                format!(":(literal){name}\0").into_bytes()
+            })
+            .collect();
+        if pathspecs.is_empty() {
+            return Ok(());
+        }
+        self.add_listed("--force", pathspecs)
+    }
+
+    /// `git add` with `how` (`--all`, `--force`) of the NUL-separated
+    /// `pathspecs`, passing over a file Git cannot read (exit 1).
+    fn add_listed(&self, how: &str, pathspecs: Vec<u8>) -> Result<()> {
         self.run(
             &[
                 "add",
-                "--all",
+                how,
                 "--ignore-errors",
                 "--pathspec-from-file=-",
                 "--pathspec-file-nul",

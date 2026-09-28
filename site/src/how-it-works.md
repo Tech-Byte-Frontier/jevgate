@@ -855,8 +855,9 @@ signatures, or one candidate pair.
    (`intended`, `later`, `wrong`) that survives rewrites; `baseline stats`
    counts them.
    [Guards](output.md#guards) are reported beside the gate and never fail it.
-   Within an agent's turn, the hook's checks read `jevgate.toml`, the
-   baseline and allow comments as they were when the turn began.
+   Within an agent's turn, the hook's checks read `jevgate.toml`, the custom
+   questions, the baseline and allow comments as they were when the turn
+   began.
 
 ### Constraints
 

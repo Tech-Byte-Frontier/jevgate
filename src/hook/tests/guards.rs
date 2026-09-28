@@ -183,6 +183,68 @@ fn settings_the_turn_breaks_do_not_let_the_agent_stop() {
     }
 }
 
+/// A custom question about every function, which `reviewing` answers yes.
+const BODY_LOGS: &str =
+    "question = \"Does this function write a request body to a log?\"\nunit = \"function\"\n";
+
+/// A repository judged only by `custom/body-logs`, from its question file;
+/// with `ignored`, a root `.gitignore` entry of `/.jevgate/` keeps that file
+/// out of Git, as JevGate's own repository does.
+fn questioned(ignored: bool) -> Project {
+    let project = Project::new();
+    project.write("jevgate.toml", "rules = [\"custom\"]\n");
+    project.write(".jevgate/questions/body-logs.toml", BODY_LOGS);
+    project.write("lib.rs", &function("f"));
+    if ignored {
+        project.write(".gitignore", "/.jevgate/\n");
+    }
+    project.git(&["init", "-q"]);
+    project.git(&["add", "."]);
+    project.git(&["commit", "-qm", "start"]);
+    project
+}
+
+#[test]
+fn a_question_the_turn_deletes_lowers_or_breaks_does_not_let_the_agent_stop() {
+    let lowered = format!("{BODY_LOGS}level = \"note\"\n");
+    let edits = [
+        ("lowered", Some(lowered.as_str()), false),
+        (
+            "broken",
+            Some("question = \"Logs a body.\"\nunit = \"function\"\n"),
+            false,
+        ),
+        ("deleted", None, false),
+        (
+            "lowered, where Git ignores it",
+            Some(lowered.as_str()),
+            true,
+        ),
+    ];
+    for (how, text, ignored) in edits {
+        let project = questioned(ignored);
+        let host = reviewing();
+        send(&project, &host, prompt("log the orders"));
+        project.write("lib.rs", &long_function("charge"));
+        let file = project.0.join(".jevgate/questions/body-logs.toml");
+        match text {
+            Some(text) => std::fs::write(&file, text).unwrap(),
+            None => std::fs::remove_file(&file).unwrap(),
+        }
+        let blocked = send(&project, &host, stop(false));
+        assert_eq!(blocked["decision"], "block", "{how}: {blocked}");
+        assert!(
+            reason(&blocked).contains("- lib.rs:1 review custom/body-logs (fails the gate): "),
+            "{how}: {blocked}"
+        );
+        // From the next turn on, the edit is the person's to keep or undo.
+        send(&project, &host, prompt("go on"));
+        project.write("lib.rs", &long_function("refund"));
+        let next = send(&project, &host, stop(false));
+        assert!(next.get("decision").is_none(), "{how}: {next}");
+    }
+}
+
 #[test]
 fn a_generated_code_marker_added_in_the_turn_does_not_let_the_agent_stop() {
     let project = repository();

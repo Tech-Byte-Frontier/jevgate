@@ -1,10 +1,10 @@
 //! One check inside the hook: the repository's configuration, the files the
 //! turn changed, and the gate's levels, run on a worker thread so the hook
 //! answers the agent by its deadline whatever the provider does. Within a
-//! turn, the check reads jevgate.toml, the baseline and `jevgate: allow`
-//! comments as they were when the turn began: accepting a finding or
-//! loosening the gate is the person's decision, so the agent's edits to
-//! them count from the next turn, and the person is told of each.
+//! turn, the check reads jevgate.toml, the custom questions, the baseline
+//! and `jevgate: allow` comments as they were when the turn began: accepting
+//! a finding or loosening the gate is the person's decision, so the agent's
+//! edits to them count from the next turn, and the person is told of each.
 use super::outage::{Waiting, Watch, Watched};
 use crate::{
     check,
@@ -285,18 +285,20 @@ fn finished(
 }
 
 /// The repository's configuration for a check of `scope`: within a turn,
-/// jevgate.toml as the turn began, so the agent's edits to it, even one that
-/// breaks it, count from the next turn; else the one there now.
+/// jevgate.toml and the custom questions as the turn began, so the agent's
+/// edits to them, even one that deletes, lowers or breaks a question, count
+/// from the next turn; else those there now.
 fn context(place: &Place, scope: &Scope) -> Result<ConfigContext> {
     let Some((start, _)) = &scope.trees else {
         return ConfigContext::discover_in(&place.cwd, None, None);
     };
     let config = configuration_at(&place.root, start)?;
-    let questions = crate::custom::load(
+    let questions = crate::custom::load_at(
         &place.root,
-        (&place.root.join(CONFIG_FILE), &config.question),
-        Some(&crate::custom::directory(&place.root)),
-    )?;
+        start,
+        (Path::new(CONFIG_FILE), &config.question),
+    )
+    .context("Invalid custom questions as the turn began")?;
     Ok(ConfigContext {
         invocation_dir: place.cwd.clone(),
         root: place.root.clone(),

@@ -193,6 +193,54 @@ fn ids_are_required_unique_and_safe_to_name_a_rule() {
 }
 
 #[test]
+fn question_files_are_read_from_a_git_tree_as_it_holds_them() {
+    let project = Project::new();
+    let body = "question = \"Does this file mix two features?\"\nunit = \"file\"\n";
+    project.write(".jevgate/questions/one-feature.toml", body);
+    project.write(".jevgate/questions/.draft.toml", "not = valid");
+    project.git(&["init", "-q"]);
+    project.git(&["add", "."]);
+    project.git(&["commit", "-qm", "questions"]);
+    let at_head = || load_at(&project.0, "HEAD", (Path::new("jevgate.toml"), &[]));
+    project.write(
+        ".jevgate/questions/one-feature.toml",
+        &format!("{body}level = \"note\"\n"),
+    );
+    project.write(".jevgate/questions/later.toml", body);
+    let questions = at_head().unwrap();
+    assert_eq!(
+        questions.len(),
+        1,
+        "the tree's files, not the working tree's"
+    );
+    assert_eq!(questions[0].rule, "custom/one-feature");
+    assert_eq!(questions[0].level, Strength::Review, "as committed");
+    assert_eq!(
+        questions[0].source,
+        Path::new(".jevgate/questions/one-feature.toml")
+    );
+    #[cfg(unix)]
+    {
+        project.write("secret.txt", "TYPESAFE_API_KEY=do-not-expose\n");
+        std::os::unix::fs::symlink(
+            project.0.join("secret.txt"),
+            super::directory(&project.0).join("leak.toml"),
+        )
+        .unwrap();
+        project.git(&["add", "."]);
+        project.git(&["commit", "-qm", "link"]);
+        let error = format!("{:#}", at_head().unwrap_err());
+        assert!(
+            error.contains(
+                "Cannot read .jevgate/questions/leak.toml: a link is not a question file"
+            ),
+            "{error}"
+        );
+        assert!(!error.contains("do-not-expose"), "{error}");
+    }
+}
+
+#[test]
 fn question_files_are_named_by_their_id_beside_the_configuration() {
     let project = Project::new();
     let body = "question = \"Does this file mix two features?\"\nunit = \"file\"\n";
