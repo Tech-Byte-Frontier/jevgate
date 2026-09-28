@@ -61,7 +61,7 @@ Nothing at all appears: check that the agent runs the hook (Claude Code's `/hook
 
 ## Many files are uncertain
 
-A file is `uncertain` when some of its answers stayed undecided after the follow-up questions. JevGate reports this instead of hiding it or counting the file as clear. `--verbose` lists each undecided unit and the question it stayed undecided on. It never fails the gate unless you ask for that with `--fail-on uncertain`.
+A file is `uncertain` when some of its answers stayed undecided after the follow-up questions. JevGate reports this instead of hiding it or counting the file as clear. `--verbose` lists each undecided unit and the question it stayed undecided on; the JSON report also quotes each such question as it was asked, with what each answer means and the probabilities Jev gave them, and the MCP tools hand them to an agent as verify items. It never fails the gate unless you ask for that with `--fail-on uncertain`.
 
 ## A review did not fail the check
 

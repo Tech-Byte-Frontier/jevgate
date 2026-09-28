@@ -167,7 +167,7 @@ impl<'p> Tally<'p> {
                 self.undecided
                     .entry(unit.rule)
                     .or_default()
-                    .push(undecided_unit(plan, unit, outcome, &answers, quotes));
+                    .push(undecided_unit(plan, unit, &answers, quotes));
             }
         }
         if let (
@@ -300,12 +300,11 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
 /// so the entry names what the question was about without repeating the code.
 const SHOWN_VALUES: usize = 3;
 
-/// The unit, where it is, how close it came to a finding and the questions
-/// it left undecided, each as it was asked; with no answers, why.
+/// The unit, where it is and the questions it left undecided, each as it
+/// was asked; with no answers, why.
 fn undecided_unit(
     plan: &FilePlan,
     unit: &UnitPlan,
-    outcome: Outcome,
     answers: &Answers<'_>,
     quotes: Quotes,
 ) -> Undecided {
@@ -334,7 +333,6 @@ fn undecided_unit(
         questions,
         fingerprint: fingerprint(unit.rule, plan, &unit.identity),
         locations: unit.locations.clone(),
-        concern: outcome.concern(),
         open: quotes.open(unit, &open, answers),
     }
 }

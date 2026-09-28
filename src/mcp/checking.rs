@@ -180,15 +180,17 @@ impl Progress {
         self.answered = Some(answered);
         let cost = report
             .estimated_usd
+            .filter(|usd| *usd > 0.0)
             .map_or(String::new(), |usd| format!(", ~${usd:.4} so far"));
         let files = output::count(report.files.len(), "file");
+        let requests = output::count(usize::try_from(answered).unwrap_or(usize::MAX), "request");
         Some(json!({
             "jsonrpc": "2.0",
             "method": "notifications/progress",
             "params": {
                 "progressToken": self.token,
                 "progress": answered,
-                "message": format!("{files}: {answered} requests answered, {cached} from the cache{cost}"),
+                "message": format!("{files}: {requests} answered, {cached} from the cache{cost}"),
             },
         }))
     }
@@ -236,6 +238,10 @@ mod tests {
         assert_eq!(first["method"], "notifications/progress");
         assert_eq!(first["params"]["progressToken"], "t1");
         assert_eq!(first["params"]["progress"], 0);
+        assert_eq!(
+            first["params"]["message"],
+            "1 file: 0 requests answered, 0 from the cache"
+        );
         assert!(progress.notification(&report).is_none(), "nothing new");
         report.stages.insert(
             "functions".into(),

@@ -14,9 +14,15 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 
-/// Findings a result lists unless the call asks for another number.
+/// Findings a result lists unless the call asks for another number. With
+/// [`DEFAULT_VERIFY`], a full check's structured result took at most 25,582
+/// characters on the 117 corpus projects (about 8,500 tokens at 3
+/// characters each), under the 10,000 tokens at which Claude Code warns.
 pub(super) const DEFAULT_FINDINGS: usize = 20;
-/// Verify items a result lists unless the call asks for another number.
+/// Verify items a result lists unless the call asks for another number. A
+/// verify item is about twice a finding's size (a median of 1,096
+/// characters against 501 on the corpus): 10 would have put four
+/// projects' results over 30,000 characters, and 20 would have put 37.
 pub(super) const DEFAULT_VERIFY: usize = 5;
 /// The most findings or verify items one call can ask for.
 pub(super) const MAX_LISTED: usize = 200;
@@ -168,8 +174,8 @@ fn findings<'r>(report: &'r Report, selection: &Selection) -> Vec<(&'r Path, &'r
     findings
 }
 
-/// The selected undecided units, highest concern first, with their file and
-/// rule key.
+/// The selected undecided units, those whose open questions lean most
+/// toward the concern first, with their file and rule key.
 fn undecided<'r>(
     report: &'r Report,
     selection: &Selection,
@@ -187,8 +193,28 @@ fn undecided<'r>(
             })
         })
         .collect();
-    units.sort_by(|a, b| b.2.concern.total_cmp(&a.2.concern));
+    units.sort_by(|a, b| concern(b.2).total_cmp(&concern(a.2)));
     units
+}
+
+/// The highest probability a unit's open questions give the answer that
+/// raises their concern: a Noul's yes, a Score's top level. The probability
+/// a unit's outcome carries is no measure of this: an injection whose checks
+/// stayed undecided carries its values' origin, 1.00 for parameters.
+fn concern(unit: &Undecided) -> f64 {
+    let concern = |answer: &Answer| match answer {
+        Answer::Noul { noul } => *noul,
+        Answer::Score { probabilities, .. } => probabilities
+            .iter()
+            .max_by_key(|(level, _)| level.parse::<usize>().unwrap_or(0))
+            .map_or(0.0, |(_, p)| *p),
+        // A Choice names kinds, none of them the concern.
+        Answer::Choice { .. } => 0.0,
+    };
+    unit.open
+        .iter()
+        .map(|question| concern(&question.answer))
+        .fold(0.0, f64::max)
 }
 
 /// Probabilities to two decimals: an agent weighs 0.42, not 0.41999998.
@@ -279,7 +305,7 @@ impl<'r> VerifyView<'r> {
             end_line: unit.locations.first().map_or(unit.line, |l| l.end_line),
             rule: crate::catalog::id(rule),
             unit: &unit.unit,
-            concern: rounded(unit.concern),
+            concern: rounded(concern(unit)),
             questions,
         }
     }
@@ -296,22 +322,27 @@ struct QuestionView<'r> {
 
 impl<'r> QuestionView<'r> {
     fn new(open: &'r OpenQuestion) -> Self {
-        let probabilities: Vec<(&str, f64)> = match &open.answer {
-            Answer::Noul { noul } => vec![("true", *noul), ("false", 1.0 - noul)],
-            Answer::Choice { probabilities, .. } | Answer::Score { probabilities, .. } => {
-                probabilities
-                    .iter()
-                    .map(|(o, p)| (o.as_str(), *p))
-                    .collect()
-            }
+        let meaning = |option: &str| open.options.get(option).map_or("", String::as_str);
+        // Each answer's option, its name in text and its probability.
+        let answered: Vec<(&str, &str, f64)> = match &open.answer {
+            Answer::Noul { noul } => vec![("true", "yes", *noul), ("false", "no", 1.0 - noul)],
+            Answer::Score { probabilities, .. } => probabilities
+                .iter()
+                .map(|(level, p)| (level.as_str(), level_name(level, meaning(level)), *p))
+                .collect(),
+            Answer::Choice { probabilities, .. } => probabilities
+                .iter()
+                .map(|(option, p)| (option.as_str(), option.as_str(), *p))
+                .collect(),
         };
-        let mut answers: Vec<AnswerView> = probabilities
+        let mut answers: Vec<AnswerView> = answered
             .into_iter()
-            .filter(|(_, p)| *p >= SHOWN_ANSWER)
-            .map(|(option, p)| AnswerView {
+            .filter(|(.., p)| *p >= SHOWN_ANSWER)
+            .map(|(option, label, p)| AnswerView {
                 option,
-                meaning: open.options.get(option).map_or("", String::as_str),
+                meaning: meaning(option),
                 probability: rounded(p),
+                label,
             })
             .collect();
         answers.sort_by(|a, b| b.probability.total_cmp(&a.probability));
@@ -323,31 +354,31 @@ impl<'r> QuestionView<'r> {
     }
 }
 
+/// A Score level's name in text: the verdict that opens its meaning (`No.`,
+/// `Slightly.`, `Yes.`), else its place on JevGate's three-level scales,
+/// from no concern to the concern.
+fn level_name<'r>(level: &'r str, meaning: &'r str) -> &'r str {
+    let verdict = meaning
+        .split_once('.')
+        .map(|(first, _)| first)
+        .filter(|word| !word.is_empty() && word.chars().all(char::is_alphabetic));
+    verdict.unwrap_or(match level {
+        "0" => "no",
+        "1" => "partly",
+        "2" => "yes",
+        other => other,
+    })
+}
+
 #[derive(Serialize)]
 struct AnswerView<'r> {
     option: &'r str,
     #[serde(skip_serializing_if = "str::is_empty")]
     meaning: &'r str,
     probability: f64,
-}
-
-impl AnswerView<'_> {
-    /// A short name for the answer in text: a Score level's verdict, which
-    /// opens its meaning (`No.`, `Slightly.`, `Yes.`); yes or no for a
-    /// Noul; else the option's own name.
-    fn label(&self) -> &str {
-        let verdict = self
-            .meaning
-            .split_once('.')
-            .map(|(first, _)| first)
-            .filter(|word| !word.is_empty() && word.chars().all(char::is_alphabetic));
-        match (verdict, self.option) {
-            (Some(word), _) => word,
-            (None, "true") => "yes",
-            (None, "false") => "no",
-            (None, option) => option,
-        }
-    }
+    /// A short name for the answer in text.
+    #[serde(skip)]
+    label: &'r str,
 }
 
 impl Structured<'_> {
@@ -379,7 +410,7 @@ impl Structured<'_> {
                 let answers: Vec<String> = question
                     .answers
                     .iter()
-                    .map(|a| format!("{} {:.0}%", a.label(), a.probability * 100.0))
+                    .map(|a| format!("{} {:.0}%", a.label, a.probability * 100.0))
                     .collect();
                 text.push_str(&format!("\n    {}", question.question));
                 if !answers.is_empty() {
@@ -439,7 +470,7 @@ mod tests {
     }
 
     /// An undecided unit at `line`, with a split question answered `levels`.
-    fn open_unit(name: &str, line: usize, concern: f64, levels: [f64; 3]) -> Undecided {
+    fn open_unit(name: &str, line: usize, levels: [f64; 3]) -> Undecided {
         Undecided {
             unit: name.into(),
             line,
@@ -452,7 +483,6 @@ mod tests {
                 end_line: line + 9,
                 symbol: Some(name.into()),
             }],
-            concern,
             open: vec![OpenQuestion {
                 id: "split".into(),
                 pass: Pass::First,
@@ -550,8 +580,8 @@ mod tests {
         let report = report(
             Vec::new(),
             vec![
-                open_unit("low", 1, 0.40, [0.5, 0.2, 0.3]),
-                open_unit("high", 20, 0.72, [0.38, 0.2, 0.42]),
+                open_unit("low", 1, [0.5, 0.2, 0.3]),
+                open_unit("high", 20, [0.38, 0.2, 0.42]),
             ],
         );
         let result = structured(&report, &all(), 0);
@@ -577,7 +607,7 @@ mod tests {
         );
         let text = result.verify_text().unwrap();
         assert!(
-            text.starts_with("Verify (2 undecided; read the code and decide, they never fail the gate):\n  src/a.rs:20 [maintainability/function-simplification] high (concern 72%)\n    Would splitting the function in `functions[0].source` help? Yes 42% · No 38% · Slightly 20%\n"),
+            text.starts_with("Verify (2 undecided; read the code and decide, they never fail the gate):\n  src/a.rs:20 [maintainability/function-simplification] high (concern 42%)\n    Would splitting the function in `functions[0].source` help? Yes 42% · No 38% · Slightly 20%\n"),
             "{text}"
         );
         let one = Selection::new(&json!({"max_verify": 1}), None, false).unwrap();
@@ -593,8 +623,27 @@ mod tests {
     }
 
     #[test]
+    fn a_verify_items_concern_is_the_likeliest_concern_its_questions_give() {
+        let mut unit = open_unit("u", 1, [0.4, 0.2, 0.4]);
+        let noul = |p| OpenQuestion {
+            answer: Answer::Noul { noul: p },
+            ..unit.open[0].clone()
+        };
+        unit.open.push(noul(0.55));
+        assert_eq!(concern(&unit), 0.55, "the Noul's yes");
+        unit.open.truncate(1);
+        assert_eq!(concern(&unit), 0.4, "the Score's top level, not its middle");
+        unit.open[0].answer = Answer::Choice {
+            choice: "raw".into(),
+            confidence: 0.6,
+            probabilities: BTreeMap::from([("raw".into(), 0.6), ("own".into(), 0.4)]),
+        };
+        assert_eq!(concern(&unit), 0.0, "a Choice names no concern");
+    }
+
+    #[test]
     fn a_report_without_open_questions_lists_their_labels() {
-        let mut old = open_unit("old", 3, 0.0, [0.5, 0.0, 0.5]);
+        let mut old = open_unit("old", 3, [0.5, 0.0, 0.5]);
         old.open.clear();
         old.fingerprint.clear();
         old.locations.clear();
@@ -623,7 +672,7 @@ mod tests {
         let labels: Vec<String> = view
             .answers
             .iter()
-            .map(|a| format!("{} {}", a.label(), a.probability))
+            .map(|a| format!("{} {}", a.label, a.probability))
             .collect();
         assert_eq!(labels, ["yes 0.6", "no 0.4"]);
         let choice = OpenQuestion {
@@ -640,8 +689,16 @@ mod tests {
             ..open
         };
         let view = QuestionView::new(&choice);
-        let options: Vec<&str> = view.answers.iter().map(AnswerView::label).collect();
+        let options: Vec<&str> = view.answers.iter().map(|a| a.label).collect();
         assert_eq!(options, ["own", "raw"]);
+        assert_eq!(
+            level_name("2", "The same steps for the same purpose."),
+            "yes"
+        );
+        assert_eq!(
+            level_name("1", "Slightly. One block could be named."),
+            "Slightly"
+        );
     }
 
     #[test]
@@ -696,7 +753,7 @@ mod tests {
         baselined.category = Some("CWE-89 SQL injection".into());
         let report = report(
             vec![baselined, found(Strength::Note, 1.0, "n")],
-            vec![open_unit("u", 1, 0.5, [0.4, 0.2, 0.4])],
+            vec![open_unit("u", 1, [0.4, 0.2, 0.4])],
         );
         let schema = &super::super::tools::list()[0]["outputSchema"];
         let notes = Selection::new(&json!({}), None, true).unwrap();

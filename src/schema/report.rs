@@ -32,16 +32,14 @@ pub struct Undecided {
     /// The candidate values, for a hardcoded-value unit with only a few.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
-    /// The fingerprint a finding of this unit would have: rule, path and
-    /// unit identity.
+    /// The unit's fingerprint, made as a finding's is from its rule, path
+    /// and identity: a finding of the unit has it, except comments and tests
+    /// reported together, whose one finding covers several units.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub fingerprint: String,
     /// Where the unit is, as a finding of it would point.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locations: Vec<Location>,
-    /// The concern probability that stayed below the thresholds.
-    #[serde(default)]
-    pub concern: f64,
     /// Each question left undecided, as it was asked, with the answer that
     /// left it open: what a person or a coding agent needs to weigh it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -66,7 +66,7 @@ fn max_findings() -> Value {
 fn max_verify() -> Value {
     json!({
         "type": "integer", "minimum": 0, "maximum": MAX_LISTED,
-        "description": format!("Return at most this many verify items, highest concern first [default: {DEFAULT_VERIFY}]; total_verify counts them all"),
+        "description": format!("Return at most this many verify items, those leaning most toward the concern first [default: {DEFAULT_VERIFY}]; total_verify counts them all"),
     })
 }
 
@@ -147,13 +147,13 @@ fn verify_schema() -> Value {
         "type": "object",
         "description": "A unit whose answers stayed undecided: never a finding, never failing the gate",
         "properties": {
-            "id": {"type": "string", "description": "The fingerprint a finding of the unit would have"},
+            "id": {"type": "string", "description": "The unit's fingerprint (rule, path and unit identity), made as a finding's is; stable across unrelated edits"},
             "path": {"type": "string"},
             "line": {"type": "integer"},
             "end_line": {"type": "integer"},
             "rule": {"type": "string"},
             "unit": {"type": "string", "description": "The function, file outline, test or section judged"},
-            "concern": {"type": "number", "description": "The concern probability that stayed below the thresholds"},
+            "concern": {"type": "number", "description": "The highest probability its open questions give the answer that raises their concern"},
             "questions": {
                 "type": "array",
                 "items": {

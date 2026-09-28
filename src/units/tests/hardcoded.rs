@@ -300,11 +300,6 @@ fn undecided_units_are_listed_with_the_questions_left_undecided() {
     assert_eq!((unit.unit.as_str(), unit.line), ("borderline", 1));
     assert_eq!(unit.questions, ["splitting"]);
     assert_eq!(unit.locations[0].end_line, 8);
-    assert!(
-        unit.concern > 0.0 && unit.concern < crate::policy::REVIEW_PROBABILITY,
-        "{}",
-        unit.concern
-    );
     // The question as it was asked, the evidence it named, what each answer
     // means and the answer that left it open.
     let [open] = unit.open.as_slice() else {
