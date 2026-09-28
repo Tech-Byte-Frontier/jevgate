@@ -246,6 +246,10 @@ fn a_url_note_clears_when_the_request_leaves_from_the_browser() {
                 "runs_in",
                 choice_of(runs_in, &["browser", "server", "either"]),
             ),
+            (
+                "url_parts",
+                choice_of("given", &["own", "forwards", "given", "outside", "none"]),
+            ),
         ];
         let report = run(&project, options, &mut eval);
         let file = report

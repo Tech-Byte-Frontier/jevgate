@@ -50,11 +50,15 @@ pub fn security_path_source(code: &str, callers: bool) -> Value {
 /// program's own, or no request.
 pub const OWN_PARTS: [&str; 2] = ["own", "none"];
 
-/// Where the URLs a function requests come from, asked when the URL check
-/// stays undecided: on clients of a fixed or configured service the check
+/// Where the URLs a function requests come from, asked whenever the URL
+/// check is not clear: on clients of a fixed or configured service the check
 /// split on a variable path or query, while naming the host decided them. A
 /// host that is sent another URL to fetch is its own option, since internal
-/// proxies fetched what users sent. The same question about paths once
+/// proxies fetched what users sent. paperclip's cloud route requests a fixed
+/// path on its configured origin, with the user's id in a header, and was a
+/// review at 0.81; it put 0.88 on its own host. Every labeled corpus finding
+/// right that was asked it put at most 0.56 there, and no review or consider
+/// changed. The same question about paths once
 /// cleared real traversals, reading names stored in an index as the
 /// program's own; `security_path_source` names such records as another
 /// party's input.
