@@ -37,6 +37,17 @@ fn event(project: &Project, fields: serde_json::Value) -> String {
     event.to_string()
 }
 
+/// The reply of `jevgate hook` to a Claude Code event of `project`, its
+/// checks asking `provider` with `key`.
+fn hook_asking(
+    project: &Project,
+    provider: &MockProvider,
+    key: &str,
+    fields: serde_json::Value,
+) -> serde_json::Value {
+    hook(project.asking(provider, key), &[], &event(project, fields)).0
+}
+
 #[test]
 fn invalid_arguments_and_input_are_answered_with_exit_0() {
     let project = Project::new();
@@ -90,6 +101,48 @@ fn without_a_key_every_event_passes_and_says_why() {
 }
 
 #[test]
+fn a_402_or_another_providers_key_blocks_nothing_and_the_person_reads_why() {
+    let provider = MockProvider::start(|_| {
+        Reply::json(402, &json!({"error": "private"}))
+            .header("x-typesafe-request-id", "req_hook402")
+    });
+    let cases = [
+        (
+            "key",
+            "TypeSafe HTTP 402 (credits exhausted; add credits or turn on auto-refill at https://console.typesafe.ai); request was not retried; request id req_hook402",
+        ),
+        (
+            "sk-or-v1-hook",
+            "TYPESAFE_API_KEY environment variable: the key was issued by OpenRouter (it starts with sk-or-), not by TypeSafe; set it as OPENROUTER_API_KEY, or save it with jevgate auth login --provider openrouter",
+        ),
+    ];
+    for (key, said) in cases {
+        let project = Project::committed();
+        let send = |fields| hook_asking(&project, &provider, key, fields);
+        send(json!({"hook_event_name": "UserPromptSubmit", "prompt": "add the spread"}));
+        std::fs::write(project.0.join("lib.rs"), LONG_RS).unwrap();
+        let stopped = send(json!({"hook_event_name": "Stop", "stop_hook_active": false}));
+        assert_eq!(
+            stopped,
+            json!({"systemMessage": format!("JevGate could not check this turn: {said}. Nothing was blocked.")}),
+            "{key}"
+        );
+        assert!(
+            !project.0.join(".jevgate/turns/outage.json").exists(),
+            "{key}: waiting would not fix it, so the next event asks again"
+        );
+    }
+    let received = provider.received();
+    assert!(!received.is_empty());
+    assert!(
+        received
+            .iter()
+            .all(|r| r.header("authorization") == Some("Bearer key")),
+        "another provider's key is never sent"
+    );
+}
+
+#[test]
 fn cursor_is_answered_in_its_own_fields_and_the_person_on_stderr() {
     let project = Project::new();
     let start = serde_json::json!({"hook_event_name": "beforeSubmitPrompt", "prompt": "go"});
@@ -101,10 +154,6 @@ fn cursor_is_answered_in_its_own_fields_and_the_person_on_stderr() {
     assert_eq!(reply, serde_json::json!({"continue": true}));
     assert!(stderr.contains("is not in a Git repository"), "{stderr}");
 }
-
-/// A function longer than twenty lines, which a split question at the top
-/// of its scale makes a function-simplification review.
-const LONG_RS: &str = "fn f(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values {\n        total += value;\n    }\n    let mut largest = i32::MIN;\n    for value in values {\n        if *value > largest {\n            largest = *value;\n        }\n    }\n    let mut smallest = i32::MAX;\n    for value in values {\n        if *value < smallest {\n            smallest = *value;\n        }\n    }\n    let spread = largest - smallest;\n    let doubled = total * 2;\n    doubled + spread + 1\n}\n";
 
 #[test]
 fn the_binary_blocks_a_turn_through_the_provider_until_its_finding_is_fixed() {
@@ -118,13 +167,7 @@ fn the_binary_blocks_a_turn_through_the_provider_until_its_finding_is_fixed() {
         };
         Reply::json(200, &answer(&received.json(), level))
     });
-    let send = |fields: serde_json::Value| {
-        let mut command = project.command();
-        command
-            .env("TYPESAFE_API_KEY", "key")
-            .env("JEVGATE_BASE_URL", &provider.url);
-        hook(command, &[], &event(&project, fields)).0
-    };
+    let send = |fields| hook_asking(&project, &provider, "key", fields);
     let prompt = json!({"hook_event_name": "UserPromptSubmit", "prompt": "add the spread"});
     assert_eq!(
         send(prompt)["hookSpecificOutput"]["additionalContext"],

@@ -50,6 +50,15 @@ impl Project {
             .env("JEVGATE_CONFIG_DIR", self.0.join("isolated-auth"));
         command
     }
+    /// `jevgate` in the project with `key` as its TypeSafe key, sending its
+    /// requests to `provider`.
+    fn asking(&self, provider: &mock_provider::MockProvider, key: &str) -> Command {
+        let mut command = self.command();
+        command
+            .env("TYPESAFE_API_KEY", key)
+            .env("JEVGATE_BASE_URL", &provider.url);
+        command
+    }
     /// Runs an offline preview: it succeeds, never prints the key and sends nothing.
     fn preview(&self, args: &[&str]) -> serde_json::Value {
         let output = self.command().args(args).output().unwrap();
@@ -110,6 +119,10 @@ impl Project {
 
 /// A function large enough to judge: five body lines.
 const JUDGED_RS: &str = "fn f(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values {\n        total += value;\n    }\n    let doubled = total * 2;\n    doubled + 1\n}\n";
+
+/// A function longer than twenty lines, which a split question at the top
+/// of its scale makes a function-simplification review.
+const LONG_RS: &str = "fn f(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values {\n        total += value;\n    }\n    let mut largest = i32::MIN;\n    for value in values {\n        if *value > largest {\n            largest = *value;\n        }\n    }\n    let mut smallest = i32::MAX;\n    for value in values {\n        if *value < smallest {\n            smallest = *value;\n        }\n    }\n    let spread = largest - smallest;\n    let doubled = total * 2;\n    doubled + spread + 1\n}\n";
 
 /// Run Git in the project, with a fixed identity and no signing, apart from
 /// the repository running the tests.

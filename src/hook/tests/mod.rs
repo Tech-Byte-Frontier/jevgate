@@ -278,6 +278,39 @@ fn only_findings_that_fail_the_gate_block_the_end_of_a_turn() {
 }
 
 #[test]
+fn a_review_the_gate_still_measures_is_context_and_never_blocks() {
+    // The hook blocks on how the check's gate counted a finding, not on its
+    // level: the default gate reports a hardcoded-values review as still
+    // being measured, and the report the hook's check published says so.
+    let project = repository();
+    project.write("jevgate.toml", "rules = [\"hardcoded-values\"]\n");
+    project.commit_all();
+    let host = reviewing();
+    send(&project, &host, prompt("add a region"));
+    let region = format!("const REGION: &str = \"eu-west-1\";\n{}", function("f"));
+    project.write("lib.rs", &region);
+    let edited = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited).starts_with("JevGate reviewed lib.rs after this edit: 1 finding, none fails the quality gate.\n- lib.rs:1 review maintainability/hardcoded-values: "),
+        "{edited}"
+    );
+    assert!(
+        context(&edited).ends_with("\nNone of them blocks the end of the turn."),
+        "{edited}"
+    );
+    let stopped = send(&project, &host, stop(false));
+    assert_eq!(
+        stopped,
+        json!({"systemMessage": "JevGate: 1 review in this turn's changes doesn't fail the quality gate. `jevgate check --base HEAD` lists them."})
+    );
+    let checked = crate::storage::read_latest(&project.0).unwrap();
+    assert_eq!(
+        checked.files[0].findings[0].gate,
+        Some(crate::schema::Gating::Measuring)
+    );
+}
+
+#[test]
 fn a_stop_blocks_until_the_findings_are_fixed() {
     let project = repository();
     let host = reviewing();
