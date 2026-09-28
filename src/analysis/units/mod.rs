@@ -793,33 +793,14 @@ fn push(
     if short_name.is_empty() || definition.outer.has_error() {
         return;
     }
-    let Definition { outer, node, body } = definition;
-    let start = leading_start(outer);
+    let Definition { node, body, .. } = definition;
     let (facts, refs) = references(node, (short_name, owner), kind, &file.imports, source);
     let equality = equality_override(node, short_name, source);
     let literals = body
         .filter(|_| !equality && !super::literals::returns_constant(node))
         .map_or_else(Vec::new, |b| super::literals::in_node(b, source));
     let (role, effects, joins_text) = bend_facts(node, short_name, file, source);
-    file.units.push(Unit {
-        name: if owner.is_empty() {
-            short_name.to_string()
-        } else {
-            format!("{owner}::{short_name}")
-        },
-        short_name: short_name.to_string(),
-        owner: owner.to_string(),
-        kind,
-        span: start..outer.end_byte(),
-        line: line_of(source, outer.start_byte()),
-        end_line: line_of(
-            source,
-            outer.end_byte().saturating_sub(1).max(outer.start_byte()),
-        ),
-        body: body.map(|b| b.byte_range()),
-        signature: summary::signature(outer, body, source),
-        doc: summary::doc_line(&source[start..outer.start_byte()], outer, source),
-        body_lines: body.map_or(0, |b| body_lines(text(b, source))),
+    let unit = Unit {
         nesting: body.map_or(0, |b| super::nesting::control(b).0),
         branch_chain: body.map_or(0, |b| super::nesting::control(b).1),
         blocks: body.map_or_else(Vec::new, |b| super::blocks::blocks(b, source)),
@@ -836,7 +817,61 @@ fn push(
         joins_text,
         statement: bend::statement(node, source),
         mentions: facts.idents,
-    });
+        ..Unit::placed(definition, (short_name, owner), kind, source)
+    };
+    file.units.push(unit);
+}
+
+impl Unit {
+    /// A unit placed in its file, before any fact about its code: its names
+    /// and kind, its span with the documentation, comments and attributes
+    /// above it, its lines, body, header and documentation line, and the
+    /// size of its body.
+    fn placed(
+        definition: Definition<'_>,
+        (short_name, owner): (&str, &str),
+        kind: Kind,
+        source: &str,
+    ) -> Self {
+        let Definition { outer, body, .. } = definition;
+        let start = leading_start(outer);
+        Self {
+            name: if owner.is_empty() {
+                short_name.to_string()
+            } else {
+                format!("{owner}::{short_name}")
+            },
+            short_name: short_name.to_string(),
+            owner: owner.to_string(),
+            kind,
+            span: start..outer.end_byte(),
+            line: line_of(source, outer.start_byte()),
+            end_line: line_of(
+                source,
+                outer.end_byte().saturating_sub(1).max(outer.start_byte()),
+            ),
+            body: body.map(|b| b.byte_range()),
+            signature: summary::signature(outer, body, source),
+            doc: summary::doc_line(&source[start..outer.start_byte()], outer, source),
+            body_lines: body.map_or(0, |b| body_lines(text(b, source))),
+            nesting: 0,
+            branch_chain: 0,
+            blocks: Vec::new(),
+            literals: Vec::new(),
+            sites: Vec::new(),
+            errors: Vec::new(),
+            calls: BTreeSet::new(),
+            passed: BTreeSet::new(),
+            equality: false,
+            routes: Vec::new(),
+            refs: BTreeSet::new(),
+            role: Role::Code,
+            effects: false,
+            joins_text: false,
+            statement: None,
+            mentions: BTreeSet::new(),
+        }
+    }
 }
 
 /// What a definition calls and mentions, and the names it references: its
