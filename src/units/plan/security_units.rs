@@ -80,17 +80,20 @@ pub(super) fn plan_security(
     // templates' code is tags that write a value unescaped, which injection
     // judges by where the value comes from. Asked whether they turn off
     // escaping, each `raw` or `html_safe` tag of RailsGoat's views said yes,
-    // even around a user's numeric id.
-    if let Some(code) = security::template_subject(context, &parsed.template_code) {
-        let jsp = matches!(
-            context.path.extension().and_then(|e| e.to_str()),
-            Some("jsp" | "jspf")
-        );
-        let judged: Vec<&'static str> = rules
-            .iter()
-            .copied()
-            .filter(|rule| jsp || *rule == catalog::INJECTION)
-            .collect();
+    // even around a user's numeric id. Without a rule that judges it,
+    // nothing is asked: such a request asked no question.
+    let jsp = matches!(
+        context.path.extension().and_then(|e| e.to_str()),
+        Some("jsp" | "jspf")
+    );
+    let judged: Vec<&'static str> = rules
+        .iter()
+        .copied()
+        .filter(|rule| jsp || *rule == catalog::INJECTION)
+        .collect();
+    if let Some(code) = security::template_subject(context, &parsed.template_code)
+        && !judged.is_empty()
+    {
         security::plan(context, &[code], None, &judged, false, file, requests);
     }
 }
