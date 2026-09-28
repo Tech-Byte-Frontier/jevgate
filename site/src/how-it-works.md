@@ -192,6 +192,13 @@ signatures, or one candidate pair.
    stage) moved 0.005 on average, within their own spread across sends
    (0.007). An earlier version's entry for a whole request still answers it
    while it is unchanged, and its answers are copied into the state's file.
+   A function pack is one state with every enabled rule's questions about
+   its functions, cached question by question like any other: rewording one
+   rule's question asks only that question of each pack again, while enabling
+   or disabling a rule usually changes the pack's evidence, and so its state,
+   and asks the pack again. Two requests about the same state share their
+   answers to the questions both ask, such as a hardcoded-value question
+   asked alone and in a pack whose evidence is the same.
 4. **Follow-ups.** One recheck per uncertain unit, with callee signatures, the
    enclosing functions or the file's application source; a decisive recheck
    replaces the first answer and both are kept. A hardcoded-value unit is asked
