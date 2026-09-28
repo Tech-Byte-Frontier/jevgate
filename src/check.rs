@@ -42,7 +42,7 @@ fn publish_failure(
     session: &evaluate::Session<'_>,
     report: &mut schema::Report,
     error: anyhow::Error,
-) -> Result<u8> {
+) -> Result<()> {
     report.watcher_pid = None;
     report.errors.push(error.to_string());
     report.update_status();
@@ -51,6 +51,63 @@ fn publish_failure(
         html_report::open(&session.context.root);
     }
     Err(error)
+}
+
+/// The last published report and the first snapshot of this run, numbered
+/// after it.
+pub fn first_snapshot(
+    args: &CheckArgs,
+    context: &ConfigContext,
+    inputs: &[inventory::Input],
+) -> (Option<schema::Report>, schema::Report) {
+    let previous = storage::read_latest(&context.root).ok();
+    let report = evaluate::snapshot(
+        inputs,
+        &evaluate::previous_judgments(previous.as_ref(), args.refresh),
+        args,
+        evaluate::SnapshotContext {
+            root: &context.root,
+            generation: previous.as_ref().map_or(1, |r| r.generation + 1),
+            requests: 0,
+        },
+    );
+    (previous, report)
+}
+
+/// A session that asks `evaluator` and records answers in `store`.
+pub fn session<'a>(
+    args: &'a CheckArgs,
+    context: &'a ConfigContext,
+    store: &'a storage::Store,
+    evaluator: &'a mut dyn transport::Evaluator,
+) -> evaluate::Session<'a> {
+    evaluate::Session {
+        args,
+        context,
+        store,
+        evaluator,
+        requests: 0,
+        paid: Default::default(),
+        budget: token_budget::TokenBudget::load(&context.root),
+        observed: (0, 0),
+    }
+}
+
+/// Evaluate the snapshot, compare it with the previous report, apply the
+/// gate and publish it: what every check does, and the agent hook's checks.
+pub fn judge(
+    session: &mut evaluate::Session<'_>,
+    inputs: &[inventory::Input],
+    previous: Option<&schema::Report>,
+    report: &mut schema::Report,
+) -> Result<()> {
+    if let Err(error) = session.evaluate(inputs, report) {
+        return publish_failure(session, report, error);
+    }
+    changes::compare(previous, report);
+    gate::settle(&session.context.root, report, session.args)?;
+    report.settled = true;
+    session.publish(report)
 }
 
 /// `check`: judge the selected files, apply the gate and report.
@@ -64,18 +121,7 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
     } else {
         Some(storage::Store::open(&context.root)?)
     };
-    let baseline = storage::read_latest(&context.root).ok();
-    let previous = evaluate::previous_judgments(baseline.as_ref(), args.refresh);
-    let mut report = evaluate::snapshot(
-        &inputs,
-        &previous,
-        args,
-        evaluate::SnapshotContext {
-            root: &context.root,
-            generation: baseline.as_ref().map_or(1, |r| r.generation + 1),
-            requests: 0,
-        },
-    );
+    let (previous, mut report) = first_snapshot(args, context, &inputs);
     if args.dry_run {
         output::emit(&report, args)?;
         return Ok(0);
@@ -86,23 +132,8 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         args.env_file.is_some(),
         args.provider,
     )?;
-    let mut session = evaluate::Session {
-        args,
-        context,
-        store: &store,
-        evaluator: &mut client,
-        requests: 0,
-        paid: Default::default(),
-        budget: token_budget::TokenBudget::load(&context.root),
-        observed: (0, 0),
-    };
-    if let Err(error) = session.evaluate(&inputs, &mut report) {
-        return publish_failure(&session, &mut report, error);
-    }
-    changes::compare(baseline.as_ref(), &mut report);
-    gate::settle(&context.root, &mut report, args)?;
-    report.settled = true;
-    session.publish(&report)?;
+    let mut session = session(args, context, &store, &mut client);
+    judge(&mut session, &inputs, previous.as_ref(), &mut report)?;
     if args.report {
         html_report::open(&context.root);
     }

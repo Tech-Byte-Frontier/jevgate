@@ -66,22 +66,29 @@ fn lock_session(path: &Path) -> Result<fs::File> {
     Ok(file)
 }
 
+/// `.jevgate/` under `root`, created with a `.gitignore` that ignores all of
+/// it. Taking no lock, it is where writers other than the session keep state.
+pub fn state_directory(root: &Path) -> Result<PathBuf> {
+    let directory = root.join(".jevgate");
+    real_directory(&directory, "Jev storage must be a real directory")?;
+    let ignore = directory.join(".gitignore");
+    if !ignore.exists() {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(ignore)?;
+        file.write_all(b"*\n")?;
+    }
+    Ok(directory)
+}
+
 impl Store {
     pub fn open(root: &Path) -> Result<Self> {
-        let directory = root.join(".jevgate");
-        real_directory(&directory, "Jev storage must be a real directory")?;
+        let directory = state_directory(root)?;
         real_directory(
             &directory.join("cache"),
             "Jev storage must be a real directory",
         )?;
-        let ignore = directory.join(".gitignore");
-        if !ignore.exists() {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(ignore)?;
-            file.write_all(b"*\n")?;
-        }
         let lock = lock_session(&directory.join("session.lock"))?;
         real_directory(
             &directory.join("history"),
@@ -170,7 +177,9 @@ pub fn peek(root: &Path, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
     load_entry(&directory, hash, ttl)
 }
 
-fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Replace `path` with `bytes` through a temporary file and a rename, so a
+/// reader never sees a partial file.
+pub(crate) fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);

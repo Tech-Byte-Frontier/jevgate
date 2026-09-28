@@ -123,7 +123,13 @@ impl ConfigContext {
     /// The repository around the working directory and its configuration:
     /// `file` when given (it must exist), else the root's jevgate.toml if any.
     pub fn discover(file: Option<&Path>) -> Result<Self> {
-        let invocation_dir = std::env::current_dir()?.canonicalize()?;
+        Self::discover_in(&std::env::current_dir()?.canonicalize()?, file)
+    }
+
+    /// [`Self::discover`] from `invocation_dir`, an absolute canonical
+    /// directory, such as the working directory an agent hook reports.
+    pub fn discover_in(invocation_dir: &Path, file: Option<&Path>) -> Result<Self> {
+        let invocation_dir = invocation_dir.to_path_buf();
         let root = repository_root(&invocation_dir);
         let (file, required) = match file {
             Some(file) => (invocation_dir.join(file), true),
