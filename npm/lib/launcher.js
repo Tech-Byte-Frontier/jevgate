@@ -14,7 +14,7 @@ const { spawnSync } = require("node:child_process");
 
 const RELEASES = "https://github.com/Tech-Byte-Frontier/jevgate/releases/download";
 const INSTALL_PAGE = "https://tech-byte-frontier.github.io/jevgate/install.html";
-/** A release archive is about 7 MB; a download slower than this has stalled. */
+/** A release archive is about 10 MB (0.30.0); a download slower than this has stalled. */
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Release builds by Node's platform and architecture. Windows on Arm runs the x64 build. */
