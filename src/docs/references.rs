@@ -259,6 +259,12 @@ fn path_like(token: &str, top: &BTreeSet<&str>) -> Option<String> {
     {
         t = path.to_string();
     }
+    // `guide.md#setup` names `guide.md`.
+    if let Some((path, _)) = t.split_once('#')
+        && !path.is_empty()
+    {
+        t = path.to_string();
+    }
     let excluded = ["http", "mailto:", "#", "$", "-", "@", "~", "/"]
         .iter()
         .any(|p| t.starts_with(p))
@@ -627,6 +633,15 @@ mod tests {
         let text = "Assign :attr:`flask.Flask.json` or :py:mod:`flask.json`; edit :file:`conf/app.json` and {download}`data/seed.json`.";
         let names: Vec<String> = found(text).into_iter().map(|(n, _)| n).collect();
         assert_eq!(names, ["conf/app.json", "data/seed.json"]);
+    }
+
+    #[test]
+    fn a_code_span_with_an_anchor_names_its_file() {
+        let names: Vec<String> = found("See `docs/guide.md#setup` and `docs/gone.md#usage`.")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, ["docs/gone.md"]);
     }
 
     #[test]
