@@ -32,7 +32,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo +stable test --locked
   node:
-    # The OpenCode plugin, on each runner's own Node.
+    # The npm launcher and the OpenCode plugin, on each runner's own Node.
     strategy:
       fail-fast: false
       matrix:
@@ -40,7 +40,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: node --test src/setup/opencode.test.mjs
+      - run: node --test npm/test/launcher.test.js src/setup/opencode.test.mjs
   msrv:
     runs-on: ubuntu-latest
     steps:

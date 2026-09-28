@@ -1,0 +1,33 @@
+{
+  "name": "@tech-byte-frontier/jevgate",
+  "version": "0.25.0",
+  "description": "JevGate, the code-review gate for CI and coding agents: this package downloads the matching release binary, checks its SHA-256, caches it and runs it",
+  "keywords": [
+    "code-review",
+    "quality-gate",
+    "claude-code",
+    "codex",
+    "hooks",
+    "typesafe",
+    "jev"
+  ],
+  "homepage": "https://tech-byte-frontier.github.io/jevgate/",
+  "bugs": "https://github.com/Tech-Byte-Frontier/jevgate/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tech-Byte-Frontier/jevgate.git",
+    "directory": "npm"
+  },
+  "license": "MIT OR Apache-2.0",
+  "bin": {
+    "jevgate": "bin/jevgate.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "SHA256SUMS"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}
