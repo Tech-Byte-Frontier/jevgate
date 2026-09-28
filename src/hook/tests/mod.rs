@@ -394,6 +394,47 @@ fn a_stop_blocks_until_the_findings_are_fixed() {
 }
 
 #[test]
+fn a_hunk_question_at_the_end_of_a_turn_asks_about_what_the_turn_changed() {
+    let project = Project::new();
+    project.write("jevgate.toml", "rules = [\"custom\"]\n");
+    project.write(
+        ".jevgate/questions/owned-todos.toml",
+        "question = \"Does this change add a TODO with no owner?\"\nunit = \"hunk\"\n",
+    );
+    let constants: Vec<String> = (1..=30)
+        .map(|n| format!("const A{n}: i32 = {n};"))
+        .collect();
+    let source = |edits: &[usize]| {
+        let lines: Vec<String> = constants
+            .iter()
+            .enumerate()
+            .map(|(at, line)| match edits.contains(&(at + 1)) {
+                true => format!("{line} // TODO"),
+                false => line.clone(),
+            })
+            .collect();
+        lines.join("\n") + "\n"
+    };
+    project.write("lib.rs", &source(&[]));
+    project.git(&["init", "-q"]);
+    project.git(&["add", "."]);
+    project.git(&["commit", "-qm", "start"]);
+    // Changed before the turn, so not the turn's change.
+    project.write("lib.rs", &source(&[2]));
+    let host = reviewing();
+    send(&project, &host, prompt("add a constant"));
+    project.write("lib.rs", &source(&[2, 25]));
+    let blocked = send(&project, &host, stop(false));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+    let reason = blocked["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("- lib.rs:25 review custom/owned-todos (fails the gate): The change at line 25: Does this change add a TODO with no owner? Yes. Not yet measured."),
+        "the turn's hunk, between its two snapshots: {reason}"
+    );
+    assert!(!reason.contains("lib.rs:2 "), "{reason}");
+}
+
+#[test]
 fn a_turn_is_blocked_three_times_at_most() {
     let project = repository();
     let host = reviewing();
