@@ -3,6 +3,8 @@
 mod auth;
 mod changes;
 mod gateway;
+#[path = "../support/git.rs"]
+mod git;
 mod manual;
 mod mcp;
 #[path = "../support/mock_provider.rs"]
@@ -22,10 +24,11 @@ impl Project {
         Self(temp_dir::TempDir::new("jevgate-cli"))
     }
     /// `jevgate` in the project, with no key or endpoint from the caller's
-    /// environment and credentials saved only in the project.
+    /// environment, credentials saved only in the project, and no variable
+    /// pointing its Git at the repository running the tests.
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jevgate"));
-        command
+        git::isolate(&mut command)
             .current_dir(&self.0)
             .env_remove("TYPESAFE_API_KEY")
             .env_remove("OPENROUTER_API_KEY")
@@ -97,27 +100,10 @@ impl Project {
 /// A function large enough to judge: five body lines.
 const JUDGED_RS: &str = "fn f(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values {\n        total += value;\n    }\n    let doubled = total * 2;\n    doubled + 1\n}\n";
 
-/// Run Git in the project, with a fixed identity and no signing.
+/// Run Git in the project, with a fixed identity and no signing, apart from
+/// the repository running the tests.
 fn git(project: &Project, args: &[&str]) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(&project.0)
-        .args([
-            "-c",
-            "user.name=JevGate test",
-            "-c",
-            "user.email=test@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    git::run(&project.0, args);
 }
 
 /// The stages a dry-run preview plans.

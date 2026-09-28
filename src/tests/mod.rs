@@ -7,6 +7,8 @@ use clap::Parser;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 mod gating;
+#[path = "../../tests/support/git.rs"]
+pub(super) mod git;
 #[path = "../../tests/support/mock_provider.rs"]
 pub(super) mod mock_provider;
 pub(super) use mock_provider::answer;
@@ -30,26 +32,10 @@ impl Project {
             config: Default::default(),
         }
     }
-    /// Run Git in the project, with a fixed identity and no signing.
+    /// Run Git in the project, with a fixed identity and no signing, apart
+    /// from the repository running the tests.
     pub(super) fn git(&self, args: &[&str]) {
-        let output = std::process::Command::new("git")
-            .args([
-                "-c",
-                "user.name=JevGate test",
-                "-c",
-                "user.email=test@example.invalid",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .current_dir(&*self.0)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        git::run(&self.0, args);
     }
     /// A Git repository holding the project's files as its first commit.
     pub(super) fn commit_all(&self) {

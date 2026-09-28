@@ -141,15 +141,35 @@ fn git_path<'a>(fields: &mut impl Iterator<Item = &'a [u8]>, missing: &str) -> R
 
 /// Git in `root`, without taking optional locks. GIT_DIFF_OPTS is dropped:
 /// Git lets it outrank `-U0`, and its context lines would count as changed.
-fn git_command(root: &Path, args: &[&str]) -> Command {
+///
+/// The variables that point Git at a repository, such as `GIT_DIR` and
+/// `GIT_INDEX_FILE`, are honored, as by any Git command. Git sets them for
+/// the hooks, `rebase --exec` and `bisect run` it starts, naming the
+/// repository `root` is in: a pre-commit hook's `GIT_INDEX_FILE` is the index
+/// being committed, a temporary one for `commit -a` or a partial commit, and
+/// a repository kept apart from its work tree is found only through
+/// `GIT_DIR`. Every call only reads, except `git diff` refreshing the index's
+/// cached file stats, which Git 2.51 does despite GIT_OPTIONAL_LOCKS; what is
+/// staged stays as it was. Unit tests drop them here, as the tests' own Git
+/// does (`tests/support/git.rs`): inherited from a hook, they would point a
+/// test's check at the repository running the tests instead of the one the
+/// test built.
+pub(crate) fn git_in(root: &Path) -> Command {
     let mut command = Command::new("git");
     command
-        .arg("--literal-pathspecs")
         .arg("-C")
         .arg(root)
-        .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env_remove("GIT_DIFF_OPTS");
+    #[cfg(test)]
+    crate::tests::git::isolate(&mut command);
+    command
+}
+
+/// Git in `root` with `args`, as [`git_in`], taking pathspecs literally.
+fn git_command(root: &Path, args: &[&str]) -> Command {
+    let mut command = git_in(root);
+    command.arg("--literal-pathspecs").args(args);
     command
 }
 

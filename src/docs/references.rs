@@ -777,14 +777,7 @@ mod tests {
     fn ignored_paths_are_local_files() {
         let project = crate::tests::Project::new();
         project.write(".gitignore", "out/\n*.local\nweb/dist/\n");
-        let git = |args: &[&str]| {
-            std::process::Command::new("git")
-                .args(args)
-                .current_dir(&*project.0)
-                .output()
-                .unwrap()
-        };
-        assert!(git(&["init", "-q"]).status.success());
+        project.git(&["init", "-q"]);
         // `web/` is tracked, so its missing entries are candidates.
         let history = History {
             tracked: [PathBuf::from("web/index.html")].into(),
