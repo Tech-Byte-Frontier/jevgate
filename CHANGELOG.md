@@ -4,7 +4,9 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
-Fixes from running JevGate on nine widely used projects under daily development (rtk, headroom, paperclip, hermes-agent, cc-switch, freellmapi, herdr, multica, OmniRoute).
+## [0.25.0] - 2026-09-27
+
+Fixes from running JevGate on widely used projects under daily development (rtk, headroom, paperclip, hermes-agent, cc-switch, freellmapi, herdr, multica, OmniRoute, dify, openclaw, n8n), each checked against the code.
 
 - Two crashes on text outside ASCII: a colon right after non-ASCII text in documentation (`已移除:` before a code span) and a Python test ending in a multi-byte character. Both stopped the whole run, on herdr, hermes-agent and OmniRoute.
 - Staleness: a path with an anchor in a code span, such as `docs/en/env/01-variables.md#idempotency`, names its file; it was reported as missing although the file and its heading exist. So does a module path without its extension, such as dify's `web/test/i18n-mock` for `i18n-mock.ts`. A `make` or `just` target is checked only when the repository tracks a Makefile or justfile: openclaw documents `make routing-isolation` from a separate models repository. A package's own binaries (`bin` in `package.json`) count as scripts `pnpm` can run, such as n8n's `n8n-generate-translations`. No corpus finding changes.
@@ -263,7 +265,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.23.0...v0.23.1
