@@ -173,6 +173,7 @@ async function main(args, host = {}) {
     home = os.homedir(),
     streams = process,
     fetchBytes = download,
+    sums = shippedSums(),
   } = host;
   const version = require("../package.json").version;
   const build = target(platform, arch);
@@ -184,7 +185,7 @@ async function main(args, host = {}) {
       build,
       cache: cacheDirectory(env, platform, home),
       fetchBytes,
-      sums: shippedSums(),
+      sums,
       log: (message) => streams.stderr.write(`jevgate: ${message}\n`),
     });
   } catch (error) {
