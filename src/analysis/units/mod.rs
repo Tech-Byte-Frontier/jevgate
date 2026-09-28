@@ -836,16 +836,8 @@ fn push(
     // A definition holding a syntax error is left out and named; the rest
     // of its file is judged.
     if outer.has_error() {
-        let error = crate::syntax::error_regions(outer)
-            .first()
-            .map_or(outer.start_byte(), |region| region.start);
-        file.left_out.push(LeftOut {
-            name: placed.name,
-            span: placed.span,
-            line: placed.line,
-            end_line: placed.end_line,
-            error_line: line_of(source, error),
-        });
+        file.left_out
+            .push(LeftOut::definition(placed, outer, source));
         return;
     }
     let (facts, refs) = references(node, (short_name, owner), kind, &file.imports, source);

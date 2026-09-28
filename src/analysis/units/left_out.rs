@@ -3,9 +3,10 @@
 //! lines. The rest of the file is judged, and every rule asks
 //! `FileUnits::intact` whether its own candidate lies clear of what was left
 //! out. Most errors are grammar gaps in valid code (`syntax::error_regions`).
-use super::{FileUnits, line_of};
+use super::{FileUnits, Unit, line_of};
 use crate::analysis::test_map::TestCase;
 use std::ops::Range;
+use tree_sitter::Node;
 
 /// A unit a syntax error left out, or code outside every unit that holds one.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,6 +23,21 @@ pub struct LeftOut {
 }
 
 impl LeftOut {
+    /// A definition whose `node` holds a syntax error, named and placed as
+    /// its unit would have been (`Unit::placed`), at its first error.
+    pub(super) fn definition(placed: Unit, node: Node<'_>, source: &str) -> Self {
+        let error = crate::syntax::error_regions(node)
+            .first()
+            .map_or(node.start_byte(), |region| region.start);
+        Self {
+            name: placed.name,
+            span: placed.span,
+            line: placed.line,
+            end_line: placed.end_line,
+            error_line: line_of(source, error),
+        }
+    }
+
     /// Code outside every unit holding the syntax error at `region`.
     fn outside(region: &Range<usize>, source: &str) -> Self {
         let line = line_of(source, region.start);
