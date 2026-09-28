@@ -7,11 +7,11 @@
 
 **JevGate is a code-review gate. It asks small, precise questions about your code and turns the answers into findings you can act on.**
 
-JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, how often findings like it were right and a concrete next step, so an agent or CI job can act on it and a person can check it quickly. By default the gate fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on: among the default rules, function-simplification reviews, right 20 of the 23 times they were labeled there (87%).
+JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, how often findings like it were right and a concrete next step, so an agent or CI job can act on it and a person can check it quickly. By default the gate fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on: among the default rules, function-simplification reviews, right 20 of the 23 times they were labeled there (87%), and 80 of 93 times on 27 more public projects ([accuracy](https://tech-byte-frontier.github.io/jevgate/accuracy.html)).
 
-![JevGate's terminal output on zoxide: the gate fails on 1 function-simplification review (a function mixing separate jobs); 3 more reviews (a file holding several features, two sets of importers repeating the same steps) and a consider (branching that hides a main path) are reported without failing it, since their rules and levels are still being measured](site/src/images/terminal.svg)
+![JevGate's terminal output on zoxide: the gate fails on 1 function-simplification review (a function mixing separate jobs); 3 more reviews (a file holding several features, two sets of importers repeating the same steps) and a consider (branching that hides a main path) are reported without failing it, since their rules and levels are still being measured; each finding ends with how often findings of its rule and level were right](site/src/images/terminal.svg)
 
-JevGate 0.26.0 on [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424b3f1033094ffd97da6d47585e38259), rerun from its answer cache, so it cost nothing.
+JevGate 0.28.0 on [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424b3f1033094ffd97da6d47585e38259), rerun from its answer cache, so it cost nothing.
 
 **[Documentation](https://tech-byte-frontier.github.io/jevgate/)** · [Rules](https://tech-byte-frontier.github.io/jevgate/reference/rules.html) · [Configuration](https://tech-byte-frontier.github.io/jevgate/configuration.html) · [CI](https://tech-byte-frontier.github.io/jevgate/ci.html) · [Troubleshooting](https://tech-byte-frontier.github.io/jevgate/troubleshooting.html) · [Changelog](CHANGELOG.md)
 
@@ -50,7 +50,7 @@ jevgate init --agent claude               # check each edit and turn of Claude C
 
 `jevgate check --report` writes the same findings to a local dashboard you can filter by path and classification, with each file's findings, undecided units and the answers behind them:
 
-![JevGate's HTML report on zoxide: the gate's result and what fails it by default, totals for files, findings, notes and cost, then a list of files by classification, with src/util.rs open to show its two review findings, the one that fails the gate marked, and how each rule classified the file](site/src/images/report.png)
+![JevGate's HTML report on zoxide: the gate's result and what fails it by default, totals for files, findings, notes and cost, then a list of files by classification, with src/util.rs open to show its two review findings, the one that fails the gate marked, each with how often findings like it were right, and how each rule classified the file](site/src/images/report.png)
 
 `jevgate --help` gives the workflow, exit codes, files and environment, and `jevgate check --help` explains each flag and the JSON report. In a coding agent, JevGate's hooks give the agent each edit's findings and keep it working while findings fail the gate; a Claude Code plugin bundles them with the MCP server, `jevgate mcp` ([coding agents](https://tech-byte-frontier.github.io/jevgate/coding-agents.html)).
 

@@ -1,33 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="894" height="638" viewBox="0 0 894 638" role="img" aria-label="jevgate check · zoxide">
+<svg xmlns="http://www.w3.org/2000/svg" width="894" height="695" viewBox="0 0 894 695" role="img" aria-label="jevgate check · zoxide">
 <style>text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:13px;fill:#d1d7e0;white-space:pre}.b{font-weight:700}.d{opacity:.62}</style>
-<rect width="894" height="638" rx="10" fill="#0d1117"/>
-<rect x=".5" y=".5" width="893" height="637" rx="10" fill="none" stroke="#30363d"/>
+<rect width="894" height="695" rx="10" fill="#0d1117"/>
+<rect x=".5" y=".5" width="893" height="694" rx="10" fill="none" stroke="#30363d"/>
 <circle cx="20" cy="18" r="6" fill="#ff5f57"/><circle cx="40" cy="18" r="6" fill="#febc2e"/><circle cx="60" cy="18" r="6" fill="#28c840"/>
 <text x="447.0" y="22" text-anchor="middle" class="d" style="font-size:12px">jevgate check · zoxide</text>
 <text x="18" y="63" xml:space="preserve"><tspan fill="#3fb950">~/zoxide</tspan> <tspan class="b">$ jevgate check</tspan></text>
 <text x="18" y="82" xml:space="preserve"><tspan class="b" fill="#ff7b72">JevGate: review · gate failed: 1 new review finding · 27 files · 0 API requests · 0 input tokens · ~$0.0000</tspan></text>
 <text x="18" y="120" xml:space="preserve"><tspan class="b" fill="#ff7b72">Review (4):</tspan></text>
 <text x="18" y="139" xml:space="preserve">  <tspan class="b">src/util.rs:269</tspan> <tspan class="d">[maintainability/function-simplification]</tspan> <tspan fill="#ff7b72">(fails the gate)</tspan> `resolve_path` mixes separate</text>
-<text x="18" y="158" xml:space="preserve">      jobs in long blocks; splitting it would make it easier to understand (0.86).</text>
-<text x="18" y="177" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Extract each separate job into its own named function</text>
-<text x="18" y="196" xml:space="preserve">  <tspan class="b">src/util.rs:154</tspan> <tspan class="d">[maintainability/file-organization]</tspan> This file holds several features that would be easier</text>
-<text x="18" y="215" xml:space="preserve">      to find apart (0.81). G3 (`write`, `tmpfile`, `rename`, `canonicalize`, `current_dir`, `path_to_str`</text>
-<text x="18" y="234" xml:space="preserve">      and 1 more) or G1 (`Fzf`, `Fzf::new`, `Fzf::enable_preview`, `Fzf::args`, `Fzf::env`, `Fzf::envs`)</text>
-<text x="18" y="253" xml:space="preserve">      would be most useful as its own module.</text>
-<text x="18" y="272" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Move that group into its own module</text>
-<text x="18" y="291" xml:space="preserve">  <tspan class="b">src/import/autojump.rs:64</tspan> <tspan class="d">[maintainability/shared-logic]</tspan> `Iter::next` (src/import/autojump.rs:64) and</text>
-<text x="18" y="310" xml:space="preserve">      `Iter::next` (src/import/z.rs:66) perform the same steps for the same purpose (1.00).</text>
-<text x="18" y="329" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Move the shared steps into one implementation</text>
-<text x="18" y="348" xml:space="preserve">  <tspan class="b">src/import/fasd.rs:16</tspan> <tspan class="d">[maintainability/shared-logic]</tspan> `Fasd::dirs` (src/import/fasd.rs:16), `ZshZ::dirs`</text>
-<text x="18" y="367" xml:space="preserve">      (src/import/zsh_z.rs:16) and 2 more copies perform the same steps for the same purpose (0.99).</text>
-<text x="18" y="386" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Move the shared steps into one implementation</text>
-<text x="18" y="424" xml:space="preserve"><tspan class="b" fill="#e3b341">Consider (1):</tspan></text>
-<text x="18" y="443" xml:space="preserve">  <tspan class="b">src/import/atuin.rs:75</tspan> <tspan class="d">[maintainability/function-simplification]</tspan> `Iter::next` has branching that likely</text>
-<text x="18" y="462" xml:space="preserve">      hides its main path (0.94).</text>
-<text x="18" y="481" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Consider guard clauses, early returns or a lookup table</text>
-<text x="18" y="519" xml:space="preserve">2 optional notes on code that reads well as it is; --verbose shows them.</text>
-<text x="18" y="557" xml:space="preserve">3 reviews and 1 consider did not fail the gate: by default only rules and levels right at least 80% of the</text>
-<text x="18" y="576" xml:space="preserve">      time on projects JevGate was never tuned on fail it, and theirs are still being measured. `jevgate</text>
-<text x="18" y="595" xml:space="preserve">      rules` shows each one's precision; `--fail-on review` makes every review fail the gate.</text>
-<text x="18" y="614" xml:space="preserve">Skipped 1: Operational script. Maintainability gates apply to application and library source.</text>
+<text x="18" y="158" xml:space="preserve">      jobs in long blocks; splitting it would make it easier to understand. <tspan class="d">Right 87% of the time (23</tspan></text>
+<text x="18" y="177" xml:space="preserve">      <tspan class="d">labels).</tspan></text>
+<text x="18" y="196" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Extract each separate job into its own named function</text>
+<text x="18" y="215" xml:space="preserve">  <tspan class="b">src/util.rs:154</tspan> <tspan class="d">[maintainability/file-organization]</tspan> This file holds several features that would be easier</text>
+<text x="18" y="234" xml:space="preserve">      to find apart. G3 (`write`, `tmpfile`, `rename`, `canonicalize`, `current_dir`, `path_to_str` and 1</text>
+<text x="18" y="253" xml:space="preserve">      more) or G1 (`Fzf`, `Fzf::new`, `Fzf::enable_preview`, `Fzf::args`, `Fzf::env`, `Fzf::envs`) would be</text>
+<text x="18" y="272" xml:space="preserve">      most useful as its own module. <tspan class="d">Not yet measured.</tspan></text>
+<text x="18" y="291" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Move that group into its own module</text>
+<text x="18" y="310" xml:space="preserve">  <tspan class="b">src/import/autojump.rs:64</tspan> <tspan class="d">[maintainability/shared-logic]</tspan> `Iter::next` (src/import/autojump.rs:64) and</text>
+<text x="18" y="329" xml:space="preserve">      `Iter::next` (src/import/z.rs:66) perform the same steps for the same purpose. <tspan class="d">Right 54% of the time</tspan></text>
+<text x="18" y="348" xml:space="preserve">      <tspan class="d">(85 labels).</tspan></text>
+<text x="18" y="367" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Move the shared steps into one implementation</text>
+<text x="18" y="386" xml:space="preserve">  <tspan class="b">src/import/fasd.rs:16</tspan> <tspan class="d">[maintainability/shared-logic]</tspan> `Fasd::dirs` (src/import/fasd.rs:16), `ZshZ::dirs`</text>
+<text x="18" y="405" xml:space="preserve">      (src/import/zsh_z.rs:16) and 2 more copies perform the same steps for the same purpose. <tspan class="d">Right 54% of</tspan></text>
+<text x="18" y="424" xml:space="preserve">      <tspan class="d">the time (85 labels).</tspan></text>
+<text x="18" y="443" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Move the shared steps into one implementation</text>
+<text x="18" y="481" xml:space="preserve"><tspan class="b" fill="#e3b341">Consider (1):</tspan></text>
+<text x="18" y="500" xml:space="preserve">  <tspan class="b">src/import/atuin.rs:75</tspan> <tspan class="d">[maintainability/function-simplification]</tspan> `Iter::next` has branching that likely</text>
+<text x="18" y="519" xml:space="preserve">      hides its main path. <tspan class="d">Right 67% of the time (126 labels).</tspan></text>
+<text x="18" y="538" xml:space="preserve">    <tspan fill="#56d4dd">→</tspan> Consider guard clauses, early returns or a lookup table</text>
+<text x="18" y="576" xml:space="preserve">2 optional notes on code that reads well as it is; --verbose shows them.</text>
+<text x="18" y="614" xml:space="preserve">3 reviews and 1 consider did not fail the gate: by default only rules and levels right at least 80% of the</text>
+<text x="18" y="633" xml:space="preserve">      time on projects JevGate was never tuned on fail it, and theirs are still being measured. `jevgate</text>
+<text x="18" y="652" xml:space="preserve">      rules` shows each one's precision; `--fail-on review` makes every review fail the gate.</text>
+<text x="18" y="671" xml:space="preserve">Skipped 1: Operational script. Maintainability gates apply to application and library source.</text>
 </svg>
