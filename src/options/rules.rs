@@ -81,7 +81,7 @@ pub struct RulesTestArgs {
     /// cannot be asked exits 2 here too.
     #[arg(long)]
     pub dry_run: bool,
-    /// TypeSafe model [default: `model` in jevgate.toml, else jev-1.13.0]
+    /// Model, as the key's provider names it [default: `model` in jevgate.toml, else the key's provider's model]
     ///
     /// Answers are cached per model, so another model asks every example
     /// again: try the examples on a model before pinning it.
@@ -90,13 +90,17 @@ pub struct RulesTestArgs {
     /// Ignore cached answers for this invocation and ask again
     #[arg(long)]
     pub refresh: bool,
-    /// Use cached answers only and never contact TypeSafe; an example without one leaves the run incomplete
+    /// Use cached answers only and never contact the provider; an example without one leaves the run incomplete
     #[arg(long, conflicts_with = "refresh")]
     pub cache_only: bool,
     /// Stop after this many API attempts; reaching it leaves the run incomplete
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000))]
     pub max_requests: Option<u32>,
-    /// Credential file holding TYPESAFE_API_KEY [default: <repository root>/.env]
+    /// Credential file holding TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY [default: <repository root>/.env]
+    ///
+    /// Read as `check` reads it: TYPESAFE_API_KEY in the environment takes
+    /// precedence, and the repository's .env is read only for
+    /// TYPESAFE_API_KEY.
     #[arg(long, value_name = "FILE")]
     pub env_file: Option<PathBuf>,
     /// Read this configuration instead of <repository root>/jevgate.toml
@@ -134,9 +138,11 @@ pub struct ProposeArgs {
     /// With --dry-run, include every request body (the exact lines and questions)
     #[arg(long, requires = "dry_run")]
     pub show_requests: bool,
-    /// Credential file holding TYPESAFE_API_KEY [default: <repository root>/.env]
+    /// Credential file holding TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY [default: <repository root>/.env]
     ///
-    /// The TYPESAFE_API_KEY environment variable takes precedence.
+    /// Read as `check` reads it: TYPESAFE_API_KEY in the environment takes
+    /// precedence, and the repository's .env is read only for
+    /// TYPESAFE_API_KEY.
     #[arg(long, value_name = "FILE")]
     pub env_file: Option<PathBuf>,
 }

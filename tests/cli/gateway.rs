@@ -382,3 +382,49 @@ fn login_saves_a_gateway_key_with_its_provider_and_checks_plan_for_it() {
         "{errors}"
     );
 }
+
+#[test]
+fn rules_test_and_rules_propose_ask_through_the_gateway_of_the_key() {
+    let project = Project::new();
+    std::fs::create_dir_all(project.0.join(".jevgate/questions")).unwrap();
+    std::fs::write(
+        project.0.join(".jevgate/questions/body-logs.toml"),
+        "question = \"Does this function write a request body to a log?\"\nunit = \"function\"\n\n[[passing]]\npath = \"src/orders.rs\"\ncode = \"fn charge(req: &Request) {\\n    log(req.id());\\n}\\n\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.0.join("AGENTS.md"),
+        "# Conventions\n\n- Never log request bodies.\n",
+    )
+    .unwrap();
+    let provider = openrouter();
+    let root = format!("{}/api", provider.url);
+    let run = |args: &[&str]| {
+        project
+            .command()
+            .args(args)
+            .env("OPENROUTER_API_KEY", "sk-or-v1-test")
+            .env("JEVGATE_BASE_URL", &root)
+            .output()
+            .unwrap()
+    };
+    let output = run(&["rules", "test", "--format", "json"]);
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{errors}");
+    let tested: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        (&tested["provider"], &tested["requested_model"]),
+        (&json!("openrouter"), &json!("typesafe/jev-1.13"))
+    );
+    assert!(tested["estimated_usd"].as_f64().unwrap() > 0.0);
+    let output = run(&["rules", "propose", "--format", "json"]);
+    assert_eq!(output.status.code(), Some(0));
+    let proposed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(proposed["estimated_usd"].as_f64().unwrap() > 0.0);
+    asked(
+        &provider.received(),
+        "/api/v1/systemone",
+        "sk-or-v1-test",
+        "typesafe/jev-1.13",
+    );
+}

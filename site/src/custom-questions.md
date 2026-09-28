@@ -139,7 +139,7 @@ custom/jev-not-an-llm (comment, review at 0.70, src/**): 1 of 5 examples wrong
   ok     passing 3  yes 0.45  src/cache.rs: a comment in `keep`
 ```
 
-It exits as `check` does: 0 when every example is right, 1 when a question gets one wrong, and 2 when an example could not be asked (no key, a file it cannot read, an example without a unit). `--rule custom/<id>` tests one question. `--format json` prints `complete` and `passed`, and for each question's examples their `result` (`right`, `wrong` or `error`), `yes`, `found`, `close`, `error` and every unit's answer. `--dry-run` counts the requests and new input tokens without a key or network and still reads every example, so a broken one exits 2 for free.
+It exits as `check` does: 0 when every example is right, 1 when a question gets one wrong, and 2 when an example could not be asked (no key, a file it cannot read, an example without a unit). `--rule custom/<id>` tests one question. `--format json` prints `complete` and `passed`, the cost as `estimated_usd` (null when unknown, priced as a check prices it), and for each question's examples their `result` (`right`, `wrong` or `error`), `yes`, `found`, `close`, `error` and every unit's answer. `--dry-run` counts the requests and new input tokens without a key or network and still reads every example, so a broken one exits 2 for free.
 
 ### Drift
 
