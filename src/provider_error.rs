@@ -64,6 +64,8 @@ pub(crate) struct ProviderError {
     pub request_id: Option<String>,
     /// Where a 422 found the request invalid: each field's path and error type.
     pub invalid: Vec<String>,
+    /// The provider does not know the model asked for.
+    pub unknown_model: bool,
 }
 
 impl ProviderError {
@@ -74,6 +76,9 @@ impl ProviderError {
         }
         if self.edge_block {
             return Some("blocked by the provider's edge protection".into());
+        }
+        if self.unknown_model {
+            return Some("unknown model; check the model name".into());
         }
         match self.status {
             402 => Some(format!("credits exhausted; {}", self.service.credits)),
@@ -130,6 +135,15 @@ pub(crate) fn provider_error(service: &'static Service, failure: Failure<'_>) ->
         } else {
             Vec::new()
         },
+        // TypeSafe answered `jev-1.13`, a name its docs use, with this on
+        // 2026-09-28; only the message's fixed opening is read.
+        unknown_model: status == 400
+            && json.as_ref().is_some_and(|body| {
+                body["detail"]["error_type"] == "api_usage_error"
+                    && body["detail"]["message"]
+                        .as_str()
+                        .is_some_and(|message| message.starts_with("Unknown model:"))
+            }),
     }
 }
 
@@ -225,6 +239,18 @@ mod tests {
             "TypeSafe HTTP 402 (credits exhausted; add credits or turn on auto-refill at https://console.typesafe.ai); request was not retried"
         );
         assert!(message(404, None, None).contains("(not found; check the model name)"));
+        // TypeSafe's answer to `"model": "jev-1.13"`, as received on 2026-09-28.
+        let unknown =
+            r#"{"detail":{"error_type":"api_usage_error","message":"Unknown model: jev-1.13"}}"#;
+        assert_eq!(
+            message(400, Some(unknown), Some("req_01")),
+            "TypeSafe HTTP 400 (unknown model; check the model name); request was not retried; request id req_01"
+        );
+        let other = r#"{"detail":{"error_type":"api_usage_error","message":"private"}}"#;
+        assert_eq!(
+            message(400, Some(other), None),
+            "TypeSafe HTTP 400; request was not retried"
+        );
         let oversized = provider_error(
             &TYPESAFE,
             Failure {

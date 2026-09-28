@@ -10,8 +10,8 @@ Exit code 2 means the run could not finish, or the configuration or command line
 **`TYPESAFE_API_KEY environment variable: the key was issued by OpenRouter (it starts with sk-or-), not by TypeSafe`**
 : A key goes only to the provider that issued it. Set it in the variable the message names, or save it with `jevgate auth login --provider openrouter`.
 
-**`OpenRouter HTTP 404 (not found; check the model name)`**
-: A model name is sent as written, and each provider has its own: `jev-1.13.0` on TypeSafe, `typesafe/jev-1.13` on OpenRouter, `typesafe-ai/jev` on Vercel AI Gateway. A `model` in `jevgate.toml` written for one provider needs `--model` with another provider's key.
+**`TypeSafe HTTP 400 (unknown model; check the model name)`**, or **`OpenRouter HTTP 404 (not found; check the model name)`**
+: A model name is sent as written, and each provider has its own: `jev-1.13.0`, `jev-latest` or `jev-preview` on TypeSafe (which refuses `jev-1.13`, though its docs use it), `typesafe/jev-1.13` on OpenRouter, `typesafe-ai/jev` on Vercel AI Gateway. A `model` in `jevgate.toml` written for one provider needs `--model` with another provider's key.
 
 **`Cannot find revision …; in CI, fetch it (for example fetch-depth: 0)`**, or **`… and HEAD share no history`**
 : `--base` needs the history back to the fork point. Check out with `fetch-depth: 0`.
