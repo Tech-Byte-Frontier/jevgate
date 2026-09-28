@@ -195,10 +195,7 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
             ..Default::default()
         };
         generic::walk(language, tree.root_node(), source, &mut file);
-        file.errors = left_out::outside(
-            crate::syntax::error_regions(tree.root_node()),
-            &file.left_out,
-        );
+        file.record_errors(tree.root_node());
         calls_by_name(&mut file.units);
         return Ok(file);
     }
@@ -210,10 +207,7 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         ..Default::default()
     };
     walk(tree.root_node(), source, "", &mut file);
-    file.errors = left_out::outside(
-        crate::syntax::error_regions(tree.root_node()),
-        &file.left_out,
-    );
+    file.record_errors(tree.root_node());
     if let Some(names) = &file.bend {
         unaliased_calls(&mut file.units, &names.aliases);
     }
@@ -831,15 +825,10 @@ fn push(
     if short_name.is_empty() {
         return;
     }
-    let placed = Unit::placed(definition, (short_name, owner), kind, source);
-    let Definition { outer, node, body } = definition;
-    // A definition holding a syntax error is left out and named; the rest
-    // of its file is judged.
-    if outer.has_error() {
-        file.left_out
-            .push(LeftOut::definition(placed, outer, source));
+    let Some(placed) = file.place(definition, (short_name, owner), kind, source) else {
         return;
-    }
+    };
+    let Definition { node, body, .. } = definition;
     let (facts, refs) = references(node, (short_name, owner), kind, &file.imports, source);
     let equality = equality_override(node, short_name, source);
     let literals = body

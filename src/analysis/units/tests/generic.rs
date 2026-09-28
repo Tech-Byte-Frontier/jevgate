@@ -188,3 +188,62 @@ fn a_generic_file_of_nothing_but_an_error_leaves_no_unit_and_says_so() {
         assert!(file.units.is_empty() && file.partial(), "{path}");
     }
 }
+
+/// Three functions in Kotlin, C or Swift, the middle one holding a comment
+/// and, on the line below it, `statement`.
+fn three(path: &str, statement: &str) -> String {
+    let function = |name: &str, body: &str| match path.rsplit('.').next() {
+        Some("kt") => format!("fun {name}(x: Int): Int {{\n{body}}}\n"),
+        Some("c") => format!("int {name}(int x) {{\n{body}}}\n"),
+        _ => format!("func {name}(_ x: Int) -> Int {{\n{body}}}\n"),
+    };
+    let end = if path.ends_with(".c") { ";" } else { "" };
+    format!(
+        "{}\n{}\n{}",
+        function("first", &format!("    return x + 1{end}\n")),
+        function(
+            "broken",
+            &format!("    // Doubles it.\n    {statement}\n    return y{end}\n")
+        ),
+        function("last", &format!("    return x - 1{end}\n"))
+    )
+}
+
+#[test]
+fn a_generic_definition_holding_a_syntax_error_is_left_out_by_name() {
+    for (path, statement) in [
+        ("math.kt", "val y: = x"),
+        ("math.c", "int y = (x + 2;"),
+        ("math.swift", "let y = x + * 2"),
+    ] {
+        let source = three(path, statement);
+        let file = parse(Path::new(path), &source).unwrap();
+        let kept: Vec<&str> = file.units.iter().map(|u| u.name.as_str()).collect();
+        assert_eq!(kept, ["first", "last"], "{path}");
+        let left_out: Vec<(&str, usize, usize, usize)> = file
+            .left_out
+            .iter()
+            .map(|l| (l.name.as_str(), l.line, l.end_line, l.error_line))
+            .collect();
+        assert_eq!(left_out, [("broken", 5, 9, 7)], "{path}");
+        // The comment inside it goes with it; the other functions are whole.
+        let comment = source.find("Doubles").unwrap();
+        assert!(!file.intact(&(comment..comment + 7)), "{path}");
+        assert!(file.units.iter().all(|u| file.intact(&u.span)), "{path}");
+    }
+}
+
+#[test]
+fn definitions_the_parser_could_not_read_are_left_out_by_their_lines() {
+    // tree-sitter-kotlin-ng reads `broken` and `last` as one error.
+    let source = three("math.kt", "val = x * 2");
+    let file = parse(Path::new("math.kt"), &source).unwrap();
+    let kept: Vec<&str> = file.units.iter().map(|u| u.name.as_str()).collect();
+    assert_eq!(kept, ["first"]);
+    let code: Vec<(String, usize, usize)> = file
+        .left_out_code(&source)
+        .into_iter()
+        .map(|l| (l.name, l.line, l.end_line))
+        .collect();
+    assert_eq!(code, [(String::new(), 5, 13)]);
+}

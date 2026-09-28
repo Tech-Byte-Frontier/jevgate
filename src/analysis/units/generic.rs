@@ -61,6 +61,7 @@ pub(super) fn walk(language: &Language, root: Node<'_>, source: &str, file: &mut
         }
     }
     file.units.sort_by_key(|unit| unit.span.start);
+    file.left_out.sort_by_key(|l| (l.span.start, l.span.end));
 }
 
 /// Whether `inner` lies within `outer` and is not `outer` itself.
@@ -71,13 +72,14 @@ fn inside(outer: Node<'_>, inner: Node<'_>) -> bool {
 }
 
 /// Whether a node lies in what the parser could not read: queries match
-/// there too, where the other languages' walks never look.
+/// there too, where the other languages' walks never look. Its lines are
+/// left out as code outside every unit (`FileUnits::record_errors`).
 fn under_error(node: Node<'_>) -> bool {
     std::iter::successors(node.parent(), Node::parent).any(|n| n.is_error())
 }
 
 /// One definition's unit, with its owner and the names it calls. One that
-/// holds a syntax error is left out, as in every language.
+/// holds a syntax error is left out and named, as in every language.
 fn push(
     language: &Language,
     tag: &Tag<'_>,
@@ -86,7 +88,7 @@ fn push(
     file: &mut FileUnits,
 ) {
     let short_name = text(tag.name, source);
-    if short_name.is_empty() || tag.node.has_error() {
+    if short_name.is_empty() {
         return;
     }
     let kind = match (tag.defines, owner.is_empty()) {
@@ -99,6 +101,9 @@ fn push(
         outer: tag.node,
         node: tag.node,
         body,
+    };
+    let Some(placed) = file.place(definition, (short_name, owner), kind, source) else {
+        return;
     };
     let (nesting, branch_chain) = body.map_or((0, 0), |b| nesting::generic(b, language));
     let mut refs = BTreeSet::from([short_name.to_string()]);
@@ -120,7 +125,7 @@ fn push(
         calls,
         refs,
         mentions,
-        ..Unit::placed(definition, (short_name, owner), kind, source)
+        ..placed
     };
     file.units.push(unit);
 }

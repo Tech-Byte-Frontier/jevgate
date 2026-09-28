@@ -162,3 +162,23 @@ fn a_test_holding_a_syntax_error_is_left_out_and_named() {
         1
     );
 }
+
+#[test]
+fn a_generic_function_holding_an_error_is_left_out_with_its_comments() {
+    let source = "fun first(x: Int): Int {\n    // Count from one: the grid's first row is its header.\n    return x + 1\n}\n\nfun broken(x: Int): Int {\n    // Double it: the grid is twice as wide as it is tall.\n    val y: = x\n    return y\n}\n";
+    let (project, options) = project_with(&[("Grid.kt", source)], &[catalog::COMMENTS]);
+    let (_, plan) = planned(&project, &options);
+    assert_eq!(
+        file_plan(&plan, "Grid.kt").left_out,
+        [LeftOut {
+            unit: "broken".into(),
+            start_line: 6,
+            end_line: 10,
+            reason: "Syntax error at line 8.".into(),
+        }]
+    );
+    let request = first_request(&plan, "comments");
+    let comments = request["state"]["comments"].as_array().unwrap();
+    assert_eq!(comments.len(), 1, "{comments:?}");
+    assert_eq!(comments[0]["in"], "fun first(x: Int): Int");
+}

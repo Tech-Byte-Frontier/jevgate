@@ -3,7 +3,7 @@
 //! lines. The rest of the file is judged, and every rule asks
 //! `FileUnits::intact` whether its own candidate lies clear of what was left
 //! out. Most errors are grammar gaps in valid code (`syntax::error_regions`).
-use super::{FileUnits, Unit, line_of};
+use super::{Definition, FileUnits, Kind, Unit, line_of};
 use crate::analysis::test_map::TestCase;
 use std::ops::Range;
 use tree_sitter::Node;
@@ -25,7 +25,7 @@ pub struct LeftOut {
 impl LeftOut {
     /// A definition whose `node` holds a syntax error, named and placed as
     /// its unit would have been (`Unit::placed`), at its first error.
-    pub(super) fn definition(placed: Unit, node: Node<'_>, source: &str) -> Self {
+    fn definition(placed: Unit, node: Node<'_>, source: &str) -> Self {
         let error = crate::syntax::error_regions(node)
             .first()
             .map_or(node.start_byte(), |region| region.start);
@@ -67,6 +67,35 @@ fn contains(outer: &Range<usize>, inner: &Range<usize>) -> bool {
 }
 
 impl FileUnits {
+    /// A definition placed as its unit (`Unit::placed`), or none when its
+    /// syntax holds an error: it is then left out and named, and the rest
+    /// of its file is judged. Every walk, the generic tier's included,
+    /// places its definitions here.
+    pub(super) fn place(
+        &mut self,
+        definition: Definition<'_>,
+        names: (&str, &str),
+        kind: Kind,
+        source: &str,
+    ) -> Option<Unit> {
+        let placed = Unit::placed(definition, names, kind, source);
+        if !definition.outer.has_error() {
+            return Some(placed);
+        }
+        let left_out = LeftOut::definition(placed, definition.outer, source);
+        self.left_out.push(left_out);
+        None
+    }
+
+    /// Record the syntax errors under `root` outside every unit the walk
+    /// left out: code outside every unit.
+    pub(super) fn record_errors(&mut self, root: Node<'_>) {
+        self.errors = crate::syntax::error_regions(root)
+            .into_iter()
+            .filter(|r| !self.left_out.iter().any(|l| contains(&l.span, r)))
+            .collect();
+    }
+
     /// Whether the parse held syntax errors.
     pub fn partial(&self) -> bool {
         !self.left_out.is_empty() || !self.errors.is_empty()
@@ -158,13 +187,4 @@ impl FileUnits {
         found.sort_by_key(|l| (l.span.start, l.span.end));
         found
     }
-}
-
-/// The error regions outside every left-out unit, which are code outside
-/// every unit.
-pub(super) fn outside(regions: Vec<Range<usize>>, units: &[LeftOut]) -> Vec<Range<usize>> {
-    regions
-        .into_iter()
-        .filter(|r| !units.iter().any(|l| contains(&l.span, r)))
-        .collect()
 }
