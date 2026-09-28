@@ -113,8 +113,8 @@ impl Server {
         Ok(format!("{text}\n\n({meaning})"))
     }
 
-    /// Findings of the last report, those that fail the gate first, then by
-    /// rank, optionally for one path prefix.
+    /// Findings of the last report, those that fail the gate first, then
+    /// reviews before considers, each by rank, optionally for one path prefix.
     fn findings(&self, arguments: &Value) -> Result<String> {
         let report = crate::storage::read_latest(&self.root)
             .context("No report yet; call jevgate_check first")?;
@@ -174,8 +174,9 @@ fn strings(value: &Value, name: &str) -> Result<Vec<String>> {
     }
 }
 
-/// The findings of `report`, those that fail the gate first, so the cap
-/// never leaves one out for a finding that only warns.
+/// The findings of `report`, those that fail the gate first and then
+/// reviews, so the cap never leaves one out for a finding that only warns or
+/// for a consider.
 fn findings(report: &Report, prefix: Option<&str>, include_notes: bool) -> Value {
     let all: Vec<Value> = output::failing_first(report)
         .into_iter()

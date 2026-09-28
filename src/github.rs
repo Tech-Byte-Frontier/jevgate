@@ -157,6 +157,40 @@ mod tests {
     }
 
     #[test]
+    fn a_review_that_does_not_fail_is_annotated_before_higher_ranked_considers() {
+        use crate::tests::finding_of;
+        let ranked = |rule: &str, strength: Strength, rank: f64| Finding {
+            rank,
+            ..finding_of(rule, strength)
+        };
+        let considers =
+            (0..11).map(|_| ranked("maintainability/shared-logic", Strength::Consider, 0.9));
+        let measured = ranked("maintainability/shared-logic", Strength::Review, 0.5);
+        let failing = ranked(
+            "maintainability/function-simplification",
+            Strength::Review,
+            0.1,
+        );
+        let report = crate::tests::gated(
+            considers.chain([measured, failing]).collect(),
+            &crate::tests::args(),
+        );
+        let order: Vec<(Strength, bool)> = output::failing_first(&report)
+            .iter()
+            .map(|(_, f)| (f.strength, f.fails_gate()))
+            .collect();
+        assert_eq!(
+            order[..3],
+            [
+                (Strength::Review, true),
+                (Strength::Review, false),
+                (Strength::Consider, false)
+            ],
+            "the review still being measured is the first warning, not the twelfth"
+        );
+    }
+
+    #[test]
     fn annotations_escape_commands_and_mark_what_fails_the_gate() {
         let review = counted(Strength::Review, Gating::Fails);
         let line = annotation(Path::new("src/a,b.rs"), &review);
