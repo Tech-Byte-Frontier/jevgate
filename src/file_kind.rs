@@ -491,7 +491,7 @@ fn generic_prepared(language: &crate::analysis::generic::Language, test: bool) -
         )
     } else {
         let level = if language.preview {
-            " and in preview, so its findings never fail the default gate"
+            " and in preview, so JevGate's own rules' findings in it never fail the default gate"
         } else {
             ""
         };

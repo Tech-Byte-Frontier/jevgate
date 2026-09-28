@@ -222,6 +222,18 @@ fn a_function_question_reaches_the_functions_of_a_preview_language() {
         ),
         "`charge`: Does this function write a request body to a log? Yes. Not yet measured."
     );
+    // The preview line and notes say only JevGate's own rules never fail.
+    let mut out = Vec::new();
+    crate::output::agent(&mut out, &report, false, crate::output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("[custom/body-logs] (fails the gate)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("whose built-in rules' findings never fail the default gate: Kotlin"),
+        "{text}"
+    );
 }
 
 #[test]

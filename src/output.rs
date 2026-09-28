@@ -449,7 +449,7 @@ pub(crate) fn measuring(report: &Report) -> Option<String> {
             _ => "those languages are".into(),
         };
         format!(
-            "{findings} in {} files did not fail the gate: {which} in preview, and by default a preview language's findings never fail it. `--fail-on review` makes every review fail the gate.",
+            "{findings} in {} files did not fail the gate: {which} in preview, and by default JevGate's own rules never fail it there. `--fail-on review` makes every review fail the gate.",
             join(&languages)
         )
     });
@@ -485,7 +485,7 @@ pub(crate) fn measuring_note(path: &Path, finding: &Finding) -> Option<String> {
     (finding.gate == Some(Gating::Measuring)).then(|| {
         match crate::maturity::preview_language(path, &finding.rule) {
             Some(language) => format!(
-                "Does not fail the gate: {language} is in preview, and by default a preview language's findings never fail it."
+                "Does not fail the gate: {language} is in preview, and by default JevGate's own rules never fail it there."
             ),
             None => format!(
                 "Does not fail the gate: by default only rules and levels right at least {}% of the time over at least {} labels on projects JevGate was never tuned on fail it.",

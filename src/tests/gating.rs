@@ -468,7 +468,7 @@ fn a_preview_language_s_findings_never_fail_the_default_gate() {
         "{text}"
     );
     assert!(
-        text.contains("\n1 review and 1 consider in Kotlin files did not fail the gate: Kotlin is in preview, and by default a preview language's findings never fail it. `--fail-on review` makes every review fail the gate.\n"),
+        text.contains("\n1 review and 1 consider in Kotlin files did not fail the gate: Kotlin is in preview, and by default JevGate's own rules never fail it there. `--fail-on review` makes every review fail the gate.\n"),
         "{text}"
     );
     assert!(!text.contains("theirs are still being measured"), "{text}");
@@ -514,7 +514,7 @@ fn sarif_says_a_preview_language_s_findings_are_measured_in_it() {
     let message = result["message"]["text"].as_str().unwrap();
     assert!(
         message.contains("Not yet measured in Kotlin.")
-            && message.ends_with("Does not fail the gate: Kotlin is in preview, and by default a preview language's findings never fail it."),
+            && message.ends_with("Does not fail the gate: Kotlin is in preview, and by default JevGate's own rules never fail it there."),
         "{message}"
     );
 }
