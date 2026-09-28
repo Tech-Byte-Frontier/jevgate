@@ -651,22 +651,8 @@ fn confirm_query(
 /// What the HTML a weak-settings finding writes without escaping holds,
 /// asked only after a finding its escaping check raised: the function alone.
 fn confirm_html(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(Value, Asked)> {
-    let code = subject.code();
-    let mut questions = Questions::default();
-    questions.ask(
-        "raw_html".into(),
-        questions::raw_html(&code),
-        id,
-        UNSAFE_SETTINGS,
-        "raw_html",
-        Pass::Locate,
-    );
-    let state = json!({
-        "file": file.file_state(),
-        subject.kind: subject.state(),
-    });
-    let (request, asked) = file.request("locate", state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+    let body = questions::raw_html(&subject.code());
+    confirm_alone(file, subject, id, (UNSAFE_SETTINGS, "raw_html", body), None)
 }
 
 /// Who reads the error text of an error-detail finding, asked only after
@@ -676,25 +662,17 @@ fn confirm_readers(
     subject: &Subject<'_>,
     id: &str,
 ) -> Option<(Value, Asked)> {
-    let code = subject.code();
-    let mut questions = Questions::default();
-    questions.ask(
-        "error_readers".into(),
-        questions::error_readers(&code, file.project.is_some()),
+    let body = questions::error_readers(&subject.code(), file.project.is_some());
+    let opening = file
+        .project
+        .map(|opening| ("project", json!({"readme_opening": opening})));
+    confirm_alone(
+        file,
+        subject,
         id,
-        SENSITIVE_DATA,
-        "error_readers",
-        Pass::Locate,
-    );
-    let mut state = json!({
-        "file": file.file_state(),
-        subject.kind: subject.state(),
-    });
-    if let Some(opening) = file.project {
-        state["project"] = json!({"readme_opening": opening});
-    }
-    let (request, asked) = file.request("locate", state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+        (SENSITIVE_DATA, "error_readers", body),
+        opening,
+    )
 }
 
 /// When the log line of a logging finding runs, asked only after such a
@@ -704,20 +682,34 @@ fn confirm_logging(
     subject: &Subject<'_>,
     id: &str,
 ) -> Option<(Value, Asked)> {
-    let code = subject.code();
-    let mut questions = Questions::default();
-    questions.ask(
-        "logged_when".into(),
-        questions::logged_when(&code),
+    let body = questions::logged_when(&subject.code());
+    confirm_alone(
+        file,
+        subject,
         id,
-        SENSITIVE_DATA,
-        "logged_when",
-        Pass::Locate,
-    );
-    let state = json!({
+        (SENSITIVE_DATA, "logged_when", body),
+        None,
+    )
+}
+
+/// One Choice of `rule` asked after a finding, with the function as its
+/// evidence and `extra` state beside it.
+fn confirm_alone(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    id: &str,
+    (rule, question, body): (&'static str, &'static str, Value),
+    extra: Option<(&str, Value)>,
+) -> Option<(Value, Asked)> {
+    let mut questions = Questions::default();
+    questions.ask(question.into(), body, id, rule, question, Pass::Locate);
+    let mut state = json!({
         "file": file.file_state(),
         subject.kind: subject.state(),
     });
+    if let Some((key, value)) = extra {
+        state[key] = value;
+    }
     let (request, asked) = file.request("locate", state, questions);
     file.budget.fits(&request).then_some((request, asked))
 }

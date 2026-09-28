@@ -195,22 +195,41 @@ fn a_query_finding_is_a_note_when_its_values_are_fixed_text() {
             ("origin", spread(0.0, 0.0, 1.0)),
             ("query_values", choice),
         ];
-        let report = run(&project, &options, &mut eval);
-        report.files[0]
-            .findings
-            .iter()
-            .find(|f| f.rule == "security/injection")
-            .map(|f| (f.strength, f.message.clone()))
-            .unwrap()
+        first_of(&run(&project, &options, &mut eval), "security/injection")
     };
-    assert_eq!(judged(choice_of("raw", &QUERY_VALUES)).0, Strength::Review);
-    let (strength, message) = judged(choice_of("fixed", &QUERY_VALUES));
-    assert_eq!(
-        strength,
-        Strength::Note,
-        "one of two clauses written in the code"
+    review_until_harmless(
+        judged,
+        (&QUERY_VALUES, "fixed"),
+        (
+            "one of two clauses written in the code",
+            "cannot change the syntax",
+        ),
     );
-    assert!(message.contains("cannot change the syntax"), "{message}");
+}
+
+/// The strength and message of the first finding of `rule` in a report of
+/// one file.
+fn first_of(report: &Report, rule: &str) -> (Strength, String) {
+    report.files[0]
+        .findings
+        .iter()
+        .find(|f| f.rule == rule)
+        .map(|f| (f.strength, f.message.clone()))
+        .unwrap()
+}
+
+/// A finding that a confirm Choice follows stays a review when the Choice
+/// answers `raw`, and is a note whose message names `words` when it answers
+/// `harmless`.
+fn review_until_harmless(
+    judged: impl Fn(Value) -> (Strength, String),
+    (options, harmless): (&[&str], &str),
+    (reason, words): (&str, &str),
+) {
+    assert_eq!(judged(choice_of("raw", options)).0, Strength::Review);
+    let (strength, message) = judged(choice_of(harmless, options));
+    assert_eq!(strength, Strength::Note, "{reason}");
+    assert!(message.contains(words), "{message}");
 }
 
 #[test]
@@ -246,7 +265,6 @@ pub(super) const HIGHLIGHTED: &str = "export function CodeBlock({ code }) {\n  c
 
 #[test]
 fn unescaped_html_is_a_note_when_the_library_that_built_it_escaped_it() {
-    let markup = MARKUP_VALUES;
     let judged = |choice: Value| {
         let (report, _) = settings_run(
             "code-block.jsx",
@@ -254,17 +272,13 @@ fn unescaped_html_is_a_note_when_the_library_that_built_it_escaped_it() {
             &[("weakened", 0.95), ("escape", 0.95)],
             Some(("raw_html", choice)),
         );
-        report.files[0]
-            .findings
-            .iter()
-            .find(|f| f.rule == "security/unsafe-settings")
-            .map(|f| (f.strength, f.message.clone()))
-            .unwrap()
+        first_of(&report, "security/unsafe-settings")
     };
-    assert_eq!(judged(choice_of("raw", &markup)).0, Strength::Review);
-    let (strength, message) = judged(choice_of("encoded", &markup));
-    assert_eq!(strength, Strength::Note, "the highlighter escapes the code");
-    assert!(message.contains("escaped or sanitized"), "{message}");
+    review_until_harmless(
+        judged,
+        (&MARKUP_VALUES, "encoded"),
+        ("the highlighter escapes the code", "escaped or sanitized"),
+    );
 }
 
 /// The options of the Choice on who reads a function's error text.
