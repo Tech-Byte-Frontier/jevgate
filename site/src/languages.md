@@ -69,34 +69,34 @@ Other files, such as Zig, are listed as skipped with the reason and never fail t
 | Java | supported | 2 | 1 of 3 | 4 of 12 |
 | JavaScript | supported | 3 | 1 of 1 | 1 of 5 |
 | C#, Ruby, Bend 2 | supported | none | not measured | not measured |
-| C | preview | 4 | 64% (16 of 25) | 45% (17 of 38) |
-| C++ | preview | 6 | 58% (23 of 40) | 38% (24 of 64) |
-| Kotlin | preview | 3 | 8 of 9 | 9 of 12 |
-| Swift | preview | 5 | 82% (28 of 34) | 61% (46 of 76) |
-| Bash | preview | 8 | 45% (29 of 64) | 62% (56 of 91) |
-| Dart | preview | 3 | 8 of 12 | 15 of 19 |
-| Scala | preview | 4 | 3 of 5 | 41% (9 of 22) |
-| Elixir | preview | 5 | 5 of 6 | 10 of 15 |
-| Lua | preview | 4 | 90% (19 of 21) | 50% (20 of 40) |
+| C | preview | 4 | 64% (16 of 25) | 44% (15 of 34) |
+| C++ | preview | 6 | 58% (23 of 40) | 42% (22 of 52) |
+| Kotlin | preview | 3 | 8 of 9 | 9 of 11 |
+| Swift | preview | 5 | 82% (28 of 34) | 70% (44 of 63) |
+| Bash | preview | 8 | 45% (29 of 64) | 62% (56 of 90) |
+| Dart | preview | 3 | 8 of 12 | 13 of 16 |
+| Scala | preview | 4 | 3 of 5 | 43% (9 of 21) |
+| Elixir | preview | 5 | 5 of 6 | 10 of 13 |
+| Lua | preview | 4 | 90% (19 of 21) | 51% (19 of 37) |
 
 A finding is right when a person reading the code agrees with it; a debatable one counts as not right. A percentage is shown from 20 labels on. The counts are for the four rules every language gets: function simplification, file organization, shared logic and comments.
 
 - The supported languages' counts are 0.25.0's reviews and considers on the 25 projects JevGate was never tuned on (11 held out, 14 fresh), each labeled by hand from the code. Those projects hold no C#, Ruby or Bend 2 finding of these rules, so those three rest on the projects used for tuning.
-- The preview languages' counts are 0.30's first run of the same four rules on 37 well-known projects chosen for them and never used for tuning, with all 598 of its findings labeled by hand. A language's projects are the ones holding a labeled finding in its files: dio's Flutter runners count for C++ and Swift, and leveldb's C++ headers, which that run read as C, count for C.
+- The preview languages' counts are 0.30's first run of the same four rules on 37 well-known projects chosen for them and never used for tuning, with all 598 of its findings labeled by hand. Shared-logic considers are counted as the same-steps threshold of [0.28](changelog.md) reports them, fitted on the supported languages: of the 104 that run reported, it makes 40 notes, 31 of them not right, and the other 64 were right 26 times, where all 104 were right 35 times. A language's projects are the ones holding a labeled finding in its files: dio's Flutter runners count for C++ and Swift, and leveldb's C++ headers, which that run read as C, count for C.
 
 Maturity is judged per rule and level, which the pooled rows hide:
 
 | Preview language | Function simplification | Shared logic | Comments | File organization |
 |---|---|---|---|---|
-| C | 10 of 11 · 13 of 19 | 6 of 14 · 4 of 10 | – · 0 of 8 | – · 0 of 1 |
-| C++ | 11 of 11 · 19 of 37 | 12 of 29 · 3 of 18 | – · 1 of 6 | – · 1 of 3 |
-| Kotlin | 1 of 1 · 6 of 7 | 6 of 7 · 2 of 3 | – · 1 of 2 | 1 of 1 · – |
-| Swift | 10 of 10 · 22 of 30 | 17 of 23 · 18 of 40 | – · 4 of 4 | 1 of 1 · 2 of 2 |
-| Bash | 25 of 28 · 34 of 50 | 4 of 34 · 0 of 11 | – · 22 of 28 | 0 of 2 · 0 of 2 |
-| Dart | 5 of 5 · 9 of 10 | 3 of 7 · 3 of 4 | – · 2 of 4 | – · 1 of 1 |
-| Scala | 2 of 3 · 5 of 11 | 1 of 2 · 1 of 3 | – · 3 of 5 | – · 0 of 3 |
-| Elixir | – · 7 of 8 | 4 of 5 · 3 of 7 | – | 1 of 1 · – |
-| Lua | 11 of 12 · 18 of 22 | 8 of 9 · 1 of 8 | – · 1 of 10 | – |
+| C | 10 of 11 · 13 of 19 | 6 of 14 · 2 of 6 | – · 0 of 8 | – · 0 of 1 |
+| C++ | 11 of 11 · 19 of 37 | 12 of 29 · 1 of 6 | – · 1 of 6 | – · 1 of 3 |
+| Kotlin | 1 of 1 · 6 of 7 | 6 of 7 · 2 of 2 | – · 1 of 2 | 1 of 1 · – |
+| Swift | 10 of 10 · 22 of 30 | 17 of 23 · 16 of 27 | – · 4 of 4 | 1 of 1 · 2 of 2 |
+| Bash | 25 of 28 · 34 of 50 | 4 of 34 · 0 of 10 | – · 22 of 28 | 0 of 2 · 0 of 2 |
+| Dart | 5 of 5 · 9 of 10 | 3 of 7 · 1 of 1 | – · 2 of 4 | – · 1 of 1 |
+| Scala | 2 of 3 · 5 of 11 | 1 of 2 · 1 of 2 | – · 3 of 5 | – · 0 of 3 |
+| Elixir | – · 7 of 8 | 4 of 5 · 3 of 5 | – | 1 of 1 · – |
+| Lua | 11 of 12 · 18 of 22 | 8 of 9 · 0 of 5 | – · 1 of 10 | – |
 
 Each cell is reviews right, then considers right, and each finding in a preview language carries its own cell: a Kotlin function-simplification review says "Not yet measured in Kotlin.", a Swift function-simplification consider "Right 73% of the time in Swift (30 labels).". No preview language has two projects that meet the bar. The closest are Bash's function-simplification reviews, 25 of 28 over three projects (nvm 7 of 7, pi-hole 9 of 9, setup-ipsec-vpn 9 of 12) with none reaching 20 on its own; pi-hole's Bash comment considers (20 of 25) and Rectangle's Swift shared-logic reviews (17 of 21) meet the bar on one project each. Pooled over projects, Bash's function-simplification reviews and Lua's function-simplification considers (18 of 22) are above 80% over at least 20 labels.
 

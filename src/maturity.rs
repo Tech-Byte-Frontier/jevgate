@@ -181,9 +181,13 @@ const fn preview_row(
 /// never used for tuning (3 to 8 a language), all 598 reviews and considers
 /// labeled by hand from the code, a debatable one counting as not right
 /// (`evaluation/labels/parts/0.30-*.jsonl` in the maintainer's clone), as
-/// `languages.md` tabulates them. A finding counts for the language its path
-/// names, as `analysis::generic::preview` names it; a rule and level without
-/// a row had no finding there. The ten supported languages' shares in
+/// `languages.md` tabulates them. Shared-logic considers are counted as the
+/// same-steps threshold of `policy::CALIBRATED` reports them, fitted on the
+/// supported languages: of the 104 that run reported, it makes 40 notes, 31
+/// of them not right, and the other 64 were right 26 times (35 of 104
+/// before). A finding counts for the language its path names, as
+/// `analysis::generic::preview` names it; a rule and level without a row
+/// had no finding there. The ten supported languages' shares in
 /// [`TABLE`] say little of these: Bash's shared-logic reviews were right 4
 /// times in 34 and its function-simplification reviews 25 in 28, where the
 /// ten's were right 46 in 85 and 20 in 23.
@@ -191,55 +195,55 @@ const PREVIEW: [PreviewMeasure; 53] = [
     preview_row("C", FUNCTION_SIMPLIFICATION, Review, [10, 11]),
     preview_row("C", FUNCTION_SIMPLIFICATION, Consider, [13, 19]),
     preview_row("C", SHARED_LOGIC, Review, [6, 14]),
-    preview_row("C", SHARED_LOGIC, Consider, [4, 10]),
+    preview_row("C", SHARED_LOGIC, Consider, [2, 6]),
     preview_row("C", COMMENTS, Consider, [0, 8]),
     preview_row("C", FILE_ORGANIZATION, Consider, [0, 1]),
     preview_row("C++", FUNCTION_SIMPLIFICATION, Review, [11, 11]),
     preview_row("C++", FUNCTION_SIMPLIFICATION, Consider, [19, 37]),
     preview_row("C++", SHARED_LOGIC, Review, [12, 29]),
-    preview_row("C++", SHARED_LOGIC, Consider, [3, 18]),
+    preview_row("C++", SHARED_LOGIC, Consider, [1, 6]),
     preview_row("C++", COMMENTS, Consider, [1, 6]),
     preview_row("C++", FILE_ORGANIZATION, Consider, [1, 3]),
     preview_row("Kotlin", FUNCTION_SIMPLIFICATION, Review, [1, 1]),
     preview_row("Kotlin", FUNCTION_SIMPLIFICATION, Consider, [6, 7]),
     preview_row("Kotlin", SHARED_LOGIC, Review, [6, 7]),
-    preview_row("Kotlin", SHARED_LOGIC, Consider, [2, 3]),
+    preview_row("Kotlin", SHARED_LOGIC, Consider, [2, 2]),
     preview_row("Kotlin", COMMENTS, Consider, [1, 2]),
     preview_row("Kotlin", FILE_ORGANIZATION, Review, [1, 1]),
     preview_row("Swift", FUNCTION_SIMPLIFICATION, Review, [10, 10]),
     preview_row("Swift", FUNCTION_SIMPLIFICATION, Consider, [22, 30]),
     preview_row("Swift", SHARED_LOGIC, Review, [17, 23]),
-    preview_row("Swift", SHARED_LOGIC, Consider, [18, 40]),
+    preview_row("Swift", SHARED_LOGIC, Consider, [16, 27]),
     preview_row("Swift", COMMENTS, Consider, [4, 4]),
     preview_row("Swift", FILE_ORGANIZATION, Review, [1, 1]),
     preview_row("Swift", FILE_ORGANIZATION, Consider, [2, 2]),
     preview_row("Bash", FUNCTION_SIMPLIFICATION, Review, [25, 28]),
     preview_row("Bash", FUNCTION_SIMPLIFICATION, Consider, [34, 50]),
     preview_row("Bash", SHARED_LOGIC, Review, [4, 34]),
-    preview_row("Bash", SHARED_LOGIC, Consider, [0, 11]),
+    preview_row("Bash", SHARED_LOGIC, Consider, [0, 10]),
     preview_row("Bash", COMMENTS, Consider, [22, 28]),
     preview_row("Bash", FILE_ORGANIZATION, Review, [0, 2]),
     preview_row("Bash", FILE_ORGANIZATION, Consider, [0, 2]),
     preview_row("Dart", FUNCTION_SIMPLIFICATION, Review, [5, 5]),
     preview_row("Dart", FUNCTION_SIMPLIFICATION, Consider, [9, 10]),
     preview_row("Dart", SHARED_LOGIC, Review, [3, 7]),
-    preview_row("Dart", SHARED_LOGIC, Consider, [3, 4]),
+    preview_row("Dart", SHARED_LOGIC, Consider, [1, 1]),
     preview_row("Dart", COMMENTS, Consider, [2, 4]),
     preview_row("Dart", FILE_ORGANIZATION, Consider, [1, 1]),
     preview_row("Scala", FUNCTION_SIMPLIFICATION, Review, [2, 3]),
     preview_row("Scala", FUNCTION_SIMPLIFICATION, Consider, [5, 11]),
     preview_row("Scala", SHARED_LOGIC, Review, [1, 2]),
-    preview_row("Scala", SHARED_LOGIC, Consider, [1, 3]),
+    preview_row("Scala", SHARED_LOGIC, Consider, [1, 2]),
     preview_row("Scala", COMMENTS, Consider, [3, 5]),
     preview_row("Scala", FILE_ORGANIZATION, Consider, [0, 3]),
     preview_row("Elixir", FUNCTION_SIMPLIFICATION, Consider, [7, 8]),
     preview_row("Elixir", SHARED_LOGIC, Review, [4, 5]),
-    preview_row("Elixir", SHARED_LOGIC, Consider, [3, 7]),
+    preview_row("Elixir", SHARED_LOGIC, Consider, [3, 5]),
     preview_row("Elixir", FILE_ORGANIZATION, Review, [1, 1]),
     preview_row("Lua", FUNCTION_SIMPLIFICATION, Review, [11, 12]),
     preview_row("Lua", FUNCTION_SIMPLIFICATION, Consider, [18, 22]),
     preview_row("Lua", SHARED_LOGIC, Review, [8, 9]),
-    preview_row("Lua", SHARED_LOGIC, Consider, [1, 8]),
+    preview_row("Lua", SHARED_LOGIC, Consider, [0, 5]),
     preview_row("Lua", COMMENTS, Consider, [1, 10]),
 ];
 
@@ -505,15 +509,15 @@ mod tests {
         // `languages.md`'s support levels: reviews, then considers, right of
         // labeled; and a file of each language's.
         let published = [
-            ("C", "x.c", [16, 25], [17, 38]),
-            ("C++", "x.cpp", [23, 40], [24, 64]),
-            ("Kotlin", "x.kt", [8, 9], [9, 12]),
-            ("Swift", "x.swift", [28, 34], [46, 76]),
-            ("Bash", "x.sh", [29, 64], [56, 91]),
-            ("Dart", "x.dart", [8, 12], [15, 19]),
-            ("Scala", "x.scala", [3, 5], [9, 22]),
-            ("Elixir", "x.ex", [5, 6], [10, 15]),
-            ("Lua", "x.lua", [19, 21], [20, 40]),
+            ("C", "x.c", [16, 25], [15, 34]),
+            ("C++", "x.cpp", [23, 40], [22, 52]),
+            ("Kotlin", "x.kt", [8, 9], [9, 11]),
+            ("Swift", "x.swift", [28, 34], [44, 63]),
+            ("Bash", "x.sh", [29, 64], [56, 90]),
+            ("Dart", "x.dart", [8, 12], [13, 16]),
+            ("Scala", "x.scala", [3, 5], [9, 21]),
+            ("Elixir", "x.ex", [5, 6], [10, 13]),
+            ("Lua", "x.lua", [19, 21], [19, 37]),
         ];
         let keys = catalog::keys();
         for m in &PREVIEW {

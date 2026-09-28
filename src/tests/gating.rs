@@ -459,7 +459,7 @@ fn a_preview_language_s_findings_never_fail_the_default_gate() {
         .map(|f| f.precision)
         .collect();
     let labels = |right, labeled| Some(Labels { right, labeled });
-    assert_eq!(precision, [labels(1, 1), labels(2, 3)]);
+    assert_eq!(precision, [labels(1, 1), labels(2, 2)]);
     let mut out = Vec::new();
     output::agent(&mut out, &report, false, output::Style::PLAIN).unwrap();
     let text = String::from_utf8(out).unwrap();
