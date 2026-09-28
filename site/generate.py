@@ -23,7 +23,7 @@ LEVELS = ["review", "consider"]
 # alone; the default gate and each finding's precision start from it too
 # (MIN_LABELS in src/maturity.rs).
 MIN_LABELS = 20
-COMMANDS = ["auth", "check", "baseline", "rules", "init", "completions", "man", "serve", "mcp", "hook"]
+COMMANDS = ["auth", "check", "baseline", "rules", "rules test", "init", "completions", "man", "serve", "mcp", "hook"]
 GROUPS = {
     "maintainability": "On by default, except hardcoded values: add it with `--rule default --rule hardcoded-values`, or a level for it in `[rules]`.",
     "tests": "On by default. Test value and test redundancy are judged with `--include-tests` or `include_tests = true`; the laws of Bend 2 code are judged without it.",
@@ -261,7 +261,12 @@ def configuration_page(schema_path):
     ]
     for name, spec in sorted(schema["properties"].items()):
         lines.append(f"| `{name}` | {kind(spec, schema)} | {cell(spec.get('description', ''))} |")
-    for table, definition in [("[[scope]]", "Scope"), ("[[question]]", "Question")]:
+    tables = [
+        ("[[scope]]", "Scope"),
+        ("[[question]]", "Question"),
+        ("[[question.failing]], [[question.passing]]", "QuestionExample"),
+    ]
+    for table, definition in tables:
         table_spec = schema["$defs"][definition]
         lines += ["", f"## `{table}`", "", cell(table_spec.get("description", "")), "", "| Key | Type | Meaning |", "|---|---|---|"]
         for name, spec in sorted(table_spec["properties"].items()):
@@ -306,7 +311,8 @@ def cli_page(binary):
         "```",
     ]
     for command in COMMANDS:
-        lines += ["", f"## `jevgate {command}`", "", "```text", run(binary, command, "--help").rstrip(), "```"]
+        help_text = run(binary, *command.split(), "--help").rstrip()
+        lines += ["", f"## `jevgate {command}`", "", "```text", help_text, "```"]
     return "\n".join(lines) + "\n"
 
 

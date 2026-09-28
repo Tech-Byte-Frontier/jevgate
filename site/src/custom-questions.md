@@ -85,7 +85,69 @@ Three questions written from the instruction files of open-source projects, aske
 - ky's `AGENTS.md` says "Do not add special handling for `null`". The guidance named the `null` checks the platform forces (`Headers.get()` returns `null`; `typeof value === 'object'` holds for it) as fine. Of 103 functions, none reached 0.80 and 85 were clear; as a `hunk` question over its last 20 commits, 88 of 91 hunks were clear and none was a finding. A change adding a function that gives `null` a meaning of its own failed the gate at 0.92, as a function and as a hunk, and passed once fixed.
 - bakerydemo's `AGENTS.md` prefers CSS `light-dark()` and `color-scheme` to a custom theme system. Its guidance named a `[data-theme='dark']` block that sets the palette again as a violation, and the question found exactly that in `main.css`, at 0.94. The project added that block the same day as the instruction, so its authors likely meant it for new theming work: the guidance, not the model, made this finding.
 
-Start a new question as a `note`, or with `--fail-on custom/<id>=report`, run it on the code and on a change that breaks the rule, and raise its level once its findings are right.
+Start a new question as a `note`, or with `--fail-on custom/<id>=report`, run it on the code and on a change that breaks the rule, and raise its level once its findings are right. Give it a failing and a passing example from your own code first, below, and keep `jevgate rules test` passing while you write its guidance.
+
+## Examples and `jevgate rules test`
+
+A question can carry examples: `failing` ones, code that breaks its rule, and `passing` ones, code that keeps it. `jevgate rules test` asks the question about each and fails when it no longer separates them: a failing example whose answer stays below the threshold, which a check would miss, or a passing one at or above it, which a check would report.
+
+```toml
+[[question.failing]]
+path = "src/api/orders.ts"
+code = '''
+export function createOrder(req: Request) {
+  logger.info("order", req.body);
+  return save(req.body);
+}
+'''
+
+[[question.passing]]
+path = "src/api/orders.ts"
+code = '''
+export function createOrder(req: Request) {
+  logger.info("order", { id: req.id });
+  return save(req.body);
+}
+'''
+
+[[question.passing]]
+file = ".jevgate/questions/examples/audit.ts"
+path = "src/api/audit.ts"
+```
+
+In a question file the tables are `[[failing]]` and `[[passing]]`.
+
+| Key | Meaning |
+|---|---|
+| `code` | The example's text: a file's content, or for a `hunk` question the lines of a diff (`+` added, `-` removed, a space or an empty line unchanged; `@@` headers are optional). Use `code` or `file` |
+| `file` | A file holding the example, relative to the repository root |
+| `path` | The file the example stands for: its language, and the path Jev reads. Required with `code`; with `file`, the file's own path by default. It must match the question's `paths`, since a check never asks the question elsewhere |
+
+Each example is asked as a check asks a file with that path and text when the question is the only rule selected: its functions, comments, test cases or sections, the whole file, or each hunk of the diff, in the same requests. An example with several units is found when any of them is, and its line shows the one that leans most to yes. A `function`, `comment` or `test` example needs a language JevGate parses, and an example without a unit of the question's kind is an error.
+
+```text
+$ jevgate rules test
+JevGate: rules test · 1 of 5 examples wrong · 1 question · 0 API requests · 0 input tokens · ~$0.0000 · answered by jev-1.13.0
+
+custom/jev-not-an-llm (comment, review at 0.70, src/**): 1 of 5 examples wrong
+  ok     failing 1  yes 0.92  src/transport.rs: a comment in `send`
+  ok     failing 2  yes 0.98  src/requests.rs: a comment in `cached`
+  wrong  passing 1  yes 0.71  src/main.rs: a comment in `Cli` (a check reports it at 0.70 or more)
+  ok     passing 2  yes 0.06  src/output.rs: a comment in `ask`
+  ok     passing 3  yes 0.45  src/cache.rs: a comment in `keep`
+```
+
+It exits as `check` does: 0 when every example is right, 1 when a question gets one wrong, and 2 when an example could not be asked (no key, a file it cannot read, an example without a unit). `--rule custom/<id>` tests one question, and `--format json` gives every unit's probability. `--dry-run` counts the requests and new input tokens without a key or network and still reads every example, so a broken one exits 2 for free.
+
+### Drift
+
+Answers are cached like a check's, so a rerun costs nothing. A new model changes every request, and the examples are asked again: a new `model` pin, JevGate's default moving to a newer version, an alias's answers expiring after `cache_ttl_secs`, or `--model` to try a model before pinning it. So does rewording a question, its background or its guidance. A new threshold or level is judged from the answers already cached. Run `jevgate rules test` in CI next to `check` ([Continuous integration](ci.md)), and a question that stops separating its examples fails there, not in a pull request's findings.
+
+Answers also move a little between asks of the same model. The three questions above, ky's asked of both functions and hunks, and one from JevGate's own instructions (never call Jev an LLM) separated all 23 of their examples, taken or adapted from the projects' code. Asked seven times (four `--refresh` runs and the `jev-latest` and `jev-preview` aliases of jev-1.13.0), their answers moved 0.01 at the median and at most 0.09; one example flipped once, from 0.84 to 0.78 against a threshold of 0.80. So an example closer than 0.10 to its threshold is marked `(within 0.10 of …)`: move it further from the line, or sharpen the guidance until it is.
+
+### Example files
+
+An example file is uploaded, so it is read as a checked file is: inside the repository, not hidden except under `.jevgate/questions/`, not a credential, within `upload_allow` and `upload_deny`, and never through a symbolic link. An `upload_allow` that lists only source directories needs `".jevgate/questions/**"` for examples kept there. Inline code is part of the question and is uploaded with it.
 
 ## Cost
 
@@ -97,6 +159,8 @@ Beside the built-in questions a unit adds only its question: about 90 tokens for
 | Beside the default rules | 889 of its own | 1.83 million once, when it is added | $0.08 |
 
 Beside the default rules, 1,792 functions rode in function-simplification requests; the rest, mostly functions of fewer than five body lines, which the split question skips, were asked on their own. With `--base`, only the changed files are asked, and reruns are answered from the cache for free.
+
+`jevgate rules test` asks one request per example, or per eight of its units: about 280 tokens beyond the example's text and the question. The 23 examples above took 29,258 input tokens ($0.0012), and each rerun from the cache none.
 
 `paths` is the way to keep a question to the code it is about. A question also asks at most 2,000 units a run; the rest are counted as omitted, and the output says how many each question left unasked. `max_requests` still bounds the whole run.
 

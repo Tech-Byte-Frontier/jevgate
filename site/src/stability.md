@@ -11,7 +11,7 @@ Until 1.0, a minor release (0.18, 0.19, …) can change commands, flags, configu
 A major release is needed to remove or change the meaning of:
 
 - **Commands and flags**, and the values they accept.
-- **Exit codes**: 0 gate passed, 1 gate failed, 2 run incomplete or invalid.
+- **Exit codes**: 0 gate passed, 1 gate failed, 2 run incomplete or invalid; for `rules test`, 0 every example right, 1 a question got one wrong, 2 incomplete or invalid.
 - **`jevgate.toml` keys, levels and rule names**, and the keys of question files in `.jevgate/questions/`. Unknown keys are errors, so removing a key or a rule name would break configurations.
 - **The JSON report** (`--format json`, `.jevgate/latest.json`): its fields keep their names and meanings, and new fields can be added in any release. `schema_version` changes when a field is removed or changes meaning.
 - **`jevgate-baseline.json`** and finding fingerprints: an upgrade must not make accepted findings new. A release that changes how findings are fingerprinted carries the baseline over.

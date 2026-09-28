@@ -141,6 +141,12 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # unit = "function"  # function, file, test, section, comment, or hunk (with --base)
 # paths = ["src/api/**"]
 # level = "review"  # review, consider or note
+# [[question.failing]]  # code that breaks the rule; `jevgate rules test` asks it
+# path = "src/api/orders.py"
+# code = "def create(req):\n    log.info(req.body)\n"
+# [[question.passing]]  # code that keeps it
+# path = "src/api/orders.py"
+# code = "def create(req):\n    log.info(req.id)\n"
 "#,
         model = crate::options::DEFAULT_MODEL,
         version = env!("CARGO_PKG_VERSION"),
@@ -236,8 +242,9 @@ mod tests {
             .collect();
         let questions = crate::custom::parse(&example).unwrap();
         assert_eq!(
-            questions[0].rule, "custom/no-body-logs",
-            "the example is valid"
+            (questions[0].rule.as_str(), questions[0].examples.len()),
+            ("custom/no-body-logs", 2),
+            "the example and its examples are valid"
         );
         assert!(run(&dir, false).is_err(), "an existing file is kept");
         assert!(run(&dir, true).is_ok());

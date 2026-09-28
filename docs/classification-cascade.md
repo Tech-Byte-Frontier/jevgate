@@ -197,7 +197,10 @@ signatures, or one candidate pair.
    stage packs the same units, a file or a changed hunk's parts apart. The
    question names its unit by its literal state path, with its author's
    background and guidance as labeled keys. Its answer is a finding at the
-   question's own threshold and level, and no follow-up is asked.
+   question's own threshold and level, and no follow-up is asked. `jevgate
+   rules test` asks a question's examples the same way, each as a file with
+   the example's path and text, and fails when a failing example is not a
+   finding or a passing one is.
 4. **Follow-ups.** One recheck per uncertain unit, with callee signatures, the
    enclosing functions or the file's application source; a decisive recheck
    replaces the first answer and both are kept. A hardcoded-value unit is asked

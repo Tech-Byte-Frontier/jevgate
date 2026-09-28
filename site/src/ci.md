@@ -37,6 +37,15 @@ The action installs a checked release binary, keeps `.jevgate/cache` in the Acti
 
   With `--config`, the [custom questions](custom-questions.md) in `.jevgate/questions/` are not read, since the change could edit them too: keep the questions that must gate as `[[question]]` tables in the reviewed file.
 
+- **Custom questions' examples:** `jevgate rules test` asks each [custom question](custom-questions.md#examples-and-jevgate-rules-test) about its failing and passing examples and exits 1 when one gets an example wrong, so a new model or a reworded question that stops separating them fails the job. Run it after the action, which puts `jevgate` on the path and restores the cache; its answers are saved with the check's, so it costs nothing until a question, an example or the model changes:
+
+  ```yaml
+      - run: jevgate rules test
+        if: ${{ !cancelled() }}   # also after a check that failed its gate
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+  ```
+
 - **Forks:** GitHub withholds secrets from pull requests opened from forks, so there the run exits 2 with "No API key configured". Skip the job for forks, or run it only on branches of the repository.
 - **Budgets:** `max_requests` caps the API attempts of one run. Reaching it leaves the run incomplete instead of passing on partial evidence. `--dry-run` counts the planned requests and questions the cache already answers, so its estimate covers only what the cache lacks; follow-ups depend on answers and are not counted.
 - **Transient failures:** rate limits, overload and server or edge errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to six attempts, with pauses of 1 to 8 seconds; an attempt that has not answered in 20 seconds, or whose connection drops, is retried once, since the first send may have run. A provider that fails every attempt ends a run of 100 requests incomplete after 8 minutes or more (16 with a gateway's key, which sends 3 requests at once).
@@ -73,4 +82,4 @@ jevgate:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 ```
 
-Other CI systems work the same way: install with `install.sh` or `cargo binstall`, set `TYPESAFE_API_KEY` (or a gateway's variable), keep `.jevgate/cache` between runs, and read the exit code or the JSON report.
+Other CI systems work the same way: install with `install.sh` or `cargo binstall`, set `TYPESAFE_API_KEY` (or a gateway's variable), keep `.jevgate/cache` between runs, and read the exit code or the JSON report. Run `jevgate rules test` as a step of its own after the check, so a failed gate does not skip it.

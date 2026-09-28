@@ -101,6 +101,29 @@ Within a turn, the agent hook reads `jevgate.toml`, `jevgate-baseline.json` and 
 **`Unknown rule or group: <id>; a custom question is named custom/<id>`**
 : Custom questions are named by their rule ID, or all together as `custom`.
 
+## `jevgate rules test` fails or exits 2
+
+**`wrong  passing 2  yes 0.89  src/api/audit.ts: `auditOrder` (a check reports it at 0.80 or more)`**
+: The question finds code its author says keeps the rule. Read the example against the guidance: it usually names the case as a violation. Guidance that called "an object built from" a request body a violation made `audit.log(redact(req.body))` one at 0.89; saying that a redacted body is fine separates them. If the example is wrong instead, move it to `failing`.
+
+**`wrong  failing 1  yes 0.70 … (a check misses it below 0.80)`**
+: The question does not see this violation clearly enough to report it. Name the case in `guidance`, or lower the `threshold` if its passing examples stay well below it; a new threshold is judged from the cached answers.
+
+**`(within 0.10 of 0.80)`**
+: Answers of one model move up to about 0.09 between asks, so this example may flip on the next model or a `--refresh`. Move it further from the threshold, or sharpen the guidance.
+
+**`failing example 1: its path … is outside the question's paths; set `path` …`**
+: A check never asks the question there. Set `path` to a file the question's `paths` match: the example is asked as that file.
+
+**`… is outside upload_allow or inside upload_deny; allow it, or write the example as `code``**
+: Example files are uploaded, so the upload patterns apply. Add `".jevgate/questions/**"` (or wherever the examples are) to `upload_allow`.
+
+**`it holds no function`** (or no test case, no heading section with text, no changed line)
+: The example has no unit of the question's kind. A `test` example needs a test file's path where its language decides by name (`tests/test_api.py`), and a `hunk` example's added lines start with `+`.
+
+**`No current cached response; rerun without --cache-only to allow an API request`**
+: The model, the question or the example changed since the examples were last asked. Run without `--cache-only`; `--dry-run` shows what that costs.
+
 ## Many files are uncertain
 
 A file is `uncertain` when some of its answers stayed undecided after the follow-up questions. JevGate reports this instead of hiding it or counting the file as clear. `--verbose` lists each undecided unit and the question it stayed undecided on; the JSON report also quotes each such question as it was asked, with what each answer means and the probabilities Jev gave them, and the MCP tools hand them to an agent as verify items. It never fails the gate unless you ask for that with `--fail-on uncertain`.
