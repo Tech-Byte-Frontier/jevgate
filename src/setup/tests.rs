@@ -438,6 +438,15 @@ fn a_file_it_cannot_read_stops_the_run_before_any_write() {
 }
 
 #[test]
+fn a_directory_where_a_file_goes_stops_the_run() {
+    let project = Project::new();
+    let places = places(&project);
+    fs::create_dir_all(places.claude.join("settings.json")).unwrap();
+    let error = Plan::new(&setup(&[Target::Claude]), &places).err().unwrap();
+    assert!(format!("{error:#}").contains("is not a file"), "{error:#}");
+}
+
+#[test]
 fn a_shared_agents_md_gets_one_block() {
     let project = Project::new();
     let places = places(&project);
@@ -547,6 +556,36 @@ fn a_repository_cannot_lead_its_files_outside_itself() {
         fs::read_to_string(places.root.join("docs/AGENTS.md"))
             .unwrap()
             .contains("jevgate:begin")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_planted_where_the_write_starts_is_left_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = Project::new();
+    let outside = project.0.join("home/.bashrc");
+    write(&outside, "export PATH=$HOME/bin:$PATH\n");
+    let repository = project.0.join("repo");
+    fs::create_dir_all(&repository).unwrap();
+    let planted = repository.join(format!(".AGENTS.md.jevgate-{}-0.tmp", std::process::id()));
+    std::os::unix::fs::symlink(&outside, &planted).unwrap();
+    let agents_md = repository.join("AGENTS.md");
+    write(&agents_md, "# Rules\n");
+    fs::set_permissions(&agents_md, fs::Permissions::from_mode(0o600)).unwrap();
+    super::write(&agents_md, "# Rules\n\nMore.\n").unwrap();
+    assert_eq!(
+        fs::read_to_string(&outside).unwrap(),
+        "export PATH=$HOME/bin:$PATH\n"
+    );
+    assert!(planted.is_symlink(), "not JevGate's to remove");
+    assert_eq!(
+        fs::read_to_string(&agents_md).unwrap(),
+        "# Rules\n\nMore.\n"
+    );
+    assert_eq!(
+        fs::metadata(&agents_md).unwrap().permissions().mode() & 0o777,
+        0o600
     );
 }
 

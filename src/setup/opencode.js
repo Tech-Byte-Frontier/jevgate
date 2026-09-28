@@ -19,6 +19,9 @@ const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch"
  */
 const TIMEOUT_MS = { "chat.message": 15_000, "tool.execute.after": 35_000, "session.idle": 55_000 };
 
+/** Enough of a reply to recognize what answered instead of JevGate. */
+const QUOTED_CHARS = 120;
+
 /** A reply saying why nothing was checked. */
 const unchecked = (why) => ({ systemMessage: `JevGate could not check: ${why}. Nothing was blocked.` });
 
@@ -41,7 +44,7 @@ const replyOf = (code, stdout, stderr) => {
   try {
     return text === "" ? {} : JSON.parse(text);
   } catch {
-    return unchecked(`jevgate hook answered something other than JSON (${text.slice(0, 120)})`);
+    return unchecked(`jevgate hook answered something other than JSON (${text.slice(0, QUOTED_CHARS)})`);
   }
 };
 
@@ -59,7 +62,7 @@ const runHook = (event, timeouts) =>
       resolve(notStarted(error));
       return;
     }
-    const limit = timeouts[event.hook_event_name] ?? 15_000;
+    const limit = timeouts[event.hook_event_name] ?? timeouts["chat.message"];
     const timer = setTimeout(() => {
       try {
         child.kill();

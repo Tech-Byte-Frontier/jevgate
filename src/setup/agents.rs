@@ -49,7 +49,9 @@ impl Target {
 /// login shell (Codex runs `$SHELL -lc`). So where the agent's shell allows,
 /// a failure answers the agent itself: Claude Code runs hooks with `sh`, Git
 /// Bash (which Git for Windows brings, and the hook needs Git) or PowerShell
-/// 7, and Codex with the login shell, all of which read `||`.
+/// 7, and Codex with the login shell, all of which read `||`. Codex on
+/// Windows runs `cmd.exe`, which reads `||` too but prints the quotes, so
+/// there the guard's reply is not JSON; that path is untested.
 pub(super) const COMMAND: &str = "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'";
 /// Gemini CLI runs hooks with `bash -c`, or with Windows PowerShell 5.1,
 /// which has no `||`. It denies on any exit other than 0 and 1, reading

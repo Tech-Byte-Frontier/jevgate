@@ -420,6 +420,9 @@ fn read(path: &Path) -> Result<Option<String>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("Cannot read {}", path.display())),
     };
+    if !metadata.is_file() {
+        bail!("{} is not a file", path.display());
+    }
     if metadata.len() > MAX_BYTES {
         bail!("{} is larger than {MAX_BYTES} bytes", path.display());
     }
@@ -443,15 +446,14 @@ fn write(path: &Path, text: &str) -> Result<()> {
     };
     fs::create_dir_all(directory)
         .with_context(|| format!("Cannot create {}", directory.display()))?;
-    let temporary = directory.join(format!(
-        ".{}.jevgate-{}.tmp",
-        name.to_string_lossy(),
-        std::process::id()
-    ));
+    let permissions = fs::metadata(&target).ok().map(|m| m.permissions());
+    let (temporary, mut file) = create_temporary(directory, name, permissions.as_ref())
+        .with_context(|| format!("Cannot write {}", target.display()))?;
     let result = (|| {
-        fs::write(&temporary, text)?;
-        if let Ok(metadata) = fs::metadata(&target) {
-            fs::set_permissions(&temporary, metadata.permissions())?;
+        std::io::Write::write_all(&mut file, text.as_bytes())?;
+        drop(file);
+        if let Some(permissions) = permissions {
+            fs::set_permissions(&temporary, permissions)?;
         }
         fs::rename(&temporary, &target)
     })();
@@ -459,6 +461,63 @@ fn write(path: &Path, text: &str) -> Result<()> {
         let _ = fs::remove_file(&temporary);
     }
     result.with_context(|| format!("Cannot write {}", target.display()))
+}
+
+/// A new file beside `name` in `directory` to write before renaming it over
+/// `name`. It is created exclusively, so a file or symlink already at that
+/// path (a repository could ship one) is never written through or removed.
+fn create_temporary(
+    directory: &Path,
+    name: &std::ffi::OsStr,
+    permissions: Option<&fs::Permissions>,
+) -> std::io::Result<(PathBuf, fs::File)> {
+    /// Names tried before giving up: one is taken only when a file was left
+    /// there, or planted.
+    const ATTEMPTS: u32 = 8;
+    let options = exclusive(permissions);
+    let mut attempt = 0;
+    loop {
+        let path = directory.join(format!(
+            ".{}.jevgate-{}-{attempt}.tmp",
+            name.to_string_lossy(),
+            std::process::id()
+        ));
+        match options.open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists && attempt + 1 < ATTEMPTS =>
+            {
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Options that create a new file, readable from the first byte at most as
+/// the file it replaces (`permissions`), since settings can hold keys (Claude
+/// Code's `env`), or as a new file.
+#[cfg(unix)]
+fn exclusive(permissions: Option<&fs::Permissions>) -> fs::OpenOptions {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    /// A new file's mode before the umask, as `open(2)` callers usually ask.
+    const NEW_FILE: u32 = 0o666;
+    /// The permission bits of a mode, without its file type.
+    const PERMISSION_BITS: u32 = 0o777;
+    let mut options = fs::OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .mode(permissions.map_or(NEW_FILE, |p| p.mode() & PERMISSION_BITS));
+    options
+}
+
+/// Options that create a new file; Windows gives it its directory's access list.
+#[cfg(not(unix))]
+fn exclusive(_: Option<&fs::Permissions>) -> fs::OpenOptions {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    options
 }
 
 /// Remove a file JevGate's parts alone filled. A symlink is kept and its

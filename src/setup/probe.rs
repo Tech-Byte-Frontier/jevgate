@@ -127,11 +127,13 @@ fn finish(mut child: Child) -> Result<Output, String> {
 
 /// The first line of a program's output, cut for a sentence.
 fn first_line(text: &str) -> String {
+    /// Enough of a line to recognize an error or a usage line.
+    const SHOWN: usize = 160;
     text.trim()
         .lines()
         .next()
         .unwrap_or_default()
         .chars()
-        .take(160)
+        .take(SHOWN)
         .collect()
 }
