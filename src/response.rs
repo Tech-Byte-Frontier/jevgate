@@ -164,7 +164,7 @@ fn validate_choice(answer: &Value, probabilities: &Map<String, Value>) -> Result
 }
 
 /// The cached form of a validated response: its model, the typed answers and,
-/// when it reported one, its usage.
+/// when it reported them, its usage and the provider's request id.
 pub fn cache_value(response: &Value, request: &Value) -> Value {
     let mut answers = serde_json::Map::new();
     for (key, question) in request["questions"].as_object().unwrap() {
@@ -175,6 +175,9 @@ pub fn cache_value(response: &Value, request: &Value) -> Value {
     if let Some(input) = input_tokens(response) {
         value["usage"] =
             serde_json::json!({"input_tokens": input, "output_tokens": output_tokens(response)});
+    }
+    if let Some(id) = crate::response_headers::request_id(response["request_id"].as_str()) {
+        value["request_id"] = Value::String(id);
     }
     value
 }

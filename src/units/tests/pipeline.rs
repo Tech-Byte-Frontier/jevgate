@@ -139,8 +139,13 @@ struct Refusing {
 impl crate::transport::Evaluator for Refusing {
     fn evaluate(&mut self, request: &Value) -> Result<Value> {
         if request["jevgate"]["stage"] == self.stage {
-            let body = r#"{"detail":{"error_type":"max_tokens_exceeded"}}"#;
-            return Err(crate::provider_error::provider_error(400, Some(body), None).into());
+            let refusal = crate::provider_error::Failure {
+                status: 400,
+                body: Some(r#"{"detail":{"error_type":"max_tokens_exceeded"}}"#),
+                ..Default::default()
+            };
+            let error = crate::provider_error::provider_error(&crate::provider::TYPESAFE, refusal);
+            return Err(error.into());
         }
         Ok(answer(request, self.level))
     }

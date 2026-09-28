@@ -70,6 +70,9 @@ pub struct Judgment {
     pub version: String,
     pub pass: Pass,
     pub answer: Answer,
+    /// The provider's id for the request that answered, to quote to its support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 pub fn now() -> u64 {

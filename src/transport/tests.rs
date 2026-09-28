@@ -1,5 +1,19 @@
+//! The request queue, retries and access failures, and whole exchanges with a
+//! mock provider over HTTP.
 use super::*;
+use crate::tests::mock_provider::{MockProvider, Received, Reply};
 use serde_json::json;
+
+/// A TypeSafe failure with `status`, `body` and a pause in seconds.
+fn failed(status: u16, body: Option<&str>, pause: Option<u64>) -> ProviderError {
+    let failure = Failure {
+        status,
+        body,
+        retry_after: pause.map(Duration::from_secs),
+        request_id: None,
+    };
+    provider_error(&TYPESAFE, failure)
+}
 
 fn fast() -> ProviderAccess {
     ProviderAccess {
@@ -33,7 +47,7 @@ fn rate_limits_retry_after_the_requested_pause_and_count_retries() {
     let (outcome, calls) = sends(
         &access,
         vec![
-            Err(provider_error(429, None, Some(1)).into()),
+            Err(failed(429, None, Some(1)).into()),
             Ok(json!({"answers":{}})),
         ],
     );
@@ -44,16 +58,16 @@ fn rate_limits_retry_after_the_requested_pause_and_count_retries() {
         "retry-after is honored"
     );
     for (status, error) in [
-        (529, provider_error(529, None, None)),
-        (502, provider_error(502, None, None)),
+        (529, failed(529, None, None)),
+        (502, failed(502, None, None)),
     ] {
         let (outcome, calls) = sends(&access, vec![Err(error.into()), Ok(json!({}))]);
         assert_eq!((calls, outcome.retries), (2, 1), "{status}");
     }
-    let (outcome, calls) = sends(&access, vec![Err(Unsent.into()), Ok(json!({}))]);
+    let (outcome, calls) = sends(&access, vec![Err(Unsent(&TYPESAFE).into()), Ok(json!({}))]);
     assert_eq!((calls, outcome.retries), (2, 1), "connection never opened");
     assert_eq!(
-        retry_delay(&provider_error(429, None, Some(3600)).into()),
+        retry_delay(&failed(429, None, Some(3600)).into()),
         Some((Some(RETRY_AFTER_CAP), ATTEMPTS))
     );
 }
@@ -63,18 +77,18 @@ fn server_errors_retry_and_an_interrupted_request_is_sent_twice_at_most() {
     for status in [500, 520, 522, 524] {
         let (outcome, calls) = sends(
             &fast(),
-            vec![
-                Err(provider_error(status, None, None).into()),
-                Ok(json!({})),
-            ],
+            vec![Err(failed(status, None, None).into()), Ok(json!({}))],
         );
         assert!(outcome.result.is_ok(), "{status}");
         assert_eq!((calls, outcome.retries), (2, 1), "{status}");
     }
-    let (outcome, calls) = sends(&fast(), vec![Err(Interrupted.into()), Ok(json!({}))]);
+    let (outcome, calls) = sends(
+        &fast(),
+        vec![Err(Interrupted(&TYPESAFE).into()), Ok(json!({}))],
+    );
     assert!(outcome.result.is_ok());
     assert_eq!(calls, 2, "a timeout passes on its second send");
-    let failures = (0..4).map(|_| Err(Interrupted.into())).collect();
+    let failures = (0..4).map(|_| Err(Interrupted(&TYPESAFE).into())).collect();
     let (outcome, calls) = sends(&fast(), failures);
     assert_eq!(calls, INTERRUPTED_ATTEMPTS as usize);
     let message = outcome.result.unwrap_err().to_string();
@@ -84,9 +98,9 @@ fn server_errors_retry_and_an_interrupted_request_is_sent_twice_at_most() {
 #[test]
 fn validation_transport_and_account_errors_are_sent_once() {
     for error in [
-        anyhow::Error::from(provider_error(422, None, None)),
-        provider_error(400, None, Some(1)).into(),
-        provider_error(401, None, None).into(),
+        anyhow::Error::from(failed(422, None, None)),
+        failed(400, None, Some(1)).into(),
+        failed(401, None, None).into(),
         anyhow::anyhow!("TypeSafe transport failure; request was not retried"),
     ] {
         let text = error.to_string();
@@ -99,7 +113,7 @@ fn validation_transport_and_account_errors_are_sent_once() {
 #[test]
 fn persistent_overload_stops_after_the_attempt_limit() {
     let failures = (0..ATTEMPTS + 2)
-        .map(|_| Err(provider_error(503, None, None).into()))
+        .map(|_| Err(failed(503, None, None).into()))
         .collect();
     let (outcome, calls) = sends(&fast(), failures);
     assert_eq!(calls, ATTEMPTS as usize);
@@ -128,7 +142,7 @@ fn account_rejections_stop_pending_uploads_but_keep_in_flight_successes() {
             if index < 4 {
                 first_four.wait();
                 if index == 0 {
-                    return Err(provider_error(402, None, None).into());
+                    return Err(failed(402, None, None).into());
                 }
                 let (released, timeout) = released
                     .1
@@ -191,8 +205,7 @@ fn only_typed_account_errors_stop_siblings_and_a_new_review_can_retry() {
             &|_| Ok(()),
             |request| {
                 if request["index"] == 0 {
-                    Err(anyhow::Error::new(provider_error(status, None, None))
-                        .context("provider response"))
+                    Err(anyhow::Error::new(failed(status, None, None)).context("provider response"))
                 } else {
                     Ok(request.clone())
                 }
@@ -263,7 +276,7 @@ fn rejected_review_keeps_cached_judgments_and_recovers_only_unfinished_work() {
                 before,
                 |request| {
                     if self.reject {
-                        Err(provider_error(402, None, None).into())
+                        Err(failed(402, None, None).into())
                     } else {
                         Ok(answer(request, 0))
                     }
@@ -305,14 +318,17 @@ fn rejected_review_keeps_cached_judgments_and_recovers_only_unfinished_work() {
     assert_eq!(rejected.stages["functions"].cache_hits, 1);
     assert_eq!(
         rejected.files[1].error.as_deref(),
-        Some("TypeSafe HTTP 402; request was not retried"),
+        Some(
+            "TypeSafe HTTP 402 (credits exhausted; add credits or turn on auto-refill at https://console.typesafe.ai); request was not retried"
+        ),
         "later unsent work in the same file must not hide the original provider failure"
     );
-    assert!(
-        rejected.files[2..]
-            .iter()
-            .all(|f| f.error.as_ref().unwrap().contains("not sent"))
-    );
+    assert!(rejected.files[2..].iter().all(|f| {
+        f.error
+            .as_ref()
+            .unwrap()
+            .contains("not sent after HTTP 402 (credits exhausted); add credits")
+    }));
     let saved = crate::storage::read_latest(&project.0).unwrap();
     assert!(!saved.complete);
     assert_eq!(saved.api_requests, 1);
@@ -336,7 +352,7 @@ fn rejected_review_keeps_cached_judgments_and_recovers_only_unfinished_work() {
 fn a_context_limit_error_is_named_without_echoing_private_text() {
     let body = json!({"detail":{"error_type":"max_tokens_exceeded","message":"private source and credentials"}});
     assert_eq!(
-        provider_error(400, Some(&body.to_string()), None).to_string(),
+        failed(400, Some(&body.to_string()), None).to_string(),
         "TypeSafe HTTP 400 (model context limit exceeded); request was not retried"
     );
 }
@@ -348,14 +364,11 @@ fn unknown_error_details_are_not_echoed() {
         json!({"detail":{"error_type":"private credentials"}}),
     ] {
         assert_eq!(
-            provider_error(400, Some(&body.to_string()), None).to_string(),
+            failed(400, Some(&body.to_string()), None).to_string(),
             "TypeSafe HTTP 400; request was not retried"
         );
     }
-    assert_eq!(
-        provider_error(503, None, None).to_string(),
-        "TypeSafe HTTP 503"
-    );
+    assert_eq!(failed(503, None, None).to_string(), "TypeSafe HTTP 503");
 }
 
 const EDGE_PAGE: &str =
@@ -370,20 +383,20 @@ fn request_bodies_are_compact_without_local_metadata() {
 
 #[test]
 fn edge_firewall_blocks_are_told_apart_from_account_rejections() {
-    let edge = provider_error(403, Some("error code: 1010\n"), None);
+    let edge = failed(403, Some("error code: 1010\n"), None);
     assert!(edge.edge_block);
     assert_eq!(
         edge.to_string(),
         "TypeSafe HTTP 403 (blocked by the provider's edge protection); request was not retried"
     );
-    assert!(provider_error(403, Some(EDGE_PAGE), None).edge_block);
-    assert!(!provider_error(403, Some("{\"detail\":\"forbidden\"}"), None).edge_block);
+    assert!(failed(403, Some(EDGE_PAGE), None).edge_block);
+    assert!(!failed(403, Some("{\"detail\":\"forbidden\"}"), None).edge_block);
 }
 
 #[test]
 fn isolated_edge_blocks_fail_alone_and_consecutive_blocks_stop_uploads() {
     let access = ProviderAccess::default();
-    let blocked: Result<Value> = Err(provider_error(403, Some(EDGE_PAGE), None).into());
+    let blocked: Result<Value> = Err(failed(403, Some(EDGE_PAGE), None).into());
     access.observe(&blocked);
     access.observe(&blocked);
     access.observe(&Ok(json!({})));
@@ -410,5 +423,95 @@ fn credential_parser_does_not_execute_shell() {
     assert_eq!(
         key_from_file(&project.0.join(".env")).unwrap(),
         "literal$(do-not-execute)"
+    );
+}
+
+/// A mock provider answering with `respond`, and a TypeSafe endpoint at it.
+fn mock(respond: impl Fn(&Received) -> Reply + Send + Sync + 'static) -> (MockProvider, Endpoint) {
+    let provider = MockProvider::start(respond);
+    let endpoint = Endpoint::at(&TYPESAFE, &provider.url);
+    (provider, endpoint)
+}
+
+/// A one-question request, with local metadata that must not be uploaded.
+fn question() -> Value {
+    json!({"model": "jev-1.13.0", "state": "x", "jevgate": {"stage": "functions"},
+        "questions": {"q": {"type": "noul", "instructions": "?"}}})
+}
+
+/// A valid answer to the request the provider received.
+fn answered(received: &Received) -> Reply {
+    Reply::json(200, &crate::tests::answer(&received.json(), 0))
+}
+
+#[test]
+fn an_exchange_sends_the_bearer_key_and_keeps_the_request_id() {
+    let (provider, endpoint) =
+        mock(|received| answered(received).header(REQUEST_ID, "req_01J9-abc"));
+    let answer = send(&agent(ATTEMPT_TIMEOUT), &endpoint, "test-key", &question()).unwrap();
+    assert_eq!(answer["request_id"], "req_01J9-abc");
+    assert!(crate::response::validate(&answer, &question()).is_ok());
+    let received = &provider.received()[0];
+    assert_eq!(
+        (received.method.as_str(), received.path.as_str()),
+        ("POST", "/v1/systemone")
+    );
+    assert_eq!(received.header("Authorization"), Some("Bearer test-key"));
+    assert!(received.json().get("jevgate").is_none());
+    let (_, openrouter) = mock(|received| {
+        let mut body = crate::tests::answer(&received.json(), 0);
+        body["id"] = json!("gen-dec-1789738314-X5e5");
+        Reply::json(200, &body)
+    });
+    let answer = send(&agent(ATTEMPT_TIMEOUT), &openrouter, "k", &question()).unwrap();
+    assert_eq!(
+        answer["request_id"], "gen-dec-1789738314-X5e5",
+        "a response's own id stands in"
+    );
+}
+
+#[test]
+fn a_rate_limit_waits_the_milliseconds_the_provider_asks_for() {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&calls);
+    let (provider, endpoint) = mock(move |received| {
+        if counter.fetch_add(1, Ordering::Relaxed) == 0 {
+            Reply::json(429, &json!({}))
+                .header("retry-after-ms", "400")
+                .header("retry-after", "30")
+        } else {
+            answered(received)
+        }
+    });
+    let (agent, request, start) = (agent(ATTEMPT_TIMEOUT), question(), Instant::now());
+    let mut last = None;
+    fast().evaluate_queue(
+        &[&request],
+        1,
+        &|_| Ok(()),
+        |request| send(&agent, &endpoint, "k", request),
+        &mut |_, outcome| last = Some(outcome),
+    );
+    let outcome = last.unwrap();
+    assert!(outcome.result.is_ok());
+    assert_eq!((outcome.retries, provider.received().len()), (1, 2));
+    let waited = start.elapsed();
+    assert!(
+        waited >= Duration::from_millis(400) && waited < Duration::from_secs(30),
+        "{waited:?}"
+    );
+}
+
+#[test]
+fn a_failure_names_its_request_id_and_invalid_fields_but_never_the_provider_text() {
+    let (_provider, endpoint) = mock(|_| {
+        let detail = json!({"detail": [{"loc": ["body", "questions", "q", "criteria"],
+            "msg": "private text", "type": "missing", "input": "private input"}]});
+        Reply::json(422, &detail).header(REQUEST_ID, "req_9")
+    });
+    let error = send(&agent(ATTEMPT_TIMEOUT), &endpoint, "k", &question()).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "TypeSafe HTTP 422 (invalid request: body.questions.q.criteria missing); request was not retried; request id req_9"
     );
 }

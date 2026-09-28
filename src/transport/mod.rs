@@ -1,4 +1,8 @@
-use crate::provider_error::{Interrupted, ProviderError, Unsent, provider_error, retryable};
+use crate::provider::{Endpoint, Service, TYPESAFE};
+use crate::provider_error::{
+    Failure, Interrupted, ProviderError, Unsent, provider_error, retryable,
+};
+use crate::response_headers::{REQUEST_ID, request_id, retry_after};
 use anyhow::{Result, bail};
 use serde_json::Value;
 use std::{
@@ -17,6 +21,8 @@ const ATTEMPTS: u32 = 4;
 const INTERRUPTED_ATTEMPTS: u32 = 2;
 /// Longest provider-requested pause that is honored before a retry.
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
+/// How long one attempt may take, from connecting to reading the answer.
+const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub trait Evaluator {
     /// A new snapshot may retry after account access has been restored.
@@ -118,21 +124,30 @@ pub(crate) fn work_queue<T: Sync, R: Send>(
 
 pub struct Client {
     agent: ureq::Agent,
+    endpoint: Endpoint,
     key_file: std::path::PathBuf,
     key: Option<crate::auth::sources::Credential>,
     explicit_file: bool,
     access: ProviderAccess,
 }
 
+/// An HTTP client that gives up on an attempt after `timeout`, follows no
+/// redirect (the key must not travel elsewhere) and returns error statuses as
+/// responses, so their headers and body can be read.
+fn agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
 impl Client {
     pub fn new(key_file: &Path, explicit_file: bool) -> Self {
         Self {
-            agent: ureq::Agent::config_builder()
-                .timeout_global(Some(Duration::from_secs(60)))
-                .max_redirects(0)
-                .http_status_as_error(false)
-                .build()
-                .into(),
+            agent: agent(ATTEMPT_TIMEOUT),
+            endpoint: Endpoint::new(&TYPESAFE),
             key_file: key_file.into(),
             key: None,
             explicit_file,
@@ -162,7 +177,9 @@ impl Evaluator for Client {
     fn evaluate(&mut self, request: &Value) -> Result<Value> {
         self.access.check()?;
         let agent = self.agent.clone();
-        let result = send(&agent, self.credential()?, request);
+        self.credential()?;
+        let key = self.key.as_ref().unwrap().key.expose();
+        let result = send(&agent, &self.endpoint, key, request);
         self.access.observe(&result);
         result
     }
@@ -194,11 +211,12 @@ impl Evaluator for Client {
             }
         }
         let key = self.key.as_ref().unwrap().key.expose();
+        let endpoint = &self.endpoint;
         self.access.evaluate_queue(
             requests,
             concurrency,
             before,
-            |request| send(&agent, key, request),
+            |request| send(&agent, endpoint, key, request),
             completed,
         );
     }
@@ -229,6 +247,8 @@ struct ProviderAccess {
     edge_blocks: AtomicU16,
     cooldown: Mutex<Option<Instant>>,
     backoff: Duration,
+    /// The provider the requests go to, named in the messages.
+    service: &'static Service,
 }
 
 impl Default for ProviderAccess {
@@ -239,6 +259,7 @@ impl Default for ProviderAccess {
             edge_blocks: AtomicU16::new(0),
             cooldown: Mutex::new(None),
             backoff: FIRST_BACKOFF,
+            service: &TYPESAFE,
         }
     }
 }
@@ -253,14 +274,21 @@ impl ProviderAccess {
 
     fn check(&self) -> Result<()> {
         let status = self.rejected.load(Ordering::Acquire);
+        let provider = self.service.label;
         if status != 0 && self.edge.load(Ordering::Acquire) {
             bail!(
-                "TypeSafe request not sent after HTTP {status} from the provider's edge protection; wait before rerunning, and contact TypeSafe if it persists"
+                "{provider} request not sent after HTTP {status} from the provider's edge protection; wait before rerunning, and contact {provider} if it persists"
+            );
+        }
+        if status == 402 {
+            bail!(
+                "{provider} request not sent after HTTP 402 (credits exhausted); {}, then rerun the review",
+                self.service.credits
             );
         }
         if status != 0 {
             bail!(
-                "TypeSafe request not sent after HTTP {status}; restore account access and rerun the review"
+                "{provider} request not sent after HTTP {status}; restore account access and rerun the review"
             );
         }
         Ok(())
@@ -393,12 +421,8 @@ impl ProviderAccess {
 /// retried.
 fn retry_delay(error: &anyhow::Error) -> Option<(Option<Duration>, u32)> {
     if let Some(error) = error.downcast_ref::<ProviderError>() {
-        return retryable(error.status).then(|| {
-            let pause = error
-                .retry_after
-                .map(|s| Duration::from_secs(s).min(RETRY_AFTER_CAP));
-            (pause, ATTEMPTS)
-        });
+        return retryable(error.status)
+            .then(|| (error.retry_after.map(|p| p.min(RETRY_AFTER_CAP)), ATTEMPTS));
     }
     if error.downcast_ref::<Interrupted>().is_some() {
         return Some((None, INTERRUPTED_ATTEMPTS));
@@ -436,10 +460,14 @@ fn request_body(request: &Value) -> Result<Vec<u8>> {
     )?)
 }
 
-fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
+/// Send one request and return the provider's answer, with the provider's
+/// request id under `request_id`: TypeSafe's `x-typesafe-request-id` header,
+/// else the response's own `id`, which OpenRouter sends.
+fn send(agent: &ureq::Agent, endpoint: &Endpoint, key: &str, request: &Value) -> Result<Value> {
+    let service = endpoint.service;
     let body = request_body(request)?;
     let response = agent
-        .post("https://api.typesafe.ai/v1/systemone")
+        .post(endpoint.systemone())
         .header("Authorization", format!("Bearer {key}"))
         .header(
             "User-Agent",
@@ -454,39 +482,68 @@ fn send(agent: &ureq::Agent, key: &str, request: &Value) -> Result<Value> {
     let mut response = match response {
         Ok(response) => response,
         Err(ureq::Error::StatusCode(status)) => {
-            return Err(provider_error(status, None, None).into());
+            let failure = Failure {
+                status,
+                ..Default::default()
+            };
+            return Err(provider_error(service, failure).into());
         }
         Err(ureq::Error::HostNotFound | ureq::Error::ConnectionFailed) => {
-            return Err(Unsent.into());
+            return Err(Unsent(service).into());
         }
-        Err(ureq::Error::Timeout(_) | ureq::Error::Io(_)) => return Err(Interrupted.into()),
-        Err(_) => bail!("TypeSafe transport failure; request was not retried"),
+        Err(ureq::Error::Timeout(_) | ureq::Error::Io(_)) => {
+            return Err(Interrupted(service).into());
+        }
+        Err(_) => bail!(
+            "{} transport failure; request was not retried",
+            service.label
+        ),
     };
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let retry_after = response
+    let header = |name: &str| {
+        response
             .headers()
-            .get("retry-after")
+            .get(name)
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.trim().parse::<u64>().ok());
+            .map(str::to_owned)
+    };
+    let id = request_id(header(REQUEST_ID).as_deref());
+    if !response.status().is_success() {
+        let wait = retry_after(
+            header("retry-after-ms").as_deref(),
+            header("retry-after").as_deref(),
+            std::time::SystemTime::now(),
+        );
+        let status = response.status().as_u16();
         let body = response
             .body_mut()
             .with_config()
             .limit(65_536)
             .read_to_string()
             .ok();
-        return Err(provider_error(status, body.as_deref(), retry_after).into());
+        let failure = Failure {
+            status,
+            body: body.as_deref(),
+            retry_after: wait,
+            request_id: id,
+        };
+        return Err(provider_error(service, failure).into());
     }
     // Error bodies and headers may echo credentials or source; never render them.
-    response
+    let mut answer: Value = response
         .body_mut()
         .with_config()
         .limit(1_048_576)
         .read_json()
         .map_err(|error| match error {
-            ureq::Error::Timeout(_) | ureq::Error::Io(_) => Interrupted.into(),
-            _ => anyhow::anyhow!("TypeSafe returned invalid or oversized JSON"),
-        })
+            ureq::Error::Timeout(_) | ureq::Error::Io(_) => Interrupted(service).into(),
+            _ => anyhow::anyhow!("{} returned invalid or oversized JSON", service.label),
+        })?;
+    if let Some(id) = id.or_else(|| request_id(answer["id"].as_str()))
+        && let Some(fields) = answer.as_object_mut()
+    {
+        fields.insert("request_id".into(), Value::String(id));
+    }
+    Ok(answer)
 }
 
 #[cfg(test)]

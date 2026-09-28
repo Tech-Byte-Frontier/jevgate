@@ -16,13 +16,21 @@ Exit code 2 means the run could not finish, or the configuration or command line
 **`Cannot connect to TypeSafe; request was not sent`**
 : A network problem before anything was sent. Rerun; cached answers are kept.
 
+**`TypeSafe HTTP 402 (credits exhausted; add credits or turn on auto-refill at https://console.typesafe.ai)`**
+: The account's prepaid credits ran out. The run stops sending requests and exits 2; the answers it received are kept in the cache. Add credits and rerun: only the unanswered units are asked.
+
+**`TypeSafe HTTP 422 (invalid request: body.questions.q1.criteria missing)`**
+: TypeSafe refused a request as malformed. The message names each invalid field and its error type, never the text TypeSafe sends with it, which can quote your source. It is a JevGate bug: please [report it](https://github.com/Tech-Byte-Frontier/jevgate/issues/new) with the request id.
+
+A provider error ends with the provider's request id when it sent one (`; request id req_…`); quote it to the provider's support. The report also keeps the id of the request behind each answer (`files[].judgments[].request_id`).
+
 **`Session API request budget exhausted; restart with an explicit larger --max-requests`**
 : `max_requests` or `--max-requests` capped the run. Raise it, or check fewer files with `--base` or paths; `--dry-run` estimates what a run will ask.
 
 **`Another JevGate session owns latest.json`**
 : Another `check` or `--watch` is running in the same repository. Stop it first.
 
-Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts before the run gives up, and a timeout or dropped connection is retried once.
+Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts before the run gives up, waiting as long as the provider asks (`retry-after-ms`, or `Retry-After` in seconds or as a date, at most 30 seconds), and a timeout or dropped connection is retried once.
 
 ## Many files are uncertain
 

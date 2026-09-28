@@ -78,6 +78,7 @@ pub fn record(file: &mut FileResult, asked: &Asked, body: &Value) -> Result<()> 
             version: questions::VERSION.into(),
             pass: question.pass,
             answer,
+            request_id: body["request_id"].as_str().map(str::to_owned),
         });
     }
     Ok(())

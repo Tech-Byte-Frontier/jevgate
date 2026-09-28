@@ -7,6 +7,8 @@ use clap::Parser;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 mod gating;
+#[path = "../../tests/support/mock_provider.rs"]
+pub(super) mod mock_provider;
 mod scope;
 #[path = "../../tests/support/temp_dir.rs"]
 mod temp_dir;
