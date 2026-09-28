@@ -293,23 +293,24 @@ fn a_file_the_change_makes_jevgate_skip_is_a_guard() {
 #[test]
 fn a_file_the_change_leaves_unreadable_is_a_guard() {
     let project = repository();
+    // A syntax error leaves out only the unit it sits in, but a generator
+    // template holding one is not judged: its placeholders are no Python.
     let broken = "def f(:\n    assert (\n\ndef g(:\n    assert [\n\ndef h(:\n\ndef i(:\n";
-    project.write("broken.py", broken);
-    project.write("calc.py", "def double(x):\n    return x * 2\n");
+    project.write("templates/broken.py", broken);
+    project.write("templates/calc.py", "def double(x):\n    return x * 2\n");
     project.git(&["add", "."]);
     project.git(&["commit", "-qm", "a file that never parsed"]);
     // A coding line and one Latin-1 byte: Python reads it, JevGate does not.
     let mut latin = format!("# -*- coding: latin-1 -*-\n{APP}#").into_bytes();
     latin.extend([0xe9, b'\n']);
     std::fs::write(project.0.join("app.py"), latin).unwrap();
-    // More error regions than the check tolerates in a file it judges.
-    project.write("calc.py", broken);
-    project.write("broken.py", &format!("{broken}# still broken\n"));
+    project.write("templates/calc.py", broken);
+    project.write("templates/broken.py", &format!("{broken}# still broken\n"));
     assert_eq!(
         described(&scanned(&project)),
         [
             "app.py is no longer UTF-8 text, so JevGate stops judging it",
-            "calc.py no longer parses (Syntax errors; this file was not judged), so JevGate stops judging it",
+            "templates/calc.py no longer parses (The parser could not read enough of this file; it was not judged), so JevGate stops judging it",
         ],
         "a file that did not parse before is not one"
     );
