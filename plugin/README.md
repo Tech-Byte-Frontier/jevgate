@@ -6,7 +6,7 @@ Runs [JevGate](https://tech-byte-frontier.github.io/jevgate/) in Claude Code's l
 - **MCP server** (`.mcp.json`): `jevgate mcp`, with the `jevgate_check`, `jevgate_findings` and `jevgate_rules` tools.
 - **Skill** (`skills/findings`, `/jevgate:findings`): how to act on findings, and what never to do to clear one.
 
-The plugin runs the `jevgate` command, 0.27 or later, which you install separately ([install](https://tech-byte-frontier.github.io/jevgate/install.html)), and your TypeSafe key (`jevgate auth login`). When `jevgate` is missing or older, each hook says so and nothing is blocked. On Windows, Claude Code runs the hooks in Git Bash, which Git for Windows installs, or in PowerShell 7.
+The plugin runs the `jevgate` command, 0.27 or later, which you install separately ([install](https://tech-byte-frontier.github.io/jevgate/install.html)), and your TypeSafe key (`jevgate auth login`). A finding already in a function Claude changes counts at the end of the turn, as in a pull request check: in a repository that has findings, run `jevgate check` and `jevgate baseline` first, and accepted findings never block. When `jevgate` is missing or older, each hook says so and nothing is blocked. On Windows, Claude Code runs the hooks in Git Bash, which Git for Windows installs, or in PowerShell 7.
 
 ```text
 /plugin marketplace add Tech-Byte-Frontier/jevgate

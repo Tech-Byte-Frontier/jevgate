@@ -59,7 +59,7 @@ pub(super) fn list() -> Value {
 fn max_findings() -> Value {
     json!({
         "type": "integer", "minimum": 1, "maximum": MAX_LISTED,
-        "description": format!("Return at most this many findings, new ones and reviews first [default: {DEFAULT_FINDINGS}]; total_findings counts them all"),
+        "description": format!("Return at most this many findings, those that fail the gate first, then new ones and reviews [default: {DEFAULT_FINDINGS}]; total_findings counts them all"),
     })
 }
 

@@ -142,7 +142,9 @@ pub enum JevCommand {
     ///
     /// Configured as a hook of Claude Code, Codex, Gemini CLI, Cursor,
     /// OpenCode, Copilot CLI or VS Code, it reads the event as JSON on stdin
-    /// and prints one JSON reply. When a turn starts, it records a snapshot of
+    /// and prints one JSON reply. VS Code names its edit tools its own way,
+    /// which is not verified yet: there only the end of a turn is sure to be
+    /// checked. When a turn starts, it records a snapshot of
     /// the working tree under `.jevgate/turns/`; after each edit, it checks
     /// what the turn changed in the edited files and passes the findings to
     /// the agent, never blocking; when the turn ends, it checks everything

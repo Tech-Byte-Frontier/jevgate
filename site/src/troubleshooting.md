@@ -104,7 +104,7 @@ Accept it with `jevgate baseline`, and record why with `jevgate baseline mark wr
 
 ## A `--base` check leaves out a finding
 
-With `--base`, only what the change touches is asked about and reported: units on changed lines, copies where either copy changed, a file's outline when the change adds members, and documents naming a path it removed. A finding elsewhere in a changed file comes back with `--whole-files`, or in a check without `--base`. The report's `scope` says which a check used. The agent hook judges a turn the same way, from the snapshot taken when the turn began, so a review already in a file the agent edits neither reaches the agent nor blocks it.
+With `--base`, only what the change touches is asked about and reported: units on changed lines, copies where either copy changed, a file's outline when the change adds members, and documents naming a path it removed. A finding elsewhere in a changed file comes back with `--whole-files`, or in a check without `--base`. The report's `scope` says which a check used. The agent hook judges a turn the same way, from the snapshot taken when the turn began, so a review elsewhere in a file the agent edits neither reaches the agent nor blocks it. One in a function the turn changes does, even when it was there before the turn, as it would in a pull request check: to hold the hook to what agents add, accept what the repository already has first with `jevgate check`, then `jevgate baseline`.
 
 ## A file is skipped
 

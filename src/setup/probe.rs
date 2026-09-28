@@ -23,12 +23,12 @@ const INSTALL: &str = "https://tech-byte-frontier.github.io/jevgate/install.html
 pub(super) fn problem(path: Option<&OsStr>) -> Option<String> {
     let Some(found) = path.and_then(|path| find(path, "jevgate")) else {
         return Some(format!(
-            "no jevgate is on your PATH, and the hooks run `jevgate hook` by name: install JevGate where the agent finds it ({INSTALL}; with npm, `npm install -g @tech-byte-frontier/jevgate`)"
+            "no jevgate is on your PATH, and the hooks run `jevgate hook` by name: install JevGate where the agent finds it ({INSTALL})"
         ));
     };
     answer(&found).err().map(|why| {
         format!(
-            "the jevgate on your PATH ({}) cannot answer the hooks: {why}. The agent runs that one: replace it with JevGate 0.27 or later, or put one first on your PATH (the npm package named jevgate is another program; JevGate's is @tech-byte-frontier/jevgate)",
+            "the jevgate on your PATH ({}) cannot answer the hooks: {why}. The agent runs that one: replace it with JevGate 0.27 or later, or put one first on your PATH ({INSTALL}; the npm package named jevgate is another program)",
             found.display()
         )
     })

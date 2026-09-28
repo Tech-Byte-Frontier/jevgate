@@ -285,7 +285,7 @@ impl Plan {
         }
         if !setup.dry_run {
             say!(
-                "Next: `jevgate auth login` saves your TypeSafe key if you have not; the agent loads its hooks when a session starts."
+                "Next: `jevgate auth login` saves your TypeSafe key if you have not; the agent loads its hooks when a session starts. In a repository that already has findings, `jevgate check` then `jevgate baseline` accepts them, so a turn is not held on findings it did not add."
             );
         }
     }
