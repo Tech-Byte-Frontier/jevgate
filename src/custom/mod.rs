@@ -9,6 +9,7 @@ use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+pub(crate) mod characters;
 mod examples;
 pub mod gallery;
 mod ignored;
@@ -421,7 +422,7 @@ fn checked(spec: &Spec) -> Result<Checked, String> {
     if !question.ends_with('?') {
         return Err("`question` must be one yes/no question ending in `?`".into());
     }
-    text(&Some(question.clone()), "question", QUESTION_CHARS)
+    text(&Some(question.clone()), ("question", false), QUESTION_CHARS)
         .map_err(|problem| format!("{problem}; move detail to background or guidance"))?;
     let threshold = spec.threshold.unwrap_or(DEFAULT_THRESHOLD);
     if !THRESHOLDS.contains(&threshold) {
@@ -435,9 +436,9 @@ fn checked(spec: &Spec) -> Result<Checked, String> {
         .map_err(|error| format!("invalid paths {:?}: {error}", spec.paths))?;
     let applies = |path: &Path| spec.paths.is_empty() || matcher.is_match(path);
     Ok(Checked {
-        background: text(&spec.background, "background", TEXT_CHARS)?,
-        guidance: text(&spec.guidance, "guidance", TEXT_CHARS)?,
-        next_step: text(&spec.next_step, "next_step", NEXT_STEP_CHARS)?,
+        background: text(&spec.background, ("background", true), TEXT_CHARS)?,
+        guidance: text(&spec.guidance, ("guidance", true), TEXT_CHARS)?,
+        next_step: text(&spec.next_step, ("next_step", false), NEXT_STEP_CHARS)?,
         examples: examples::validate((&spec.failing, &spec.passing), applies)?,
         matcher,
         question,
@@ -457,13 +458,29 @@ pub(crate) fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// An optional text trimmed, none when empty, and at most `limit` characters.
-fn text(value: &Option<String>, field: &str, limit: usize) -> Result<Option<String>, String> {
+/// An optional text trimmed, none when empty, and at most `limit`
+/// characters, of [`printable`](characters::printable) ones only, but for
+/// the line breaks and tabs of a `multiline` field: a question's text is
+/// printed as written in terminals, CI logs and the rules table.
+fn text(
+    value: &Option<String>,
+    (field, multiline): (&str, bool),
+    limit: usize,
+) -> Result<Option<String>, String> {
     let value = value
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string);
+    if let Some(c) = value
+        .as_deref()
+        .and_then(|v| characters::unprintable(v, multiline))
+    {
+        return Err(format!(
+            "`{field}` holds U+{:04X}, which a terminal acts on or hides; remove it",
+            u32::from(c)
+        ));
+    }
     match value {
         Some(v) if v.chars().count() > limit => Err(format!(
             "`{field}` is {} characters; keep it within {limit}",

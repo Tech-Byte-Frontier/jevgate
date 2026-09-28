@@ -368,14 +368,14 @@ fn fallback_id(path: &std::path::Path, line: usize) -> String {
 }
 
 /// A relative path with `/` between its parts, as questions cite it, of
-/// [`printable`](super::lines::printable) characters: a directory name can
+/// [`printable`](crate::custom::characters::printable) characters: a directory name can
 /// hold a line break, which would end a proposal's comment and start a key.
 pub fn slashed(path: &std::path::Path) -> String {
     path.iter()
         .map(|part| {
             let part = part.to_string_lossy();
             part.chars()
-                .filter(|c| super::lines::printable(*c))
+                .filter(|c| crate::custom::characters::printable(*c))
                 .collect()
         })
         .collect::<Vec<String>>()

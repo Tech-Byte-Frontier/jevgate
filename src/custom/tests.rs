@@ -121,6 +121,35 @@ fn an_invalid_field_is_an_error_naming_the_question_and_its_file() {
 }
 
 #[test]
+fn a_question_holds_no_character_a_terminal_acts_on_or_hides() {
+    let mirrored = QUESTION.replace("write a request", "write\\u202E a request");
+    for (text, problem) in [
+        (mirrored, "`question` holds U+202E"),
+        (
+            format!("{QUESTION}guidance = \"Fine\\u0000.\"\n"),
+            "`guidance` holds U+0000",
+        ),
+        (
+            format!("{QUESTION}next_step = \"Fix\\nit.\"\n"),
+            "`next_step` holds U+000A",
+        ),
+        (
+            format!("{QUESTION}background = \"One\\u2028two.\"\n"),
+            "`background` holds U+2028",
+        ),
+    ] {
+        let error = configured(&text).unwrap_err().to_string();
+        assert!(
+            error.starts_with("Question custom/no-body-logs in jevgate.toml: ")
+                && error.contains(problem),
+            "{error}"
+        );
+    }
+    let lines = format!("{QUESTION}guidance = \"Counts:\\n\\t- a body.\\r\\nFine: an id.\"\n");
+    assert!(configured(&lines).is_ok(), "guidance may hold lines");
+}
+
+#[test]
 fn ids_are_required_unique_and_safe_to_name_a_rule() {
     let error = configured(&QUESTION.replace("id = \"no-body-logs\"\n", ""))
         .unwrap_err()

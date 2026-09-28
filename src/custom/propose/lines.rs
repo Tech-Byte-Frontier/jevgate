@@ -3,7 +3,10 @@
 //! introduces it. Code, tables, headings, HTML comments and `@path` imports
 //! hold no rule, and a line ending in `:` that opens a list introduces its
 //! items rather than stating one.
-use crate::docs::markdown;
+use crate::{
+    custom::characters::{BYTE_ORDER_MARK, printable},
+    docs::markdown,
+};
 
 /// Characters of a candidate at most. A rule is a line or a list item: a
 /// longer paragraph is a page of prose, which its proposal could not quote
@@ -12,16 +15,6 @@ const MAX_CHARS: usize = 1_600;
 
 /// Spaces a tab counts for in a list item's indentation.
 const TAB_WIDTH: usize = 4;
-
-/// Unicode's bidirectional controls: invisible, and able to make a line
-/// read differently on a terminal than it is.
-const BIDI_CONTROLS: [char; 9] = [
-    '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}', '\u{202e}', '\u{2066}', '\u{2067}', '\u{2068}',
-    '\u{2069}',
-];
-
-/// Invisible at the start of a file, which some editors write.
-const BYTE_ORDER_MARK: char = '\u{feff}';
 
 /// One candidate: a list item or a paragraph.
 #[derive(Clone, Debug, PartialEq)]
@@ -274,13 +267,6 @@ fn without_marker(item: &str) -> &str {
         .iter()
         .find_map(|box_| rest.strip_prefix(box_))
         .unwrap_or(rest)
-}
-
-/// Whether a character is kept in what is quoted or shown: no control
-/// character, which a TOML comment cannot hold and a terminal acts on, and
-/// no bidirectional control or byte-order mark, which are invisible.
-pub fn printable(c: char) -> bool {
-    !c.is_control() && !BIDI_CONTROLS.contains(&c) && c != BYTE_ORDER_MARK
 }
 
 /// Words joined by single spaces, of [`printable`] characters only.
