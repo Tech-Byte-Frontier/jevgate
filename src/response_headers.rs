@@ -54,7 +54,12 @@ fn http_date(text: &str) -> Option<SystemTime> {
     }
     let day: u64 = parts[1].parse().ok()?;
     let month = MONTHS.iter().position(|m| *m == parts[2])? as u64 + 1;
-    let year: u64 = parts[3].parse().ok().filter(|year| *year >= 1970)?;
+    // The form's year is four digits: a longer one would overflow the time.
+    let year: u64 = Some(parts[3])
+        .filter(|year| year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit()))?
+        .parse()
+        .ok()
+        .filter(|year| *year >= 1970)?;
     let clock: Vec<u64> = parts[4]
         .split(':')
         .map(|part| part.parse().ok())
@@ -66,10 +71,9 @@ fn http_date(text: &str) -> Option<SystemTime> {
         return None;
     }
     let days = days_since_epoch(year, month, day);
-    Some(
-        UNIX_EPOCH
-            + Duration::from_secs(days * SECONDS_PER_DAY + hour * 3600 + minute * 60 + second),
-    )
+    UNIX_EPOCH.checked_add(Duration::from_secs(
+        days * SECONDS_PER_DAY + hour * 3600 + minute * 60 + second,
+    ))
 }
 
 /// Days from 1970-01-01 to a date from 1970 on: Howard Hinnant's
@@ -134,6 +138,9 @@ mod tests {
             "Sunday, 06-Nov-94 08:49:37 GMT",
             "Sun, 06 Nov 1994 08:49:37 UTC",
             "Sun, 32 Nov 1994 08:49:37 GMT",
+            "Sun, 06 Nov 500000000000 08:49:37 GMT",
+            "Sun, 06 Nov 18446744073709551615 08:49:37 GMT",
+            "Sun, 06 Nov +994 08:49:37 GMT",
             "tomorrow",
         ] {
             assert_eq!(wait(None, Some(value)), None, "{value}");
@@ -153,5 +160,6 @@ mod tests {
         assert_eq!(seconds("Thu, 01 Jan 1970 00:00:00 GMT"), 0);
         assert_eq!(seconds("Tue, 29 Feb 2000 00:00:00 GMT"), 951_782_400);
         assert_eq!(seconds("Mon, 28 Sep 2026 12:00:00 GMT"), 1_790_596_800);
+        assert_eq!(seconds("Fri, 31 Dec 9999 23:59:59 GMT"), 253_402_300_799);
     }
 }
