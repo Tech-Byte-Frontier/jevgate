@@ -539,6 +539,36 @@ pub(super) fn git(project: &Project, args: &[&str]) {
 }
 
 #[test]
+fn a_hunk_question_reads_a_file_git_attributes_keep_out_of_diffs() {
+    let toml = r#"
+[[question]]
+id = "no-body-logs"
+question = "Does this change add a print call that logs a request body?"
+unit = "hunk"
+"#;
+    for attribute in ["*.py -diff\n", "*.py binary\n"] {
+        let project = Project::new();
+        project.write("app/api.py", "def handle(request):\n    return 1\n");
+        project.write(".gitattributes", attribute);
+        git(&project, &["init", "-q"]);
+        git(&project, &["add", "."]);
+        git(&project, &["commit", "-qm", "base"]);
+        project.write(
+            "app/api.py",
+            "def handle(request):\n    print(\"VIOLATION\", request.body)\n    return 1\n",
+        );
+        let mut options = configured(toml, &["custom"]);
+        options.base = Some(crate::revision::resolve(&project.0, "HEAD").unwrap());
+        let (_, plan) = planned(&project, &options);
+        let changed: Vec<(usize, usize)> = custom_units(&plan, "app/api.py")
+            .iter()
+            .map(|u| (u.locations[0].start_line, u.locations[0].end_line))
+            .collect();
+        assert_eq!(changed, [(2, 2)], "{attribute}");
+    }
+}
+
+#[test]
 fn a_hunk_question_asks_about_each_change_since_the_base_in_any_language() {
     let toml = r#"
 [[question]]

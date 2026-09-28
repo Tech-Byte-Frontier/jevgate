@@ -60,9 +60,12 @@ impl Changes {
     }
 
     /// The hunks of `path`, whose text is now `source`: none when it did
-    /// not change, and all of it when Git does not track it yet. External
-    /// diff and text conversion helpers never run, and a blank line of
-    /// context keeps its space whatever `diff.suppressBlankEmpty` says.
+    /// not change, and all of it when Git does not track it yet or cannot
+    /// diff it, so a change is never passed over. External diff and text
+    /// conversion helpers never run, a file `.gitattributes` marks `-diff`
+    /// or `binary` is diffed as text, as the check's own diff reads it, and a
+    /// blank line of context keeps its space whatever
+    /// `diff.suppressBlankEmpty` says.
     pub(super) fn hunks(&self, path: &Path, source: &str) -> Vec<Hunk> {
         let Some(previous) = self.paths.get(path) else {
             return Vec::new();
@@ -73,6 +76,7 @@ impl Changes {
             "diff",
             "--no-ext-diff",
             "--no-textconv",
+            "--text",
             "--find-renames",
             "--no-color",
             "--unified=3",
@@ -86,10 +90,10 @@ impl Changes {
             return Vec::new();
         };
         args.push(now);
-        let diff = crate::revision::git(&self.root, &args)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .unwrap_or_default();
-        let hunks = parse(&diff, source.lines().count());
+        let Ok(diff) = crate::revision::git(&self.root, &args) else {
+            return added(source);
+        };
+        let hunks = parse(&String::from_utf8_lossy(&diff), source.lines().count());
         if hunks.is_empty() && previous.is_none() {
             added(source)
         } else {
