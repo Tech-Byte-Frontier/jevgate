@@ -691,6 +691,26 @@ fn a_provider_outage_is_waited_out_from_the_cache_for_five_minutes() {
 }
 
 #[test]
+fn the_hooks_checks_keep_each_answer_by_question_for_the_next_one() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let project = repository();
+    let reviewer = reviewing();
+    send(&project, &reviewer, prompt("refactor"));
+    project.write("lib.rs", &long_function("f"));
+    let edited = send(&project, &reviewer, edit(&project, "lib.rs"));
+    assert!(context(&edited).contains("(fails the gate)"), "{edited}");
+    let (states, requests) = project.cache_files();
+    assert!(states > 0, "kept by state and question");
+    assert_eq!(requests, 0, "never as a whole request");
+    // The stop's check reads them: it blocks with a provider it cannot reach.
+    let asked = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&asked);
+    let down = host(move || Box::new(Unreachable(Arc::clone(&counted))));
+    assert_eq!(send(&project, &down, stop(false))["decision"], "block");
+    assert_eq!(asked.load(Ordering::Relaxed), 0, "nothing was asked");
+}
+
+#[test]
 fn a_slow_provider_is_cut_at_the_budget() {
     let project = repository();
     let host = host(|| Box::new(Slow(Duration::from_secs(6))));

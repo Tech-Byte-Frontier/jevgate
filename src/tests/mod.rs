@@ -57,6 +57,19 @@ impl Project {
         self.git(&["add", "-A"]);
         self.git(&["commit", "-qm", "base"]);
     }
+    /// The answer cache's files: one per state asked about, then whole
+    /// requests' entries, which only versions before 0.28 wrote.
+    pub(super) fn cache_files(&self) -> (usize, usize) {
+        let files = |directory: &std::path::Path| {
+            std::fs::read_dir(directory).map_or(0, |entries| {
+                entries
+                    .filter(|entry| entry.as_ref().is_ok_and(|e| e.path().is_file()))
+                    .count()
+            })
+        };
+        let cache = self.0.join(".jevgate/cache");
+        (files(&cache.join("answers")), files(&cache))
+    }
 }
 
 #[derive(Parser)]
