@@ -28,7 +28,7 @@ fn a_question_names_its_rule_and_takes_the_defaults() {
         (question.level, question.unit),
         (Strength::Review, Kind::Function)
     );
-    assert_eq!(question.default_levels(), [FailOn::Review]);
+    assert_eq!(question.blocks(), [Strength::Review]);
     assert!(question.applies_to(Path::new("deep/any.rs")));
     assert!(!question.names_files());
     assert!(
@@ -67,11 +67,10 @@ fn every_field_counts_toward_the_version_and_levels_follow_the_level() {
         "paths only choose files"
     );
     assert_eq!(changed("next_step = \"Log the id.\""), plain);
-    let levels = |level: &str| {
-        configured(&format!("{QUESTION}level = \"{level}\"\n")).unwrap()[0].default_levels()
-    };
-    assert_eq!(levels("consider"), [FailOn::Consider]);
-    assert_eq!(levels("note"), [FailOn::None]);
+    let blocks =
+        |level: &str| configured(&format!("{QUESTION}level = \"{level}\"\n")).unwrap()[0].blocks();
+    assert_eq!(blocks("consider"), [Strength::Consider]);
+    assert!(blocks("note").is_empty(), "a note never fails the gate");
 }
 
 #[test]

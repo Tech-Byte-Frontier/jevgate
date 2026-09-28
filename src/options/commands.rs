@@ -83,7 +83,8 @@ pub enum JevCommand {
     /// projects JevGate was never tuned on, from findings labeled from the
     /// code. The levels right at least 80% of the time over at least 20
     /// labels are mature: by default only they fail the check (`--fail-on
-    /// mature`), and the other findings are reported without failing it.
+    /// mature`), with each custom question at its own level, and the other
+    /// findings are reported without failing it.
     ///
     /// `rules test` asks custom questions about their examples, `rules propose`
     /// proposes custom questions from the project's agent instruction files,

@@ -64,8 +64,9 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
 
 /// How the gate counts a finding in `path`, at its rule's levels for that
 /// path: none for notes and accepted findings. Consider counts every finding
-/// and review only reviews; `mature` counts the rule's mature levels, and a
-/// finding it leaves out is still being measured.
+/// and review only reviews; `mature` counts the rule's mature levels (a
+/// custom question's own level), and a finding it leaves out is still being
+/// measured.
 fn gating(finding: &Finding, path: &Path, args: &CheckArgs) -> Option<Gating> {
     if finding.accepted() || finding.strength == Strength::Note {
         return None;
@@ -74,7 +75,10 @@ fn gating(finding: &Finding, path: &Path, args: &CheckArgs) -> Option<Gating> {
     let mature = levels.contains(&FailOn::Mature);
     let counted = levels.contains(&FailOn::Consider)
         || (finding.strength == Strength::Review && levels.contains(&FailOn::Review))
-        || (mature && crate::maturity::mature(&finding.rule, finding.strength));
+        || (mature
+            && args
+                .mature_levels(&finding.rule)
+                .contains(&finding.strength));
     Some(if counted {
         Gating::Fails
     } else if mature {

@@ -42,7 +42,8 @@ pub enum FailOn {
     /// New review or consider findings
     Consider,
     /// New findings of the rule's mature levels, measured right at least 80%
-    /// of the time on projects JevGate was never tuned on (the default)
+    /// of the time on projects JevGate was never tuned on, or of a custom
+    /// question's own level (the default)
     Mature,
     /// Files whose answers stayed undecided or that need context
     Uncertain,
@@ -173,8 +174,9 @@ pub struct CheckArgs {
     /// LEVEL is review, consider (also fails on review), mature, uncertain, or
     /// none (advisory; `report` is accepted as a synonym). `mature` fails only
     /// on the levels of a rule measured right at least 80% of the time on
-    /// projects JevGate was never tuned on (`jevgate rules` shows them); other
-    /// findings are reported without failing. TARGET is a rule ID, key or
+    /// projects JevGate was never tuned on, and on a custom question's own
+    /// level (`jevgate rules` shows them); other findings are reported without
+    /// failing. TARGET is a rule ID, key or
     /// group, for example `security=consider`; the most specific target wins.
     /// Flags replace `fail_on` and `[rules]` levels from jevgate.toml for the
     /// rules they address. Notes and baselined findings never fail the gate.
@@ -465,9 +467,18 @@ impl CheckArgs {
             .collect()
     }
 
-    /// What `mature` stands for, for the report: the mature levels of each
-    /// selected rule that has some and whose levels include `mature` outside
-    /// scopes or in one, by rule ID.
+    /// The levels `mature` stands for, for a rule by ID or key: a built-in
+    /// rule's levels measured mature, and a custom question's own level.
+    pub fn mature_levels(&self, rule: &str) -> Vec<crate::schema::Strength> {
+        match self.questions.iter().find(|q| q.rule == rule) {
+            Some(question) => question.blocks(),
+            None => crate::maturity::mature_levels(rule),
+        }
+    }
+
+    /// What `mature` stands for, for the report: the levels of each selected
+    /// rule that has some and whose levels include `mature` outside scopes
+    /// or in one, by rule ID.
     pub fn mature_level_names(&self) -> BTreeMap<String, Vec<String>> {
         let uses_mature = |key: &str| {
             self.levels(key).contains(&FailOn::Mature)
@@ -482,7 +493,7 @@ impl CheckArgs {
             .iter()
             .filter(|key| uses_mature(key))
             .filter_map(|key| {
-                let levels = crate::maturity::mature_levels(key);
+                let levels = self.mature_levels(key);
                 let names = levels.iter().map(crate::output::label).collect::<Vec<_>>();
                 (!names.is_empty()).then(|| (crate::catalog::id(key).to_string(), names))
             })

@@ -455,7 +455,7 @@
       "type": "array"
     },
     "fail_on": {
-      "description": "The level for rules without their own, like `--fail-on`. Default: [\"mature\"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate rules` shows them.",
+      "description": "The level for rules without their own, like `--fail-on`. Default: [\"mature\"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on, and on a custom question's own level; `jevgate rules` shows them.",
       "items": {
         "enum": [
           "review",

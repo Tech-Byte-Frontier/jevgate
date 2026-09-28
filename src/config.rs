@@ -33,7 +33,7 @@ pub struct Config {
     pub max_file_bytes: Option<u64>,
     /// Ceiling on context bytes per request. Default: 32768.
     pub max_context_bytes: Option<u64>,
-    /// The level for rules without their own, like `--fail-on`. Default: ["mature"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate rules` shows them.
+    /// The level for rules without their own, like `--fail-on`. Default: ["mature"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on, and on a custom question's own level; `jevgate rules` shows them.
     pub fail_on: Vec<String>,
     /// Model, as the key's provider names it; a pinned version keeps results repeatable. `--model` overrides it. Default: `jev-1.13.0` with a TypeSafe key, `typesafe/jev-1.13` with an OpenRouter key, `typesafe-ai/jev` with a Vercel AI Gateway key.
     pub model: Option<String>,
@@ -232,7 +232,8 @@ impl ConfigContext {
 
     /// Each enabled rule's gate levels. The command line wins over the file;
     /// within each, a rule's own entry wins over its group's, then over the
-    /// levels for every rule, then `mature`, or a custom question's own level.
+    /// levels for every rule, then `mature`, which for a custom question
+    /// stands for its own level.
     fn configure_gate(&self, args: &mut CheckArgs) -> Result<()> {
         let rules = self.rules();
         let cli = Levels::from_cli(&rules, &args.fail_on_specs)?;
@@ -252,28 +253,12 @@ impl ConfigContext {
                 .target(rule)
                 .or_else(|| (!cli.global.is_empty()).then(|| cli.global.clone()))
                 .or_else(|| file.target(rule))
-                .unwrap_or_else(|| self.unaddressed(rule, &file.global, &fallback));
+                .unwrap_or_else(|| fallback.clone());
             if levels != fallback {
                 args.rule_fail_on.insert(rule.key.into(), levels);
             }
         }
         self.configure_scopes(args, (&rules, &cli))
-    }
-
-    /// The levels of a rule no flag or `[rules]` entry addresses: `fail_on`
-    /// of the file, else a custom question's own level, since whoever wrote
-    /// and committed it chose where it fails, else `fallback`.
-    fn unaddressed(
-        &self,
-        rule: &catalog::Rule,
-        file: &[FailOn],
-        fallback: &[FailOn],
-    ) -> Vec<FailOn> {
-        let question = self.questions.iter().find(|q| q.rule == rule.key);
-        match question {
-            Some(question) if file.is_empty() => question.default_levels(),
-            _ => fallback.to_vec(),
-        }
     }
 
     /// The levels each `[[scope]]` sets for the enabled rules. A flag that
@@ -854,13 +839,27 @@ mod tests {
     #[test]
     fn a_custom_question_fails_the_gate_at_its_level_unless_a_level_is_configured() {
         let args = configured(QUESTIONS, &[], &[]).unwrap();
-        assert_eq!(args.levels("custom/no-body-logs"), [FailOn::Review]);
-        assert_eq!(args.levels("custom/owned-todos"), [FailOn::Consider]);
-        assert_eq!(
-            args.rule_fail_on_names()["custom/owned-todos"],
-            ["consider"]
-        );
+        assert_eq!(args.levels("custom/no-body-logs"), [FailOn::Mature]);
         assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Mature]);
+        let mature = args.mature_level_names();
+        assert_eq!(
+            (
+                &mature["custom/no-body-logs"],
+                &mature["custom/owned-todos"]
+            ),
+            (&vec!["review".to_string()], &vec!["consider".to_string()]),
+            "mature stands for a question's own level"
+        );
+        let named = format!("fail_on = [\"mature\"]\n{QUESTIONS}");
+        let args = configured(&named, &[], &[]).unwrap();
+        assert_eq!(
+            args.mature_levels("custom/owned-todos"),
+            [crate::schema::Strength::Consider],
+            "the default named explicitly is still the default"
+        );
+        let stricter = format!("fail_on = [\"review\"]\n{QUESTIONS}");
+        let args = configured(&stricter, &[], &[]).unwrap();
+        assert_eq!(args.levels("custom/owned-todos"), [FailOn::Review]);
         let advisory = format!("fail_on = [\"none\"]\n{QUESTIONS}");
         let args = configured(&advisory, &[], &[]).unwrap();
         assert_eq!(args.levels("custom/owned-todos"), [FailOn::None]);
@@ -882,7 +881,7 @@ mod tests {
         };
         assert_eq!(
             (at("scripts/a.rs"), at("src/a.rs")),
-            (vec![FailOn::None], vec![FailOn::Review])
+            (vec![FailOn::None], vec![FailOn::Mature])
         );
     }
 

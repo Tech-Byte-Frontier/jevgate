@@ -67,8 +67,9 @@ fn a_dry_run_plans_custom_questions_and_a_reviewed_config_leaves_the_directory_o
     assert_eq!(report["rules"], serde_json::json!(["custom/body-logs"]));
     assert_eq!(report["stages"]["custom"]["planned_requests"], 1);
     assert_eq!(
-        report["fail_on_rules"]["custom/body-logs"],
-        serde_json::json!(["consider"])
+        report["fail_on_mature"]["custom/body-logs"],
+        serde_json::json!(["consider"]),
+        "the default gate fails a question at its own level"
     );
     std::fs::write(project.0.join("policy.toml"), "").unwrap();
     let reviewed = dry_run(&project, &["--config", "policy.toml"]);

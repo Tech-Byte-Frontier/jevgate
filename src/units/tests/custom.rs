@@ -179,11 +179,21 @@ fn a_review_question_fails_the_gate_and_a_note_question_never_does() {
     project.write("lib.rs", &function("charge"));
     let review = configured(BODY_LOGS, &["custom"]);
     let report = run(&project, &review, &mut Custom { yes: 0.95 });
+    let finding = findings_of(&report, "custom/body-logs")[0];
     assert_eq!(
-        findings_of(&report, "custom/body-logs")[0].strength,
-        Strength::Review
+        (finding.strength, finding.gate),
+        (Strength::Review, Some(crate::schema::Gating::Fails)),
+        "under the default level, mature, a question fails at its own level"
     );
+    assert_eq!(report.fail_on_mature["custom/body-logs"], ["review"]);
     assert_eq!(crate::gate::exit_code(&report), 1);
+    let named = configured(&format!("fail_on = [\"mature\"]\n{BODY_LOGS}"), &["custom"]);
+    let report = run(&project, &named, &mut Custom { yes: 0.95 });
+    assert_eq!(
+        crate::gate::exit_code(&report),
+        1,
+        "mature named explicitly"
+    );
     let note = configured(&format!("{BODY_LOGS}level = \"note\"\n"), &["custom"]);
     let report = run(&project, &note, &mut Custom { yes: 0.95 });
     assert_eq!(

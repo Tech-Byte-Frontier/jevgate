@@ -474,7 +474,7 @@ pub fn table(questions: &'static [crate::custom::Question]) -> String {
     lines.join("\n")
 }
 
-/// A rule's row; a custom question blocks at its own level (a note never)
+/// A rule's row; a custom question fails the default gate at its own level
 /// and shows what it is asked about after its question.
 fn table_row(rule: &Rule, width: usize, question: Option<&crate::custom::Question>) -> String {
     use crate::{maturity, schema::Strength};
@@ -483,13 +483,7 @@ fn table_row(rule: &Rule, width: usize, question: Option<&crate::custom::Questio
         (true, true) => "tests",
         (true, false) => "yes",
     };
-    let levels = match question {
-        Some(q) => [q.level]
-            .into_iter()
-            .filter(|l| *l != Strength::Note)
-            .collect(),
-        None => maturity::mature_levels(rule.key),
-    };
+    let levels = question.map_or_else(|| maturity::mature_levels(rule.key), |q| q.blocks());
     let blocks = if levels.is_empty() {
         "-".to_string()
     } else {

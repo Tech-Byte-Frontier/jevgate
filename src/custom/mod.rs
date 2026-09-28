@@ -4,7 +4,7 @@
 //! `[[question]]` tables of the configuration and, with the repository's own
 //! configuration, from one file per question in `.jevgate/questions/`. Its
 //! examples (`examples`) are what `jevgate rules test` asks it about.
-use crate::{catalog, options::FailOn, schema::Strength};
+use crate::{catalog, schema::Strength};
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -195,14 +195,16 @@ impl Question {
         !self.paths.is_empty() && matches!(self.unit, Kind::File | Kind::Hunk)
     }
 
-    /// The gate levels it fails at when no configured level addresses it:
-    /// its own, since a question someone wrote and committed is an opt-in.
-    pub fn default_levels(&self) -> Vec<FailOn> {
-        vec![match self.level {
-            Strength::Review => FailOn::Review,
-            Strength::Consider => FailOn::Consider,
-            Strength::Note => FailOn::None,
-        }]
+    /// The levels at which it fails the default gate, which `mature` stands
+    /// for: its own, none for a note. JevGate cannot measure a team's
+    /// question on projects it was never tuned on, as it measures its own
+    /// rules; whoever wrote and committed it chose where it blocks, and its
+    /// examples test it (`jevgate rules test`).
+    pub fn blocks(&self) -> Vec<Strength> {
+        [self.level]
+            .into_iter()
+            .filter(|level| *level != Strength::Note)
+            .collect()
     }
 
     /// Its catalog entry, beside the built-in rules.
