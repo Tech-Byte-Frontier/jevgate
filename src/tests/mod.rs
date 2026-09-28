@@ -105,6 +105,7 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
         suppressed: None,
         gate: None,
         precision: None,
+        preview: None,
     }
 }
 

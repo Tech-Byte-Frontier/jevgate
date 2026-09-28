@@ -186,6 +186,9 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
     if let Some(precision) = finding.precision {
         value["properties"]["precision"] = json!(precision);
     }
+    if let Some(language) = &finding.preview {
+        value["properties"]["preview"] = json!(language);
+    }
     value
 }
 

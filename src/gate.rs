@@ -39,6 +39,8 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
         for finding in &mut file.findings {
             finding.precision =
                 crate::maturity::precision_at(&file.path, &finding.rule, finding.strength);
+            finding.preview =
+                crate::maturity::preview_language(&file.path, &finding.rule).map(str::to_string);
             finding.gate = gating(finding, &file.path, args);
         }
     }

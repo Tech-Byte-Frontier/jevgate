@@ -35,6 +35,10 @@ pub(crate) struct FindingView<'r> {
     /// was never tuned on, as `jevgate rules` counts them; none for a note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub precision: Option<Labels>,
+    /// The preview language whose labels `precision` holds, and in which the
+    /// default gate never fails on JevGate's own rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<&'r str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<&'r str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,6 +67,7 @@ impl<'r> FindingView<'r> {
             action: &finding.action,
             probability: rounded(finding.concern_probability),
             precision: finding.precision,
+            preview: finding.preview.as_deref(),
             symbol: finding.symbol.as_deref(),
             category: finding.category.as_deref(),
             gate: finding.gate,

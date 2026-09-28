@@ -511,6 +511,7 @@ fn sarif_says_a_preview_language_s_findings_are_measured_in_it() {
         result["properties"]["precision"],
         json!({"right": 1, "labeled": 1})
     );
+    assert_eq!(result["properties"]["preview"], "Kotlin");
     let message = result["message"]["text"].as_str().unwrap();
     assert!(
         message.contains("Not yet measured in Kotlin.")

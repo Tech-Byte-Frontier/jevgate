@@ -165,6 +165,7 @@ mod tests {
             suppressed: None,
             gate: None,
             precision: None,
+            preview: None,
         }
     }
 

@@ -183,6 +183,11 @@ pub struct Finding {
     /// never labeled, and before the gate is applied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precision: Option<crate::maturity::Labels>,
+    /// The preview language of its file, for a finding of JevGate's own
+    /// rules there: its precision is that language's own, and the default
+    /// gate never fails on it. None elsewhere and for custom questions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 impl Finding {

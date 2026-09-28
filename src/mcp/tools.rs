@@ -160,6 +160,7 @@ fn finding_schema() -> Value {
                 "properties": {"right": {"type": "integer", "minimum": 0}, "labeled": {"type": "integer", "minimum": 0}},
                 "required": ["right", "labeled"],
             },
+            "preview": {"type": "string", "description": "The preview language of its file, for a finding of JevGate's own rules there: `precision` is that language's own, and the default gate never fails on it"},
             "symbol": {"type": "string"},
             "category": {"type": "string", "description": "The weakness a security finding names, such as CWE-89 SQL injection"},
             "gate": {"type": "string", "enum": ["fails", "measuring", "advisory"], "description": "How the gate counted a new finding: fails (it fails the gate), measuring (reported without failing: its rule and level are still being measured, or its file's language is in preview) or advisory (the level in force does not count it); absent for notes and accepted findings"},

@@ -575,6 +575,12 @@ mod tests {
         assert_eq!(finding["path"], "src/Shop.kt");
         assert_eq!(finding["gate"], "measuring");
         assert_eq!(finding["precision"], json!({"right": 1, "labeled": 1}));
+        assert_eq!(finding["preview"], "Kotlin");
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["files"][0]["findings"][0]["preview"], "Kotlin",
+            "the JSON report"
+        );
         assert!(
             finding["message"]
                 .as_str()

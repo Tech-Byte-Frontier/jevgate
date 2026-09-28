@@ -33,21 +33,10 @@ pub fn render(report: &Report) -> Result<String> {
                 .iter()
                 .map(|(rule, d)| dimension(rule, d))
                 .collect();
-            // A preview language's findings say so: their precision is that
-            // language's own, and they never fail the default gate.
-            let findings: Vec<Value> = file
-                .findings
-                .iter()
-                .map(|finding| {
-                    let mut value = json!(finding);
-                    if let Some(language) =
-                        crate::maturity::preview_language(&file.path, &finding.rule)
-                    {
-                        value["preview"] = json!(language);
-                    }
-                    value
-                })
-                .collect();
+            // A preview language's findings say so, in their `preview`:
+            // their precision is that language's own, and JevGate's own
+            // rules never fail the default gate there.
+            let findings: Vec<Value> = file.findings.iter().map(|finding| json!(finding)).collect();
             json!({"path":file.path,"status":file.status,"cached":file.cached,"checks":checks,
             "findings":findings,"limitations":file.context_limitations,
             "error":file.error,"left_out":file.left_out,

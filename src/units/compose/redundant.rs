@@ -146,5 +146,6 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         suppressed: None,
         gate: None,
         precision: None,
+        preview: None,
     }
 }

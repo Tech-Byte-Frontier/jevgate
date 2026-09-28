@@ -95,6 +95,7 @@ pub(super) fn comment_findings(
                 suppressed: None,
                 gate: None,
                 precision: None,
+                preview: None,
             }
         })
         .collect()
