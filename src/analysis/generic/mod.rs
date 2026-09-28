@@ -18,7 +18,7 @@
 //! body, while Kotlin and Bash ship none and Scala does not export its.
 mod tags;
 
-use std::{path::Path, sync::OnceLock};
+use std::{collections::BTreeSet, path::Path, sync::OnceLock};
 pub(crate) use tags::{Defines, Tag, tags};
 use tree_sitter::Query;
 
@@ -383,6 +383,33 @@ fn cpp_code(source: &str) -> bool {
             .lines()
             .map(str::trim_start)
             .any(|line| OPENINGS.iter().any(|opening| line.starts_with(opening)))
+}
+
+/// The names of the files a script reads in (`source lib/common.sh` reads
+/// `common.sh`), for a language whose files share code only that way: its
+/// query names them (`@include`), as Bash's does. None for the others.
+pub(crate) fn includes(path: &Path, source: &str) -> Option<BTreeSet<String>> {
+    let language = read(path, source)?;
+    if !language.query().capture_names().contains(&"include") {
+        return None;
+    }
+    let Ok(Some(tree)) = crate::syntax::parse(path, source) else {
+        return Some(BTreeSet::new());
+    };
+    let found = tags(language, tree.root_node(), source).includes;
+    Some(
+        found
+            .into_iter()
+            .filter_map(|node| file_name(super::text(node, source)))
+            .collect(),
+    )
+}
+
+/// The file name at the end of a path as a script writes it:
+/// `"$(dirname "$0")/lib.sh"` names `lib.sh`.
+fn file_name(written: &str) -> Option<String> {
+    let name = written.rsplit('/').next()?.trim_matches(['"', '\'', ' ']);
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// The family of a file's generic language; none for the other languages,

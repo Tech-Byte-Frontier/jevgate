@@ -676,6 +676,33 @@ fn copies_pair_within_a_generic_language_s_family_only() {
 }
 
 #[test]
+fn bash_copies_pair_only_between_scripts_one_reads_into_the_other() {
+    let copied = "check_os() {\n  os_type=$(lsb_release -si 2>/dev/null)\n  os_arch=$(uname -m | tr -dc 'A-Za-z0-9_-')\n  if [ \"$os_type\" != \"Ubuntu\" ]; then\n    echo \"unsupported system $os_type on $os_arch\" >&2\n    exit 1\n  fi\n}\n";
+    let script = |sources: &str| format!("#!/bin/bash\n{sources}{copied}\ncheck_os\n");
+    let (alone, reader) = (script(""), script(". \"$(dirname \"$0\")/setup.sh\"\n"));
+    let found = |files: &[(&str, &str)]| {
+        let files: Vec<(&str, &str, bool)> = files.iter().map(|(p, s)| (*p, *s, true)).collect();
+        run(&files).pairs.len()
+    };
+    // Run on their own, as setup-ipsec-vpn's scripts are fetched and run.
+    assert_eq!(found(&[("setup.sh", &alone), ("upgrade.sh", &alone)]), 0);
+    // One reads the other in, or both read in a script of the project.
+    assert_eq!(found(&[("setup.sh", &alone), ("upgrade.sh", &reader)]), 1);
+    let common = script("source lib/common.sh\n");
+    assert_eq!(
+        found(&[
+            ("a.sh", &common),
+            ("b.sh", &common),
+            ("lib/common.sh", "#!/bin/bash\nlog() { echo \"$1\"; }\n"),
+        ]),
+        1
+    );
+    // A system file both read in is no place to share code.
+    let system = script(". /etc/os-release\n");
+    assert_eq!(found(&[("a.sh", &system), ("b.sh", &system)]), 0);
+}
+
+#[test]
 fn copies_of_the_generic_tier_take_only_the_places_the_other_languages_leave() {
     let pair = |path: String, size: usize| {
         let site = Site {

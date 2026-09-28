@@ -27,6 +27,8 @@ pub(crate) struct Tags<'t> {
     pub definitions: Vec<Tag<'t>>,
     /// The name each call names.
     pub calls: Vec<Node<'t>>,
+    /// The files it reads in, as written (`@include`): a Bash `source`.
+    pub includes: Vec<Node<'t>>,
 }
 
 /// The definitions and calls a language's tag query captures under `root`.
@@ -38,6 +40,7 @@ pub(crate) fn tags<'t>(language: &Language, root: Node<'t>, source: &'t str) -> 
     let mut tags = Tags {
         definitions: Vec::new(),
         calls: Vec::new(),
+        includes: Vec::new(),
     };
     while let Some(found) = matches.next() {
         let mut captured = Captured::default();
@@ -62,6 +65,7 @@ struct Captured<'t> {
     name: Option<Node<'t>>,
     body: Option<Node<'t>>,
     scope: Option<Node<'t>>,
+    include: Option<Node<'t>>,
 }
 
 impl<'t> Captured<'t> {
@@ -70,6 +74,7 @@ impl<'t> Captured<'t> {
             "name" => self.name = Some(node),
             "body" => self.body = Some(node),
             "scope" => self.scope = Some(node),
+            "include" => self.include = Some(node),
             "reference.call" => self.call = true,
             "definition.function" | "definition.method" => {
                 self.definition = Some((node, Defines::Function));
@@ -82,6 +87,9 @@ impl<'t> Captured<'t> {
     }
 
     fn record(self, tags: &mut Tags<'t>) {
+        if let Some(include) = self.include {
+            tags.includes.push(include);
+        }
         let Some(name) = self.name else {
             return;
         };

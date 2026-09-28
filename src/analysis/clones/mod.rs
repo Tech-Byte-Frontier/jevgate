@@ -16,11 +16,13 @@ use tree_sitter::Node;
 
 mod apart;
 mod frame;
+mod scripts;
 #[cfg(test)]
 mod tests;
 use apart::*;
 pub(crate) use apart::{benchmark_code, example_code};
 use frame::*;
+use scripts::Scripts;
 
 pub const MIN_BYTES: usize = 120;
 /// Consecutive matching statements that seed a candidate window.
@@ -152,12 +154,15 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         .iter()
         .filter_map(|f| f.package?.name.clone())
         .collect();
+    let scripts = Scripts::of(files);
     let mut pairs: Vec<Pair> = matching_windows(&blocks)
         .into_iter()
         .filter(|&((bx, _), (by, _), _)| {
-            let (a, b) = (&files[blocks[bx].file], &files[blocks[by].file]);
+            let (x, y) = (blocks[bx].file, blocks[by].file);
+            let (a, b) = (&files[x], &files[y]);
             crate::packages::linked(a.package, b.package, &local)
                 && generic::family(a.path) == generic::family(b.path)
+                && scripts.linked(x, y)
                 && !separate_examples(a.path, b.path)
                 && !separate_tests(a, b)
         })
