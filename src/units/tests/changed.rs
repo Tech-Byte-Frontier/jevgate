@@ -403,3 +403,105 @@ unit = "hunk"
     );
     assert_eq!(plan.requests.len(), 1);
 }
+
+/// Asks `toml`'s questions alone about what changed since `HEAD`.
+fn custom_since_head(toml: &str) -> CheckArgs {
+    let mut options = super::custom::configured(toml, &["custom"]);
+    options.base = Some("HEAD".into());
+    options
+}
+
+/// The names of the units planned for the file whose path ends with `name`.
+fn unit_names<'p>(plan: &'p Plan, name: &str) -> Vec<&'p str> {
+    file_plan(plan, name)
+        .units
+        .iter()
+        .map(|u| u.name.as_str())
+        .collect()
+}
+
+const VIEWS: &str = "def home(request):\n    return 1\n\n\n@login_required\ndef orders(request):\n    return 2\n\n\ndef gone():\n    return 3\n\n\ndef listed(request):\n    return 4\n\n\ndef total(values):\n    result = sum(values)\n    audit(result)\n";
+
+#[test]
+fn a_custom_question_counts_what_a_removal_at_a_units_edge_took_from_it() {
+    let project = Project::new();
+    project.write("views.py", VIEWS);
+    project.commit_all();
+    let edited = VIEWS
+        .replace("@login_required\n", "")
+        .replace("def gone():\n    return 3\n\n\n", "")
+        .replace("    audit(result)\n", "");
+    project.write("views.py", &edited);
+    let (_, plan) = planned(&project, &custom_since_head(BODY_LOGS));
+    assert_eq!(
+        unit_names(&plan, "views.py"),
+        ["orders", "total"],
+        "the decorator above `orders` and the last statement of `total` were theirs; \
+         `listed` only lost the function above it"
+    );
+    let built_in = since("HEAD", &[catalog::FUNCTION_SIMPLIFICATION]);
+    let (_, plan) = planned(&project, &built_in);
+    assert!(
+        file_plan(&plan, "views.py").units.is_empty(),
+        "the built-in rules leave a removal at an edge to the code beside it"
+    );
+}
+
+const LICENSED: &str = "// Copyright 2026 Example\n// SPDX-License-Identifier: MIT\n\npub fn total() -> u32 {\n    1\n}\n";
+
+#[test]
+fn a_file_question_asks_about_a_file_the_change_edits_anywhere_or_moves() {
+    let toml = r#"
+[[question]]
+id = "license-header"
+question = "Does this file lack its license header?"
+unit = "file"
+"#;
+    let project = Project::new();
+    for name in ["head.rs", "old.rs", "same.rs"] {
+        project.write(name, LICENSED);
+    }
+    project.write("tail.rs", &format!("{LICENSED}// End of file.\n"));
+    project.commit_all();
+    project.write(
+        "head.rs",
+        &LICENSED.replace(
+            "// Copyright 2026 Example\n// SPDX-License-Identifier: MIT\n",
+            "",
+        ),
+    );
+    project.write("tail.rs", LICENSED);
+    project.git(&["mv", "old.rs", "moved.rs"]);
+    project.write("same.rs", LICENSED);
+    let (_, plan) = planned(&project, &custom_since_head(toml));
+    let asked: Vec<String> = plan
+        .files
+        .values()
+        .filter(|file| !file.units.is_empty())
+        .map(|file| file.path.display().to_string())
+        .collect();
+    assert_eq!(asked, ["head.rs", "moved.rs", "tail.rs"]);
+}
+
+#[test]
+fn a_file_moved_into_a_questions_paths_is_new_to_it() {
+    let toml = r#"
+[[question]]
+id = "api-body-logs"
+question = "Does this function write a request body to a log?"
+unit = "function"
+paths = ["src/api/**"]
+"#;
+    let project = Project::new();
+    project.write("lib/handler.rs", &functions_file(&["f0", "f1"], &[]));
+    project.write("src/api/kept.rs", &functions_file(&["f2"], &[]));
+    project.commit_all();
+    project.git(&["mv", "lib/handler.rs", "src/api/handler.rs"]);
+    project.git(&["mv", "src/api/kept.rs", "src/api/renamed.rs"]);
+    let (_, plan) = planned(&project, &custom_since_head(toml));
+    assert_eq!(unit_names(&plan, "src/api/handler.rs"), ["f0", "f1"]);
+    assert!(
+        unit_names(&plan, "src/api/renamed.rs").is_empty(),
+        "a file the question already read, moved untouched"
+    );
+}

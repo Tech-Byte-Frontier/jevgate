@@ -1,10 +1,20 @@
 use super::*;
 use crate::tests::Project;
 
-fn lines(changed: &[(usize, usize)], removed_after: &[usize]) -> Lines {
+fn lines(changed: &[(usize, usize)], removed: &[Removal]) -> Lines {
     Lines {
         changed: changed.to_vec(),
-        removed_after: removed_after.to_vec(),
+        removed: removed.to_vec(),
+    }
+}
+
+/// Lines removed after `after`: the first indented `opens` when it holds
+/// text, the last holding text when `closes`.
+fn removal(after: usize, opens: Option<usize>, closes: bool) -> Removal {
+    Removal {
+        after,
+        opens,
+        closes,
     }
 }
 
@@ -58,7 +68,10 @@ fn a_patch_gives_each_files_changed_lines_and_removals() {
     );
     let files = parse_diff(patch.as_bytes()).unwrap();
     let expected: BTreeMap<PathBuf, Lines> = [
-        ("src/lib.rs", lines(&[(3, 3), (19, 21)], &[9])),
+        (
+            "src/lib.rs",
+            lines(&[(3, 3), (19, 21)], &[removal(9, Some(4), true)]),
+        ),
         ("my file.rs", lines(&[(1, 2)], &[])),
         ("café \"q\".rs", lines(&[(2, 2)], &[])),
         ("new.rs", lines(&[(5, 5)], &[])),
@@ -72,13 +85,57 @@ fn a_patch_gives_each_files_changed_lines_and_removals() {
 
 #[test]
 fn a_change_touches_the_spans_holding_its_lines_or_its_removals() {
-    let change = lines(&[(10, 12)], &[20]);
+    let change = lines(&[(10, 12)], &[removal(20, None, false)]);
     assert!(change.touch(12, 15) && change.touch(1, 10) && change.touch(11, 11));
     assert!(!change.touch(13, 19) && !change.touch(1, 9));
     // Lines removed after line 20 sit inside 18..=25, and at the edge of the
     // spans that end at 20 or start at 21.
     assert!(change.touch(18, 25));
     assert!(!change.touch(15, 20) && !change.touch(21, 30));
+}
+
+#[test]
+fn a_removal_at_an_edge_belongs_to_the_lines_it_was_written_against() {
+    // A removed decorator above `orders`, a removed function with the blank
+    // lines after it above `b`, and the last statement of `total`'s body.
+    let patch = concat!(
+        "+++ b/views.py\n",
+        "@@ -5 +4,0 @@ def home(request):\n",
+        "-@login_required\n",
+        "@@ -12,4 +10,0 @@ def orders(request):\n",
+        "-def gone():\n",
+        "-    return 2\n",
+        "-\n",
+        "-\n",
+        "@@ -18 +14,0 @@ def total():\n",
+        "-    audit(total)\n",
+    );
+    let lines = &parse_diff(patch.as_bytes()).unwrap()[Path::new("views.py")];
+    assert_eq!(
+        lines.removed,
+        [
+            removal(4, Some(0), true),
+            removal(10, Some(0), false),
+            removal(14, Some(4), true)
+        ]
+    );
+    // `orders` now starts on line 5, `b` on 11, `total` spans 13..=14.
+    assert!(
+        lines.edge((5, 8), 0),
+        "the decorator was written against it"
+    );
+    assert!(!lines.touch(5, 8));
+    assert!(
+        !lines.edge((11, 13), 0),
+        "a function removed above it is not"
+    );
+    assert!(lines.edge((13, 14), 0), "its body lost its last statement");
+    assert!(
+        !lines.edge((13, 14), 4),
+        "a line no deeper than its own first line was not in its body"
+    );
+    assert!(!lines.edge((1, 3), 0) && !lines.edge((6, 8), 0));
+    assert!(lines.edited() && !Lines::default().edited());
 }
 
 #[test]
@@ -141,7 +198,10 @@ fn changes_from_git_hold_each_files_lines_and_its_base_text() {
         .file(&project.0, Path::new("src/lib.rs"), &removed)
         .unwrap();
     // `uno` on line 2, `three` removed after line 6 and `c` on line 9.
-    assert_eq!(lib.lines, lines(&[(2, 2), (9, 9)], &[6]));
+    assert_eq!(
+        lib.lines,
+        lines(&[(2, 2), (9, 9)], &[removal(6, Some(4), true)])
+    );
     let names = |_: &Path, text: &str| -> BTreeSet<String> {
         ["a", "b", "c"]
             .into_iter()

@@ -32,9 +32,35 @@ pub struct Changes {
 pub struct Lines {
     /// Added or modified lines of the current file, as inclusive ranges in order.
     pub changed: Vec<(usize, usize)>,
-    /// Lines removed with nothing in their place sit after each of these
-    /// current lines (0: before the first line).
-    pub removed_after: Vec<usize>,
+    /// Lines removed with nothing in their place, in order.
+    pub removed: Vec<Removal>,
+}
+
+/// Lines a change removed with nothing in their place.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Removal {
+    /// The current line they sat after (0: before the first line).
+    pub after: usize,
+    /// The indentation of the first removed line, when it holds text.
+    pub opens: Option<usize>,
+    /// Whether the last removed line holds text.
+    pub closes: bool,
+}
+
+impl Removal {
+    /// Take in the next removed line, `text` without its `-`: the first
+    /// sets `opens`, and each sets `closes`.
+    fn read(&mut self, text: &[u8], first: bool) {
+        let indent = text
+            .iter()
+            .take_while(|b| matches!(b, b' ' | b'\t'))
+            .count();
+        let holds_text = text[indent..].iter().any(|b| !b.is_ascii_whitespace());
+        if first {
+            self.opens = holds_text.then_some(indent);
+        }
+        self.closes = holds_text;
+    }
 }
 
 impl Lines {
@@ -46,14 +72,37 @@ impl Lines {
     pub fn touch(&self, start: usize, end: usize) -> bool {
         self.changed.iter().any(|&(a, b)| a <= end && start <= b)
             || self
-                .removed_after
+                .removed
                 .iter()
-                .any(|&after| start <= after && after < end)
+                .any(|removal| start <= removal.after && removal.after < end)
+    }
+
+    /// Whether a removal right at the edge of lines `start..=end`, whose
+    /// first line is indented `indent`, took lines written as part of them:
+    /// right above, when its last line held text, as a decorator, an
+    /// attribute or a doc comment does; right below, when its first line
+    /// was indented deeper, as the last statements of an indented body are.
+    /// A definition removed beside them is not: Git ends a removal with the
+    /// blank lines that set the definition apart, and the next one starts
+    /// after them.
+    pub fn edge(&self, (start, end): (usize, usize), indent: usize) -> bool {
+        self.removed.iter().any(|removal| {
+            removal.after + 1 == start && removal.closes
+                || removal.after == end && removal.opens.is_some_and(|opens| opens > indent)
+        })
+    }
+
+    /// Whether the change added, modified or removed any line.
+    pub fn edited(&self) -> bool {
+        !self.changed.is_empty() || !self.removed.is_empty()
     }
 
     fn add_hunk(&mut self, start: usize, count: usize) {
         if count == 0 {
-            self.removed_after.push(start);
+            self.removed.push(Removal {
+                after: start,
+                ..Removal::default()
+            });
         } else {
             self.changed.push((start, start + count - 1));
         }
@@ -96,6 +145,12 @@ impl FileChange {
     /// for naming a path the change removed.
     pub fn left_alone(&self) -> bool {
         self.before.is_none()
+    }
+
+    /// The file's path at the base revision, which a rename changed; none
+    /// for a document the change left alone.
+    pub fn previous(&self) -> Option<&Path> {
+        self.before.as_ref().map(|before| before.path.as_path())
     }
 
     /// Whether the change adds one of `members`, each a name and the line it
@@ -320,17 +375,33 @@ const KEPT_LINE_BYTES: usize = 64 * 1024;
 
 /// The changed lines per new path of a `-U0` patch. Content lines are
 /// counted off each hunk's header, so a line starting `+++ ` inside a hunk
-/// is never read as a header.
+/// is never read as a header. A hunk that only removes lines is read for
+/// what its first and last lines held.
 fn parse_diff(mut reader: impl BufRead) -> Result<BTreeMap<PathBuf, Lines>> {
     let mut files = BTreeMap::<PathBuf, Lines>::new();
     let mut current: Option<PathBuf> = None;
     // Old and new lines still to come in the current hunk.
     let (mut old, mut new) = (0usize, 0usize);
+    // Whether the next removed line is its hunk's first.
+    let mut first = false;
     let mut line = Vec::new();
     while read_line(&mut reader, &mut line, KEPT_LINE_BYTES)? {
         if old + new > 0 {
             match line.first() {
-                Some(b'-') => old = old.saturating_sub(1),
+                Some(b'-') => {
+                    // Without context, a hunk lists its removed lines before
+                    // its added ones: with none to add, it only removes.
+                    let removal = current
+                        .as_ref()
+                        .filter(|_| new == 0)
+                        .and_then(|path| files.get_mut(path))
+                        .and_then(|lines| lines.removed.last_mut());
+                    if let Some(removal) = removal {
+                        removal.read(&line[1..], first);
+                    }
+                    first = false;
+                    old = old.saturating_sub(1);
+                }
                 Some(b'+') => new = new.saturating_sub(1),
                 Some(b' ') => {
                     old = old.saturating_sub(1);
@@ -351,6 +422,7 @@ fn parse_diff(mut reader: impl BufRead) -> Result<BTreeMap<PathBuf, Lines>> {
         } else if line.starts_with(b"@@ ") {
             let hunk = hunk_header(&line).context("Git diff has an unreadable hunk header")?;
             (old, new) = (hunk.old_count, hunk.count);
+            first = true;
             if let Some(path) = &current {
                 files
                     .entry(path.clone())

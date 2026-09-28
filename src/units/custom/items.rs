@@ -3,7 +3,7 @@
 //! for the same unit sends, so a question can ride in that stage's request.
 use super::hunks::Hunk;
 use crate::{
-    analysis::{test_map::TestCase, units::Unit},
+    analysis::{line_of, test_map::TestCase, units::Unit},
     schema::Location,
     units::{FileContext, comments, compact, identity, instructions, test_units, unique_ids},
 };
@@ -19,6 +19,10 @@ pub(super) struct Item {
     /// Unique among the file's items of its kind.
     pub id: String,
     pub location: Location,
+    /// The lines its evidence covers, which a change must touch for a check
+    /// with `--base` to ask about it: a definition's documentation,
+    /// attributes and decorators with it.
+    pub reach: (usize, usize),
     pub lines: usize,
     /// What its findings' fingerprints keep across unrelated edits.
     pub identity: String,
@@ -49,6 +53,7 @@ pub(super) fn functions(
                 name: unit.name.clone(),
                 id,
                 location: file.location(unit.line, unit.end_line, Some(&unit.name)),
+                reach: (line_of(file.source, unit.span.start), unit.end_line),
                 lines: unit.lines(),
                 identity: identity(&[&unit.name, &compact(source)]),
                 quote: None,
@@ -72,6 +77,7 @@ pub(super) fn tests(file: &FileContext<'_>, cases: &[TestCase]) -> Vec<Item> {
                 name: case.name.clone(),
                 id,
                 location: file.location(case.line, case.end_line, Some(&case.name)),
+                reach: (line_of(file.source, case.span.start), case.end_line),
                 lines: case.end_line + 1 - case.line,
                 identity: identity(&[&case.name, &compact(source)]),
                 quote: None,
@@ -107,6 +113,7 @@ pub(super) fn comments(
             name: owner.to_string(),
             id,
             location: file.location(comment.line, comment.end_line, Some(owner)),
+            reach: (comment.line, comment.end_line),
             lines: comment.end_line + 1 - comment.line,
             identity: identity(&[owner, &compact(&comment.text)]),
             quote: Some(comment.text.clone()),
@@ -137,6 +144,7 @@ pub(super) fn sections(file: &FileContext<'_>) -> Vec<Item> {
         .map(|((section, name), id)| Item {
             state: json!({"heading": section.heading, "text": section.text}),
             location: file.location(section.start_line, section.end_line, Some(&name)),
+            reach: (section.start_line, section.end_line),
             lines: section.end_line + 1 - section.start_line,
             identity: identity(&[&section.heading, &compact(&section.text)]),
             quote: None,
@@ -156,6 +164,7 @@ pub(super) fn whole(file: &FileContext<'_>) -> Item {
         name: file.path.display().to_string(),
         id: "file".into(),
         location: file.location(1, lines, None),
+        reach: (1, lines),
         lines,
         identity: identity(&["file"]),
         quote: None,
@@ -191,6 +200,7 @@ pub(super) fn changed(file: &FileContext<'_>, hunks: &[Hunk]) -> Vec<Item> {
                 },
                 id,
                 location: file.location(hunk.start, hunk.end, None),
+                reach: (hunk.start, hunk.end),
                 lines: hunk.end + 1 - hunk.start,
                 identity: changed.clone(),
                 quote: None,

@@ -46,7 +46,7 @@ Every mistake is an error that names the question and its file. In `jevgate.toml
 
 A `hunk` question without `--base`, and a `test` question without `--include-tests`, are not asked, and the check says so on stderr.
 
-With `--base`, a check asks only about what the change touched, as it does for the built-in rules: the functions, tests, comments and sections on lines the change added or modified, or removed lines between, and a whole file only when the change touched some line of it. Every hunk is part of the change, including one that only removes lines. A new or untracked file is judged whole, and `--whole-files` asks about every unit of the changed files.
+With `--base`, a check asks only about what the change touched, as it does for the built-in rules: the functions, tests, comments and sections on lines the change added or modified, or removed lines between. A team's rule is often about what the built-in rules leave to the code beside a unit, so a custom question also counts a decorator, attribute or doc comment removed right above a function or test, and the last lines removed from an indented body, as in Python; a function removed beside it, which Git removes with the blank lines after it, does not count. A `file` question asks about every file the change edits, at any line, or moves, and a file moved into a question's `paths` is asked about whole, since the question never read it before. Every hunk is part of the change, including one that only removes lines. A new or untracked file is judged whole, and `--whole-files` asks about every unit of the changed files.
 
 ## How it is asked
 

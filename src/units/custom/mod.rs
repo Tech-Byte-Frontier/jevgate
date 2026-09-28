@@ -157,7 +157,7 @@ impl Planner {
                     None => continue,
                 },
             };
-            let judged = judged(file, question.unit, found);
+            let judged = judged(file, question, found);
             let room = MAX_UNITS - self.asked.get(question.rule.as_str()).copied().unwrap_or(0);
             let taken = judged.len().min(room);
             *out.rules.entry(&question.rule).or_default() += judged.len() - taken;
@@ -223,15 +223,58 @@ fn applies(question: &Question, offered: &Offered<'_>, path: &Path) -> bool {
         }
 }
 
-/// The items of `kind` a check asks about, by index: all of a file judged
-/// whole, and with `--base` judging what the change touched, those on lines
-/// it touched, as for the built-in rules, so the others are neither paid
-/// for nor counted against the cap. Every hunk is the change itself.
-fn judged(file: &FileContext<'_>, kind: Kind, items: &[Item]) -> Vec<usize> {
-    let touched = |item: &Item| file.judges(item.location.start_line, item.location.end_line);
+/// The items `question` asks about, by index: all of a file judged whole;
+/// with `--base` judging what the change touched, those it touched, so the
+/// others are neither paid for nor counted against the cap. A file the
+/// change moved into the question's `paths` is new to the question, and
+/// judged whole.
+fn judged(file: &FileContext<'_>, question: &Question, items: &[Item]) -> Vec<usize> {
+    let entered = file.changed.is_some_and(|change| {
+        change
+            .previous()
+            .is_some_and(|before| !question.applies_to(before))
+    });
     (0..items.len())
-        .filter(|&at| kind == Kind::Hunk || touched(&items[at]))
+        .filter(|&at| entered || touched(file, question.unit, &items[at]))
         .collect()
+}
+
+/// Whether the change a check judges touched `item`, a unit of `kind`. A
+/// team's rule is often about what the built-in rules leave to the code
+/// beside a unit, so for a function or a test a removal at its edge counts
+/// when it took lines written as part of it: a decorator, an attribute or a
+/// doc comment above, the end of an indented body below
+/// ([`Lines::edge`](crate::revision::Lines::edge)). A whole file counts
+/// when the change edits any line of it or moves it. Every hunk is the
+/// change itself.
+fn touched(file: &FileContext<'_>, kind: Kind, item: &Item) -> bool {
+    let Some(change) = file.changed else {
+        return true;
+    };
+    let (start, end) = item.reach;
+    match kind {
+        Kind::Hunk => true,
+        Kind::File => {
+            change.lines.edited() || change.previous().is_some_and(|before| before != file.path)
+        }
+        Kind::Function | Kind::Test => {
+            change.lines.touch(start, end)
+                || change
+                    .lines
+                    .edge((start, end), indentation(file.source, start))
+        }
+        Kind::Comment | Kind::Section => change.lines.touch(start, end),
+    }
+}
+
+/// The indentation of 1-based `line` of `source`, in spaces and tabs.
+fn indentation(source: &str, line: usize) -> usize {
+    source
+        .lines()
+        .nth(line.saturating_sub(1))
+        .map_or(0, |text| {
+            text.len() - text.trim_start_matches([' ', '\t']).len()
+        })
 }
 
 /// The unit `question` asks about `item`.

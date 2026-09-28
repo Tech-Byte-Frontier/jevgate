@@ -200,17 +200,18 @@ fn keep_changed(inputs: &[Input], plan: &mut Plan) {
 /// Units whose planner already chose them by what the change did: an
 /// outline or a document's outline by the members it added, a stale section
 /// and a finished-plan question by the paths it removed, and a custom
-/// question's hunk, which is the change itself: one that only removes lines
-/// sits at the line after them, outside what the change left.
+/// question's unit by what the change did at its edges too, a hunk being
+/// the change itself: one that only removes lines sits at the line after
+/// them, outside what the change left.
 fn chosen_when_planned(unit: &UnitPlan) -> bool {
-    match unit.detail {
+    matches!(
+        unit.detail,
         Detail::Outline { .. }
-        | Detail::Document { .. }
-        | Detail::Stale { .. }
-        | Detail::Plan { .. } => true,
-        Detail::Custom(question) => question.unit == crate::custom::Kind::Hunk,
-        _ => false,
-    }
+            | Detail::Document { .. }
+            | Detail::Stale { .. }
+            | Detail::Plan { .. }
+            | Detail::Custom(_)
+    )
 }
 
 /// Each GitHub Actions workflow file's jobs.
