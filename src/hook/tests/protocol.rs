@@ -327,7 +327,7 @@ fn measured(rule: &str, strength: Strength, words: usize) -> Flagged {
 #[test]
 fn a_finding_line_says_how_often_findings_like_it_were_right_after_its_why() {
     let line = |flagged: Flagged| {
-        let reason = text::block_reason(&[flagged], 1, false);
+        let reason = text::block_reason(&[flagged], &[], 1, false);
         reason
             .lines()
             .find(|l| l.starts_with("- "))
