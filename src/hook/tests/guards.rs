@@ -254,6 +254,30 @@ fn a_question_the_turn_deletes_lowers_or_breaks_does_not_let_the_agent_stop() {
 }
 
 #[test]
+fn a_question_that_stops_loading_is_not_carried_past_the_turn_that_restores_it() {
+    let project = questioned(false);
+    let host = reviewing();
+    let file = project.0.join(".jevgate/questions/body-logs.toml");
+    send(&project, &host, prompt("tidy the questions"));
+    std::fs::write(&file, "question = \"Logs a body.\"\nunit = \"function\"\n").unwrap();
+    send(&project, &host, stop(false));
+    // The next turn begins with the broken file, so none of its checks can run.
+    send(&project, &host, prompt("go on"));
+    project.write("lib.rs", &long_function("refund"));
+    let unchecked = send(&project, &host, stop(false));
+    assert!(
+        message(&unchecked).contains("Invalid custom questions as the turn began")
+            && message(&unchecked).contains("this turn's changes stay unchecked"),
+        "{unchecked}"
+    );
+    std::fs::write(&file, BODY_LOGS).unwrap();
+    send(&project, &host, prompt("log the orders"));
+    project.write("lib.rs", &long_function("charge"));
+    let blocked = send(&project, &host, stop(false));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+}
+
+#[test]
 fn a_generated_code_marker_added_in_the_turn_does_not_let_the_agent_stop() {
     let project = repository();
     let host = reviewing();
