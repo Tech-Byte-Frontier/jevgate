@@ -100,18 +100,18 @@ fn recheck(
     scope: &Scope<'_>,
 ) -> Option<(Value, Asked)> {
     // Callees of one family: a Kotlin function's `map` is no Python `map`,
-    // and the other languages keep reading each other as before.
+    // and the other languages keep reading each other as before. The family
+    // is looked up only for a name the unit calls: the pairs of functions
+    // grow with the square of a scope's size.
     let family = crate::analysis::generic::family(file.path);
     let mut callees = Vec::new();
     for (path, _, callee) in scope.scope_units() {
         if callees.len() == CALLEES {
             break;
         }
-        if crate::analysis::generic::family(path) != family {
-            continue;
-        }
         if unit.calls.contains(&callee.short_name)
             && callee.name != unit.name
+            && crate::analysis::generic::family(path) == family
             && !callees.iter().any(|c: &Value| c["name"] == callee.name)
         {
             callees.push(json!({"name": callee.name, "signature": callee.signature}));

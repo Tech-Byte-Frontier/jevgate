@@ -338,10 +338,13 @@ static LANGUAGES: [Language; 9] = [
 
 /// The generic language a file is written in, by its extension.
 pub(crate) fn of(path: &Path) -> Option<&'static Language> {
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    LANGUAGES
-        .iter()
-        .find(|language| language.extensions.contains(&extension.as_str()))
+    let extension = path.extension()?.to_str()?;
+    LANGUAGES.iter().find(|language| {
+        language
+            .extensions
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(extension))
+    })
 }
 
 /// The family of a file's generic language; none for the other languages,
