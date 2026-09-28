@@ -250,6 +250,33 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_question_is_a_rule_its_findings_point_to() {
+        let questions = crate::custom::parse(
+            "[[question]]\nid = \"body-logs\"\nquestion = \"Does this function log a request body?\"\nunit = \"function\"\n",
+        )
+        .unwrap();
+        let custom = Finding {
+            rule: "custom/body-logs".into(),
+            gate: Some(Gating::Fails),
+            ..finding(Strength::Review)
+        };
+        let args = crate::tests::args();
+        let path = Path::new("src/a.rs");
+        let log = document(&report(&args), &[(path, &custom)], questions);
+        let run = &log["runs"][0];
+        let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), catalog::rules().len() + 1);
+        let index = run["results"][0]["ruleIndex"].as_u64().unwrap() as usize;
+        assert_eq!(rules[index]["id"], "custom/body-logs");
+        assert_eq!(
+            rules[index]["fullDescription"]["text"],
+            "Does this function log a request body?"
+        );
+        assert_eq!(rules[index]["properties"]["tags"], json!(["custom"]));
+        assert_eq!(run["results"][0]["level"], "error");
+    }
+
+    #[test]
     fn security_rules_are_tagged_for_code_scanning() {
         let injection = descriptor("security/injection");
         assert_eq!(injection["properties"]["tags"], json!(["security"]));
