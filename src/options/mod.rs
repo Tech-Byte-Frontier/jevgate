@@ -1,9 +1,12 @@
 //! The `check` arguments, output formats and gate levels; the subcommands and
-//! their help text are in `commands`, and the rules actions' in `rules`.
+//! their help text are in `commands`, the baseline actions' in `baseline`,
+//! and the rules actions' in `rules`.
+mod baseline;
 mod commands;
 mod rules;
 
-pub use commands::{BaselineAction, Disposition, JevCommand, OVERVIEW, RulesFormat};
+pub use baseline::{BaselineAction, Disposition};
+pub use commands::{JevCommand, OVERVIEW, RulesFormat};
 pub use rules::{ProposeArgs, ProposeFormat, RulesAction, RulesTestArgs};
 
 use clap::{Args, ValueEnum};
