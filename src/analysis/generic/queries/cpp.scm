@@ -1,8 +1,9 @@
 ; C++: functions and methods, their declarator reached through the pointer
 ; or reference they return; a qualified name (`Cart::add`, `ns::Cart::add`)
 ; names the type it is written in, and an operator (`operator==`) itself;
-; templates with their `template` line; classes, structs, unions, enums and
-; typedefs; and calls.
+; templates with their `template` line; classes and structs (a nested one
+; defined outside its class, `class Block::Iter`, by its own name), unions,
+; enums and typedefs; and calls.
 (function_definition
   declarator: [
     (function_declarator declarator: [
@@ -27,8 +28,12 @@
     ]
     body: (_) @body)) @definition.function
 
-(class_specifier name: (type_identifier) @name body: (_)) @definition.class
-(struct_specifier name: (type_identifier) @name body: (_)) @definition.class
+(class_specifier
+  name: [(type_identifier) (qualified_identifier) (template_type)] @name
+  body: (_)) @definition.class
+(struct_specifier
+  name: [(type_identifier) (qualified_identifier) (template_type)] @name
+  body: (_)) @definition.class
 (union_specifier name: (type_identifier) @name body: (_)) @definition.class
 (enum_specifier name: (type_identifier) @name body: (_)) @definition.type
 (type_definition declarator: (type_identifier) @name) @definition.type

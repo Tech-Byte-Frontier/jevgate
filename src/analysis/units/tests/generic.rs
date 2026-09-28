@@ -120,6 +120,12 @@ fn cpp_members_returning_references_operators_and_qualified_members_are_units() 
             ("Cart::add", Kind::Method, 28),
         ])
     );
+    // A nested class defined outside its class owns its methods.
+    let nested = "class Block::Iter : public Iterator {\n public:\n  void Seek(int target) {\n    current_ = target;\n  }\n};\n";
+    assert_eq!(
+        outline("block.cc", nested),
+        owned(&[("Iter::Seek", Kind::Method, 3)])
+    );
 }
 
 #[test]
