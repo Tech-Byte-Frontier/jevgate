@@ -193,7 +193,7 @@ pub(super) fn claim(root: &Path, key: &str) -> Option<Claim> {
 
 /// How long ago `path` was last written.
 fn age(path: &Path) -> Option<std::time::Duration> {
-    std::fs::metadata(path)
+    std::fs::symlink_metadata(path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|modified| modified.elapsed().ok())
@@ -201,13 +201,19 @@ fn age(path: &Path) -> Option<std::time::Duration> {
 
 /// Remove the files of `directory` idle for a week: turn files and scratch
 /// indexes a killed hook left under `.jevgate/turns/`, or marks outside Git.
+/// A `directory` that is a symbolic link is not read, and only regular
+/// files are removed, so nothing is removed through a link.
 pub(super) fn prune(directory: &Path) {
+    if directory.is_symlink() {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(directory) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if age(&path).is_some_and(|age| age.as_secs() > KEPT_SECS) {
+        let file = entry.file_type().is_ok_and(|kind| kind.is_file());
+        if file && age(&path).is_some_and(|age| age.as_secs() > KEPT_SECS) {
             let _ = std::fs::remove_file(path);
         }
     }

@@ -50,19 +50,45 @@ impl std::fmt::Display for OutsideGit {
 /// and stop. An empty mark in the system's temporary directory remembers
 /// it; when it cannot be written, the session is told again.
 pub(super) fn first_outside(event: &Event) -> bool {
-    let directory = std::env::temp_dir().join("jevgate-hook");
+    let Some(directory) = marks_directory(&std::env::temp_dir()) else {
+        return true;
+    };
     let key = format!(
         "{}\n{}",
         event.session,
         event.cwd.as_deref().unwrap_or(Path::new("")).display()
     );
     let mark = directory.join(&crate::schema::hash(key.as_bytes())[..32]);
-    let _ = std::fs::create_dir_all(&directory);
     turn::prune(&directory);
     !matches!(
         std::fs::OpenOptions::new().write(true).create_new(true).open(mark),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists
     )
+}
+
+/// The user's directory of outside-Git marks in `temporary`, created only
+/// the user can open. None when that path is a symbolic link or not a
+/// directory: in a shared /tmp another user could plant a link there, and
+/// the week-old files `turn::prune` removes would be in the link's target.
+pub(super) fn marks_directory(temporary: &Path) -> Option<PathBuf> {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default();
+    let user: String = user
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .collect();
+    let directory = temporary.join(format!("jevgate-hook-{user}"));
+    match std::fs::symlink_metadata(&directory) {
+        Ok(metadata) => metadata.is_dir().then_some(directory),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+            builder.create(&directory).ok().map(|()| directory)
+        }
+        Err(_) => None,
+    }
 }
 
 /// One event in its repository.

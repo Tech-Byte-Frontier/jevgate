@@ -752,6 +752,32 @@ fn outside_git_nothing_is_checked_blocked_or_written_and_it_is_said_once() {
     assert!(!project.0.join(".jevgate").exists());
 }
 
+/// A link planted where the marks go is neither written through nor
+/// pruned through: its target's week-old file stays.
+#[cfg(unix)]
+#[test]
+fn outside_git_marks_are_never_kept_or_pruned_through_a_link() {
+    use std::os::unix::fs::PermissionsExt;
+    let own = Project::new();
+    let marks = events::marks_directory(&own.0).unwrap();
+    let mode = std::fs::metadata(&marks).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700, "only the user opens it");
+    let shared = Project::new();
+    shared.write("victim/old-report.txt", "kept\n");
+    let old = std::time::SystemTime::now() - Duration::from_secs(30 * 24 * 60 * 60);
+    std::fs::File::options()
+        .write(true)
+        .open(shared.0.join("victim/old-report.txt"))
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let planted = shared.0.join(marks.file_name().unwrap());
+    std::os::unix::fs::symlink(shared.0.join("victim"), &planted).unwrap();
+    assert_eq!(events::marks_directory(&shared.0), None);
+    turn::prune(&planted);
+    assert!(shared.0.join("victim/old-report.txt").exists());
+}
+
 #[test]
 fn an_invalid_configuration_never_blocks() {
     let project = repository();
