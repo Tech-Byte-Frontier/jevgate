@@ -914,20 +914,32 @@ fn a_turn_that_began_with_a_broken_configuration_is_not_carried_into_the_next() 
 #[cfg(not(windows))]
 #[test]
 fn deeply_nested_code_is_checked_with_a_main_threads_stack() {
-    // 1,000 branches: a debug build overflowed a spawned thread's 2 MiB at
-    // 700 and passed 2,400 on 8 MiB.
+    // A debug build overflowed a spawned thread's 2 MiB at 700 branches and
+    // passed 2,400 on 8 MiB. Syntax nested deeper than 1,000 levels is not
+    // read at all now (`syntax::MAX_DEPTH`), and each branch nests two: 480
+    // is as deep as a file the parser reads goes, and 1,000 is named as not
+    // reviewed rather than walked.
     let project = repository();
     let host = reviewing();
     send(&project, &host, prompt("add a table"));
-    let mut code = String::from("pub fn pick(x: i32) -> i32 {\n    if x == 0 { 0 }\n");
-    for i in 1..1_000 {
-        code.push_str(&format!("    else if x == {i} {{ {i} }}\n"));
-    }
-    code.push_str("    else { -1 }\n}\n");
-    project.write("lib.rs", &code);
+    let branches = |count: usize| {
+        let mut code = String::from("pub fn pick(x: i32) -> i32 {\n    if x == 0 { 0 }\n");
+        for i in 1..count {
+            code.push_str(&format!("    else if x == {i} {{ {i} }}\n"));
+        }
+        code + "    else { -1 }\n}\n"
+    };
+    project.write("lib.rs", &branches(480));
     let reply = send(&project, &host, edit(&project, "lib.rs"));
     assert!(
         context(&reply).starts_with("JevGate reviewed lib.rs after this edit"),
+        "{reply}"
+    );
+    project.write("lib.rs", &branches(1_000));
+    let reply = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&reply)
+            .contains("did not review lib.rs: Its syntax nests more than 1,000 levels deep"),
         "{reply}"
     );
 }
