@@ -92,13 +92,10 @@ fn a_hunk_example_is_the_diff_a_check_sends_with_or_without_its_header() {
     let mut options = configured(toml, &["custom"]);
     options.base = Some(crate::revision::resolve(&project.0, "HEAD").unwrap());
     let (_, checked) = planned(&project, &options);
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&project.0)
-        .args(["diff", "--no-color", "--unified=3", "HEAD", "--", "lib.rs"])
-        .output()
-        .unwrap();
-    let diff = String::from_utf8(output.stdout).unwrap();
+    let diff = crate::tests::git::run(
+        &project.0,
+        &["diff", "--no-color", "--unified=3", "HEAD", "--", "lib.rs"],
+    );
     assert_eq!(
         example_requests(&options, "lib.rs", &diff).unwrap(),
         uploaded(&checked.requests),

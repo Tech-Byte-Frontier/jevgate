@@ -35,13 +35,10 @@ fn an_added_question_is_listed_asked_and_tracked_by_git() {
     );
     let report = dry_run(&project, &["--rule", "custom"]);
     assert_eq!(stages(&report), ["custom"]);
-    let status = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&project.0)
-        .args(["status", "--porcelain", "--untracked-files=all"])
-        .output()
-        .unwrap();
-    let status = String::from_utf8(status.stdout).unwrap();
+    let status = crate::git::run(
+        &project.0,
+        &["status", "--porcelain", "--untracked-files=all"],
+    );
     assert!(
         status.contains("?? .jevgate/questions/swallowed-errors.toml")
             && !status.contains(".jevgate/cache"),

@@ -306,14 +306,7 @@ fn question_files_are_named_by_their_id_beside_the_configuration() {
 fn a_question_file_git_ignores_is_named_with_the_rule_that_ignores_it() {
     let project = Project::new();
     let git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&project.0)
-            .args(args)
-            .output()
-            .unwrap()
-            .status;
-        assert!(status.success(), "git {args:?}");
+        crate::tests::git::run(&project.0, args);
     };
     git(&["init", "-q"]);
     project.write(".jevgate/.gitignore", super::super::storage::IGNORE);

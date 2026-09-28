@@ -124,15 +124,9 @@ fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request_and_a_
     assert_eq!(code, Some(0), "{text}");
     git(&project, &["add", "."]);
     git(&project, &["commit", "-qm", "Accept a question"]);
-    let tracked = Command::new("git")
-        .arg("-C")
-        .arg(&project.0)
-        .args(["ls-files", ".jevgate"])
-        .output()
-        .unwrap();
+    let tracked = crate::git::run(&project.0, &["ls-files", ".jevgate"]);
     assert_eq!(
-        String::from_utf8_lossy(&tracked.stdout),
-        ".jevgate/questions/never-log-request-bodies.toml\n",
+        tracked, ".jevgate/questions/never-log-request-bodies.toml\n",
         "the accepted question is committed, the cache is not"
     );
 

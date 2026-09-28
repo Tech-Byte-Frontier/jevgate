@@ -1,5 +1,5 @@
 //! A warning when Git ignores the question files.
-use std::{path::Path, process::Command};
+use std::path::Path;
 
 /// The `.gitignore` JevGate writes in its state directory.
 const STATE_IGNORE: &str = ".jevgate/.gitignore";
@@ -37,14 +37,11 @@ pub fn ignored(root: &Path, file: &Path) -> Option<String> {
 
 /// `git check-ignore` of `file` with `flags`: its output when it exits 0.
 fn check_ignore(root: &Path, file: &Path, flags: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let output = crate::revision::git_in(root)
         .arg("check-ignore")
         .args(flags)
         .arg("--")
         .arg(file)
-        .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
         .ok()
         .filter(|output| output.status.success())?;

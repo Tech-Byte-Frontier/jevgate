@@ -532,21 +532,10 @@ paths = ["*.json"]
     assert_eq!(read(&options), ["staged.json"], "among the changed files");
 }
 
-/// Run Git in `project` with a fixed identity.
+/// Run Git in `project`, with a fixed identity, apart from the repository
+/// running the tests.
 pub(super) fn git(project: &Project, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&project.0)
-        .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
-        .args(["-c", "commit.gpgsign=false"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    crate::tests::git::run(&project.0, args);
 }
 
 #[test]
