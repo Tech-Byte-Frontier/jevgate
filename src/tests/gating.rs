@@ -366,7 +366,7 @@ fn every_finding_but_a_note_carries_its_rule_and_levels_precision() {
         "{text}"
     );
     assert!(
-        text.contains("[tests/laws] Copies: 50% alike,\nsee `b` Not yet measured.\n"),
+        text.contains("[tests/laws] Copies: 50% alike,\nsee `b` Not yet measured: labeled only on Bend 2 projects, which the maturity table leaves out.\n"),
         "{text}"
     );
     assert!(!text.contains("0.9"), "no probability: {text}");

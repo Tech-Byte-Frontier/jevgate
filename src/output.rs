@@ -443,7 +443,7 @@ pub(crate) fn claim(finding: &Finding, style: Style) -> String {
     let Some(labels) = finding.precision else {
         return finding.message.clone();
     };
-    let words = labels.in_words();
+    let words = crate::maturity::precision_in_words(&finding.rule, labels);
     let mut chars = words.chars();
     let sentence = chars.next().map_or_else(String::new, |first| {
         format!("{}{}.", first.to_uppercase(), chars.as_str())

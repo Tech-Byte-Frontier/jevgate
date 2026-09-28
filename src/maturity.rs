@@ -137,14 +137,34 @@ pub fn measure(rule: &str, level: Strength) -> Option<&'static Measure> {
     TABLE.iter().find(|m| m.rule == key && m.level == level)
 }
 
+/// Why the laws rule has no share: it judges only Bend 2 code, whose labeled
+/// projects this table leaves out.
+const BEND_2_ONLY: &str = "labeled only on Bend 2 projects, which the maturity table leaves out";
+
+fn bend_2_only(rule: &str) -> bool {
+    catalog::find(rule).is_some_and(|found| found.key == catalog::LAWS)
+}
+
 /// Why `rule` has no share of right findings on unseen projects at a level:
 /// the laws rule judges Bend 2 code, whose labeled projects this table
 /// leaves out; any other has no labeled finding there yet.
 pub fn unmeasured(rule: &str) -> &'static str {
-    if catalog::find(rule).is_some_and(|found| found.key == catalog::LAWS) {
-        "labeled only on Bend 2 projects, which the maturity table leaves out"
+    if bend_2_only(rule) {
+        BEND_2_ONLY
     } else {
         "none labeled yet on projects JevGate was never tuned on"
+    }
+}
+
+/// How often findings of `rule` with `labels` were right, for a reader:
+/// [`Labels::in_words`], and for a law finding, which has none, that its
+/// labels are Bend 2's: "not yet measured" alone would say none were made.
+pub fn precision_in_words(rule: &str, labels: Labels) -> String {
+    let words = labels.in_words();
+    if labels.labeled == 0 && bend_2_only(rule) {
+        format!("{words}: {BEND_2_ONLY}")
+    } else {
+        words
     }
 }
 
@@ -295,6 +315,15 @@ mod tests {
         let never = labels(catalog::LAWS, Review);
         assert_eq!(never, Labels::default(), "no row: none labeled");
         assert_eq!(never.in_words(), "not yet measured");
+        assert_eq!(
+            precision_in_words(catalog::LAWS, never),
+            "not yet measured: labeled only on Bend 2 projects, which the maturity table leaves out"
+        );
+        let none = labels(catalog::ACCESS_CONTROL, Consider);
+        assert_eq!(
+            precision_in_words(catalog::ACCESS_CONTROL, none),
+            "not yet measured"
+        );
         assert_eq!(precision(catalog::SHARED_LOGIC, Strength::Note), None);
     }
 }

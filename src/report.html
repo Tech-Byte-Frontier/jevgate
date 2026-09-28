@@ -76,7 +76,7 @@ const order=['review','consider','note','error','needs-context','uncertain','pen
 const files=[...data.files].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status)||a.path.localeCompare(b.path));
 function stillMeasured(){return 'Does not fail the gate: by default only rules and levels right at least '+data.bar.right_percent+'% of the time over at least '+data.bar.labels+' labels on projects JevGate was never tuned on fail it.'}
 // How often findings of its rule and level were right on unseen projects, as the agent text says it, with where; a note carries none.
-function precisionText(finding){const labels=finding.precision,where=' on projects JevGate was never tuned on';if(!labels)return '';return labels.labeled>=data.bar.labels?'Right '+Math.round(100*labels.right/labels.labeled)+'% of the time'+where+' ('+labels.labeled+' labels).':'Not yet measured: fewer than '+data.bar.labels+' labels'+where+'.'}
+function precisionText(finding){const labels=finding.precision,where=' on projects JevGate was never tuned on';if(!labels)return '';if(!labels.labeled)return 'Not yet measured: '+(rules.get(finding.rule)?.unmeasured||'none labeled yet'+where)+'.';return labels.labeled>=data.bar.labels?'Right '+Math.round(100*labels.right/labels.labeled)+'% of the time'+where+' ('+labels.labeled+' labels).':'Not yet measured: fewer than '+data.bar.labels+' labels'+where+'.'}
 function findingRow(finding){
  const row=el('details',null,'row finding-row'),summary=el('summary'),main=el('span',null,'main');
  main.append(el('span','Line '+finding.line+(finding.baselined?' · baselined':finding.suppressed?' · allowed: '+finding.suppressed:''),'path'),el('span',finding.message,'lead'));
