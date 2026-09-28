@@ -32,6 +32,35 @@ These are judgments or presentation, and any release can change them; the change
 - **Request bodies and the answer cache**: the cache is safe to delete or restore at any version; unmatched entries are simply not used.
 - **The default model**: a release can pin a newer model version, which re-asks every unit once. Set `model` in `jevgate.toml` to keep one.
 
+## Reruns of an unchanged commit
+
+A check asks Jev only what its answer cache cannot answer. The cache keeps each answer under a hash of the exact request: the unit's source and evidence, the questions and the model. The default model is a pinned version, `jev-1.13.0`, whose answers never expire, and code, not the model, turns the answers into findings. So with the same version and cache, a rerun of an unchanged commit sends no request, costs nothing and reports the same findings, down to each answer's probabilities.
+
+[`rerun.sh`](rerun.sh) shows it on your repository. It runs `jevgate check` twice with the arguments you give it, prints each run's headline, and compares the two reports: whether each run finished, the gate, and each file's status, findings and raw answers. It needs `jq`, and exits 0 when the rerun sent no request and matched, 1 when it sent requests or differed, and 2 when a check did not finish.
+
+```sh
+curl -fsSLO https://tech-byte-frontier.github.io/jevgate/rerun.sh
+sh rerun.sh --rule all --include-tests
+```
+
+On [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424b3f1033094ffd97da6d47585e38259), whose answers an earlier check had cached:
+
+```text
+JevGate: review · gate failed: 4 new review findings · 33 files · 0 API requests · 0 input tokens · ~$0.0000
+JevGate: review · gate failed: 4 new review findings · 33 files · 0 API requests · 0 input tokens · ~$0.0000
+The rerun sent no request and matched: 40 findings (4 reviews, 8 considers, 28 notes) and 1472 answers in 33 files, with the same levels, lines and probabilities.
+```
+
+On 14 open-source projects in 9 languages (2,839 files, 3,870 findings, 129,403 answers), every rerun sent no request and matched, and a check answered from the cache took 0.3 to 3.3 seconds.
+
+A rerun asks Jev again, and its findings can change, when:
+
+- **A release changes a rule's questions or composition.** The [changelog](changelog.md) says what an upgrade asks again. `--refresh` skips the cache on purpose.
+- **`model` names an alias**, such as `jev-latest`, rather than a version: its answers expire after `cache_ttl_secs`, an hour by default.
+- **The cache is missing**, in a fresh clone or a CI job without the cache step. [Continuous integration](ci.md) keeps `.jevgate/cache` between runs.
+- **The first run did not finish.** What it could not ask is asked on the rerun.
+- **A unit is at the edge of the provider's size limit and the token calibration moved.** Each run that sends requests updates `.jevgate/token-budget.json`, which planning reads to tell whether a unit fits in one request. On the 14 projects above, checks with the default calibration and with the saved one matched.
+
 ## Releases
 
 Releases are batched: a minor release collects features and rule changes, and a patch release ships fixes without waiting. Each release publishes binaries, the crate, the GitHub Action's inputs and the Homebrew formula together, and this site is published from the same tag.
