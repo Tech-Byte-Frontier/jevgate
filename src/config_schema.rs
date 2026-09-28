@@ -24,37 +24,50 @@ pub fn schema() -> Value {
     schema["description"] = json!(
         "JevGate configuration. The command line wins over the file, except that upload patterns and budgets in the file are ceilings that flags can only narrow. Unknown keys are errors."
     );
-    let names = rule_names();
-    let levels = json!(LEVELS);
-    let mut with_off = LEVELS.to_vec();
-    with_off.push("off");
-    let properties = &mut schema["properties"];
-    properties["fail_on"]["items"]["enum"] = levels.clone();
+    bound_budgets(&mut schema["properties"]);
+    list_levels(&mut schema);
+    list_names(&mut schema["$defs"]);
+    crate::custom::schema(&mut schema["$defs"]["Question"]);
+    schema
+}
+
+/// The least and most each budget accepts.
+fn bound_budgets(properties: &mut Value) {
     properties["concurrency"]["minimum"] = json!(1);
     properties["concurrency"]["maximum"] = json!(MAX_CONCURRENCY);
     for budget in ["max_requests", "max_file_bytes", "max_context_bytes"] {
         properties[budget]["minimum"] = json!(1);
     }
+}
+
+/// The gate levels `fail_on` and `[[scope]]` accept, and with `off` the
+/// levels of `[rules]`.
+fn list_levels(schema: &mut Value) {
+    let levels = json!(LEVELS);
+    let mut with_off = LEVELS.to_vec();
+    with_off.push("off");
+    schema["properties"]["fail_on"]["items"]["enum"] = levels.clone();
     let definitions = &mut schema["$defs"];
+    definitions["Scope"]["properties"]["fail_on"]["items"]["enum"] = levels;
     for level in definitions["Level"]["anyOf"].as_array_mut().unwrap() {
         match level["type"].as_str() {
             Some("string") => level["enum"] = json!(with_off),
             _ => level["items"]["enum"] = json!(with_off),
         }
     }
-    // A custom question is named by its ID, which only the configuration knows.
-    let named = json!({"anyOf": [{"enum": names}, {"pattern": crate::custom::NAMES}]});
+}
+
+/// The rule names `rules`, `[rules]` and `[[scope]]` accept: every built-in
+/// name, and a custom question's ID, which only the configuration knows.
+fn list_names(definitions: &mut Value) {
+    let named = json!({"anyOf": [{"enum": rule_names()}, {"pattern": crate::custom::NAMES}]});
     for rules in definitions["Rules"]["anyOf"].as_array_mut().unwrap() {
         match rules["type"].as_str() {
             Some("array") => rules["items"] = json!({"type": "string", "anyOf": named["anyOf"]}),
             _ => rules["propertyNames"] = named.clone(),
         }
     }
-    let scope = &mut definitions["Scope"]["properties"];
-    scope["fail_on"]["items"]["enum"] = levels;
-    scope["rules"]["propertyNames"] = named;
-    crate::custom::schema(&mut definitions["Question"]);
-    schema
+    definitions["Scope"]["properties"]["rules"]["propertyNames"] = named;
 }
 
 /// Every rule ID, name, key and group, and the `default` and `all` groups.
