@@ -10,7 +10,7 @@ pub(super) fn list() -> Value {
         {
             "name": "jevgate_check",
             "title": "Review code with JevGate",
-            "description": "Run `jevgate check` in the repository and return its findings, each with an id, a location, a probability and a next step, then the units Jev left undecided as verify items and what the change does to the checks around the code as guards. Uses jevgate.toml and the API key `jevgate auth status` shows; unchanged code is answered from the cache for free, and dry_run costs nothing. Can take minutes on a large change; with a progress token, it reports each stage.",
+            "description": "Run `jevgate check` in the repository and return its findings, each with an id, a location, how often findings of its rule and level were right, and a next step, then the units Jev left undecided as verify items and what the change does to the checks around the code as guards. Uses jevgate.toml and the API key `jevgate auth status` shows; unchanged code is answered from the cache for free, and dry_run costs nothing. Can take minutes on a large change; with a progress token, it reports each stage.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -152,6 +152,12 @@ fn finding_schema() -> Value {
             "message": {"type": "string"},
             "action": {"type": "string", "description": "The next step"},
             "probability": {"type": "number", "description": "The concern probability that set the level"},
+            "precision": {
+                "type": "object",
+                "description": "How often findings of its rule and level were right on projects JevGate was never tuned on, as `jevgate rules` counts them; absent for notes",
+                "properties": {"right": {"type": "integer", "minimum": 0}, "labeled": {"type": "integer", "minimum": 0}},
+                "required": ["right", "labeled"],
+            },
             "symbol": {"type": "string"},
             "category": {"type": "string", "description": "The weakness a security finding names, such as CWE-89 SQL injection"},
             "gate": {"type": "string", "enum": ["fails", "measuring", "advisory"], "description": "How the gate counted a new finding: fails (it fails the gate), measuring (reported without failing: its rule and level are still being measured) or advisory (the level in force does not count it); absent for notes and accepted findings"},

@@ -29,16 +29,6 @@ pub(super) use test_rules::{law_wording, test_pair_wording, test_wording};
 /// A finding's message and the action it recommends.
 pub(super) type Wording = (String, &'static str);
 
-/// The probability a message shows: the one that set its review or consider.
-/// A note shows none, since its concern stayed below the level that acts on
-/// it; the report keeps the raw value.
-pub(super) fn shown(strength: Strength, p: f64) -> String {
-    match strength {
-        Strength::Note => String::new(),
-        _ => format!(" ({p:.2})"),
-    }
-}
-
 /// A question in plain words, for listing what a unit left undecided.
 pub(super) fn question_label(question: &str) -> &str {
     match question {

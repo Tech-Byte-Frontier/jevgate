@@ -535,6 +535,10 @@ mod tests {
             "a failure first, whatever its rank"
         );
         assert_eq!(result["gate"]["passed"], false);
+        assert_eq!(
+            result["findings"][1]["precision"],
+            json!({"right": 46, "labeled": 85})
+        );
     }
 
     #[test]

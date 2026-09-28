@@ -96,6 +96,21 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
         baselined: false,
         suppressed: None,
         gate: None,
+        precision: None,
+    }
+}
+
+/// [`finding`] as the gate leaves it: counted as `gate`, carrying its rule
+/// and level's precision.
+pub(super) fn counted(
+    strength: crate::schema::Strength,
+    gate: crate::schema::Gating,
+) -> crate::schema::Finding {
+    let finding = finding(strength);
+    crate::schema::Finding {
+        gate: Some(gate),
+        precision: crate::maturity::precision(&finding.rule, strength),
+        ..finding
     }
 }
 

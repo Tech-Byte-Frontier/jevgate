@@ -137,6 +137,8 @@ pub struct Finding {
     pub action: String,
     pub symbol: Option<String>,
     pub rule_version: String,
+    /// The probability of the answer that set its level: how sure that
+    /// answer was, not how often such findings are right (`precision`).
     pub concern_probability: f64,
     pub locations: Vec<Location>,
     /// Whole statements from the first location, when the evidence is a quote.
@@ -162,6 +164,12 @@ pub struct Finding {
     /// before the gate is applied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<Gating>,
+    /// How often findings of its rule and level were right on projects
+    /// JevGate was never tuned on: hand labels, as `jevgate rules` counts
+    /// them. None for notes, which are never labeled, and before the gate is
+    /// applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<crate::maturity::Labels>,
 }
 
 impl Finding {

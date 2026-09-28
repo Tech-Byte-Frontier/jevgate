@@ -103,8 +103,9 @@ fn repeated_code_in_one_function_is_one_consider_and_documentation_a_note() {
     assert_eq!(consider.symbol.as_deref(), Some("total"));
     assert_eq!(
         consider.message,
-        "`total` has 3 comments to clean up (1.00): at lines 4, 6 and 8 they repeat the code."
+        "`total` has 3 comments to clean up: at lines 4, 6 and 8 they repeat the code."
     );
+    assert_eq!(consider.concern_probability, 1.0);
     assert_eq!(consider.action, "Delete these comments");
 }
 

@@ -319,7 +319,7 @@ fn hardcoded_project() -> (Project, CheckArgs) {
 fn hardcoded_finding(path: &str, strength: &str, values: &[&str]) -> Value {
     json!({
         "rule": "maintainability/hardcoded-values", "strength": strength, "line": 3,
-        "message": "`f` special-cases one specific identity (0.90).", "action": "Move it",
+        "message": "`f` special-cases one specific identity.", "action": "Move it",
         "symbol": "f", "rule_version": "1", "concern_probability": 0.9,
         "locations": [{"path": path, "start_line": 3, "end_line": 5, "symbol": "f"}],
         "values": values, "fingerprint": path, "rank": 1.0

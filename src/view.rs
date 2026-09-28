@@ -2,7 +2,10 @@
 //! results give each finding, from which the agent hook also writes its
 //! one-line findings, so an agent meets the same finding the same way
 //! whichever door it came through.
-use crate::schema::{Finding, Gating, Strength};
+use crate::{
+    maturity::Labels,
+    schema::{Finding, Gating, Strength},
+};
 use serde::Serialize;
 use std::path::Path;
 
@@ -22,6 +25,8 @@ pub(crate) struct FindingView<'r> {
     pub message: &'r str,
     pub action: &'r str,
     pub probability: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub precision: Option<Labels>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<&'r str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,6 +54,7 @@ impl<'r> FindingView<'r> {
             message: &finding.message,
             action: &finding.action,
             probability: rounded(finding.concern_probability),
+            precision: finding.precision,
             symbol: finding.symbol.as_deref(),
             category: finding.category.as_deref(),
             gate: finding.gate,

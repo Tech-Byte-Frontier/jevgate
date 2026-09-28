@@ -697,9 +697,11 @@ signatures, or one candidate pair.
    the Score's acceptable levels do and nothing is at review; public tables
    and views are at most a consider, reducers can be reviews. A
    hardcoded-value review or consider whose value the locate Choice could not
-   name is one level lower. Messages show the probability that set a finding's
-   level (a consider shows the middle-or-top mass, not the top level); notes
-   show none. Finished plans in one directory become one finding identified by
+   name is one level lower. A finding keeps the probability that set its
+   level as `concern_probability` (a consider's is the middle-or-top mass, not
+   the top level); its message does not show it, and the outputs show instead
+   how often findings of its rule and level were right on projects never used
+   for tuning. Finished plans in one directory become one finding identified by
    the directory, and the others become notes pointing at it. On its
    labeled set, no living document leaned past 0.50. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:

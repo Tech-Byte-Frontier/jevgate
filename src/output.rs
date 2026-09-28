@@ -422,18 +422,33 @@ pub(crate) fn measuring(report: &Report) -> Option<String> {
     ))
 }
 
-/// Why a finding still being measured does not fail the gate, with its rule
-/// and level's precision on unseen projects; none for any other finding.
+/// Why a finding still being measured does not fail the gate; none for any
+/// other finding. Its claim already says how often its rule and level were
+/// right.
 pub(crate) fn measuring_note(finding: &Finding) -> Option<String> {
-    if finding.gate != Some(Gating::Measuring) {
-        return None;
-    }
-    Some(format!(
-        "Does not fail the gate: {} {}s are still being measured ({}).",
-        finding.rule,
-        label(&finding.strength),
-        crate::maturity::unseen_share(&finding.rule, finding.strength)
-    ))
+    (finding.gate == Some(Gating::Measuring)).then(|| {
+        format!(
+            "Does not fail the gate: by default only rules and levels right at least {}% of the time over at least {} labels on projects JevGate was never tuned on fail it.",
+            crate::maturity::MIN_PERCENT_RIGHT,
+            crate::maturity::MIN_LABELS
+        )
+    })
+}
+
+/// A finding's message, then how often findings of its rule and level were
+/// right on projects JevGate was never tuned on, in place of the probability
+/// of the answer that set its level: "… Right 87% of the time (23 labels)."
+/// or "… Not yet measured."; a note's message alone.
+pub(crate) fn claim(finding: &Finding, style: Style) -> String {
+    let Some(labels) = finding.precision else {
+        return finding.message.clone();
+    };
+    let words = labels.in_words();
+    let mut chars = words.chars();
+    let sentence = chars.next().map_or_else(String::new, |first| {
+        format!("{}{}.", first.to_uppercase(), chars.as_str())
+    });
+    format!("{} {}", finding.message, style.paint(DIM, &sentence))
 }
 
 /// Counts of undecided, unsent and failed files, then why files failed and
@@ -526,8 +541,9 @@ fn emit_context_load(out: &mut impl Write, load: &crate::docs::load::ContextLoad
     Ok(())
 }
 
-/// `path:line [rule] message`, then the next step; the location is bold,
-/// the rule dim, and a finding that fails the gate says so in red.
+/// `path:line [rule] message` and how often such findings were right, then
+/// the next step; the location is bold, the rule and the share right dim,
+/// and a finding that fails the gate says so in red.
 fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Style) -> Result<()> {
     let location = format!("{}:{}", path.display(), finding.line);
     let accepted = match (&finding.suppressed, finding.baselined) {
@@ -546,7 +562,7 @@ fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Sty
         "  {} {} {fails}{}",
         style.paint(BOLD, &location),
         style.paint(DIM, &rule),
-        finding.message
+        claim(finding, style)
     )?;
     writeln!(out, "    {} {}", style.paint(CYAN, "→"), finding.action)?;
     Ok(())

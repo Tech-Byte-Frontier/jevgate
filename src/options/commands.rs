@@ -291,8 +291,10 @@ Reading the JSON report (--format json or .jevgate/latest.json):
   files[].status     clear, note, consider, review, uncertain, needs-context,
                      not-applicable, skipped or error
   files[].findings   rule, strength, line, message, action, locations,
-                     concern_probability, fingerprint, baselined, and gate:
-                     fails, measuring (its rule and level are still being
+                     concern_probability, fingerprint, baselined; precision:
+                     right of labeled findings of its rule and level on
+                     projects never used for tuning; and gate: fails,
+                     measuring (its rule and level are still being
                      measured) or advisory (below the level in force)
   files[].dimensions per rule: status, unit counts and the units left undecided
   files[].judgments  every raw answer, first pass and follow-ups

@@ -28,7 +28,11 @@ fn issue(path: &Path, finding: &Finding) -> Value {
         .iter()
         .find(|l| l.path == path && l.start_line == finding.line)
         .map_or(finding.line, |l| l.end_line.max(finding.line));
-    let mut description = format!("{} Next step: {}", finding.message, finding.action);
+    let mut description = format!(
+        "{} Next step: {}",
+        output::claim(finding, output::Style::PLAIN),
+        finding.action
+    );
     if let Some(note) = output::measuring_note(finding) {
         description.push_str(&format!(" {note}"));
     }
@@ -62,25 +66,23 @@ fn fingerprint(path: &Path, finding: &Finding) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{schema::Gating, tests::finding};
+    use crate::{
+        schema::Gating,
+        tests::{counted, finding},
+    };
 
     #[test]
     fn issues_carry_severity_location_and_a_fingerprint() {
         let path = Path::new("src/a,b.rs");
-        let failing = Finding {
-            gate: Some(Gating::Fails),
-            ..finding(Strength::Review)
-        };
-        let review = issue(path, &failing);
+        let review = issue(path, &counted(Strength::Review, Gating::Fails));
         assert_eq!(review["severity"], "major");
         assert_eq!(review["check_name"], "maintainability/shared-logic");
         assert_eq!(review["location"]["path"], "src/a,b.rs");
         assert_eq!(review["location"]["lines"], json!({"begin": 12, "end": 20}));
         assert!(
-            review["description"]
-                .as_str()
-                .unwrap()
-                .ends_with("Next step: Share one | implementation")
+            review["description"].as_str().unwrap().ends_with(
+                "Right 54% of the time (85 labels). Next step: Share one | implementation"
+            )
         );
         assert_eq!(review["fingerprint"].as_str().unwrap().len(), 64);
         let consider = issue(path, &finding(Strength::Consider));
@@ -88,17 +90,13 @@ mod tests {
         let mut named = finding(Strength::Consider);
         named.fingerprint = "abc".into();
         assert_eq!(issue(path, &named)["fingerprint"], "abc");
-        let measuring = Finding {
-            gate: Some(Gating::Measuring),
-            ..finding(Strength::Review)
-        };
-        let measured = issue(path, &measuring);
+        let measured = issue(path, &counted(Strength::Review, Gating::Measuring));
         assert_eq!(measured["severity"], "minor");
         assert!(
             measured["description"]
                 .as_str()
                 .unwrap()
-                .ends_with("Next step: Share one | implementation Does not fail the gate: maintainability/shared-logic reviews are still being measured (54% of 85 right on projects JevGate was never tuned on).")
+                .ends_with("Next step: Share one | implementation Does not fail the gate: by default only rules and levels right at least 80% of the time over at least 20 labels on projects JevGate was never tuned on fail it.")
         );
     }
 }

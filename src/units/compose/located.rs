@@ -71,7 +71,6 @@ pub(super) fn chosen_groups<'g>(
 pub(super) fn values_finding(
     unit: &UnitPlan,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
     judgments: &[Judgment],
 ) -> (Wording, Option<Location>) {
@@ -80,7 +79,6 @@ pub(super) fn values_finding(
         &unit.name,
         &unit.detail,
         (strength, lowered.map(|(reached, _)| reached)),
-        p,
         answers,
     );
     let why = lowered
@@ -130,11 +128,9 @@ pub(super) fn job_wording(
     name: &str,
     expressions: &[String],
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
 ) -> (Wording, String) {
-    let ((message, action), named) =
-        privilege_wording(&format!("Job `{name}`"), strength, p, answers);
+    let ((message, action), named) = privilege_wording(&format!("Job `{name}`"), strength, answers);
     let outside = matches!(
         answers.get("outside").map(|a| noul(a)),
         Some(Outcome::Review(_))

@@ -74,16 +74,19 @@ const openPaths=new Set(Array.isArray(saved.open)?saved.open:[]);
 function save(){try{sessionStorage.setItem('jevgate:'+data.root,JSON.stringify({query:$('search').value,filter:$('filter').value,open:[...openPaths],page,pageSize:Number($('page-size').value),scroll:window.scrollY}))}catch{}}
 const order=['review','consider','note','error','needs-context','uncertain','pending','clear','not-applicable','skipped'];
 const files=[...data.files].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status)||a.path.localeCompare(b.path));
-function stillMeasured(finding){const rule=rules.get(finding.rule);const unseen=rule?.maturity?.[finding.strength]?.unseen;const share=unseen&&unseen.labeled?Math.round(100*unseen.right/unseen.labeled)+'% of '+unseen.labeled+' right on projects JevGate was never tuned on':rule?.unmeasured;return 'Does not fail the gate: '+name(finding.rule)+' '+finding.strength+'s are still being measured ('+share+').'}
+function stillMeasured(){return 'Does not fail the gate: by default only rules and levels right at least '+data.bar.right_percent+'% of the time over at least '+data.bar.labels+' labels on projects JevGate was never tuned on fail it.'}
+// How often findings of its rule and level were right on unseen projects, as the agent text says it, with where; a note carries none.
+function precisionText(finding){const labels=finding.precision,where=' on projects JevGate was never tuned on';if(!labels)return '';return labels.labeled>=data.bar.labels?'Right '+Math.round(100*labels.right/labels.labeled)+'% of the time'+where+' ('+labels.labeled+' labels).':'Not yet measured: fewer than '+data.bar.labels+' labels'+where+'.'}
 function findingRow(finding){
  const row=el('details',null,'row finding-row'),summary=el('summary'),main=el('span',null,'main');
  main.append(el('span','Line '+finding.line+(finding.baselined?' · baselined':finding.suppressed?' · allowed: '+finding.suppressed:''),'path'),el('span',finding.message,'lead'));
+ if(finding.precision)main.append(el('span',precisionText(finding),'small'));
  summary.append(main,el('span',name(finding.rule),'count'));
  if(finding.gate==='fails')summary.append(el('span','fails the gate','badge review'));
  summary.append(badge(finding.strength));row.append(summary);
  const body=el('div',null,'detail');row.append(body);
  p(body,finding.action);
- if(finding.gate==='measuring')p(body,stillMeasured(finding),'small');
+ if(finding.gate==='measuring')p(body,stillMeasured(),'small');
  p(body,finding.category,'small');
  if(finding.locations&&finding.locations.length>1)p(body,'Locations: '+finding.locations.map(l=>l.path+':'+l.start_line+'–'+l.end_line).join(', '),'small');
  p(body,'Concern '+pct(finding.concern_probability),'small');

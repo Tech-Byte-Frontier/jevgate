@@ -65,7 +65,7 @@ pub(super) fn comment_findings(
                 .iter()
                 .map(|(unit, _, _, reason)| (&unit.locations[0], *reason))
                 .collect();
-            let (message, action) = comment_wording(owner, &listed, strength, p);
+            let (message, action) = comment_wording(owner, &listed, strength);
             let locations: Vec<crate::schema::Location> =
                 listed.iter().map(|(l, _)| (*l).clone()).collect();
             let lines = entries.iter().map(|(unit, ..)| unit.lines).sum();
@@ -94,6 +94,7 @@ pub(super) fn comment_findings(
                 baselined: false,
                 suppressed: None,
                 gate: None,
+                precision: None,
             }
         })
         .collect()

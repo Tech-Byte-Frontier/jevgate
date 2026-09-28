@@ -317,6 +317,62 @@ fn the_default_gate_fails_only_on_mature_rule_levels() {
 }
 
 #[test]
+fn every_finding_but_a_note_carries_its_rule_and_levels_precision() {
+    use crate::maturity::Labels;
+    use schema::Strength::*;
+    let labels = |right, labeled| Some(Labels { right, labeled });
+    let accepted = schema::Finding {
+        baselined: true,
+        ..finding_of(SIMPLIFICATION, Review)
+    };
+    let report = gated(
+        vec![
+            finding_of(SIMPLIFICATION, Review),
+            finding_of(SHARED_LOGIC, Consider),
+            finding_of("tests/laws", Review),
+            finding_of(SIMPLIFICATION, Note),
+            accepted,
+        ],
+        &args(),
+    );
+    let precision: Vec<_> = report.files[0]
+        .findings
+        .iter()
+        .map(|f| f.precision)
+        .collect();
+    assert_eq!(
+        precision,
+        [
+            labels(20, 23),
+            labels(76, 129),
+            labels(0, 0),
+            None,
+            labels(20, 23)
+        ]
+    );
+    let json = serde_json::to_value(&report.files[0].findings).unwrap();
+    assert_eq!(json[0]["precision"], json!({"right": 20, "labeled": 23}));
+    assert!(
+        json[3].get("precision").is_none(),
+        "a note is never labeled"
+    );
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, true, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains(
+            "(fails the gate) Copies: 50% alike,\nsee `b` Right 87% of the time (23 labels).\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("[tests/laws] Copies: 50% alike,\nsee `b` Not yet measured.\n"),
+        "{text}"
+    );
+    assert!(!text.contains("0.9"), "no probability: {text}");
+}
+
+#[test]
 fn an_explicit_level_replaces_the_default_exactly_as_it_says() {
     use schema::{Gating::*, Strength::*};
     let findings = vec![

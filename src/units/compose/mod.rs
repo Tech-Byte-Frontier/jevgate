@@ -583,7 +583,7 @@ fn finding(
             block = located_block(unit, blocks, judgments, "block")
                 .filter(|b| !most_of(&b.location, &unit.locations));
             let bend = crate::analysis::bend::file(&plan.path);
-            function_wording(name, strength, p, answers, (block, bend))
+            function_wording(name, strength, answers, (block, bend))
         }
         Detail::Outline {
             tests,
@@ -595,7 +595,7 @@ fn finding(
             if let Some(part) = deciding_part(answers, parts) {
                 symbol = part.names.first().cloned();
                 locations = part.locations.clone();
-                part_wording(part, strength, p)
+                part_wording(part, strength)
             } else {
                 let chosen = outline_groups(answers.get("module").copied(), groups, *members);
                 symbol = chosen.first().map(|group| group.id.clone());
@@ -604,7 +604,7 @@ fn finding(
                 }
                 let several =
                     several_kind(answers.get("split").copied(), answers.get("kind").copied());
-                outline_wording(&chosen, *tests, several, strength, p)
+                outline_wording(&chosen, *tests, several, strength)
             }
         }
         Detail::Pair {
@@ -617,10 +617,9 @@ fn finding(
             differences,
             (*within_test, *in_tests, *in_cases),
             strength,
-            p,
         ),
         Detail::Values { .. } | Detail::Constants { .. } => {
-            let (wording, constant) = values_finding(unit, strength, p, answers, judgments);
+            let (wording, constant) = values_finding(unit, strength, answers, judgments);
             if let Some(location) = constant {
                 symbol = location.symbol.clone();
                 locations = vec![location];
@@ -636,15 +635,15 @@ fn finding(
             category = Some(named);
             wording
         }
-        Detail::Section { .. } => section_wording(name, &unit.detail, strength, p, answers),
+        Detail::Section { .. } => section_wording(name, &unit.detail, strength, answers),
         Detail::Plan { facts } => {
             symbol = None;
             category = Some(super::grouping::FINISHED_PLAN.into());
-            plan_wording(name, facts, p)
+            plan_wording(name, facts)
         }
-        Detail::Stale { missing, .. } => stale_wording(name, missing, p),
+        Detail::Stale { missing, .. } => stale_wording(name, missing),
         Detail::DocPair { other, .. } => {
-            let (wording, conflict) = doc_pair_wording(name, other, answers, p);
+            let (wording, conflict) = doc_pair_wording(name, other, answers);
             if conflict {
                 category = Some("conflict".into());
             }
@@ -653,14 +652,14 @@ fn finding(
         Detail::Document { parts, .. } => {
             symbol = None;
             block = located_block(unit, parts, judgments, "part");
-            document_wording(name, strength, p, answers, block)
+            document_wording(name, strength, answers, block)
         }
         Detail::Handler { registered } => {
             category = Some("CWE-209 error details exposed".into());
-            handler_wording(name, registered, strength, p)
+            handler_wording(name, registered, strength)
         }
         Detail::Access(access @ (Access::Table | Access::View | Access::Reducer)) => {
-            let (wording, named) = module_wording(access, name, strength, p, answers);
+            let (wording, named) = module_wording(access, name, strength, answers);
             category = Some(named);
             wording
         }
@@ -670,24 +669,24 @@ fn finding(
                 Access::Definer => format!("SECURITY DEFINER function `{name}`"),
                 _ => format!("A grant on `{name}`"),
             };
-            let (wording, named) = privilege_wording(&subject, strength, p, answers);
+            let (wording, named) = privilege_wording(&subject, strength, answers);
             category = Some(named);
             wording
         }
         Detail::Job { expressions } => {
-            let (wording, named) = job_wording(name, expressions, strength, p, answers);
+            let (wording, named) = job_wording(name, expressions, strength, answers);
             category = Some(named);
             wording
         }
         Detail::Comment { .. } => {
             let reason = comment_reason(answers, documented(unit));
-            comment_wording(name, &[(&unit.locations[0], reason)], strength, p)
+            comment_wording(name, &[(&unit.locations[0], reason)], strength)
         }
-        Detail::Test { .. } => test_wording(name, strength, p, answers),
-        Detail::Law => law_wording(name, strength, p, answers),
+        Detail::Test { .. } => test_wording(name, strength, answers),
+        Detail::Law => law_wording(name, strength, answers),
         Detail::TestPair { .. } => {
             symbol = None;
-            test_pair_wording(name, strength == Strength::Review, p)
+            test_pair_wording(name, strength == Strength::Review)
         }
     };
     let lines = locations
@@ -727,5 +726,6 @@ fn finding(
         baselined: false,
         suppressed: None,
         gate: None,
+        precision: None,
     }
 }

@@ -1,6 +1,6 @@
 # Coding agents
 
-JevGate's default output is written for coding agents as much as for people: ranked findings, each with a location, a probability and a next step, and nothing hidden when an answer stays undecided.
+JevGate's default output is written for coding agents as much as for people: ranked findings, each with a location, how often findings like it were right and a next step, and nothing hidden when an answer stays undecided.
 
 ## Check before finishing
 

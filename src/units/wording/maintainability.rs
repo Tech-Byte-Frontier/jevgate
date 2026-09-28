@@ -6,7 +6,6 @@ use super::*;
 pub(in crate::units) fn function_wording(
     name: &str,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
     (block, bend): (Option<&Block>, bool),
 ) -> Wording {
@@ -31,7 +30,7 @@ pub(in crate::units) fn function_wording(
     match (strength, flattening) {
         (Strength::Review, false) => (
             format!(
-                "`{name}` mixes separate jobs in long blocks; splitting it would make it easier to understand ({p:.2}).{located}"
+                "`{name}` mixes separate jobs in long blocks; splitting it would make it easier to understand.{located}"
             ),
             if block.is_some() {
                 "Extract the located block into a named function"
@@ -40,7 +39,7 @@ pub(in crate::units) fn function_wording(
             },
         ),
         (Strength::Review, true) => (
-            format!("`{name}` has nested or repeated branches that hide its main path ({p:.2})."),
+            format!("`{name}` has nested or repeated branches that hide its main path."),
             if bend {
                 "Flatten the matches with nested patterns, a `case _:` fallback or a helper def"
             } else {
@@ -49,7 +48,7 @@ pub(in crate::units) fn function_wording(
         ),
         (Strength::Consider, false) => (
             format!(
-                "`{name}` likely mixes separate jobs; splitting it may make it easier to understand ({p:.2}).{located}"
+                "`{name}` likely mixes separate jobs; splitting it may make it easier to understand.{located}"
             ),
             if block.is_some() {
                 "Consider extracting the located block into a named function"
@@ -58,7 +57,7 @@ pub(in crate::units) fn function_wording(
             },
         ),
         (Strength::Consider, true) => (
-            format!("`{name}` has branching that likely hides its main path ({p:.2})."),
+            format!("`{name}` has branching that likely hides its main path."),
             if bend {
                 "Consider nested patterns, a `case _:` fallback or a helper def"
             } else {
@@ -85,7 +84,6 @@ pub(in crate::units) fn outline_wording(
     tests: bool,
     several: Option<&str>,
     strength: Strength,
-    p: f64,
 ) -> Wording {
     let (kind, parts) = if tests {
         ("test file", "tests")
@@ -107,7 +105,7 @@ pub(in crate::units) fn outline_wording(
     match strength {
         // A test file's note may be a lowered consider, so it does not say the file reads well.
         Strength::Note if tests => (
-            format!("Some tests of this file could move to a separate test file ({p:.2}).{detail}"),
+            format!("Some tests of this file could move to a separate test file.{detail}"),
             "Optional: move those tests when you next change them",
         ),
         Strength::Note => (
@@ -118,10 +116,10 @@ pub(in crate::units) fn outline_wording(
         ),
         Strength::Consider => (
             match several {
-                Some(_) => format!("This file holds several unrelated features ({p:.2}).{detail}"),
-                None => format!(
-                    "Some {parts} of this file could move to a separate {kind} ({p:.2}).{detail}"
-                ),
+                Some(_) => format!("This file holds several unrelated features.{detail}"),
+                None => {
+                    format!("Some {parts} of this file could move to a separate {kind}.{detail}")
+                }
             },
             if tests {
                 "Consider moving those tests into their own test file"
@@ -130,9 +128,7 @@ pub(in crate::units) fn outline_wording(
             },
         ),
         Strength::Review => (
-            format!(
-                "This file holds several features that would be easier to find apart ({p:.2}).{detail}"
-            ),
+            format!("This file holds several features that would be easier to find apart.{detail}"),
             if !chosen.is_empty() {
                 "Move that group into its own module"
             } else {
@@ -152,21 +148,15 @@ fn listed_names(names: &[String]) -> String {
 }
 
 /// A part of a long file that does a job of its own apart from the rest.
-pub(in crate::units) fn part_wording(
-    part: &crate::units::Part,
-    strength: Strength,
-    p: f64,
-) -> Wording {
+pub(in crate::units) fn part_wording(part: &crate::units::Part, strength: Strength) -> Wording {
     let part_named = format!("{} ({} lines)", listed_names(&part.names), part.lines);
     match strength {
         Strength::Note => (
-            format!("{part_named} could live in a module of their own ({p:.2})."),
+            format!("{part_named} could live in a module of their own."),
             "Optional: move those members when you next change them",
         ),
         _ => (
-            format!(
-                "{part_named} do a job of their own apart from the rest of this file ({p:.2})."
-            ),
+            format!("{part_named} do a job of their own apart from the rest of this file."),
             "Consider moving those members into a module of their own",
         ),
     }
@@ -178,7 +168,6 @@ pub(in crate::units) fn pair_wording(
     differences: &[crate::analysis::clones::Difference],
     sites: (bool, bool, bool),
     strength: Strength,
-    p: f64,
 ) -> Wording {
     let (within_test, in_tests, in_cases) = sites;
     let renamed = if differences.is_empty() {
@@ -204,7 +193,7 @@ pub(in crate::units) fn pair_wording(
             "Optional: a fixture, helper or table of cases if the steps grow",
         ),
         Strength::Consider if in_cases => (
-            format!("{name} repeat the same steps {place} ({p:.2}).{renamed}"),
+            format!("{name} repeat the same steps {place}.{renamed}"),
             if within_test {
                 "Consider a table of cases or a local helper for the repeated steps"
             } else {
@@ -212,7 +201,7 @@ pub(in crate::units) fn pair_wording(
             },
         ),
         Strength::Review => (
-            format!("{name} perform the same steps for the same purpose ({p:.2}).{renamed}"),
+            format!("{name} perform the same steps for the same purpose.{renamed}"),
             if in_tests {
                 "Share the steps through a fixture, helper or parameterized test"
             } else {
@@ -221,7 +210,7 @@ pub(in crate::units) fn pair_wording(
         ),
         Strength::Consider => (
             format!(
-                "{name} repeat related steps; a person should decide whether they belong together ({p:.2}).{renamed}"
+                "{name} repeat related steps; a person should decide whether they belong together.{renamed}"
             ),
             "Decide whether one implementation should serve both",
         ),
@@ -266,7 +255,6 @@ pub(in crate::units) fn values_wording(
     name: &str,
     detail: &Detail,
     (strength, lowered): (Strength, Option<Strength>),
-    p: f64,
     answers: &Answers<'_>,
 ) -> Wording {
     let get = |q: &str| answers.get(q).copied();
@@ -312,11 +300,7 @@ pub(in crate::units) fn values_wording(
         ""
     };
     (
-        format!(
-            "{subject}{likely} {}{}.",
-            reasons.join("; "),
-            shown(strength, p)
-        ),
+        format!("{subject}{likely} {}.", reasons.join("; ")),
         match (strength, reached.first()) {
             (Strength::Note, _) => "Optional: name or configure the value if it changes",
             (_, Some((signal, _))) => signal.action,

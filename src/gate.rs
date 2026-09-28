@@ -30,10 +30,13 @@ pub fn exit_code(report: &Report) -> u8 {
     }
 }
 
-/// Record how the gate counts each finding, then decide it for a complete run.
+/// Record each finding's measured precision and how the gate counts it, then
+/// decide the gate for a complete run. Both read the maturity table, once
+/// every level is final: grouping across files turns some findings into notes.
 pub fn evaluate(report: &mut Report, args: &CheckArgs) {
     for file in &mut report.files {
         for finding in &mut file.findings {
+            finding.precision = crate::maturity::precision(&finding.rule, finding.strength);
             finding.gate = gating(finding, &file.path, args);
         }
     }

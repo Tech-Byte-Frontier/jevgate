@@ -164,6 +164,7 @@ mod tests {
             baselined: false,
             suppressed: None,
             gate: None,
+            precision: None,
         }
     }
 

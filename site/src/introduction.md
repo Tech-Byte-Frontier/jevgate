@@ -2,7 +2,7 @@
 
 **JevGate is a code-review gate. It asks small, precise questions about your code and turns the answers into findings you can act on.**
 
-JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, a probability and a concrete next step, so an agent or CI job can act on it and a person can check it quickly. By default the gate fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on: among the default rules, function-simplification reviews, right 20 of the 23 times they were labeled there (87%).
+JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, how often findings like it were right and a concrete next step, so an agent or CI job can act on it and a person can check it quickly. By default the gate fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on: among the default rules, function-simplification reviews, right 20 of the 23 times they were labeled there (87%).
 
 ```text
 JevGate: consider · gate passed · 42 files · 118 API requests · 263410 input tokens · ~$0.0111

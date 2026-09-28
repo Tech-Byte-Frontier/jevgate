@@ -60,6 +60,7 @@ pub fn render(report: &Report) -> Result<String> {
         "cost":batch_cost(report),"unmetered":report.unmetered_requests,
         "gate":report.gate,"fail_on":report.fail_on,
         "fail_on_mature":report.fail_on_mature,
+        "bar":{"right_percent":crate::maturity::MIN_PERCENT_RIGHT,"labels":crate::maturity::MIN_LABELS},
         "errors":report.errors,"deleted":report.deleted_files,"base":report.base_revision,
         "scope":report.scope,"files":files,"rules":rules,
         "selected":report.rules,"partial":partial});
@@ -166,6 +167,11 @@ mod tests {
         );
         assert_eq!(decoded["scope"], "whole-files");
         assert_eq!(decoded["unmetered"], 0);
+        assert_eq!(
+            decoded["bar"],
+            serde_json::json!({"right_percent": 80, "labels": 20}),
+            "the page says \"not yet measured\" below the same count"
+        );
         assert!(!html.contains("id=\"root\""));
         assert_eq!(batch_cost(&report).unwrap()["estimated_usd"], 0.0);
         report.estimated_usd = Some(0.042);

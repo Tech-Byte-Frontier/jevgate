@@ -10,6 +10,7 @@ use crate::{
     catalog,
     schema::Strength::{self, Consider, Review},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Labeled findings a rule and level needs on unseen projects to be mature.
@@ -19,7 +20,7 @@ pub const MIN_PERCENT_RIGHT: u32 = 80;
 
 /// Findings of one rule and level labeled by hand: how many were right, of
 /// how many labeled. A debatable label counts as not right.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Labels {
     pub right: u32,
     pub labeled: u32,
@@ -37,8 +38,16 @@ impl Labels {
         self.percent().map(|p| format!("{p}% of {}", self.labeled))
     }
 
-    fn describe(self) -> Value {
-        json!({"right": self.right, "labeled": self.labeled})
+    /// How often such findings were right, for a reader: "right 87% of the
+    /// time (23 labels)", or "not yet measured" below [`MIN_LABELS`], where a
+    /// share says little.
+    pub fn in_words(self) -> String {
+        match self.percent() {
+            Some(p) if self.labeled >= MIN_LABELS => {
+                format!("right {p}% of the time ({} labels)", self.labeled)
+            }
+            _ => "not yet measured".into(),
+        }
     }
 }
 
@@ -139,16 +148,12 @@ pub fn unmeasured(rule: &str) -> &'static str {
     }
 }
 
-/// How often findings of `rule` at `level` were right on unseen projects,
-/// "54% of 85 right on projects JevGate was never tuned on", or why that
-/// is unknown.
-pub fn unseen_share(rule: &str, level: Strength) -> String {
-    measure(rule, level)
-        .and_then(|m| m.unseen.summary())
-        .map_or_else(
-            || unmeasured(rule).into(),
-            |share| format!("{share} right on projects JevGate was never tuned on"),
-        )
+/// The labels a finding of `rule` at `level` carries: its rule and level's on
+/// unseen projects, none labeled when the table has no row for them, and
+/// none for a note, which is never labeled.
+pub fn precision(rule: &str, level: Strength) -> Option<Labels> {
+    (level != Strength::Note)
+        .then(|| measure(rule, level).map_or_else(Labels::default, |m| m.unseen))
 }
 
 /// Whether the default gate fails on findings of `rule` at `level`.
@@ -170,8 +175,8 @@ pub fn describe(rule: &str) -> Value {
     let levels = [Review, Consider].into_iter().filter_map(|level| {
         measure(rule, level).map(|m| {
             let value = json!({
-                "unseen": m.unseen.describe(),
-                "tuned": m.tuned.describe(),
+                "unseen": m.unseen,
+                "tuned": m.tuned,
                 "mature": m.mature(),
             });
             (crate::output::label(&level), value)
@@ -262,17 +267,34 @@ mod tests {
     #[test]
     fn a_level_without_a_share_says_why() {
         assert_eq!(
-            unseen_share(catalog::SHARED_LOGIC, Review),
-            "54% of 85 right on projects JevGate was never tuned on"
-        );
-        assert_eq!(
-            unseen_share(catalog::ACCESS_CONTROL, Review),
+            unmeasured(catalog::ACCESS_CONTROL),
             "none labeled yet on projects JevGate was never tuned on"
         );
         assert_eq!(
-            unseen_share("tests/laws", Review),
+            unmeasured("tests/laws"),
             "labeled only on Bend 2 projects, which the maturity table leaves out",
             "law findings were labeled, on the Bend 2 projects kept apart"
         );
+    }
+
+    #[test]
+    fn a_finding_carries_its_levels_labels_and_a_reader_sees_them_from_twenty() {
+        let labels = |rule, level| precision(rule, level).unwrap();
+        assert_eq!(
+            labels("maintainability/function-simplification", Review).in_words(),
+            "right 87% of the time (23 labels)"
+        );
+        let shared = labels(catalog::SHARED_LOGIC, Consider);
+        assert_eq!(shared, unseen(76, 129).unseen);
+        assert_eq!(shared.in_words(), "right 59% of the time (129 labels)");
+        assert_eq!(unseen(19, 19).unseen.in_words(), "not yet measured");
+        assert_eq!(
+            unseen(16, 20).unseen.in_words(),
+            "right 80% of the time (20 labels)"
+        );
+        let never = labels(catalog::LAWS, Review);
+        assert_eq!(never, Labels::default(), "no row: none labeled");
+        assert_eq!(never.in_words(), "not yet measured");
+        assert_eq!(precision(catalog::SHARED_LOGIC, Strength::Note), None);
     }
 }

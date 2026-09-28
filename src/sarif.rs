@@ -13,8 +13,9 @@ const HOME: &str = "https://github.com/Tech-Byte-Frontier/jevgate";
 
 /// The same findings the GitHub annotations show: every new finding that is
 /// not a note, an `error` when it fails the gate and a `warning` otherwise,
-/// with how the gate counted it as the `gate` property. Run errors and files
-/// that could not be judged are tool notifications.
+/// with how the gate counted it as the `gate` property and how often its
+/// rule and level were right as `precision`. Run errors and files that could
+/// not be judged are tool notifications.
 pub fn emit(out: &mut impl Write, report: &Report) -> Result<()> {
     let shown: Vec<(&Path, &Finding)> = output::ranked(report)
         .into_iter()
@@ -116,7 +117,11 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
             })
         })
         .collect();
-    let mut text = format!("{}\n\nNext step: {}", finding.message, finding.action);
+    let mut text = format!(
+        "{}\n\nNext step: {}",
+        output::claim(finding, output::Style::PLAIN),
+        finding.action
+    );
     if let Some(note) = output::measuring_note(finding) {
         text.push_str(&format!("\n\n{note}"));
     }
@@ -146,6 +151,9 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
     if let Some(gate) = finding.gate {
         value["properties"]["gate"] = json!(gate);
     }
+    if let Some(precision) = finding.precision {
+        value["properties"]["precision"] = json!(precision);
+    }
     value
 }
 
@@ -157,7 +165,7 @@ fn artifact(path: &Path) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{options::CheckArgs, schema::Gating, tests::finding};
+    use crate::{options::CheckArgs, schema::Gating, tests::counted};
 
     fn report(args: &CheckArgs) -> Report {
         crate::evaluate::snapshot(
@@ -175,14 +183,8 @@ mod tests {
     #[test]
     fn results_name_their_rule_level_location_and_fingerprint() {
         let args = crate::tests::args();
-        let review = Finding {
-            gate: Some(Gating::Fails),
-            ..finding(Strength::Review)
-        };
-        let measuring = Finding {
-            gate: Some(Gating::Measuring),
-            ..finding(Strength::Review)
-        };
+        let review = counted(Strength::Review, Gating::Fails);
+        let measuring = counted(Strength::Review, Gating::Measuring);
         let path = Path::new("src/a,b.rs");
         let log = document(&report(&args), &[(path, &review), (path, &measuring)]);
         assert_eq!(log["version"], "2.1.0");
@@ -198,8 +200,13 @@ mod tests {
             results[1]["message"]["text"]
                 .as_str()
                 .unwrap()
-                .ends_with("reviews are still being measured (54% of 85 right on projects JevGate was never tuned on).")
+                .ends_with("Does not fail the gate: by default only rules and levels right at least 80% of the time over at least 20 labels on projects JevGate was never tuned on fail it.")
         );
+        assert_eq!(
+            results[0]["properties"]["precision"],
+            json!({"right": 46, "labeled": 85})
+        );
+        assert_eq!(results[0]["properties"]["probability"], 0.9);
         let first = &results[0];
         let index = first["ruleIndex"].as_u64().unwrap() as usize;
         assert_eq!(rules[index]["id"], "maintainability/shared-logic");
@@ -209,12 +216,9 @@ mod tests {
         assert_eq!(region["region"]["startLine"], 12);
         assert_eq!(region["region"]["endLine"], 20);
         assert!(first.get("relatedLocations").is_none());
-        assert!(
-            first["message"]["text"]
-                .as_str()
-                .unwrap()
-                .ends_with("Next step: Share one | implementation")
-        );
+        assert!(first["message"]["text"].as_str().unwrap().ends_with(
+            "Right 54% of the time (85 labels).\n\nNext step: Share one | implementation"
+        ));
         assert!(first["partialFingerprints"]["jevgateFingerprint/v1"].is_string());
     }
 
