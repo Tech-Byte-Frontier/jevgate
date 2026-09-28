@@ -4,7 +4,10 @@
 use crate::{revision, schema, storage};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 /// Turn files untouched this long belong to finished sessions and are removed.
 const KEPT_SECS: u64 = 7 * 24 * 60 * 60;
@@ -107,15 +110,21 @@ pub(super) fn save(root: &Path, turn: &Turn) -> Result<()> {
 }
 
 /// The working tree now, as a Git tree, starting from the repository's Git
-/// `index`; the scratch copy is named for the session and the process, so
-/// hooks of parallel edits never share one.
-pub(super) fn snapshot(root: &Path, index: &Path, session: &str) -> Result<String> {
+/// `index` and finished by `deadline`; the scratch copy is named for the
+/// session and the process, so hooks of parallel edits never share one.
+pub(super) fn snapshot(
+    root: &Path,
+    index: &Path,
+    session: &str,
+    deadline: Instant,
+) -> Result<String> {
     let scratch = directory(root)?.join(format!(
         "{}.{}.index",
         file_name(session),
         std::process::id()
     ));
-    revision::snapshot(root, index, &scratch).context("Cannot take a snapshot of the working tree")
+    revision::snapshot(root, index, &scratch, deadline)
+        .context("Cannot take a snapshot of the working tree")
 }
 
 /// Remove turn files, and scratch indexes a killed hook left, idle for a week.

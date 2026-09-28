@@ -179,12 +179,7 @@ fn git_command(root: &Path, args: &[&str]) -> Command {
 }
 
 pub(crate) fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    run(git_command(root, args), args)
-}
-
-/// What `command`, Git given `args`, printed; an error when it failed.
-fn run(mut command: Command, args: &[&str]) -> Result<Vec<u8>> {
-    let output = command.output().context("Cannot run Git")?;
+    let output = git_command(root, args).output().context("Cannot run Git")?;
     ensure!(
         output.status.success(),
         "Git {} failed: {}",
@@ -537,32 +532,6 @@ pub fn has_tree(root: &Path, id: &str) -> bool {
     is_object_id(id) && git(root, &["cat-file", "-e", &format!("{id}^{{tree}}")]).is_ok()
 }
 
-/// The working tree as a Git tree: tracked and untracked files, less ignored
-/// ones. It is written through a copy of `index` at `scratch`, so the
-/// repository's own index and stash list are never touched, and the copy's
-/// stat cache hashes only the files that changed (42-173 ms on corpus clones
-/// of 7,310 and 8,707 files).
-pub fn snapshot(root: &Path, index: &Path, scratch: &Path) -> Result<String> {
-    let _ = std::fs::remove_file(scratch);
-    // Left by a process killed while Git held it, it would stop the next
-    // process given the same ID.
-    let _ = std::fs::remove_file(scratch.with_extension("index.lock"));
-    // A repository without commits may have no index yet.
-    if let Err(error) = std::fs::copy(index, scratch)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        return Err(error).context("Cannot copy the Git index");
-    }
-    let in_scratch = |args: &[&str]| {
-        let mut git = git_command(root, args);
-        git.env("GIT_INDEX_FILE", scratch);
-        run(git, args)
-    };
-    let tree = in_scratch(&["add", "--all"]).and_then(|_| in_scratch(&["write-tree"]));
-    let _ = std::fs::remove_file(scratch);
-    object_id(&tree?)
-}
-
 /// The text of each of `paths` (relative to `root`) in `revision`, a commit
 /// or tree, read by one Git process: a path the revision lacks, or whose
 /// blob is larger than `limit`, not UTF-8 or holds NUL bytes, is left out.
@@ -761,6 +730,9 @@ impl Changes {
         })
     }
 }
+
+mod snapshot;
+pub use snapshot::snapshot;
 
 #[cfg(test)]
 mod tests;

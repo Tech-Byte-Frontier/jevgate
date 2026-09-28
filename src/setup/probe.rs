@@ -16,7 +16,6 @@ use std::{
 const EVENT: &str = r#"{"hook_event_name":"JevGateSetupCheck"}"#;
 /// A hook answers an ignored event at once; a program this slow is not one.
 const WAIT: Duration = Duration::from_secs(10);
-const POLL: Duration = Duration::from_millis(20);
 const INSTALL: &str = "https://tech-byte-frontier.github.io/jevgate/install.html";
 
 /// What is wrong with the `jevgate` that `path` (a `PATH` value) leads the
@@ -106,23 +105,12 @@ pub(super) fn answer(program: &Path) -> Result<(), String> {
 }
 
 /// What `child` printed once it exits, or why it did not within [`WAIT`].
-fn finish(mut child: Child) -> Result<Output, String> {
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if started.elapsed() < WAIT => std::thread::sleep(POLL),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("it did not answer within {} s", WAIT.as_secs()));
-            }
-            Err(error) => return Err(format!("it could not be waited for ({error})")),
-        }
+fn finish(child: Child) -> Result<Output, String> {
+    match crate::child::output_until(child, Instant::now() + WAIT) {
+        Ok(Some(output)) => Ok(output),
+        Ok(None) => Err(format!("it did not answer within {} s", WAIT.as_secs())),
+        Err(error) => Err(format!("it could not be waited for ({error})")),
     }
-    child
-        .wait_with_output()
-        .map_err(|error| format!("its answer could not be read ({error})"))
 }
 
 /// The first line of a program's output, cut for a sentence.

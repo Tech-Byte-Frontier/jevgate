@@ -76,7 +76,7 @@ impl<'a> Hook<'a> {
     }
 
     fn snapshot(&self) -> Result<String> {
-        turn::snapshot(&self.root, &self.index, &self.event.session)
+        turn::snapshot(&self.root, &self.index, &self.event.session, self.deadline)
     }
 
     fn load(&self) -> Option<Turn> {

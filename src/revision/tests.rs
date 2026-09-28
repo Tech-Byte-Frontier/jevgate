@@ -216,7 +216,13 @@ fn paths_are_diffed_in_batches_that_keep_a_renamed_files_names_together() {
 /// outside it.
 fn snapshot_of(project: &Project, root: &Path) -> String {
     let index = index_file(root).unwrap();
-    snapshot(root, &index, &project.0.join(".git/jevgate-test.index")).unwrap()
+    let scratch = project.0.join(".git/jevgate-test.index");
+    snapshot(root, &index, &scratch, far_off()).unwrap()
+}
+
+/// A deadline no test reaches.
+fn far_off() -> std::time::Instant {
+    std::time::Instant::now() + std::time::Duration::from_secs(600)
 }
 
 #[test]
@@ -247,6 +253,126 @@ fn a_snapshot_holds_untracked_files_but_not_ignored_ones_and_leaves_the_index_al
         "a.rs\n",
         "no commit yet"
     );
+}
+
+/// Whether the project's object store holds `id`.
+fn stored(project: &Project, id: &str) -> bool {
+    std::process::Command::new("git")
+        .args(["cat-file", "-e", id])
+        .current_dir(&*project.0)
+        .status()
+        .unwrap()
+        .success()
+}
+
+#[test]
+fn a_file_larger_than_a_snapshot_holds_is_recorded_by_a_stand_in() {
+    let project = Project::new();
+    project.write("lib.rs", "fn a() {}\n");
+    project.write("data.bin", "small\n");
+    project.commit_all();
+    let large = "x".repeat(snapshot::SNAPSHOT_BYTES as usize + 1);
+    project.write("data.bin", &large);
+    project.write("dump.sql", &large);
+    let baseline = large.replace('x', "b");
+    project.write("jevgate-baseline.json", &baseline);
+    let before = snapshot_of(&project, &project.0);
+    let size = |tree: &str, path: &str| -> u64 {
+        let object = format!("{tree}:{path}");
+        project
+            .git(&["cat-file", "-s", &object])
+            .trim()
+            .parse()
+            .unwrap()
+    };
+    assert!(
+        size(&before, "data.bin") < 100,
+        "a tracked file grown past the limit"
+    );
+    assert!(size(&before, "dump.sql") < 100, "an untracked one");
+    assert_eq!(
+        size(&before, "jevgate-baseline.json"),
+        baseline.len() as u64,
+        "the baseline is read whole as the turn began"
+    );
+    let id = project.git(&["hash-object", "dump.sql"]);
+    assert!(!stored(&project, id.trim()), "Git never copied it");
+    project.write("dump.sql", &format!("{large}y"));
+    let after = snapshot_of(&project, &project.0);
+    let changes = Changes::between(&project.0, &before, &after).unwrap();
+    assert_eq!(
+        changes.paths.keys().collect::<Vec<_>>(),
+        [Path::new("dump.sql")],
+        "its stand-in changes with it"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_git_cannot_read_is_left_out_of_a_snapshot() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = Project::new();
+    project.write("lib.rs", "fn a() {}\n");
+    project.commit_all();
+    project.write("new.rs", "fn new() {}\n");
+    project.write("dump.sql", "rows\n");
+    let dump = project.0.join("dump.sql");
+    std::fs::set_permissions(&dump, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = std::fs::File::open(&dump).is_ok();
+    let tree = snapshot_of(&project, &project.0);
+    std::fs::set_permissions(&dump, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let files = project.git(&["ls-tree", "-r", "--name-only", &tree]);
+    if !readable {
+        assert_eq!(files, "lib.rs\nnew.rs\n");
+    }
+}
+
+#[test]
+fn a_rewrite_in_the_second_of_the_last_add_is_in_the_snapshot() {
+    let project = Project::new();
+    let one = "fn a() -> i32 { 1 }\n";
+    project.write("a.rs", one);
+    project.commit_all();
+    let second = |path: &Path| {
+        let modified = std::fs::metadata(path).unwrap().modified().unwrap();
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    };
+    // An entry as new as the index file is read again, not trusted: a copy
+    // of the index stamped a second later must not hide a rewrite of the
+    // same size made in the second Git last wrote the index.
+    for _ in 0..5 {
+        project.write("a.rs", one);
+        project.git(&["add", "a.rs"]);
+        project.write("a.rs", &one.replace('1', "2"));
+        if second(&project.0.join(".git/index")) == second(&project.0.join("a.rs")) {
+            break;
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let tree = snapshot_of(&project, &project.0);
+    let blob = format!("{tree}:a.rs");
+    assert_eq!(
+        project.git(&["cat-file", "blob", &blob]),
+        one.replace('1', "2")
+    );
+}
+
+#[test]
+fn a_snapshot_past_its_deadline_stops() {
+    let project = Project::new();
+    project.write("a.rs", "fn a() {}\n");
+    project.commit_all();
+    let index = index_file(&project.0).unwrap();
+    let scratch = project.0.join(".git/jevgate-test.index");
+    let error = snapshot(&project.0, &index, &scratch, std::time::Instant::now()).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Git ls-files did not finish in the hook's time"
+    );
+    assert!(!scratch.exists());
 }
 
 #[test]
