@@ -233,12 +233,20 @@ file = "examples/missing.rs"
 [[question.failing]]
 file = "private/charge.rs"
 
+[[question.failing]]
+file = "examples/latin1.rs"
+
 [[question.passing]]
 file = "examples/charge.rs"
 "#;
     let (project, context) = project(files);
     project.write("private/charge.rs", "fn charge() {\n    log(body);\n}\n");
     project.write("examples/charge.rs", "fn charge() {\n    log(id);\n}\n");
+    std::fs::write(
+        project.0.join("examples/latin1.rs"),
+        b"// caf\xe9\nfn f() {}\n",
+    )
+    .unwrap();
     let report = tested(&context, &[], &mut evaluator).unwrap();
     assert_eq!(report.exit_code(), 2);
     let (_, examples) = reported(&report);
@@ -254,8 +262,9 @@ file = "examples/charge.rs"
         errors[1].contains("private/charge.rs is outside upload_allow or inside upload_deny"),
         "{errors:?}"
     );
+    assert!(errors[2].contains("not UTF-8"), "{errors:?}");
     assert_eq!(
-        (examples[2]["result"].clone(), examples[2]["file"].clone()),
+        (examples[3]["result"].clone(), examples[3]["file"].clone()),
         (json!("right"), json!("examples/charge.rs"))
     );
     assert_eq!(
@@ -274,7 +283,7 @@ file = "examples/charge.rs"
         let report = tested(&context, &[], &mut evaluator).unwrap();
         let (_, examples) = reported(&report);
         assert!(
-            examples[2]["error"].as_str().unwrap().contains("symlinks"),
+            examples[3]["error"].as_str().unwrap().contains("symlinks"),
             "{examples:?}"
         );
         assert_eq!(evaluator.requests, 1, "a linked file is never sent");
