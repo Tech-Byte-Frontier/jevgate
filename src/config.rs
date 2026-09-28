@@ -444,6 +444,7 @@ mod tests {
     fn default_group_runs_when_nothing_is_configured() {
         let args = configured("", &[], &[]).unwrap();
         assert_eq!(args.rules, catalog::select(catalog::DEFAULT_GROUP).unwrap());
+        assert!(!args.rules.iter().any(|r| r == catalog::HARDCODED_VALUES));
         assert_eq!(args.fail_on, [FailOn::Mature]);
         assert!(args.rule_fail_on.is_empty());
     }
@@ -463,6 +464,7 @@ mod tests {
             &[],
         )
         .unwrap();
+        assert!(!args.rules.iter().any(|r| r == catalog::HARDCODED_VALUES));
         assert_eq!(args.fail_on, [FailOn::Consider]);
         assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Review]);
         assert_eq!(args.levels(catalog::TEST_REDUNDANCY), [FailOn::None]);

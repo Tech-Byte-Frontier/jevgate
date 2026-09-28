@@ -15,7 +15,7 @@ from pathlib import Path
 
 COMMANDS = ["auth", "check", "baseline", "rules", "init", "completions", "man", "serve", "mcp"]
 GROUPS = {
-    "maintainability": "On by default.",
+    "maintainability": "On by default, except hardcoded values: add it with `--rule default --rule hardcoded-values`, or a level for it in `[rules]`.",
     "tests": "On by default. Test value and test redundancy are judged with `--include-tests` or `include_tests = true`; the laws of Bend 2 code are judged without it.",
     "security": "Opt-in: `--rule security`, or a level in `[rules]`.",
     "documentation": "Opt-in: `--rule documentation`, or a level in `[rules]`.",

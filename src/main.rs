@@ -77,10 +77,10 @@ use options::JevCommand;
 /// has a location, a probability and a next step, and undecided answers are
 /// reported as uncertain instead of hidden.
 ///
-/// Rule groups: maintainability (on by default), tests (with
-/// --include-tests), and the opt-in security and documentation groups. By
-/// default only rules and levels measured right at least 80% of the time on
-/// projects JevGate was never tuned on fail the check.
+/// Rule groups: maintainability (on by default, except hardcoded values),
+/// tests (with --include-tests), and the opt-in security and documentation
+/// groups. By default only rules and levels measured right at least 80% of
+/// the time on projects JevGate was never tuned on fail the check.
 #[derive(Parser)]
 #[command(version, after_long_help = options::OVERVIEW)]
 pub struct Cli {

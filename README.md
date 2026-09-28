@@ -19,7 +19,7 @@ JevGate 0.22.0 on [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424
 
 | Group | Rules | On |
 |---|---|---|
-| Maintainability | File organization, function simplification, shared logic, hardcoded values | by default |
+| Maintainability | File organization, function simplification, shared logic; hardcoded values (opt-in) | by default |
 | Tests | Test value (mock-only checks, expected values recomputed with the code's own logic), test redundancy | with `--include-tests` |
 | Security | Injection, sensitive data, unsafe settings, SQL access control, GitHub workflows; each finding names a CWE | `--rule security` |
 | Documentation | Agent instruction files, large and stale docs, duplicated sections, code comments | `--rule documentation` |

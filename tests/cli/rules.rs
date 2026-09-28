@@ -47,6 +47,7 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             .find(|r| r["key"] == key)
             .unwrap()
     };
+    assert_eq!(rule("hardcoded_values")["default_enabled"], false);
     let simplification = &rule("function_simplification")["maturity"];
     assert_eq!(simplification["review"]["mature"], true);
     assert_eq!(simplification["consider"]["mature"], false);
@@ -92,7 +93,7 @@ fn rules_table_names_rules_groups_and_opt_in_rules() {
     );
     assert_eq!(
         row("maintainability/hardcoded-values"),
-        "maintainability/hardcoded-values yes - 13% of 8 17% of 29"
+        "maintainability/hardcoded-values opt-in - 13% of 8 17% of 29"
     );
     assert!(table.contains("BLOCKS: the levels that fail the check by default"));
 }
@@ -141,7 +142,16 @@ fn skipped_rules_and_rule_levels_shape_the_run() {
         JUDGED_RS.replace("total * 2", "total * 86400"),
     )
     .unwrap();
-    assert!(stages(&dry_run(&project, &[])).contains(&"values".to_string()));
+    let values = "values".to_string();
+    assert!(
+        !stages(&dry_run(&project, &[])).contains(&values),
+        "hardcoded values is opt-in"
+    );
+    let opted_in = dry_run(
+        &project,
+        &["--rule", "default", "--rule", "hardcoded-values"],
+    );
+    assert!(stages(&opted_in).contains(&values));
     let preview = dry_run(
         &project,
         &[

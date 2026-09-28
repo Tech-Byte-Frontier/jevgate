@@ -89,7 +89,10 @@ pub fn rules() -> Vec<Rule> {
         Rule {
             id: "maintainability/hardcoded-values",
             group: "maintainability",
-            default_enabled: true,
+            // Opt-in: 6 of its 37 labeled reviews and considers were right on
+            // projects JevGate was never tuned on (16%), against 47 of 85 on
+            // the projects it was tuned on (55%).
+            default_enabled: false,
             key: HARDCODED_VALUES,
             version: rule_version(HARDCODED_VALUES),
             scope: "application functions and module constants that use literal values other than 0, 1, 2 or one-character strings",

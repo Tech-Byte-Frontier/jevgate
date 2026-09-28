@@ -204,6 +204,7 @@ mod tests {
             Rules::List(_) => panic!("rules is a table of levels"),
         };
         assert!(levels(config).is_empty(), "the default rules and gate");
+        assert!(text.contains("hardcoded-values (opt-in)"), "{text}");
         let uncommented: Vec<&str> = text
             .lines()
             .map(|line| {

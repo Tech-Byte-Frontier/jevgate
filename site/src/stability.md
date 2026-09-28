@@ -25,6 +25,7 @@ These are judgments or presentation, and any release can change them; the change
 
 - **Which findings a rule reports**, their levels, wording, probabilities and next steps. Findings are model judgments composed by code, and improving them is most of what releases do. A rule's `version` changes when its questions or composition change, and its cached answers are asked again.
 - **Which rules and levels fail the check by default.** The default level, `mature`, follows the labeled findings: a release marks a rule's reviews or considers mature once they are right at least 80% of the time on projects JevGate was never tuned on, over at least 20 labels, and can drop one that stops measuring up. The changelog gives the numbers. Set `fail_on`, or a level per rule, to keep a fixed policy.
+- **Which rules run by default.** A rule can leave the default group, as hardcoded values did in 0.26, or join it; `--rule` and `[rules]` keep an explicit selection.
 - **The agent text** (`--format agent`): it is written for people and coding agents to read. Scripts should read JSON.
 - **Request bodies and the answer cache**: the cache is safe to delete or restore at any version; unmatched entries are simply not used.
 - **The default model**: a release can pin a newer model version, which re-asks every unit once. Set `model` in `jevgate.toml` to keep one.
