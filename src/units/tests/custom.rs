@@ -161,15 +161,25 @@ fn a_question_added_to_a_cached_project_is_the_only_one_asked() {
     );
 }
 
-#[test]
-fn a_function_no_built_in_request_sends_is_asked_in_one_of_its_own() {
-    let tiny = "fn tiny() -> i32 {\n    1\n}\n";
+/// A project whose file at `path` holds `source`, a function large enough
+/// for function simplification and then one too small, planned with that
+/// rule and `BODY_LOGS`: the question rides in the request that sends the
+/// first, and asks about the second in a request of its own.
+fn one_rides_one_alone(path: &str, source: &str) -> (Project, CheckArgs, Plan) {
     let project = Project::new();
-    project.write("lib.rs", &format!("{}{tiny}", function("charge")));
+    project.write(path, source);
     let options = configured(BODY_LOGS, &[catalog::FUNCTION_SIMPLIFICATION, "custom"]);
     let (_, plan) = planned(&project, &options);
     assert_eq!(custom_keys(&plan, "functions"), ["custom_0_body_logs"]);
     assert_eq!(custom_keys(&plan, "custom"), ["custom_0_body_logs"]);
+    (project, options, plan)
+}
+
+#[test]
+fn a_function_no_built_in_request_sends_is_asked_in_one_of_its_own() {
+    let tiny = "fn tiny() -> i32 {\n    1\n}\n";
+    let (project, _, plan) =
+        one_rides_one_alone("lib.rs", &format!("{}{tiny}", function("charge")));
     let own = first_request(&plan, "custom");
     assert_eq!(own["state"]["functions"][0]["name"], "tiny");
     assert_eq!(own["state"]["file"]["language"], "Rust");
@@ -189,15 +199,9 @@ fn kotlin_function(name: &str) -> String {
 
 #[test]
 fn a_function_question_reaches_the_functions_of_a_preview_language() {
-    let project = Project::new();
     let tiny = "fun id(): Int = 1\n";
-    project.write("Shop.kt", &format!("{}{tiny}", kotlin_function("charge")));
-    let options = configured(BODY_LOGS, &[catalog::FUNCTION_SIMPLIFICATION, "custom"]);
-    let (_, plan) = planned(&project, &options);
-    // `charge` rides in the function-simplification request that sends it;
-    // `id`, too small for that rule, is asked in a request of its own.
-    assert_eq!(custom_keys(&plan, "functions"), ["custom_0_body_logs"]);
-    assert_eq!(custom_keys(&plan, "custom"), ["custom_0_body_logs"]);
+    let source = format!("{}{tiny}", kotlin_function("charge"));
+    let (project, options, plan) = one_rides_one_alone("Shop.kt", &source);
     for (stage, name) in [("functions", "charge"), ("custom", "id")] {
         let request = first_request(&plan, stage);
         assert_eq!(request["state"]["file"]["language"], "Kotlin", "{stage}");
