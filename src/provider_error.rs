@@ -230,6 +230,13 @@ mod tests {
             message(422, Some("{\"detail\":\"private\"}"), None),
             "TypeSafe HTTP 422; request was not retried"
         );
+        // TypeSafe's answer to a request without `state`, as received on
+        // 2026-09-28: its `input` echoes the whole request.
+        let real = r#"{"detail":[{"type":"missing","loc":["body","state"],"msg":"Field required","input":{"questions":{"q":{"type":"noul","instructions":"private question"}},"model":"jev-1.13.0"}}]}"#;
+        assert_eq!(
+            message(422, Some(real), None),
+            "TypeSafe HTTP 422 (invalid request: body.state missing); request was not retried"
+        );
     }
 
     #[test]
