@@ -1,10 +1,10 @@
 //! The `check` arguments, output formats and gate levels; the subcommands and
-//! their help text are in `commands`, and `rules test`'s in `rules`.
+//! their help text are in `commands`, and the rules actions' in `rules`.
 mod commands;
 mod rules;
 
 pub use commands::{BaselineAction, Disposition, JevCommand, OVERVIEW, RulesFormat};
-pub use rules::{RulesAction, RulesTestArgs};
+pub use rules::{ProposeArgs, ProposeFormat, RulesAction, RulesTestArgs};
 
 use clap::{Args, ValueEnum};
 use std::{collections::BTreeMap, path::PathBuf};

@@ -51,7 +51,7 @@ pub(crate) enum Durability {
 }
 
 /// Create `path` as a directory, or accept an existing real (non-symlink) one.
-fn real_directory(path: &Path, message: &'static str) -> Result<()> {
+pub(crate) fn real_directory(path: &Path, message: &'static str) -> Result<()> {
     if path.exists() || path.is_symlink() {
         ensure!(!path.is_symlink() && path.is_dir(), message);
     } else {

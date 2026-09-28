@@ -237,7 +237,7 @@ const RUN_ENDS: u8 = 4;
 /// change touched, the changed functions of one run share a pack, and a
 /// later push that changes another function of the run adds it to that
 /// pack, which is asked again whole.
-pub(super) fn pack_runs<T>(
+pub(crate) fn pack_runs<T>(
     items: Vec<T>,
     key: impl Fn(&T) -> &str,
     state: impl Fn(&T) -> &Value,

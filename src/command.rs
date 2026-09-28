@@ -79,6 +79,14 @@ fn configured(command: JevCommand) -> Result<u8> {
             ..
         } => crate::rules_test::run(&args, &context),
         JevCommand::Rules {
+            action: Some(options::RulesAction::Propose(args)),
+            ..
+        } => crate::custom::propose::run(&args, &context),
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Accept { ids }),
+            ..
+        } => crate::custom::propose::accept(&ids, &context),
+        JevCommand::Rules {
             format,
             action: None,
         } => {

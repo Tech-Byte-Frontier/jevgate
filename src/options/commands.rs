@@ -1,5 +1,5 @@
-//! The subcommands, the baseline actions and their help text; `rules test`
-//! is in `rules`.
+//! The subcommands, the baseline actions and their help text; the rules
+//! actions are in `rules`.
 use super::{CheckArgs, RulesAction};
 use clap::{Subcommand, ValueEnum};
 
@@ -85,7 +85,9 @@ pub enum JevCommand {
     /// labels are mature: by default only they fail the check (`--fail-on
     /// mature`), and the other findings are reported without failing it.
     ///
-    /// `rules test` asks custom questions about their examples.
+    /// `rules test` asks custom questions about their examples, `rules propose`
+    /// proposes custom questions from the project's agent instruction files,
+    /// and `rules accept` adds a proposal to them.
     #[command(args_conflicts_with_subcommands = true, after_long_help = RULES_EXAMPLES)]
     Rules {
         /// `table` for people; `json` adds scope, evidence unit, version, labels per level and decision policy
@@ -181,7 +183,9 @@ Examples:
   jevgate rules                                     Every rule and custom question
   jevgate rules --format json                       With scope, evidence unit, version and policy
   jevgate rules test                                Ask custom questions about their examples
-  jevgate rules test --rule custom/no-body-logs     One question's examples";
+  jevgate rules test --rule custom/no-body-logs     One question's examples
+  jevgate rules propose                             Propose questions from agent instruction files
+  jevgate rules accept no-body-logs                 Move a proposal into .jevgate/questions/";
 
 /// Why a finding was accepted into the baseline.
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -242,6 +246,7 @@ Workflow:
   jevgate baseline                          Accept current findings; later checks fail only on new ones
   jevgate baseline --merge                  Accept a partial check's findings, keeping the rest
   jevgate baseline mark wrong PATH[:LINE]   Record why a finding was accepted; `baseline stats` counts them
+  jevgate rules propose                     Propose custom questions from AGENTS.md and other instruction files
 
 For agents and CI:
   jevgate init --agent claude                        Hooks for Claude Code (also codex, cursor, gemini, opencode)

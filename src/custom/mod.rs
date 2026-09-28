@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 mod examples;
 mod ignored;
+pub mod propose;
 
 pub use examples::{Example, ExampleSpec, Expected, Text};
 pub use ignored::ignored;
@@ -18,11 +19,15 @@ pub use ignored::ignored;
 /// Question files, one per question, relative to the repository root.
 pub const DIRECTORY: &str = ".jevgate/questions";
 
-/// The question directory of the repository at `root`, joined a component
-/// at a time: a canonical Windows root is a `\\?\` path, where `/` is
-/// not a separator.
+/// The question directory of the repository at `root`.
 pub fn directory(root: &Path) -> PathBuf {
-    DIRECTORY
+    within(root, DIRECTORY)
+}
+
+/// `relative`, a slash path, under `root`, joined a component at a time: a
+/// canonical Windows root is a `\\?\` path, where `/` is not a separator.
+pub fn within(root: &Path, relative: &str) -> PathBuf {
+    relative
         .split('/')
         .fold(root.to_path_buf(), |path, part| path.join(part))
 }
@@ -136,13 +141,13 @@ const DEFAULT_THRESHOLD: f64 = crate::policy::REVIEW_PROBABILITY;
 const THRESHOLDS: std::ops::RangeInclusive<f64> = 0.5..=0.99;
 /// Built-in questions stay under 200 characters: one short question, with
 /// the detail in background and guidance.
-const QUESTION_CHARS: usize = 300;
-const TEXT_CHARS: usize = 2_000;
+pub(crate) const QUESTION_CHARS: usize = 300;
+pub(crate) const TEXT_CHARS: usize = 2_000;
 const NEXT_STEP_CHARS: usize = 300;
 const ID_CHARS: usize = 48;
 /// A question file larger than this is refused: one question with its
 /// background and guidance takes a few kilobytes.
-const FILE_BYTES: u64 = 65_536;
+pub(crate) const FILE_BYTES: u64 = 65_536;
 /// The version of a question: enough of a hash to tell edits apart.
 const VERSION_CHARS: usize = 12;
 
@@ -302,7 +307,7 @@ pub fn load(
 
 /// The `.toml` files directly in `directory`, by name; none when it does
 /// not exist. Hidden files are left out, as editors keep backups there.
-fn question_files(directory: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn question_files(directory: &Path) -> Result<Vec<PathBuf>> {
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -327,7 +332,7 @@ fn question_files(directory: &Path) -> Result<Vec<PathBuf>> {
 /// One question file, whose name is its id. It is read as sources are, so a
 /// question file linked to another file is refused rather than followed:
 /// a parse error would show a line of that file, such as a key, in a log.
-fn read_file(path: &Path, shown: PathBuf) -> Result<Question> {
+pub(crate) fn read_file(path: &Path, shown: PathBuf) -> Result<Question> {
     let text = crate::inventory::read_source(path, FILE_BYTES)
         .with_context(|| format!("Cannot read {}", shown.display()))?;
     let spec: Spec =
@@ -432,7 +437,7 @@ fn checked(spec: &Spec) -> Result<Checked, String> {
 
 /// Lowercase letters, digits and single hyphens, starting with a letter:
 /// safe in a question key, a rule name and an allow comment.
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     id.len() <= ID_CHARS
         && id.starts_with(|c: char| c.is_ascii_lowercase())
         && !id.ends_with('-')

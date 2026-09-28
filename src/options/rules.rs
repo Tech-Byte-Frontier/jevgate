@@ -1,7 +1,9 @@
-//! `rules test`: which custom questions to ask about their examples, and
-//! how to ask them.
+//! The rules actions: `rules test` (which custom questions to ask about
+//! their examples, and how), `rules propose` (which instruction files to
+//! read, and how to print what is proposed) and `rules accept` (which
+//! proposals to accept).
 use super::RulesFormat;
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
@@ -17,6 +19,30 @@ pub enum RulesAction {
     /// separating its examples fails here before it misleads a check.
     #[command(after_long_help = RULES_TEST_EXAMPLES)]
     Test(RulesTestArgs),
+    /// Propose custom questions from the lines of AGENTS.md and the other agent instruction files
+    ///
+    /// Splits each instruction file into lines and list items and asks
+    /// TypeSafe Jev of each whether it states a rule for how the code is
+    /// written that one piece of it shows, and which piece: a function, test,
+    /// comment, documentation section, file or change. Each line it calls such
+    /// a rule becomes a custom question that quotes the line and cites its
+    /// file and line, written to `.jevgate/proposals/` (which Git ignores) as a
+    /// note. Read one, edit it, then accept it with `jevgate rules accept ID`;
+    /// nothing reaches the configuration otherwise. Answers are cached, so a
+    /// rerun pays only for changed lines, and it never overwrites a proposal or
+    /// proposes a line that is already a question.
+    #[command(after_long_help = PROPOSE_EXAMPLES)]
+    Propose(ProposeArgs),
+    /// Accept proposed questions: check each one and move it to .jevgate/questions/
+    ///
+    /// Each ID names `.jevgate/proposals/ID.toml`, which must be a valid
+    /// question file whose id no other question uses. Commit the moved file. A
+    /// proposal is a note, which never fails the gate, until its `level` says
+    /// otherwise.
+    Accept {
+        #[arg(required = true, value_name = "ID")]
+        ids: Vec<String>,
+    },
 }
 
 /// The arguments of `rules test`: which questions, and how to ask.
@@ -65,3 +91,57 @@ Examples:
   jevgate rules test                                Exit 1 when a question gets an example wrong
   jevgate rules test --model jev-latest             Try the examples on another model before pinning it
   jevgate rules test --format json                  Every unit's probability, for scripts";
+
+#[derive(Args, Debug)]
+pub struct ProposeArgs {
+    /// Instruction files or directories to read [default: every instruction file an agent loads]
+    ///
+    /// A directory selects the agent instruction files under it. A file is
+    /// read whatever its name, such as CONTRIBUTING.md.
+    pub paths: Vec<PathBuf>,
+    /// Output format [default: table; json with --show-requests]
+    #[arg(long, value_enum)]
+    pub format: Option<ProposeFormat>,
+    /// List the files, lines and planned requests without credentials, network or writes
+    ///
+    /// Requests the cache already answers are counted apart and cost nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// With --dry-run, include every request body (the exact lines and questions)
+    #[arg(long, requires = "dry_run")]
+    pub show_requests: bool,
+    /// Credential file holding TYPESAFE_API_KEY [default: <repository root>/.env]
+    ///
+    /// The TYPESAFE_API_KEY environment variable takes precedence.
+    #[arg(long, value_name = "FILE")]
+    pub env_file: Option<PathBuf>,
+}
+
+impl ProposeArgs {
+    pub fn output_format(&self) -> ProposeFormat {
+        self.format.unwrap_or(if self.show_requests {
+            ProposeFormat::Json
+        } else {
+            ProposeFormat::Table
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum ProposeFormat {
+    /// Write the proposals to .jevgate/proposals/ and list them
+    Table,
+    /// Print the proposals as [[question]] tables for jevgate.toml; write nothing
+    Toml,
+    /// Print every line with its answers and proposal; write nothing
+    Json,
+}
+
+const PROPOSE_EXAMPLES: &str = "\
+Examples:
+  jevgate rules propose --dry-run                 Files, lines and price; no key, no network
+  jevgate rules propose                           Write proposals to .jevgate/proposals/
+  jevgate rules propose AGENTS.md docs/STYLE.md   Only these files
+  jevgate rules propose --format toml             Print [[question]] tables for jevgate.toml
+  jevgate rules propose --format json             Every line with Jev's answers
+  jevgate rules accept never-log-request-bodies   Accept one after editing it";
