@@ -242,7 +242,7 @@ Examples:
   jevgate check --fail-on review                   Fail on every review, not only on mature rules
   jevgate check --fail-on review --fail-on security=consider
   jevgate check --dry-run --show-requests          Exactly what would be uploaded, offline
-  jevgate check --cache-only                       Replay cached answers; never contact TypeSafe
+  jevgate check --cache-only                       Replay cached answers; never contact the provider
 
 Reading the JSON report (--format json or .jevgate/latest.json):
   complete           false when any selected file was not judged; the exit code is then 2

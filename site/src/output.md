@@ -11,6 +11,8 @@
 
 Agent output is colored on a terminal; `--color never`, or `NO_COLOR` set to any value, turns it off, and `--color always` or `CLICOLOR_FORCE` turns it on for pipes and logs.
 
+The first line, also the title of the GitHub job summary, sums up the run: its status, the gate and why it failed, the files, what a `--base` check judged (`changed lines since 1a2b3c4`, or `whole files changed since 1a2b3c4` with `--whole-files`; the report's `scope` records it), the API requests (`via OpenRouter` or `via Vercel AI Gateway` when a gateway answered), the input tokens and the estimated cost, which is `cost unknown` when a response reported no token usage or the model that answered has no known price.
+
 Findings are `review` (act on it), `consider` (worth a look) or `note` (optional, shown with `--verbose`, never failing the gate). A file whose answers stay undecided is `uncertain`, and one that cannot be judged without more evidence is `needs-context`; neither is hidden or counted as clear. A finding's message shows the probability that set its level; a note shows none, and the JSON report keeps every raw value. Finished plans that share a directory are one finding. A hardcoded-value finding that cannot name its value is one level lower.
 
 | Exit code | Meaning |
