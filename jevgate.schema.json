@@ -322,7 +322,7 @@
       "type": "integer"
     },
     "model": {
-      "description": "TypeSafe model; a pinned version keeps results repeatable. `--model` overrides it.",
+      "description": "Model, as the key's provider names it; a pinned version keeps results repeatable. `--model` overrides it. Default: `jev-1.13.0` with a TypeSafe key, `typesafe/jev-1.13` with an OpenRouter key, `typesafe-ai/jev` with a Vercel AI Gateway key.",
       "type": "string"
     },
     "rules": {

@@ -100,6 +100,7 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         dry_run: args.dry_run,
         initial_requests: Vec::new(),
         requested_model: args.model().to_owned(),
+        provider: args.provider.name().into(),
         api_requests: current.requests,
         concurrency: args.concurrency,
         paid_input_tokens: 0,

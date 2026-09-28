@@ -106,7 +106,9 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # File organization judges test files either way.
 # include_tests = true
 
-# The model, pinned so results stay repeatable; --model overrides it.
+# The model, pinned so results stay repeatable; --model overrides it. The
+# default follows the key: this one for TypeSafe, typesafe/jev-1.13 for
+# OpenRouter, typesafe-ai/jev for Vercel AI Gateway.
 # model = "{model}"
 
 # Budgets for one invocation; flags can only lower them.

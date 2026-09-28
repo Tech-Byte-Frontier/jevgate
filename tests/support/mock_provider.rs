@@ -1,6 +1,7 @@
 //! A provider on 127.0.0.1 for tests: each request gets the reply a closure
 //! computes from it, over plain HTTP/1.1 with one request per connection,
-//! and every request is recorded.
+//! and every request is recorded; and scripted answers to any request.
+use serde_json::Value;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
@@ -27,7 +28,7 @@ impl Received {
     }
 
     /// The body as JSON.
-    pub fn json(&self) -> serde_json::Value {
+    pub fn json(&self) -> Value {
         serde_json::from_str(&self.body).unwrap()
     }
 }
@@ -41,7 +42,7 @@ pub struct Reply {
 }
 
 impl Reply {
-    pub fn json(status: u16, body: &serde_json::Value) -> Self {
+    pub fn json(status: u16, body: &Value) -> Self {
         Self {
             status,
             headers: Vec::new(),
@@ -134,4 +135,58 @@ fn serve(stream: TcpStream, log: &Mutex<Vec<Received>>, respond: &Respond) {
     }
     // The client may have given up waiting; a failed write is its business.
     let _ = out.write_all(format!("{head}\r\n{}", reply.body).as_bytes());
+}
+
+/// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider,
+/// or a note where the middle says the code is fine), 2 the top (review),
+/// 3 spreads probability (uncertain), 4 leans to the top without reaching review.
+pub fn answer(request: &Value, level: usize) -> Value {
+    let answers = request["questions"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, q)| (name.clone(), typed_answer(q, level)))
+        .collect::<serde_json::Map<_, _>>();
+    serde_json::json!({"model":request["model"],"answers":answers,"usage":{"input_tokens":10,"output_tokens":0}})
+}
+
+/// A valid answer of the question's type at `level` (see [`answer`]).
+fn typed_answer(question: &Value, level: usize) -> Value {
+    match question["type"].as_str().unwrap() {
+        "noul" => {
+            let noul = [0.05, 0.5, 0.95, 0.5, 0.5][level];
+            serde_json::json!({"type":"noul","noul":noul})
+        }
+        "score" => {
+            let p = [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.4, 0.2, 0.4],
+                [0.1, 0.3, 0.6],
+            ][level];
+            serde_json::json!({"type":"score","score":p[1] + 2.0 * p[2],"confidence":1.0,
+                "probabilities":{"0":p[0],"1":p[1],"2":p[2]}})
+        }
+        _ => choice_answer(question["criteria"].as_object().unwrap()),
+    }
+}
+
+/// A certain Choice of `none` when offered, else the first option.
+fn choice_answer(options: &serde_json::Map<String, Value>) -> Value {
+    let chosen = if options.contains_key("none") {
+        "none"
+    } else {
+        options.keys().next().unwrap()
+    };
+    let probabilities: serde_json::Map<_, _> = options
+        .keys()
+        .map(|k| {
+            (
+                k.clone(),
+                serde_json::json!(if k == chosen { 1.0 } else { 0.0 }),
+            )
+        })
+        .collect();
+    serde_json::json!({"type":"choice","choice":chosen,"confidence":1.0,"probabilities":probabilities})
 }

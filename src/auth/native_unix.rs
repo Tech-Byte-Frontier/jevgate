@@ -1,10 +1,10 @@
 //! Secret Service reads and deletion never invoke its Unlock or Prompt methods.
 //! The higher-level keyring library can open a dialog even when just reading.
-use super::secret::Secret;
 use anyhow::{Result, ensure};
 use secret_service::{EncryptionType, blocking::SecretService};
 use std::collections::HashMap;
 use zbus::blocking::{Connection, Proxy};
+use zeroize::Zeroizing;
 
 fn attributes() -> HashMap<&'static str, &'static str> {
     HashMap::from([("service", "jevgate"), ("username", "typesafe-api-key")])
@@ -19,15 +19,16 @@ fn unlocked_item<'a>(
     Ok(items.unlocked.pop())
 }
 
-pub fn get() -> Result<Option<Secret>> {
-    (|| -> Result<Option<Secret>> {
+/// The saved credential's text, as `store` wrote it.
+pub fn get() -> Result<Option<Zeroizing<String>>> {
+    (|| -> Result<Option<Zeroizing<String>>> {
         let service = SecretService::connect(EncryptionType::Dh)?;
         let Some(item) = unlocked_item(&service)? else {
             return Ok(None);
         };
-        let bytes = zeroize::Zeroizing::new(item.get_secret()?);
+        let bytes = Zeroizing::new(item.get_secret()?);
         let value = std::str::from_utf8(&bytes)?;
-        Secret::parse(value.to_owned()).map(Some)
+        Ok(Some(Zeroizing::new(value.to_owned())))
     })()
     .map_err(|_| anyhow::anyhow!(
         "Cannot read the system credential store; unlock it and retry, or use TYPESAFE_API_KEY or an --env-file. Run jevgate auth login to configure credentials"

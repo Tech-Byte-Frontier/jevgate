@@ -242,6 +242,9 @@ pub struct Report {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub initial_requests: Vec<serde_json::Value>,
     pub requested_model: String,
+    /// Whose key the requests use: `typesafe`, `openrouter` or `vercel`.
+    #[serde(default)]
+    pub provider: String,
     pub decision_policy: BTreeMap<String, f64>,
     /// The configured gate policy; classification does not depend on it.
     #[serde(default)]

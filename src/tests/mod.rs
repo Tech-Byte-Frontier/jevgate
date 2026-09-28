@@ -9,6 +9,7 @@ use std::path::PathBuf;
 mod gating;
 #[path = "../../tests/support/mock_provider.rs"]
 pub(super) mod mock_provider;
+pub(super) use mock_provider::answer;
 mod scope;
 #[path = "../../tests/support/temp_dir.rs"]
 mod temp_dir;
@@ -103,55 +104,6 @@ pub(super) fn long_function(name: &str) -> String {
     format!(
         "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let mut largest = i32::MIN;\n    for value in values {{\n        if *value > largest {{\n            largest = *value;\n        }}\n    }}\n    let mut smallest = i32::MAX;\n    for value in values {{\n        if *value < smallest {{\n            smallest = *value;\n        }}\n    }}\n    let spread = largest - smallest;\n    let doubled = total * 2;\n    doubled + spread + 1\n}}\n"
     )
-}
-
-/// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider,
-/// or a note where the middle says the code is fine), 2 the top (review),
-/// 3 spreads probability (uncertain), 4 leans to the top without reaching review.
-pub(super) fn answer(request: &Value, level: usize) -> Value {
-    let answers = request["questions"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(name, q)| (name.clone(), typed_answer(q, level)))
-        .collect::<serde_json::Map<_, _>>();
-    json!({"model":request["model"],"answers":answers,"usage":{"input_tokens":10,"output_tokens":0}})
-}
-
-/// A valid answer of the question's type at `level` (see [`answer`]).
-fn typed_answer(question: &Value, level: usize) -> Value {
-    match question["type"].as_str().unwrap() {
-        "noul" => {
-            let noul = [0.05, 0.5, 0.95, 0.5, 0.5][level];
-            json!({"type":"noul","noul":noul})
-        }
-        "score" => {
-            let p = [
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.4, 0.2, 0.4],
-                [0.1, 0.3, 0.6],
-            ][level];
-            json!({"type":"score","score":p[1] + 2.0 * p[2],"confidence":1.0,
-                "probabilities":{"0":p[0],"1":p[1],"2":p[2]}})
-        }
-        _ => choice_answer(question["criteria"].as_object().unwrap()),
-    }
-}
-
-/// A certain Choice of `none` when offered, else the first option.
-fn choice_answer(options: &serde_json::Map<String, Value>) -> Value {
-    let chosen = if options.contains_key("none") {
-        "none"
-    } else {
-        options.keys().next().unwrap()
-    };
-    let probabilities: serde_json::Map<_, _> = options
-        .keys()
-        .map(|k| (k.clone(), json!(if k == chosen { 1.0 } else { 0.0 })))
-        .collect();
-    json!({"type":"choice","choice":chosen,"confidence":1.0,"probabilities":probabilities})
 }
 
 #[derive(Default)]

@@ -2,8 +2,11 @@
 //! project helper is here.
 mod auth;
 mod changes;
+mod gateway;
 mod manual;
 mod mcp;
+#[path = "../support/mock_provider.rs"]
+mod mock_provider;
 mod preview;
 mod rules;
 #[path = "../support/temp_dir.rs"]
@@ -18,11 +21,16 @@ impl Project {
     fn new() -> Self {
         Self(temp_dir::TempDir::new("jevgate-cli"))
     }
+    /// `jevgate` in the project, with no key or endpoint from the caller's
+    /// environment and credentials saved only in the project.
     fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jevgate"));
         command
             .current_dir(&self.0)
             .env_remove("TYPESAFE_API_KEY")
+            .env_remove("OPENROUTER_API_KEY")
+            .env_remove("AI_GATEWAY_API_KEY")
+            .env_remove("JEVGATE_BASE_URL")
             .env_remove("CI")
             .env("JEVGATE_CREDENTIAL_STORE", "file")
             .env("JEVGATE_CONFIG_DIR", self.0.join("isolated-auth"));

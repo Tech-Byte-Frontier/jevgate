@@ -1,9 +1,9 @@
-use crate::provider::{Endpoint, Service, TYPESAFE};
+use crate::provider::{Endpoint, Provider, Service, TYPESAFE};
 use crate::provider_error::{
     Failure, Interrupted, ProviderError, Unsent, provider_error, retryable,
 };
 use crate::response_headers::{REQUEST_ID, request_id, retry_after};
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use serde_json::Value;
 use std::{
     path::Path,
@@ -129,6 +129,8 @@ pub(crate) fn work_queue<T: Sync, R: Send>(
 
 pub struct Client {
     agent: ureq::Agent,
+    /// The provider the check planned its model for; the key must be its.
+    provider: Provider,
     endpoint: Endpoint,
     key_file: std::path::PathBuf,
     key: Option<crate::auth::sources::Credential>,
@@ -149,23 +151,38 @@ fn agent(timeout: Duration) -> ureq::Agent {
 }
 
 impl Client {
-    pub fn new(key_file: &Path, explicit_file: bool) -> Self {
-        Self {
+    /// A client for `provider`'s key, sending to its endpoint; says on
+    /// stderr when `JEVGATE_BASE_URL` sends requests elsewhere.
+    pub fn new(key_file: &Path, explicit_file: bool, provider: Provider) -> Result<Self> {
+        let endpoint = Endpoint::new(provider)?;
+        if endpoint.is_custom() {
+            note!("Sending requests to {}", endpoint.describe());
+        }
+        Ok(Self {
             agent: agent(ATTEMPT_TIMEOUT),
-            endpoint: Endpoint::new(&TYPESAFE),
+            provider,
+            access: ProviderAccess {
+                service: endpoint.service,
+                ..Default::default()
+            },
+            endpoint,
             key_file: key_file.into(),
             key: None,
             explicit_file,
-            access: ProviderAccess::default(),
-        }
+        })
     }
 
     fn credential(&mut self) -> Result<&str> {
         if self.key.is_none() {
-            self.key = Some(crate::auth::sources::resolve(
-                &self.key_file,
-                self.explicit_file,
-            )?);
+            let credential = crate::auth::sources::resolve(&self.key_file, self.explicit_file)?;
+            ensure!(
+                credential.provider == self.provider,
+                "The key in {} is for {}, but this check planned its requests for {}; rerun the check",
+                credential.source,
+                credential.provider.service().label,
+                self.provider.service().label
+            );
+            self.key = Some(credential);
         }
         Ok(self.key.as_ref().unwrap().key.expose())
     }
@@ -574,13 +591,6 @@ fn send(agent: &ureq::Agent, endpoint: &Endpoint, key: &str, request: &Value) ->
         fields.insert("request_id".into(), Value::String(id));
     }
     Ok(answer)
-}
-
-#[cfg(test)]
-pub(super) fn key_from_file(path: &Path) -> Result<String> {
-    crate::auth::sources::key_from_file(path)?
-        .map(|key| key.expose().to_owned())
-        .ok_or_else(|| anyhow::anyhow!("Credential file has no TYPESAFE_API_KEY"))
 }
 
 #[cfg(test)]

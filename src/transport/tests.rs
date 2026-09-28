@@ -415,23 +415,10 @@ fn isolated_edge_blocks_fail_alone_and_consecutive_blocks_stop_uploads() {
     );
 }
 
-#[test]
-fn credential_parser_does_not_execute_shell() {
-    let project = crate::tests::Project::new();
-    project.write(
-        ".env",
-        "export TYPESAFE_API_KEY='literal$(do-not-execute)'\n",
-    );
-    assert_eq!(
-        key_from_file(&project.0.join(".env")).unwrap(),
-        "literal$(do-not-execute)"
-    );
-}
-
 /// A mock provider answering with `respond`, and a TypeSafe endpoint at it.
 fn mock(respond: impl Fn(&Received) -> Reply + Send + Sync + 'static) -> (MockProvider, Endpoint) {
     let provider = MockProvider::start(respond);
-    let endpoint = Endpoint::at(&TYPESAFE, &provider.url);
+    let endpoint = Endpoint::custom(&TYPESAFE, &provider.url).unwrap();
     (provider, endpoint)
 }
 

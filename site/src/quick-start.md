@@ -2,7 +2,7 @@
 
 ```sh
 jevgate init                              # write a commented jevgate.toml for this repository
-jevgate auth login                        # validate and save your TypeSafe API key
+jevgate auth login                        # validate and save your API key: TypeSafe, OpenRouter or Vercel
 jevgate check --dry-run --show-requests   # see exactly what would be uploaded; free and offline
 jevgate check --report                    # review, then open a local HTML dashboard
 jevgate baseline                          # accept today's findings; later checks fail only on new ones

@@ -4,12 +4,14 @@ use clap::{Subcommand, ValueEnum};
 
 #[derive(Subcommand)]
 pub enum JevCommand {
-    /// Save, inspect or remove your TypeSafe API credential
+    /// Save, inspect or remove your API key: TypeSafe, OpenRouter or Vercel AI Gateway
     ///
-    /// A check finds its key in this order: the TYPESAFE_API_KEY environment
-    /// variable, then the file named by `check --env-file` (by default the
-    /// repository's `.env`), then the key saved by `jevgate auth login`. In CI, set TYPESAFE_API_KEY
-    /// from a secret; nothing needs to be saved.
+    /// A check uses the first key it finds: TYPESAFE_API_KEY, OPENROUTER_API_KEY
+    /// or AI_GATEWAY_API_KEY in the environment, in that order; then the file
+    /// named by `check --env-file` (the same names), else TYPESAFE_API_KEY in
+    /// the repository's `.env`; then the key saved by `jevgate auth login`.
+    /// The key goes only to its own provider. In CI, set one variable from a
+    /// secret; nothing needs to be saved.
     #[command(after_long_help = AUTH_EXAMPLES)]
     Auth {
         #[command(subcommand)]
@@ -183,7 +185,7 @@ Examples:
 pub const OVERVIEW: &str = "\
 Workflow:
   jevgate init                              Write jevgate.toml: upload scope, rules and gate
-  jevgate auth login                        Save an API key (or set TYPESAFE_API_KEY)
+  jevgate auth login                        Save an API key: TypeSafe, OpenRouter or Vercel AI Gateway
   jevgate check --dry-run --show-requests   Print every request body; no key, no network
   jevgate check                             Review and apply the gate
   jevgate baseline                          Accept current findings; later checks fail only on new ones
@@ -211,7 +213,11 @@ Files (at the repository root):
   .jevgate/report.html    HTML dashboard, with --report
 
 Environment:
-  TYPESAFE_API_KEY          API key; takes precedence over every saved credential
+  TYPESAFE_API_KEY          A TypeSafe key; wins over the keys below and every saved credential
+  OPENROUTER_API_KEY        An OpenRouter key, used when TYPESAFE_API_KEY is not set
+  AI_GATEWAY_API_KEY        A Vercel AI Gateway key, used when neither is set
+  JEVGATE_BASE_URL          Send requests to this API root instead (https, or http to localhost),
+                            for a self-hosted proxy; never read from jevgate.toml or .env
   JEVGATE_CREDENTIAL_STORE  Where `auth login` saves: auto, keyring or file
   JEVGATE_CONFIG_DIR        Absolute directory for file-stored credentials
   CI                        When set, --report writes the dashboard without opening a browser
@@ -273,10 +279,11 @@ Examples:
 
 const AUTH_EXAMPLES: &str = "\
 Examples:
-  jevgate auth login                               Hidden prompt; saved in the OS credential store
-  jevgate auth login --with-key < key.txt          Read the key from stdin
+  jevgate auth login                               Asks the kind of key, then a hidden prompt
+  jevgate auth login --with-key < key.txt          Read a TypeSafe key from stdin
+  jevgate auth login --with-key --provider openrouter < key.txt
   jevgate auth status                              Show which key a check would use and verify it
-  jevgate auth status --offline --json             Same, without contacting TypeSafe
+  jevgate auth status --offline --json             Same, without contacting the provider
   jevgate auth logout";
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]

@@ -17,7 +17,7 @@ const VERSIONS: [&str; 4] = ["2025-06-18", "2025-11-25", "2025-03-26", "2024-11-
 const MAX_FINDINGS: usize = 50;
 
 const INSTRUCTIONS: &str = "JevGate reviews code by asking TypeSafe Jev small questions about functions, files, tests and docs. \
-Call jevgate_check with `base` (such as origin/main) to review what changed; it uses the repository's jevgate.toml and TYPESAFE_API_KEY, and paid requests only for code the answer cache lacks. \
+Call jevgate_check with `base` (such as origin/main) to review what changed; it uses the repository's jevgate.toml and the API key `jevgate auth status` shows, and paid requests only for code the answer cache lacks. \
 Fix each `review` finding; for a `consider`, fix it or explain why the code should stay. \
 Findings marked to fail the gate (`gate: fails` in jevgate_findings) decide the exit code; by default only rules and levels measured right at least 80% of the time do, and the rest are reported. \
 Exit code 2 means the run could not finish: report it, never treat it as a pass. \
@@ -224,7 +224,7 @@ fn tools() -> Value {
         {
             "name": "jevgate_check",
             "title": "Review code with JevGate",
-            "description": "Run `jevgate check` in the repository and return its ranked findings, each with a location, probability and next step. Uses jevgate.toml and TYPESAFE_API_KEY; unchanged code is answered from the cache for free, and dry_run costs nothing. Can take minutes on a large change.",
+            "description": "Run `jevgate check` in the repository and return its ranked findings, each with a location, probability and next step. Uses jevgate.toml and the API key `jevgate auth status` shows; unchanged code is answered from the cache for free, and dry_run costs nothing. Can take minutes on a large change.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

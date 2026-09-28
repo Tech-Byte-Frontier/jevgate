@@ -30,7 +30,7 @@ fn validate(args: &CheckArgs) -> Result<()> {
 }
 
 /// The credential file: `--env-file` from the invocation directory, else the root `.env`.
-fn credential_path(args: &CheckArgs, context: &ConfigContext) -> std::path::PathBuf {
+pub(crate) fn credential_path(args: &CheckArgs, context: &ConfigContext) -> std::path::PathBuf {
     args.env_file
         .as_ref()
         .map(|p| context.input_path(p))
@@ -81,8 +81,11 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         return Ok(0);
     }
     let store = store.unwrap();
-    let mut client =
-        transport::Client::new(&credential_path(args, context), args.env_file.is_some());
+    let mut client = transport::Client::new(
+        &credential_path(args, context),
+        args.env_file.is_some(),
+        args.provider,
+    )?;
     let mut session = evaluate::Session {
         args,
         context,

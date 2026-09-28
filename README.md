@@ -35,13 +35,13 @@ cargo binstall jevgate            # any platform, with cargo-binstall
 cargo install jevgate --locked    # build from source; needs Rust 1.90 or later
 ```
 
-Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs a [TypeSafe API key](https://console.typesafe.ai/settings/keys). [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, shell completions and man pages.
+Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs an API key from [TypeSafe](https://console.typesafe.ai/settings/keys), [OpenRouter](https://openrouter.ai/settings/keys) or [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys), which serve the same model at the same price. [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, shell completions and man pages.
 
 ## Quick start
 
 ```sh
 jevgate init                              # write a commented jevgate.toml for this repository
-jevgate auth login                        # validate and save your TypeSafe API key
+jevgate auth login                        # validate and save your API key: TypeSafe, OpenRouter or Vercel
 jevgate check --dry-run --show-requests   # see exactly what would be uploaded; free and offline
 jevgate check --report                    # review, then open a local HTML dashboard
 jevgate baseline                          # accept today's findings; later checks fail only on new ones

@@ -93,7 +93,8 @@ const OUTPUT: &str = "Output";
 const BUDGETS: &str = "Model, budgets and cache";
 const WATCH: &str = "Watch";
 
-/// The model used when neither `--model` nor `model` in jevgate.toml names one.
+/// The model asked with a TypeSafe key when neither `--model` nor `model` in
+/// jevgate.toml names one.
 pub const DEFAULT_MODEL: &str = "jev-1.13.0";
 /// Cache lifetime for an alias (a model name without an `x.y.z` version, such
 /// as `jev-latest`), in seconds.
@@ -179,6 +180,10 @@ pub struct CheckArgs {
     /// who reads an error-detail finding's responses.
     #[arg(skip)]
     pub project: Option<String>,
+    /// The provider of the key the check will use, found before planning so
+    /// that its default model is the one asked; never from jevgate.toml.
+    #[arg(skip)]
+    pub provider: crate::provider::Provider,
     /// Output format [default: agent; jsonl with --watch; json with --show-requests]
     #[arg(long, value_enum, help_heading = OUTPUT)]
     pub format: Option<Format>,
@@ -206,10 +211,12 @@ pub struct CheckArgs {
     /// Follow-up requests depend on answers and are not known in advance.
     #[arg(long, requires = "dry_run", help_heading = OUTPUT)]
     pub show_requests: bool,
-    /// TypeSafe model; pin a version for repeatable results [default: jev-1.13.0]
+    /// Model, as the key's provider names it; pin a version for repeatable results [default: jev-1.13.0]
     ///
-    /// Also set by `model` in jevgate.toml. Answers are cached per model, so
-    /// changing it re-asks every unit.
+    /// The default follows the key: jev-1.13.0 with a TypeSafe key,
+    /// typesafe/jev-1.13 with an OpenRouter key, typesafe-ai/jev with a Vercel
+    /// AI Gateway key. Also set by `model` in jevgate.toml. Answers are cached
+    /// per model, so changing it re-asks every unit.
     #[arg(long, help_heading = BUDGETS)]
     pub model: Option<String>,
     /// Stop after this many API attempts in this invocation, watch updates included
@@ -237,12 +244,14 @@ pub struct CheckArgs {
     /// Ignore cached answers for this invocation and ask again
     #[arg(long, help_heading = BUDGETS)]
     pub refresh: bool,
-    /// Use cached answers only and never contact TypeSafe; unanswered units leave the run incomplete
+    /// Use cached answers only and never contact the provider; unanswered units leave the run incomplete
     #[arg(long, conflicts_with = "refresh", help_heading = BUDGETS)]
     pub cache_only: bool,
-    /// Credential file holding TYPESAFE_API_KEY [default: <repository root>/.env]
+    /// Credential file holding TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY [default: <repository root>/.env]
     ///
-    /// The TYPESAFE_API_KEY environment variable takes precedence.
+    /// Keys in the environment take precedence. The repository's .env is
+    /// read only for TYPESAFE_API_KEY: a gateway's key there is usually the
+    /// application's own.
     #[arg(long, value_name = "FILE", help_heading = BUDGETS)]
     pub env_file: Option<PathBuf>,
     /// Keep running and re-check the selected files after each save
@@ -394,9 +403,12 @@ impl CheckArgs {
             .collect()
     }
 
-    /// The model to ask: `--model`, else configuration, else [`DEFAULT_MODEL`].
+    /// The model to ask: `--model`, else configuration, else the default of
+    /// the key's provider ([`DEFAULT_MODEL`] for TypeSafe).
     pub fn model(&self) -> &str {
-        self.model.as_deref().unwrap_or(DEFAULT_MODEL)
+        self.model
+            .as_deref()
+            .unwrap_or(self.provider.service().default_model)
     }
 
     pub fn cache_ttl_secs(&self) -> u64 {

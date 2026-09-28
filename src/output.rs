@@ -164,12 +164,23 @@ pub(crate) fn headline(report: &Report) -> String {
     };
     let cost = cost(report.estimated_usd);
     format!(
-        "JevGate: {} · {gate} · {} files · {} API requests · {} input tokens{cost}",
+        "JevGate: {} · {gate} · {} files · {} API requests{} · {} input tokens{cost}",
         report.status,
         report.files.len(),
         report.api_requests,
+        via(report),
         report.paid_input_tokens
     )
+}
+
+/// ` via OpenRouter` when a gateway answered, so a key found in the
+/// environment never bills another account unseen; nothing for TypeSafe.
+fn via(report: &Report) -> String {
+    crate::provider::Provider::named(&report.provider)
+        .filter(|provider| *provider != crate::provider::Provider::Typesafe)
+        .map_or(String::new(), |provider| {
+            format!(" via {}", provider.service().label)
+        })
 }
 
 /// The headline, green when the gate passed and red when it failed, then run errors.

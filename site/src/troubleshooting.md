@@ -4,8 +4,14 @@
 
 Exit code 2 means the run could not finish, or the configuration or command line is invalid. The message says which; an outage never passes as a clean review.
 
-**`No API key configured. Run jevgate auth login, set TYPESAFE_API_KEY, or provide --env-file PATH`**
-: A check reads `TYPESAFE_API_KEY` from the environment, then `--env-file` or the repository's `.env`, then the key saved by `jevgate auth login`. `jevgate auth status` shows which one a check would use and verifies it. On GitHub Actions, pull requests from forks don't receive secrets: skip the job for them (`if: github.event.pull_request.head.repo.full_name == github.repository`).
+**`No API key configured. Run jevgate auth login, set TYPESAFE_API_KEY (or OPENROUTER_API_KEY, AI_GATEWAY_API_KEY), or provide --env-file PATH`**
+: A check reads `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY` or `AI_GATEWAY_API_KEY` from the environment, then `--env-file` (or `TYPESAFE_API_KEY` in the repository's `.env`), then the key saved by `jevgate auth login`. A gateway's key in the repository's `.env` is read only with `--env-file .env`, since it is usually the application's own; the message says so when one is there. `jevgate auth status` shows which key a check would use and verifies it. On GitHub Actions, pull requests from forks don't receive secrets: skip the job for them (`if: github.event.pull_request.head.repo.full_name == github.repository`).
+
+**`TYPESAFE_API_KEY environment variable: the key was issued by OpenRouter (it starts with sk-or-), not by TypeSafe`**
+: A key goes only to the provider that issued it. Set it in the variable the message names, or save it with `jevgate auth login --provider openrouter`.
+
+**`OpenRouter HTTP 404 (not found; check the model name)`**
+: A model name is sent as written, and each provider has its own: `jev-1.13.0` on TypeSafe, `typesafe/jev-1.13` on OpenRouter, `typesafe-ai/jev` on Vercel AI Gateway. A `model` in `jevgate.toml` written for one provider needs `--model` with another provider's key.
 
 **`Cannot find revision …; in CI, fetch it (for example fetch-depth: 0)`**, or **`… and HEAD share no history`**
 : `--base` needs the history back to the fork point. Check out with `fetch-depth: 0`.

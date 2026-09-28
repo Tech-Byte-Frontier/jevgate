@@ -35,7 +35,7 @@ pub struct Config {
     pub max_context_bytes: Option<u64>,
     /// The level for rules without their own, like `--fail-on`. Default: ["mature"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate rules` shows them.
     pub fail_on: Vec<String>,
-    /// TypeSafe model; a pinned version keeps results repeatable. `--model` overrides it.
+    /// Model, as the key's provider names it; a pinned version keeps results repeatable. `--model` overrides it. Default: `jev-1.13.0` with a TypeSafe key, `typesafe/jev-1.13` with an OpenRouter key, `typesafe-ai/jev` with a Vercel AI Gateway key.
     pub model: Option<String>,
     /// Cache lifetime in seconds for an alias, a model name without an x.y.z version such as `jev-latest`; pinned versions never expire. Default: 3600.
     pub cache_ttl_secs: Option<u64>,

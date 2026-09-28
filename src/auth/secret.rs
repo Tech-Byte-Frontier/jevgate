@@ -3,6 +3,8 @@ use std::io::Read;
 use zeroize::Zeroizing;
 
 pub const MAX_KEY_BYTES: usize = 4096;
+/// A saved credential holds a key and, for a gateway, its provider's name.
+pub const MAX_STORED_BYTES: usize = MAX_KEY_BYTES + 32;
 
 // Intentionally no Debug/Display/Serialize implementation.
 pub struct Secret(Zeroizing<String>);
@@ -14,7 +16,7 @@ impl Secret {
             !trimmed.is_empty()
                 && trimmed.len() <= MAX_KEY_BYTES
                 && trimmed.bytes().all(|b| b.is_ascii_graphic()),
-            "Invalid TYPESAFE_API_KEY: provide one nonempty key without spaces or embedded newlines"
+            "Invalid API key: provide one nonempty key without spaces or embedded newlines"
         );
         Ok(Self(Zeroizing::new(trimmed.to_owned())))
     }

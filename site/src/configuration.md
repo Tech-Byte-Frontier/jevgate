@@ -31,7 +31,7 @@ rules = { security = "consider" }        # except these
 | `[[scope]]` | none | `paths` (globs), with `fail_on` for every rule and `rules` for rules or groups, as above; `off` is not accepted (use `upload_deny`). The last scope that matches a file and addresses a rule wins; flags win over scopes |
 | `fail_on` | `["mature"]` | The level for rules without their own, like `--fail-on` |
 | `include_tests` | `false` | Judge tests, like `--include-tests` |
-| `model` | `jev-1.13.0` | TypeSafe model; a pinned version keeps results repeatable |
+| `model` | the key's provider's | The model, as the key's provider names it: `jev-1.13.0` for TypeSafe, `typesafe/jev-1.13` for OpenRouter, `typesafe-ai/jev` for Vercel AI Gateway. A pinned version keeps results repeatable; a repository that sets it for one provider needs `--model` with another provider's key |
 | `cache_ttl_secs` | `3600` | Cache lifetime for an alias: a model name without an `x.y.z` version, such as `jev-latest` or `jev-1.13`. Pinned versions such as `jev-1.13.0` never expire |
 | `max_requests` | unlimited | Ceiling on API attempts per invocation |
 | `concurrency` | `6` | Ceiling on simultaneous requests (1–6). Requests also start at least 50 ms apart, TypeSafe's limit of 1,200 a minute |
@@ -47,5 +47,8 @@ The default level, `mature`, fails the check only on the rules and levels measur
 Any level you set replaces the default exactly as it says, for the rules and paths it addresses: `fail_on = ["review"]` (or `--fail-on review`) fails on every review, as releases before 0.26 did; `--fail-on security=consider` sets one group and leaves the others at `mature`; `mature` itself can be set, such as for one group after a stricter `fail_on`. A later release can mark more levels mature as labels accumulate, or fewer; set `fail_on` to keep a fixed policy. Undecided answers never fail the check under `mature`.
 
 A `jevgate.toml` written by `jevgate init` before 0.26 sets `maintainability = "review"` and `tests = "review"`: those lines keep every review of the two groups failing the check, and judge hardcoded values. Delete them for the default rules and gate.
+## Keys and where requests go
+
+`jevgate.toml` has no key for the provider or its address: the change under review can edit that file, so it must not be able to send your key elsewhere. The provider follows the key ([Install](install.md) lists the three kinds), and a key goes only to its own provider. `JEVGATE_BASE_URL`, read only from the environment, replaces the provider's API root for a self-hosted proxy or a test server: `https://` to any host, or `http://` only to `localhost`, `127.0.0.1` or `[::1]`. Each check says on stderr when it is set, and `jevgate auth status` checks the key against `<root>/v1/models` there.
 
 The [configuration reference](reference/configuration.md) lists every key with its type, and the rule names and levels it accepts.

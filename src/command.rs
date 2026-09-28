@@ -51,6 +51,10 @@ fn configured(command: JevCommand) -> Result<u8> {
         }
         JevCommand::Check(mut args) => {
             context.configure(&mut args)?;
+            args.provider = crate::auth::sources::planned_provider(
+                &crate::check::credential_path(&args, &context),
+                args.env_file.is_some(),
+            );
             if let Some(base) = &args.base {
                 args.base = Some(revision::resolve(&context.root, base)?);
             }
