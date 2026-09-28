@@ -69,6 +69,7 @@ mod test_locations;
 mod token_budget;
 mod transport;
 mod units;
+mod view;
 mod watch;
 
 use clap::Parser;

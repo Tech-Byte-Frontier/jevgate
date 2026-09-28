@@ -10,7 +10,7 @@ pub(super) fn list() -> Value {
         {
             "name": "jevgate_check",
             "title": "Review code with JevGate",
-            "description": "Run `jevgate check` in the repository and return its findings, each with an id, a location, a probability and a next step, then the units Jev left undecided as verify items. Uses jevgate.toml and the API key `jevgate auth status` shows; unchanged code is answered from the cache for free, and dry_run costs nothing. Can take minutes on a large change; with a progress token, it reports each stage.",
+            "description": "Run `jevgate check` in the repository and return its findings, each with an id, a location, a probability and a next step, then the units Jev left undecided as verify items and what the change does to the checks around the code as guards. Uses jevgate.toml and the API key `jevgate auth status` shows; unchanged code is answered from the cache for free, and dry_run costs nothing. Can take minutes on a large change; with a progress token, it reports each stage.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -114,8 +114,28 @@ fn result_schema() -> Value {
             "total_findings": count,
             "verify": {"type": "array", "items": verify_schema()},
             "total_verify": count,
+            "guards": {"type": "array", "items": guard_schema()},
+            "total_guards": count,
         },
-        "required": ["headline", "status", "complete", "dry_run", "exit_code", "errors", "usage", "findings", "total_findings", "verify", "total_verify"],
+        "required": ["headline", "status", "complete", "dry_run", "exit_code", "errors", "usage", "findings", "total_findings", "verify", "total_verify", "guards", "total_guards"],
+    })
+}
+
+/// A guard, as the JSON report records it.
+fn guard_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "What the change does to the checks around the code, for a person to look at: never a finding, never failing the gate",
+        "properties": {
+            "kind": {"type": "string", "enum": ["allow", "suppression", "skipped-test", "focused-test", "deleted-test", "weaker-assertion", "configuration", "baseline", "steering"]},
+            "path": {"type": "string"},
+            "line": {"type": "integer"},
+            "text": {"type": "string", "description": "What was found: the line, a test's name, the settings changed"},
+            "message": {"type": "string", "description": "What it does, such as `skips a test`"},
+            "probability": {"type": "number", "description": "Jev's answer, for a weaker test or text written to steer a reviewer"},
+            "id": {"type": "string", "description": "A hash of the kind, path and text, which stays when lines move"},
+        },
+        "required": ["kind", "path", "text", "message", "id"],
     })
 }
 

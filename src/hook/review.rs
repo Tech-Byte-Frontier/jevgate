@@ -49,15 +49,21 @@ pub(super) struct Scope {
     pub paths: Vec<PathBuf>,
 }
 
-/// A finding the agent may act on, and whether it fails the gate.
+/// A finding the agent may act on.
 #[derive(Clone, Debug)]
 pub(super) struct Flagged {
     pub path: PathBuf,
     pub finding: Finding,
-    pub fails: bool,
     /// Accepted by a baseline entry or `jevgate: allow` comment the turn
     /// added, which counts from the next turn.
     pub accepted_this_turn: bool,
+}
+
+impl Flagged {
+    /// Whether it fails the gate: what the check's gate recorded on it.
+    pub fn fails(&self) -> bool {
+        self.finding.fails_gate()
+    }
 }
 
 /// What one hook check found: the findings the agent may act on, and what
@@ -222,8 +228,7 @@ fn incomplete(report: &Report) -> String {
 
 /// The findings the agent may act on: not notes and not accepted (as the
 /// turn began, within a turn), those that fail the gate first, then reviews,
-/// then by rank. Whether one fails is what the check's own gate recorded on
-/// it; `accepted_now` are those the turn's own edits accepted.
+/// then by rank; `accepted_now` are those the turn's own edits accepted.
 fn flag(report: &Report, accepted_now: &BTreeSet<String>) -> Vec<Flagged> {
     let mut flagged: Vec<Flagged> = report
         .files
@@ -234,15 +239,14 @@ fn flag(report: &Report, accepted_now: &BTreeSet<String>) -> Vec<Flagged> {
                 .filter(|f| f.strength != Strength::Note && !f.accepted())
                 .map(|finding| Flagged {
                     path: file.path.clone(),
-                    fails: finding.fails_gate(),
                     accepted_this_turn: accepted_now.contains(&finding.fingerprint),
                     finding: finding.clone(),
                 })
         })
         .collect();
     flagged.sort_by(|a, b| {
-        b.fails
-            .cmp(&a.fails)
+        b.fails()
+            .cmp(&a.fails())
             .then(b.finding.strength.cmp(&a.finding.strength))
             .then(b.finding.rank.total_cmp(&a.finding.rank))
     });

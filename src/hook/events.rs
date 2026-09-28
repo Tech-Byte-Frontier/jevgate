@@ -246,7 +246,7 @@ impl<'a> Hook<'a> {
         let blocks = if self.event.continued { turn.blocks } else { 0 };
         let guards = text::guards_user(&checked.guards);
         let (failing, advisory): (Vec<_>, Vec<_>) =
-            checked.flagged.into_iter().partition(|f| f.fails);
+            checked.flagged.into_iter().partition(Flagged::fails);
         let user = if failing.is_empty() {
             text::passed(blocks > 0, &advisory)
         } else if turn.blocked_tree.as_deref() == Some(now.as_str()) {

@@ -3,11 +3,14 @@
 //! them, and the units Jev left undecided as verify items, with the question
 //! each left open, the evidence it named and the probability of each answer.
 //! Claude Code shows the model only the structured result when a tool
-//! returns one, so it stands on its own.
+//! returns one, so it stands on its own: it also carries the report's
+//! guards, which the text gives in its own section.
 use crate::{
     gate::Gate,
+    guards::Guard,
     output,
-    schema::{Answer, Finding, Gating, OpenQuestion, Report, Status, Strength, Undecided},
+    schema::{Answer, Finding, OpenQuestion, Report, Status, Strength, Undecided},
+    view::{FindingView, rounded},
 };
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -26,6 +29,10 @@ pub(super) const DEFAULT_FINDINGS: usize = 20;
 pub(super) const DEFAULT_VERIFY: usize = 5;
 /// The most findings or verify items one call can ask for.
 pub(super) const MAX_LISTED: usize = 200;
+/// Guards a result lists, as many as findings by default: a change rarely
+/// has more (the last five commits of 142 corpus projects had 129 in all),
+/// and a large deletion of tests, one guard a test, stays counted.
+const SHOWN_GUARDS: usize = DEFAULT_FINDINGS;
 /// Answers less likely than this are left out of a verify item: a Choice's
 /// other options would only repeat its criteria.
 const SHOWN_ANSWER: f64 = 0.05;
@@ -100,6 +107,8 @@ pub(super) struct Structured<'r> {
     total_findings: usize,
     verify: Vec<VerifyView<'r>>,
     total_verify: usize,
+    guards: Vec<&'r Guard>,
+    total_guards: usize,
 }
 
 #[derive(Serialize)]
@@ -117,6 +126,11 @@ pub(super) fn structured<'r>(
 ) -> Structured<'r> {
     let findings = findings(report, selection);
     let undecided = undecided(report, selection);
+    let guards: Vec<&Guard> = report
+        .guards
+        .iter()
+        .filter(|guard| selection.includes(&guard.path))
+        .collect();
     let lines = |status: Status, label: &str| -> Vec<String> {
         output::reasons(report, status)
             .into_iter()
@@ -155,6 +169,8 @@ pub(super) fn structured<'r>(
             .take(selection.max_verify)
             .map(|(path, rule, unit)| VerifyView::new(path, rule, unit))
             .collect(),
+        total_guards: guards.len(),
+        guards: guards.into_iter().take(SHOWN_GUARDS).collect(),
     }
 }
 
@@ -215,58 +231,6 @@ fn concern(unit: &Undecided) -> f64 {
         .iter()
         .map(|question| concern(&question.answer))
         .fold(0.0, f64::max)
-}
-
-/// Probabilities to two decimals: an agent weighs 0.42, not 0.41999998.
-fn rounded(probability: f64) -> f64 {
-    (probability * 100.0).round() / 100.0
-}
-
-#[derive(Serialize)]
-struct FindingView<'r> {
-    id: &'r str,
-    path: &'r Path,
-    line: usize,
-    end_line: usize,
-    rule: &'r str,
-    strength: Strength,
-    message: &'r str,
-    action: &'r str,
-    probability: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    symbol: Option<&'r str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    category: Option<&'r str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gate: Option<Gating>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    baselined: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    suppressed: Option<&'r str>,
-}
-
-impl<'r> FindingView<'r> {
-    fn new(path: &'r Path, finding: &'r Finding) -> Self {
-        Self {
-            id: &finding.fingerprint,
-            path,
-            line: finding.line,
-            end_line: finding
-                .locations
-                .first()
-                .map_or(finding.line, |l| l.end_line),
-            rule: &finding.rule,
-            strength: finding.strength,
-            message: &finding.message,
-            action: &finding.action,
-            probability: rounded(finding.concern_probability),
-            symbol: finding.symbol.as_deref(),
-            category: finding.category.as_deref(),
-            gate: finding.gate,
-            baselined: finding.baselined,
-            suppressed: finding.suppressed.as_deref(),
-        }
-    }
 }
 
 #[derive(Serialize)]
@@ -745,16 +709,46 @@ mod tests {
         assert!(Selection::new(&json!({"max_verify": 0}), None, false).is_ok());
     }
 
+    /// A guard of `kind` in `path`, as a check's report records it.
+    fn guard(kind: &str, path: &str) -> Guard {
+        serde_json::from_value(json!({
+            "kind": kind, "path": path, "line": 3, "text": "#[ignore]",
+            "message": "skips a test", "probability": 0.91, "id": format!("{kind}:{path}"),
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn guards_come_back_under_the_selected_path_with_their_count() {
+        let mut report = report(Vec::new(), Vec::new());
+        report.guards = (0..SHOWN_GUARDS + 2)
+            .map(|n| guard("skipped-test", &format!("src/t{n}.rs")))
+            .chain([guard("suppression", "tests/a.rs")])
+            .collect();
+        let result = value(&structured(&report, &all(), 0));
+        assert_eq!(result["guards"].as_array().unwrap().len(), SHOWN_GUARDS);
+        assert_eq!(result["total_guards"], SHOWN_GUARDS + 3);
+        let tests = Selection::new(&json!({}), Some("tests"), false).unwrap();
+        let result = value(&structured(&report, &tests, 0));
+        assert_eq!(
+            result["guards"],
+            json!([guard("suppression", "tests/a.rs")]),
+            "the report's own shape"
+        );
+        assert_eq!(result["total_guards"], 1);
+    }
+
     #[test]
     fn every_result_conforms_to_the_declared_schema() {
         let mut baselined = found(Strength::Review, 9.0, "old");
         baselined.baselined = true;
         baselined.suppressed = Some("the protocol fixes it".into());
         baselined.category = Some("CWE-89 SQL injection".into());
-        let report = report(
+        let mut report = report(
             vec![baselined, found(Strength::Note, 1.0, "n")],
             vec![open_unit("u", 1, [0.4, 0.2, 0.4])],
         );
+        report.guards = vec![guard("weaker-assertion", "src/a.rs")];
         let schema = &super::super::tools::list()[0]["outputSchema"];
         let notes = Selection::new(&json!({}), None, true).unwrap();
         super::super::tools::assert_conforms(&value(&structured(&report, &notes, 1)), schema);

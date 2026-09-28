@@ -6,6 +6,7 @@ use crate::{
     guards::{self, Guard, Kind},
     output,
     schema::Strength,
+    view::FindingView,
 };
 use std::path::PathBuf;
 
@@ -64,14 +65,14 @@ fn findings_after_edit(
         } else {
             "remain"
         },
-        fail(known.iter().filter(|f| f.fails).count())
+        fail(known.iter().filter(|f| f.fails()).count())
     );
     match (new.is_empty(), known.is_empty()) {
         (true, true) => return None,
         (true, false) => return Some(format!("{reviewed} {earlier}")),
         _ => {}
     }
-    let failing = new.iter().filter(|f| f.fails).count();
+    let failing = new.iter().filter(|f| f.fails()).count();
     let head = format!(
         "{reviewed} {}, {} the quality gate.",
         output::count(
@@ -84,7 +85,7 @@ fn findings_after_edit(
         ),
         fail(failing)
     );
-    let blocks = if failing > 0 || known.iter().any(|f| f.fails) {
+    let blocks = if failing > 0 || known.iter().any(Flagged::fails) {
         "Findings that fail the gate block the end of the turn until they are fixed; the others are optional."
     } else {
         "None of them blocks the end of the turn."
@@ -308,10 +309,11 @@ fn list(head: &str, found: &[Flagged], tail: &str, room: usize) -> String {
     text
 }
 
-/// `- path:line level rule (fails the gate): why Next: step`.
+/// `- path:line level rule (fails the gate): why Next: step`, from the
+/// fields the MCP tools return for the same finding.
 fn line(flagged: &Flagged) -> String {
-    let finding = &flagged.finding;
-    let mark = match (flagged.fails, flagged.accepted_this_turn) {
+    let finding = FindingView::new(&flagged.path, &flagged.finding);
+    let mark = match (finding.fails(), flagged.accepted_this_turn) {
         (true, true) => " (fails the gate; accepted this turn)",
         (true, false) => " (fails the gate)",
         (false, true) => " (accepted this turn)",
@@ -319,12 +321,12 @@ fn line(flagged: &Flagged) -> String {
     };
     format!(
         "- {}:{} {} {}{mark}: {} Next: {}",
-        flagged.path.display(),
+        finding.path.display(),
         finding.line,
         output::label(&finding.strength),
         finding.rule,
-        sentence(&finding.message, WHY_CHARS),
-        sentence(&finding.action, NEXT_CHARS)
+        sentence(finding.message, WHY_CHARS),
+        sentence(finding.action, NEXT_CHARS)
     )
 }
 

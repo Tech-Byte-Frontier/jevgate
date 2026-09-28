@@ -230,9 +230,9 @@ fn failing(n: usize, words: usize) -> Vec<Flagged> {
                 line: i + 1,
                 message: "word ".repeat(words),
                 action: "step ".repeat(words),
+                gate: Some(crate::schema::Gating::Fails),
                 ..crate::tests::finding(Strength::Review)
             },
-            fails: true,
             accepted_this_turn: false,
         })
         .collect()
@@ -284,7 +284,6 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
     let flagged = Flagged {
         path: PathBuf::from("src/a,b.rs"),
         finding: crate::tests::finding(Strength::Consider),
-        fails: false,
         accepted_this_turn: false,
     };
     let file = [PathBuf::from("src/a,b.rs")];

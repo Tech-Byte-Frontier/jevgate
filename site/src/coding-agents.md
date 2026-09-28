@@ -143,8 +143,9 @@ Each tool returns a structured result, described by its output schema, and text 
 
 - `headline`, `status`, `complete`, `exit_code` and `gate`: what the run found and whether the gate passed.
 - `errors`: the run's errors, then one `Failed N: reason` line per reason files failed, such as a missing key or exhausted credit. `skipped`: why files were not judged, such as a syntax error in the file just edited.
-- `findings`: new findings before accepted ones and reviews before considers, each by rank, with its location, message, next step and probability, and its fingerprint as `id`, the id the baseline and the SARIF and GitLab reports use. At most `max_findings` (default 20); `total_findings` counts them all.
+- `findings`: those that fail the gate first, then new findings before accepted ones and reviews before considers, each by rank, with its location, message, next step, probability and how the gate counted it (`gate`: `fails`, `measuring` or `advisory`), and its fingerprint as `id`, the id the baseline and the SARIF and GitLab reports use. The hook's one-line findings are written from the same fields. At most `max_findings` (default 20); `total_findings` counts them all.
 - `verify`: the units Jev left undecided, those whose open questions lean most toward the concern first. At most `max_verify` (default 5; 0 leaves them out); `total_verify` counts them all.
+- `guards`: what the change does to the checks around the code, as the JSON report records [guards](output.md#guards), for the person to look at. At most 20; `total_guards` counts them all.
 
 A verify item is not a finding and never fails the gate: it is a unit whose questions Jev could not settle. It holds each such question as it was asked, the evidence the question named (such as `functions[0].source`, the unit's code at its location), and each likely answer with what it means and its probability. Read the code there and change it only if you agree it should change. This follows TypeSafe's confidence-routing pattern: a case the classifier leaves open goes to a stronger reasoner, with the question and its evidence.
 
