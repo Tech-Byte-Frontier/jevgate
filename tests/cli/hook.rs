@@ -1,13 +1,14 @@
 //! `jevgate hook` as agents run it: one event on stdin, one reply on stdout,
 //! and exit 0 whatever happens, since agents read exit 2 as a block.
 use super::*;
+use mock_provider::{MockProvider, Reply, answer};
+use serde_json::json;
 use std::io::Write;
 
-/// Run `jevgate hook ARGS` with `event` on stdin; its reply, its stderr, and
-/// that it exited 0.
-fn hook(project: &Project, args: &[&str], event: &str) -> (serde_json::Value, String) {
-    let mut child = project
-        .command()
+/// Run `jevgate hook ARGS`, started by `command`, with `event` on stdin; its
+/// reply, its stderr, and that it exited 0.
+fn hook(mut command: Command, args: &[&str], event: &str) -> (serde_json::Value, String) {
+    let mut child = command
         .arg("hook")
         .args(args)
         .stdin(Stdio::piped())
@@ -45,7 +46,7 @@ fn invalid_arguments_and_input_are_answered_with_exit_0() {
         (&[][..], "not json", "could not read the hook event"),
         (&[][..], "[1, 2]", "not a JSON object"),
     ] {
-        let (reply, _) = hook(&project, args, input);
+        let (reply, _) = hook(project.command(), args, input);
         let message = reply["systemMessage"].as_str().unwrap();
         assert!(message.contains(said), "{args:?}: {message}");
         assert!(message.ends_with("Nothing was checked or blocked."));
@@ -61,13 +62,13 @@ fn without_a_key_every_event_passes_and_says_why() {
     git(&project, &["commit", "-qm", "start"]);
     let start = serde_json::json!({"hook_event_name": "UserPromptSubmit", "prompt": "go"});
     assert_eq!(
-        hook(&project, &[], &event(&project, start)).0,
+        hook(project.command(), &[], &event(&project, start)).0,
         serde_json::json!({})
     );
     std::fs::write(project.0.join("lib.rs"), JUDGED_RS.replace("+ 1", "+ 2")).unwrap();
     let edit = serde_json::json!({"hook_event_name": "PostToolUse", "tool_name": "Edit",
         "tool_input": {"file_path": project.0.join("lib.rs")}});
-    let (edited, _) = hook(&project, &[], &event(&project, edit));
+    let (edited, _) = hook(project.command(), &[], &event(&project, edit));
     let context = edited["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
@@ -76,7 +77,7 @@ fn without_a_key_every_event_passes_and_says_why() {
         "{context}"
     );
     let stop = serde_json::json!({"hook_event_name": "Stop", "stop_hook_active": false});
-    let (stopped, _) = hook(&project, &[], &event(&project, stop));
+    let (stopped, _) = hook(project.command(), &[], &event(&project, stop));
     assert!(stopped.get("decision").is_none(), "{stopped}");
     assert!(
         stopped["systemMessage"]
@@ -91,7 +92,63 @@ fn without_a_key_every_event_passes_and_says_why() {
 fn cursor_is_answered_in_its_own_fields_and_the_person_on_stderr() {
     let project = Project::new();
     let start = serde_json::json!({"hook_event_name": "beforeSubmitPrompt", "prompt": "go"});
-    let (reply, stderr) = hook(&project, &["--agent", "cursor"], &event(&project, start));
+    let (reply, stderr) = hook(
+        project.command(),
+        &["--agent", "cursor"],
+        &event(&project, start),
+    );
     assert_eq!(reply, serde_json::json!({"continue": true}));
     assert!(stderr.contains("is not in a Git repository"), "{stderr}");
+}
+
+/// A function longer than twenty lines, which a split question at the top
+/// of its scale makes a function-simplification review.
+const LONG_RS: &str = "fn f(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values {\n        total += value;\n    }\n    let mut largest = i32::MIN;\n    for value in values {\n        if *value > largest {\n            largest = *value;\n        }\n    }\n    let mut smallest = i32::MAX;\n    for value in values {\n        if *value < smallest {\n            smallest = *value;\n        }\n    }\n    let spread = largest - smallest;\n    let doubled = total * 2;\n    doubled + spread + 1\n}\n";
+
+#[test]
+fn the_binary_blocks_a_turn_through_the_provider_until_its_finding_is_fixed() {
+    let project = Project::new();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+    git(&project, &["init", "-q"]);
+    git(&project, &["add", "lib.rs"]);
+    git(&project, &["commit", "-qm", "start"]);
+    // Jev's part, scripted: a concern only about the long function.
+    let provider = MockProvider::start(|received| {
+        let level = if received.body.contains("smallest") {
+            2
+        } else {
+            0
+        };
+        Reply::json(200, &answer(&received.json(), level))
+    });
+    let send = |fields: serde_json::Value| {
+        let mut command = project.command();
+        command
+            .env("TYPESAFE_API_KEY", "key")
+            .env("JEVGATE_BASE_URL", &provider.url);
+        hook(command, &[], &event(&project, fields)).0
+    };
+    let prompt = json!({"hook_event_name": "UserPromptSubmit", "prompt": "add the spread"});
+    assert_eq!(send(prompt), json!({}));
+    std::fs::write(project.0.join("lib.rs"), LONG_RS).unwrap();
+    let blocked = send(json!({"hook_event_name": "Stop", "stop_hook_active": false}));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+    let reason = blocked["reason"].as_str().unwrap();
+    assert!(
+        reason.contains(
+            "\n- lib.rs:1 review maintainability/function-simplification (fails the gate): "
+        ),
+        "{reason}"
+    );
+    assert!(
+        !provider.received().is_empty(),
+        "asked through the provider"
+    );
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS.replace("+ 1", "+ 2")).unwrap();
+    let fixed = send(json!({"hook_event_name": "Stop", "stop_hook_active": true}));
+    assert!(fixed.get("decision").is_none(), "{fixed}");
+    assert_eq!(
+        fixed["systemMessage"],
+        "JevGate: the findings that blocked this turn are fixed."
+    );
 }
