@@ -265,6 +265,25 @@ fn stored(project: &Project, id: &str) -> bool {
 }
 
 #[test]
+fn a_snapshot_leaves_out_the_directories_a_check_never_reads() {
+    let project = Project::new();
+    project.write("lib.rs", "fn a() {}\n");
+    project.commit_all();
+    project.write("node_modules/pkg/index.js", "module.exports = 1;\n");
+    project.write("web/node_modules/pkg/index.js", "module.exports = 2;\n");
+    project.write("target/debug/out.rs", "fn built() {}\n");
+    project.write("src/build.rs", "fn b() {}\n");
+    project.write("app.js", "x\n");
+    let tree = snapshot_of(&project, &project.0);
+    assert_eq!(
+        project.git(&["ls-tree", "-r", "--name-only", &tree]),
+        "app.js\nlib.rs\nsrc/build.rs\n"
+    );
+    let dependency = project.git(&["hash-object", "node_modules/pkg/index.js"]);
+    assert!(!stored(&project, dependency.trim()), "never copied");
+}
+
+#[test]
 fn a_file_larger_than_a_snapshot_holds_is_recorded_by_a_stand_in() {
     let project = Project::new();
     project.write("lib.rs", "fn a() {}\n");

@@ -27,6 +27,17 @@ pub(crate) const SNAPSHOT_BYTES: u64 = 1_048_576;
 /// reads them as the turn began.
 const WHOLE: [&str; 2] = [crate::init::CONFIG_FILE, crate::baseline::BASELINE_FILE];
 
+/// Pathspecs leaving out the directories a check never reads at any depth,
+/// installed dependencies and build output (`discovery::SKIPPED_DIRS`): an
+/// untracked `node_modules` of 30,000 files made the first turn start run
+/// past its 10 s, leave 90 MB of objects behind, and cost 2 to 5 s at every
+/// turn start after it.
+fn skipped_directories() -> impl Iterator<Item = String> {
+    crate::discovery::SKIPPED_DIRS
+        .iter()
+        .map(|dir| format!(":(exclude,glob)**/{dir}/**"))
+}
+
 /// The working tree under `root` as a Git tree, written through a copy of
 /// `index` at `scratch` and finished by `deadline`. The copy's stat cache
 /// hashes only the files that changed (42-173 ms on corpus clones of 7,310
@@ -97,16 +108,18 @@ impl Large {
 
 impl Snapshot<'_> {
     fn take(&self) -> Result<String> {
-        let listed = self.git(
-            &[
-                "ls-files",
-                "-z",
-                "--modified",
-                "--others",
-                "--exclude-standard",
-            ],
-            None,
-        )?;
+        let skipped: Vec<String> = skipped_directories().collect();
+        let mut args = vec![
+            "ls-files",
+            "-z",
+            "--modified",
+            "--others",
+            "--exclude-standard",
+            "--",
+            ".",
+        ];
+        args.extend(skipped.iter().map(String::as_str));
+        let listed = self.git(&args, None)?;
         let large = self.large(&listed);
         self.add(&large)?;
         if !large.is_empty() {
@@ -135,13 +148,17 @@ impl Snapshot<'_> {
             .collect()
     }
 
-    /// Record every change under the root but the `large` files. A file Git
-    /// cannot read, such as a database volume another user owns, is passed
-    /// over (`--ignore-errors`, exit 1) instead of stopping every snapshot.
+    /// Record every change under the root but the `large` files and the
+    /// directories a check never reads. A file Git cannot read, such as a
+    /// database volume another user owns, is passed over (`--ignore-errors`,
+    /// exit 1) instead of stopping every snapshot.
     fn add(&self, large: &[Large]) -> Result<()> {
         let mut pathspecs = b".\0".to_vec();
         for file in large {
             pathspecs.extend(format!(":(exclude,literal){}\0", file.path).bytes());
+        }
+        for skipped in skipped_directories() {
+            pathspecs.extend(format!("{skipped}\0").bytes());
         }
         self.run(
             &[
