@@ -78,14 +78,25 @@ pub(super) fn plan_security(
         file,
         requests,
     );
-    // A server template's code that reads client data: a JSP page's
-    // scriptlets are judged like a PHP page script, by every rule; other
-    // templates' code is tags that write a value unescaped, which injection
-    // judges by where the value comes from. Asked whether they turn off
-    // escaping, each `raw` or `html_safe` tag of RailsGoat's views said yes,
-    // even around a user's numeric id. It is packed alone, never with the
-    // file's functions, and not at all without a rule that judges it: such a
-    // request asked no question.
+    plan_template_code(context, parsed, rules, file, requests);
+    asks
+}
+
+/// A server template's code that reads client data: a JSP page's
+/// scriptlets are judged like a PHP page script, by every rule; other
+/// templates' code is tags that write a value unescaped, which injection
+/// judges by where the value comes from. Asked whether they turn off
+/// escaping, each `raw` or `html_safe` tag of RailsGoat's views said yes,
+/// even around a user's numeric id. It is packed alone, never with the
+/// file's functions, and not at all without a rule that judges it: such a
+/// request asked no question.
+fn plan_template_code(
+    context: &FileContext<'_>,
+    parsed: &FileUnits,
+    rules: &[&'static str],
+    file: &mut FilePlan,
+    requests: &mut Vec<Planned>,
+) {
     let jsp = matches!(
         context.path.extension().and_then(|e| e.to_str()),
         Some("jsp" | "jspf")
@@ -101,7 +112,6 @@ pub(super) fn plan_security(
         let code = security::plan(context, &[code], None, &judged, false, file, requests);
         packs::send(context, code, file, requests);
     }
-    asks
 }
 
 /// A function, at `position` among its file's parsed units, with the
