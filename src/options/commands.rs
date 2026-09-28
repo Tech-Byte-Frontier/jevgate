@@ -84,8 +84,9 @@ pub enum JevCommand {
     /// projects JevGate was never tuned on, from findings labeled from the
     /// code. The levels right at least 80% of the time over at least 20
     /// labels are mature: by default only they fail the check (`--fail-on
-    /// mature`), with each custom question at its own level, and the other
-    /// findings are reported without failing it.
+    /// mature`), never in a preview language, with each custom question at
+    /// its own level in every language, and the other findings are reported
+    /// without failing it.
     ///
     /// `rules test` asks custom questions about their examples, `rules propose`
     /// proposes custom questions from the project's agent instruction files,
@@ -318,9 +319,11 @@ Reading the JSON report (--format json or .jevgate/latest.json):
   files[].findings   rule, strength, line, message, action, locations,
                      concern_probability, fingerprint, baselined; precision:
                      right of labeled findings of its rule and level on
-                     projects never used for tuning; and gate: fails,
+                     projects never used for tuning; preview: the preview
+                     language whose labels those are; and gate: fails,
                      measuring (its rule and level are still being
-                     measured) or advisory (below the level in force)
+                     measured, or its language is in preview) or advisory
+                     (below the level in force)
   files[].dimensions per rule: status, unit counts and the units left undecided
   files[].judgments  every raw answer, first pass and follow-ups
   api_requests, paid_input_tokens, paid_output_tokens   this run's usage

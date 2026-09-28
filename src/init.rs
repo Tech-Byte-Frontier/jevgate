@@ -119,11 +119,11 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # Unset, the default rules run and only rule levels measured right at least
 # 80% of the time on projects JevGate was never tuned on fail the check
 # ("mature"; `jevgate rules` shows them), never in a preview language; other
-# findings are reported without failing it. A group or rule ID set to a level is judged, every rule of a
-# group included, and fails the check at exactly that level: "review",
-# "consider" (also fails on review), "mature", "uncertain", "report" (judge,
-# never fail) or "off". A rule's own entry wins over its group's. Test rules
-# also need include_tests or --include-tests.
+# findings are reported without failing it. A group or rule ID set to a
+# level is judged, every rule of a group included, and fails the check at
+# exactly that level: "review", "consider" (also fails on review), "mature",
+# "uncertain", "report" (judge, never fail) or "off". A rule's own entry wins
+# over its group's. Test rules also need include_tests or --include-tests.
 [rules]
 {rules}
 # Levels for the files some paths match, such as report-only tooling. The last
