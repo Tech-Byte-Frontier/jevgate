@@ -11,6 +11,7 @@ fn every_query_compiles_and_every_kind_the_table_names_is_its_grammar_s() {
             language.conditionals,
             language.clauses,
             language.literals,
+            language.strings,
         ];
         for kind in kinds.into_iter().flatten() {
             assert_ne!(

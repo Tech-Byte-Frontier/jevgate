@@ -7,8 +7,10 @@ use anyhow::Result;
 use std::{ops::Range, path::Path};
 use tree_sitter::Node;
 
-/// String literals in the grammars JevGate parses; a string's parts are not
-/// visited apart from it.
+/// String literals in the grammars of the languages with analyzers of
+/// their own; the generic tier's table names its languages'
+/// (`generic::Language::strings`). A string's parts are not visited apart
+/// from it.
 const STRING_KINDS: &[&str] = &[
     "string",
     "string_literal",
@@ -43,8 +45,10 @@ impl Regions {
             return Ok(None);
         };
         let root = tree.root_node();
+        let kinds = crate::analysis::generic::read(path, source)
+            .map_or(STRING_KINDS, |language| language.strings);
         let mut strings = Vec::new();
-        collect_strings(root, &mut strings);
+        collect_strings(root, kinds, &mut strings);
         Ok(Some(Self {
             comments: comments::spans(path, root, source),
             strings,
@@ -64,15 +68,15 @@ impl Regions {
     }
 }
 
-/// String literal nodes, outermost only.
-fn collect_strings(node: Node<'_>, found: &mut Vec<Range<usize>>) {
-    if STRING_KINDS.contains(&node.kind()) {
+/// String literal nodes of `kinds`, outermost only.
+fn collect_strings(node: Node<'_>, kinds: &[&str], found: &mut Vec<Range<usize>>) {
+    if kinds.contains(&node.kind()) {
         found.push(node.byte_range());
         return;
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_strings(child, found);
+        collect_strings(child, kinds, found);
     }
 }
 
@@ -96,5 +100,23 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn the_generic_tier_s_strings_are_strings() {
+        for (path, source) in [
+            ("View.swift", "let a = \"# noqa\"\n"),
+            ("View.swift", "let a = \"\"\"\n# noqa\n\"\"\"\n"),
+            ("run.sh", "a='# noqa'\n"),
+            ("run.sh", "a=\"# noqa\"\n"),
+            ("run.sh", "cat <<EOF\n# noqa\nEOF\n"),
+            ("Shop.kt", "val a = \"\"\"\n# noqa\n\"\"\"\n"),
+            ("cart.cpp", "auto a = R\"(# noqa)\";\n"),
+            ("lib.ex", "a = ~s(# noqa)\n"),
+        ] {
+            let regions = Regions::of(Path::new(path), source).unwrap().unwrap();
+            let at = source.find("# noqa").unwrap();
+            assert_eq!(regions.at(at), Region::String, "{path}: {source}");
+        }
     }
 }

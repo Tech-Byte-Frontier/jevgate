@@ -55,6 +55,10 @@ pub(crate) struct Language {
     pub clauses: &'static [&'static str],
     /// Leaves that hold literal values, which copies may differ in.
     pub literals: &'static [&'static str],
+    /// Nodes that hold a whole string literal (`analysis::regions`): text
+    /// in one addressed to a reviewer is asked about as a comment's is, and
+    /// a tool's marker quoted in one turns nothing off.
+    pub strings: &'static [&'static str],
     tests: Tests,
     query: OnceLock<Query>,
 }
@@ -122,6 +126,7 @@ static LANGUAGES: [Language; 9] = [
         conditionals: &["if_statement"],
         clauses: &["else_clause"],
         literals: C_LITERALS,
+        strings: &["string_literal"],
         tests: C_TESTS,
         query: OnceLock::new(),
     },
@@ -151,6 +156,7 @@ static LANGUAGES: [Language; 9] = [
             "number_literal",
             "char_literal",
         ],
+        strings: &["string_literal", "raw_string_literal"],
         tests: Tests {
             stems: &["Test", "Tests", "-test", "-tests", "_unittest"],
             ..C_TESTS
@@ -181,6 +187,7 @@ static LANGUAGES: [Language; 9] = [
             "float_literal",
             "character_literal",
         ],
+        strings: &["string_literal", "multiline_string_literal"],
         tests: Tests {
             stems: CLASS_TESTS,
             directory_ends: &["Test"],
@@ -216,6 +223,11 @@ static LANGUAGES: [Language; 9] = [
             "bin_literal",
             "oct_literal",
         ],
+        strings: &[
+            "line_string_literal",
+            "multi_line_string_literal",
+            "raw_string_literal",
+        ],
         tests: Tests {
             stems: CLASS_TESTS,
             directory_ends: &["Tests"],
@@ -241,6 +253,13 @@ static LANGUAGES: [Language; 9] = [
         conditionals: &["if_statement"],
         clauses: &["elif_clause", "else_clause"],
         literals: &["string_content", "raw_string", "ansi_c_string", "number"],
+        strings: &[
+            "string",
+            "raw_string",
+            "ansi_c_string",
+            "translated_string",
+            "heredoc_body",
+        ],
         tests: Tests {
             names: &[".bats"],
             ..Tests::NONE
@@ -276,6 +295,7 @@ static LANGUAGES: [Language; 9] = [
             "decimal_floating_point_literal",
             "hex_integer_literal",
         ],
+        strings: &["string_literal"],
         tests: Tests {
             directories: &["integration_test", "test_driver"],
             ..Tests::NONE
@@ -306,6 +326,7 @@ static LANGUAGES: [Language; 9] = [
             "floating_point_literal",
             "character_literal",
         ],
+        strings: &["string", "interpolated_string_expression"],
         tests: Tests {
             stems: CLASS_TESTS,
             ..Tests::NONE
@@ -326,6 +347,7 @@ static LANGUAGES: [Language; 9] = [
         conditionals: &[],
         clauses: &[],
         literals: &["quoted_content", "integer", "float", "char"],
+        strings: &["string", "charlist", "sigil"],
         tests: Tests::NONE,
         query: OnceLock::new(),
     },
@@ -346,6 +368,7 @@ static LANGUAGES: [Language; 9] = [
         conditionals: &["if_statement"],
         clauses: &["elseif_statement", "else_statement"],
         literals: &["string_content", "number"],
+        strings: &["string"],
         tests: Tests {
             names: &["_spec.lua"],
             directories: &["spec"],
