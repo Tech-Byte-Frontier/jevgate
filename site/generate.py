@@ -137,7 +137,7 @@ def precision_table(rules):
             fails_by_default = "no"
             if m["mature"]:
                 unseen = f"**{unseen}**"
-                fails_by_default = "**yes**" if rule["default_enabled"] else "**once selected**"
+                fails_by_default = f"**{condition(rule) or 'yes'}**"
             lines.append(f"| {link if i == 0 else ''} | {level} | {unseen} | {tuned} | {fails_by_default} |")
     return "\n".join(lines) + "\n"
 
@@ -145,15 +145,23 @@ def precision_table(rules):
 def default_gate(rules):
     """What the default gate fails on, with the labels that put it there."""
     mature = [(rule, level, m) for rule in rules for level, m in rule["maturity"].items() if m["mature"]]
-    by_default = described([item for item in mature if item[0]["default_enabled"]])
-    once_selected = described([item for item in mature if not item[0]["default_enabled"]])
-    sentence = f"With the default rules, a check fails only on {by_default or 'nothing'}"
-    return sentence + (f"; once selected, also on {once_selected}." if once_selected else ".")
+    by_default = described([item for item in mature if not condition(item[0])])
+    sentence = f"With the default rules, a check fails only on {by_default}" if by_default else (
+        "With the default rules, no finding fails a check"
+    )
+    for when in ("with `--include-tests`", "once selected"):
+        also = described([item for item in mature if condition(item[0]) == when])
+        if also:
+            sentence += f"; {when}, also on {also}"
+    return sentence + "."
 
 
 def described(levels):
-    """"function-simplification reviews, right 87% (20 of 23), and …"."""
-    return ", and ".join(f"{name(rule)} {level}s, right {share(m['unseen'])}" for rule, level, m in levels)
+    """"function-simplification reviews, right 87% (20 of 23), and …", each
+    rule by its key, which says "test-value" where its ID says "tests/value"."""
+    return ", and ".join(
+        f"{rule['key'].replace('_', '-')} {level}s, right {share(m['unseen'])}" for rule, level, m in levels
+    )
 
 
 def check_pages(rules):
@@ -190,11 +198,19 @@ def runs(rule):
 
 
 def fails(rule):
-    """"reviews", "considers, once the rule is selected", or "no"."""
+    """"reviews", "considers, once selected", or "no"."""
     levels = " and ".join(f"{level}s" for level in mature_levels(rule["maturity"]))
     if not levels:
         return "no"
-    return levels if rule["default_enabled"] else f"{levels}, once the rule is selected"
+    return f"{levels}, {condition(rule)}" if condition(rule) else levels
+
+
+def condition(rule):
+    """What a rule's mature levels need besides the defaults to fail a check:
+    `--include-tests` for a test rule, selecting an opt-in rule, or nothing."""
+    if not rule["default_enabled"]:
+        return "once selected"
+    return "with `--include-tests`" if rule["requires_tests"] else None
 
 
 def shares_by_level(maturity, where):
