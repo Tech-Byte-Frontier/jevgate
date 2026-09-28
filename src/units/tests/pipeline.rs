@@ -320,6 +320,43 @@ fn one_request_answers_every_rule_about_its_functions() {
 }
 
 #[test]
+fn a_packs_questions_are_cached_one_by_one_so_a_reworded_one_is_asked_alone() {
+    let (project, options) = project_with(&[("lib.rs", &queried("load"))], &FUNCTION_RULES);
+    let (_, plan) = planned(&project, &options);
+    let pack = plan.requests[0].request.clone();
+    let context = project.context();
+    let store = crate::storage::Store::open(&project.0).unwrap();
+    let mut mock = crate::tests::Mock::default();
+    let mut ask = |request: &Value| {
+        let mut session = crate::tests::session(&options, &context, &store, &mut mock);
+        session.queries(&[request]).remove(0)
+    };
+    ask(&pack);
+    let mut reworded = pack.clone();
+    reworded["questions"]["f0_interpreted"]["instructions"]["question"] =
+        json!("Does `functions[0].source` build a query from outside input?");
+    let receipt = ask(&reworded);
+    let (body, _, cached) = receipt.result.unwrap();
+    assert!(!cached);
+    assert_eq!(body["answers"].as_object().unwrap().len(), 9);
+    assert_eq!(
+        (
+            receipt.metrics.asked_questions,
+            receipt.metrics.cached_questions
+        ),
+        (1, 8),
+        "the other rules' answers about the pack come from the cache"
+    );
+    let sent: Vec<&String> = mock.requests[1]["questions"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    assert_eq!(sent, ["f0_interpreted"]);
+    assert_eq!(mock.requests[1]["state"], pack["state"]);
+}
+
+#[test]
 fn a_change_asks_every_rule_about_only_the_functions_it_touched_in_one_pack() {
     // `f0` to `f2` form one run, whose end is `f2`; the change edits `f1`.
     let source = |edited: &str| -> String {
