@@ -95,7 +95,8 @@ const WATCH: &str = "Watch";
 
 /// The model used when neither `--model` nor `model` in jevgate.toml names one.
 pub const DEFAULT_MODEL: &str = "jev-1.13.0";
-/// Cache lifetime for the `jev-latest` and `jev-preview` aliases, in seconds.
+/// Cache lifetime for an alias (a model name without an `x.y.z` version, such
+/// as `jev-latest`), in seconds.
 pub const DEFAULT_CACHE_TTL_SECS: u64 = 3600;
 
 #[derive(Args, Debug)]
@@ -227,10 +228,10 @@ pub struct CheckArgs {
     /// Total bytes of --context files per request; context is never truncated
     #[arg(long, value_name = "BYTES", default_value_t = 32768, value_parser = clap::value_parser!(u64).range(1..=1048576), help_heading = BUDGETS)]
     pub max_context_bytes: u64,
-    /// Cache lifetime for the jev-latest and jev-preview aliases [default: 3600]
+    /// Cache lifetime for an alias, a model name without an x.y.z version such as jev-latest [default: 3600]
     ///
-    /// Answers from a pinned model version never expire. Also set by
-    /// `cache_ttl_secs` in jevgate.toml.
+    /// Answers from a pinned model version, such as jev-1.13.0, never
+    /// expire. Also set by `cache_ttl_secs` in jevgate.toml.
     #[arg(long, value_name = "SECONDS", help_heading = BUDGETS)]
     pub cache_ttl_secs: Option<u64>,
     /// Ignore cached answers for this invocation and ask again

@@ -32,7 +32,7 @@ rules = { security = "consider" }        # except these
 | `fail_on` | `["mature"]` | The level for rules without their own, like `--fail-on` |
 | `include_tests` | `false` | Judge tests, like `--include-tests` |
 | `model` | `jev-1.13.0` | TypeSafe model; a pinned version keeps results repeatable |
-| `cache_ttl_secs` | `3600` | Cache lifetime for the `jev-latest` and `jev-preview` aliases; pinned versions never expire |
+| `cache_ttl_secs` | `3600` | Cache lifetime for an alias: a model name without an `x.y.z` version, such as `jev-latest` or `jev-1.13`. Pinned versions such as `jev-1.13.0` never expire |
 | `max_requests` | unlimited | Ceiling on API attempts per invocation |
 | `concurrency` | `6` | Ceiling on simultaneous requests (1–8) |
 | `max_file_bytes` | `262144` | Files larger than this are reported as needs-context, never truncated; generated and vendored files are skipped instead |

@@ -45,6 +45,7 @@ mod locations;
 mod manual;
 mod maturity;
 mod mcp;
+mod model;
 mod options;
 mod output;
 mod packages;

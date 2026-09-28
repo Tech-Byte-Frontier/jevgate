@@ -37,7 +37,7 @@ pub struct Config {
     pub fail_on: Vec<String>,
     /// TypeSafe model; a pinned version keeps results repeatable. `--model` overrides it.
     pub model: Option<String>,
-    /// Cache lifetime in seconds for the `jev-latest` and `jev-preview` aliases; pinned versions never expire. Default: 3600.
+    /// Cache lifetime in seconds for an alias, a model name without an x.y.z version such as `jev-latest`; pinned versions never expire. Default: 3600.
     pub cache_ttl_secs: Option<u64>,
     /// Judge tests, like `--include-tests`. Default: false.
     pub include_tests: bool,

@@ -38,22 +38,21 @@ pub fn validate(response: &Value, request: &Value) -> Result<()> {
     Ok(())
 }
 
-/// A well-formed model name, equal to the pinned model when one was requested.
+/// A well-formed model name; when a pinned version was requested, that
+/// version, with or without a gateway's namespace (`typesafe-ai/jev-1.13.0`
+/// asked, `jev-1.13.0` answered). An alias answers with whatever version it
+/// points to.
 fn validate_model(response: &Value, request: &Value) -> Result<()> {
     let model = response["model"]
         .as_str()
         .context("Missing model identity")?;
-    ensure!(
-        !model.is_empty()
-            && model.len() <= 128
-            && model
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)),
-        "Invalid model identity"
-    );
-    if let Some(requested) = request["model"].as_str() {
+    ensure!(crate::model::valid_name(model), "Invalid model identity");
+    if let Some(requested) = request["model"]
+        .as_str()
+        .filter(|name| crate::model::pinned(name))
+    {
         ensure!(
-            matches!(requested, "jev-latest" | "jev-preview") || model == requested,
+            crate::model::base_name(model) == crate::model::base_name(requested),
             "Provider returned a different pinned model"
         );
     }
@@ -174,4 +173,50 @@ fn typed_fields(answer: &Value, kind: &str) -> Value {
             .map(|f| (f.to_string(), answer[*f].clone()))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A one-question request for `requested`, and a valid answer from `answered`.
+    fn exchange(requested: &str, answered: &str) -> (Value, Value) {
+        let request = json!({"model": requested, "state": "x",
+            "questions": {"q": {"type": "noul", "instructions": "?"}}});
+        let response = json!({"model": answered, "answers": {"q": {"type": "noul", "noul": 0.1}},
+            "usage": {"input_tokens": 10, "output_tokens": 1}});
+        (request, response)
+    }
+
+    #[test]
+    fn an_alias_accepts_any_version_and_a_pinned_name_only_its_own() {
+        for (requested, answered) in [
+            ("jev-1.13.0", "jev-1.13.0"),
+            ("jev-latest", "jev-1.13.0"),
+            ("jev-1.13", "jev-1.13.0"),
+            ("~typesafe/jev-latest", "typesafe/jev-1.13"),
+            ("typesafe/jev-1.13", "typesafe/jev-1.13"),
+            ("typesafe-ai/jev", "typesafe-ai/jev"),
+            ("typesafe-ai/jev-1.13.0", "jev-1.13.0"),
+        ] {
+            let (request, response) = exchange(requested, answered);
+            assert!(
+                validate(&response, &request).is_ok(),
+                "{requested} {answered}"
+            );
+        }
+        for (requested, answered) in [
+            ("jev-1.13.0", "jev-1.14.0"),
+            ("jev-1.13.0", "typesafe/jev-1.13"),
+            ("jev-latest", "jev 1.13.0"),
+            ("jev-latest", ""),
+        ] {
+            let (request, response) = exchange(requested, answered);
+            assert!(
+                validate(&response, &request).is_err(),
+                "{requested} {answered}"
+            );
+        }
+    }
 }

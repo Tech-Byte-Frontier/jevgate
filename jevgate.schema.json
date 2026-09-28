@@ -263,7 +263,7 @@
   "description": "JevGate configuration. The command line wins over the file, except that upload patterns and budgets in the file are ceilings that flags can only narrow. Unknown keys are errors.",
   "properties": {
     "cache_ttl_secs": {
-      "description": "Cache lifetime in seconds for the `jev-latest` and `jev-preview` aliases; pinned versions never expire. Default: 3600.",
+      "description": "Cache lifetime in seconds for an alias, a model name without an x.y.z version such as `jev-latest`; pinned versions never expire. Default: 3600.",
       "minimum": 0,
       "type": "integer"
     },

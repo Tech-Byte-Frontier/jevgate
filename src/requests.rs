@@ -74,7 +74,7 @@ pub(super) fn judgment_key(request: &Value) -> String {
 /// Aliases move to new model versions, so their answers expire. A pinned
 /// version answers the same request the same way; its entries never expire.
 fn cache_ttl(model: &str, ttl: u64) -> Option<u64> {
-    matches!(model, "jev-latest" | "jev-preview").then_some(ttl)
+    (!crate::model::pinned(model)).then_some(ttl)
 }
 
 /// A valid, unexpired cached answer to `request`, read through `load`; none
@@ -297,8 +297,12 @@ mod tests {
         store.save("old", &body, schema::now() - 7200).unwrap();
         for (model, kept) in [
             ("jev-1.13.0", true),
+            ("typesafe/jev-1.13.0", true),
             ("jev-latest", false),
             ("jev-preview", false),
+            ("jev-1.13", false),
+            ("typesafe/jev-1.13", false),
+            ("typesafe-ai/jev", false),
         ] {
             let ttl = cache_ttl(model, 3600);
             assert_eq!(store.load("old", ttl).is_some(), kept, "{model}");
