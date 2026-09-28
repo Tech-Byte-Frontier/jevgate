@@ -25,6 +25,15 @@ impl Project {
     fn new() -> Self {
         Self(temp_dir::TempDir::new("jevgate-cli"))
     }
+    /// A Git repository with [`JUDGED_RS`] committed as `lib.rs`.
+    fn committed() -> Self {
+        let project = Self::new();
+        std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+        git(&project, &["init", "-q"]);
+        git(&project, &["add", "lib.rs"]);
+        git(&project, &["commit", "-qm", "start"]);
+        project
+    }
     /// `jevgate` in the project, with no key or endpoint from the caller's
     /// environment, credentials saved only in the project, and no variable
     /// pointing its Git at the repository running the tests.

@@ -567,38 +567,58 @@ pub(crate) fn blobs(
     let writer = std::thread::spawn(move || stdin.write_all(names.as_bytes()));
     let mut out = BufReader::new(child.stdout.take().context("Git has no stdout")?);
     for path in paths {
-        let mut header = String::new();
-        if out.read_line(&mut header)? == 0 {
-            break;
-        }
-        // `<id> <type> <size>`, then the content and a newline; or `<name>
-        // missing` alone, for a path the revision lacks.
-        let header = header.trim_end();
-        if header.ends_with(" missing") {
-            continue;
-        }
-        let size: u64 = header
-            .rsplit(' ')
-            .next()
-            .and_then(|size| size.parse().ok())
-            .with_context(|| format!("Git printed an unexpected object header: {header}"))?;
-        let mut content = (&mut out).take(size);
-        if size > limit {
-            std::io::copy(&mut content, &mut std::io::sink())?;
-        } else {
-            let mut bytes = Vec::new();
-            content.read_to_end(&mut bytes)?;
-            if !bytes.contains(&0)
-                && let Ok(text) = String::from_utf8(bytes)
-            {
+        match batched(&mut out, limit)? {
+            Batched::Text(text) => {
                 texts.insert(path.to_path_buf(), text);
             }
+            Batched::Other => {}
+            Batched::End => break,
         }
-        out.read_exact(&mut [0])?;
     }
     let _ = writer.join();
     let _ = child.wait();
     Ok(texts)
+}
+
+/// One answer of `git cat-file --batch`.
+enum Batched {
+    /// A blob of at most the limit's bytes of UTF-8 without NUL bytes.
+    Text(String),
+    /// A missing path, or an object read past as too large or not text.
+    Other,
+    /// Git printed nothing more.
+    End,
+}
+
+/// The next answer `out`, the output of `git cat-file --batch`, holds:
+/// `<id> <type> <size>`, then the content and a newline; or `<name>
+/// missing` alone, for a path the revision lacks.
+fn batched(out: &mut impl BufRead, limit: u64) -> Result<Batched> {
+    let mut header = String::new();
+    if out.read_line(&mut header)? == 0 {
+        return Ok(Batched::End);
+    }
+    let header = header.trim_end();
+    if header.ends_with(" missing") {
+        return Ok(Batched::Other);
+    }
+    let size: u64 = header
+        .rsplit(' ')
+        .next()
+        .and_then(|size| size.parse().ok())
+        .with_context(|| format!("Git printed an unexpected object header: {header}"))?;
+    let mut content = out.take(size);
+    let mut bytes = Vec::new();
+    if size > limit {
+        std::io::copy(&mut content, &mut std::io::sink())?;
+    } else {
+        content.read_to_end(&mut bytes)?;
+    }
+    out.read_exact(&mut [0])?;
+    Ok(match String::from_utf8(bytes) {
+        Ok(text) if size <= limit && !text.contains('\0') => Batched::Text(text),
+        _ => Batched::Other,
+    })
 }
 
 impl Changes {

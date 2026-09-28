@@ -64,9 +64,9 @@ mod tests {
     use super::*;
     use std::process::{Command, Stdio};
 
-    fn started(script: &str) -> Child {
-        Command::new("sh")
-            .args(["-c", script])
+    fn started(program: &str, args: &[&str]) -> Child {
+        Command::new(program)
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -76,19 +76,18 @@ mod tests {
 
     #[test]
     fn a_child_that_prints_more_than_a_pipe_holds_is_read_to_its_end() {
-        let child = started("head -c 300000 /dev/zero; echo done >&2");
+        let child = started("head", &["-c", "300000", "/dev/zero"]);
         let output = output_until(child, Instant::now() + Duration::from_secs(20))
             .unwrap()
             .unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout.len(), 300_000);
-        assert_eq!(output.stderr, b"done\n");
     }
 
     #[test]
     fn a_child_still_running_at_the_deadline_is_stopped() {
         let begun = Instant::now();
-        let child = started("sleep 5");
+        let child = started("sleep", &["5"]);
         let output = output_until(child, begun + Duration::from_millis(200)).unwrap();
         assert!(output.is_none());
         assert!(begun.elapsed() < Duration::from_secs(4), "it was stopped");

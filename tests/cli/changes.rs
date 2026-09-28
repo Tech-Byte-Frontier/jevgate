@@ -32,11 +32,7 @@ fn base_errors_and_empty_changes_are_distinct_cli_outcomes() {
 
 #[test]
 fn base_reviews_changes_since_the_fork_point_like_a_pull_request() {
-    let project = Project::new();
-    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
-    git(&project, &["init", "-q"]);
-    git(&project, &["add", "lib.rs"]);
-    git(&project, &["commit", "-qm", "start"]);
+    let project = Project::committed();
     git(&project, &["tag", "start"]);
     git(&project, &["checkout", "-qb", "feature"]);
     std::fs::write(project.0.join("feature.rs"), JUDGED_RS).unwrap();
