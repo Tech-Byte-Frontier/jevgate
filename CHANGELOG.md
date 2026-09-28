@@ -4,6 +4,12 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+Fixes from running JevGate on nine widely used projects under daily development (rtk, headroom, paperclip, hermes-agent, cc-switch, freellmapi, herdr, multica, OmniRoute).
+
+- Two crashes on text outside ASCII: a colon right after non-ASCII text in documentation (`已移除:` before a code span) and a Python test ending in a multi-byte character. Both stopped the whole run, on herdr, hermes-agent and OmniRoute.
+- Staleness: a path with an anchor in a code span, such as `docs/en/env/01-variables.md#idempotency`, names its file; it was reported as missing although the file and its heading exist.
+- Documentation: the docs of one release, in a directory named like a version (`docs/versions/0.7.5`, `v1.2`) or under `versioned_docs`, are left out as frozen copies. herdr keeps its website docs per release, and 137 of its 147 documentation considers named a section of such a copy. No corpus finding changes.
+
 ## [0.24.1] - 2026-09-27
 
 - File organization: in Rust, a function another file passes by path, such as `compose::unconfirmed_units` in `follow_ups(plan, files, compose::unconfirmed_units)`, counts as used by that file, so a file's outline names the files that use each member (`used_by`). JevGate's own `compose.rs`, before it was split, listed `follow_ups.rs` as the user of 3 of its 8 follow-up selectors, and the file stayed clear; with all 8 listed, its outline is a consider (0.80). Only outlines whose members are passed by path change: on the 26 Rust projects of the corpus, 37 outline requests were asked again (under $0.01), one wrong review (a SpacetimeDB conversion module, one job laid out in sections) is a consider, one right consider (zoxide's `util.rs`, a grab bag of helpers) is a review, and two units are undecided; nothing else changed. Other languages are unchanged.
