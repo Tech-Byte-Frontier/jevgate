@@ -48,9 +48,9 @@ sh rerun.sh --rule all --include-tests
 On [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424b3f1033094ffd97da6d47585e38259), whose answers an earlier check had cached:
 
 ```text
-JevGate: review · gate failed: 1 new review finding · 33 files · 0 API requests · 0 input tokens · ~$0.0000
-JevGate: review · gate failed: 1 new review finding · 33 files · 0 API requests · 0 input tokens · ~$0.0000
-The rerun sent no request and matched: 40 findings (4 reviews, 8 considers, 28 notes) and 1472 answers in 33 files, with the same levels, lines and probabilities.
+JevGate: review · gate passed · 34 files · 0 API requests · 0 input tokens · ~$0.0000
+JevGate: review · gate passed · 34 files · 0 API requests · 0 input tokens · ~$0.0000
+The rerun sent no request and matched: 47 findings (3 reviews, 12 considers, 32 notes) and 1544 answers in 34 files, with the same levels, lines and probabilities.
 ```
 
 On 14 open-source projects in 9 languages (2,839 files, 3,870 findings, 129,403 answers), every rerun sent no request and matched, and a check answered from the cache took 0.3 to 3.3 seconds.
