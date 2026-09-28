@@ -259,6 +259,32 @@ pub(super) fn run(
 }
 
 #[test]
+fn a_file_nested_past_what_jevgate_reads_fails_the_run() {
+    let project = Project::new();
+    // A function to judge, beside one literal no rule can read.
+    let settle: String = (0..40)
+        .map(|n| format!("  total += items[{n}].price * rate;\n"))
+        .collect();
+    let deep = format!(
+        "export function settle(items, rate) {{\n  let total = 0;\n{settle}  return total;\n}}\n\nexport const ROUNDING = {}1{};\n",
+        "(".repeat(1_001),
+        ")".repeat(1_001)
+    );
+    project.write("src/billing.js", &deep);
+    project.write("src/other.js", "function other(x) {\n  return x + 1;\n}\n");
+    let report = run(&project, &args(), &mut Mock::default());
+    let billing = report
+        .files
+        .iter()
+        .find(|f| f.path == std::path::Path::new("src/billing.js"))
+        .unwrap();
+    assert_eq!(billing.status, schema::Status::Error, "{:?}", billing.error);
+    assert_eq!(billing.error.as_deref(), Some(crate::syntax::TOO_DEEP));
+    assert!(!report.complete, "it never passes unread");
+    assert_eq!(crate::gate::exit_code(&report), 2);
+}
+
+#[test]
 fn unchanged_files_are_answered_from_cache_without_api_calls() {
     let project = Project::new();
     project.write("a.rs", &function("a"));

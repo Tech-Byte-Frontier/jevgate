@@ -716,7 +716,7 @@ fn schedule(
         Ok(plan) => plan,
         Err(error) => {
             // Invalid syntax cannot be located; it is reported, not judged.
-            skip(file, crate::syntax::skip_reason(&error));
+            unread(file, crate::syntax::skip_reason(&error));
             return Ok(Scheduled::None);
         }
     };
@@ -772,10 +772,23 @@ fn fail(file: &mut FileResult, error: anyhow::Error) {
 /// of the others.
 fn record_plan(plan: &crate::units::Plan, report: &mut Report) {
     for (owner, reason) in &plan.skipped {
-        skip(&mut report.files[*owner], reason);
+        unread(&mut report.files[*owner], reason);
     }
     for (&owner, file) in &plan.files {
         report.files[owner].left_out.clone_from(&file.left_out);
+    }
+}
+
+/// A file planning could not read, for `reason`: skipped, but for syntax
+/// nested too deep to read, which fails the run. That file's code is read
+/// by no rule, so a pull request could hide a long function beside one
+/// literal of 1,001 parentheses and pass, where before the limit the run
+/// crashed; the corpus's deepest file nests 405 levels.
+fn unread(file: &mut FileResult, reason: &str) {
+    if reason == crate::syntax::TOO_DEEP {
+        fail(file, anyhow::anyhow!(reason.to_string()));
+    } else {
+        skip(file, reason);
     }
 }
 

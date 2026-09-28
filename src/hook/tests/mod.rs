@@ -977,8 +977,8 @@ fn deeply_nested_code_is_checked_with_a_main_threads_stack() {
     // A debug build overflowed a spawned thread's 2 MiB at 700 branches and
     // passed 2,400 on 8 MiB. Syntax nested deeper than 1,000 levels is not
     // read at all now (`syntax::MAX_DEPTH`), and each branch nests two: 480
-    // is as deep as a file the parser reads goes, and 1,000 is named as not
-    // reviewed rather than walked.
+    // is as deep as a file the parser reads goes, and 1,000 fails the check
+    // rather than being walked, which the agent is told.
     let project = repository();
     let host = reviewing();
     send(&project, &host, prompt("add a table"));
@@ -998,8 +998,9 @@ fn deeply_nested_code_is_checked_with_a_main_threads_stack() {
     project.write("lib.rs", &branches(1_000));
     let reply = send(&project, &host, edit(&project, "lib.rs"));
     assert!(
-        context(&reply)
-            .contains("did not review lib.rs: Its syntax nests more than 1,000 levels deep"),
+        context(&reply).contains(
+            "JevGate could not check lib.rs (Its syntax nests more than 1,000 levels deep, past what JevGate reads"
+        ),
         "{reply}"
     );
 }

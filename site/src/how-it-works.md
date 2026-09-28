@@ -84,9 +84,10 @@ signatures, or one candidate pair.
    non-blank lines parsed: leaving out whole members of 55 clean outlines, the
    first answer moved as little as with one small member missing above 90%,
    twice as much from 70% to 90%, and more below. A file with no intact unit
-   is skipped, as is one whose top level the parser could not read, and one
-   whose syntax nests more than 1,000 levels (the corpus's deepest nests 405),
-   before any walk that could overflow. What is left out is reported as code
+   is skipped, as is one whose top level the parser could not read. One whose
+   syntax nests more than 1,000 levels (the corpus's deepest nests 405) is
+   refused before any walk that could overflow, and fails the run: skipped, it
+   would pass whatever it holds unread. What is left out is reported as code
    the parser could not read, not as broken code: nearly every such error is a
    grammar gap. A file under a directory named with a `{{ … }}` placeholder,
    as in a cookiecutter template, is parsed without its Jinja tags (statements

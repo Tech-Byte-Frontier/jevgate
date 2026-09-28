@@ -35,8 +35,7 @@ pub(crate) const SYNTAX_ERRORS: &str =
 pub(crate) const BEND1: &str = "Bend 1 syntax: JevGate reads Bend 2 (bendlang/bend 2.0.x), a different language that shares the .bend extension; this file was not judged.";
 pub(crate) const SLOW_PARSE: &str =
     "The parser did not finish within 10 seconds; this file was not judged.";
-pub(crate) const TOO_DEEP: &str =
-    "Its syntax nests more than 1,000 levels deep; this file was not judged.";
+pub(crate) const TOO_DEEP: &str = "Its syntax nests more than 1,000 levels deep, past what JevGate reads, so the run cannot judge it: mark it generated or deny its upload in jevgate.toml, or nest it less.";
 
 /// The skip reason of a parse error: its message when it is one of the
 /// reasons above, and syntax errors otherwise.
