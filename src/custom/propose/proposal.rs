@@ -309,9 +309,23 @@ fn marker(text: &str) -> String {
 }
 
 /// An id from the rule's first words: lowercase ASCII letters and digits
-/// joined by hyphens, up to [`ID_CHARS`], starting with a letter. None when
-/// the rule has no such word, as in a rule written in Chinese.
+/// joined by hyphens, up to [`ID_CHARS`], starting with a letter; from its
+/// first sentence when that has two such words, so ky's "Prefer `undefined`
+/// for absent values. Do not add special handling for `null`." is
+/// `prefer-undefined-for-absent-values`, not `…-values-do`. None when the
+/// rule has no such word, as in a rule written in Chinese.
 pub fn slug(text: &str) -> Option<String> {
+    let first = hyphenated(first_sentence(text));
+    if first.contains('-') {
+        return Some(first);
+    }
+    let whole = hyphenated(text);
+    (!whole.is_empty()).then_some(whole)
+}
+
+/// The ASCII words of `text` from its first that starts with a letter,
+/// lowercase, joined by hyphens while they fit [`ID_CHARS`].
+fn hyphenated(text: &str) -> String {
     let ascii: String = text.chars().filter(char::is_ascii).collect();
     let mut id = String::new();
     let words = ascii
@@ -327,7 +341,20 @@ pub fn slug(text: &str) -> Option<String> {
         }
         id.push_str(&word.to_ascii_lowercase());
     }
-    (!id.is_empty()).then_some(id)
+    id
+}
+
+/// `text` up to the end of its first sentence: a `.`, `!` or `?` followed by
+/// a space and a capital letter or code, so "e.g. this" ends none.
+fn first_sentence(text: &str) -> &str {
+    let ends = text.match_indices(['.', '!', '?']).map(|(at, _)| at);
+    ends.into_iter()
+        .find(|&at| {
+            text[at + 1..]
+                .strip_prefix(' ')
+                .is_some_and(|rest| rest.starts_with(|c: char| c.is_uppercase() || c == '`'))
+        })
+        .map_or(text, |at| &text[..at])
 }
 
 /// An id from the file's name and the rule's line: `agents-12`.

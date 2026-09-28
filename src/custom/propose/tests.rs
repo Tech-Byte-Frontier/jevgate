@@ -768,6 +768,24 @@ fn ids_come_from_the_first_words_of_the_rule() {
         Some("retries-then-no-fail")
     );
     assert_eq!(proposal::slug("不要记录请求正文"), None);
+    assert_eq!(
+        proposal::slug(
+            "Prefer `undefined` for absent values. Do not add special handling for `null`."
+        )
+        .as_deref(),
+        Some("prefer-undefined-for-absent-values"),
+        "the first sentence names the rule"
+    );
+    assert_eq!(
+        proposal::slug("Wrap errors (e.g. with context). Always.").as_deref(),
+        Some("wrap-errors-e-g-with-context"),
+        "an abbreviation ends no sentence"
+    );
+    assert_eq!(
+        proposal::slug("Imports. Use relative imports.").as_deref(),
+        Some("imports-use-relative-imports"),
+        "a first sentence of one word is too short to name a rule"
+    );
 }
 
 /// [`Rules`], with the first line of every request a rule.
