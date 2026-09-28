@@ -31,12 +31,11 @@ It reads Rust, Python, JavaScript, TypeScript, Go, C#, Ruby, PHP, Java and Bend 
 ```sh
 brew install tech-byte-frontier/tap/jevgate   # macOS and Linux, with Homebrew
 curl -fsSL https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/main/install.sh | sh   # Linux and macOS
-npm install -g @tech-byte-frontier/jevgate    # any platform with Node 20 or later
 cargo binstall jevgate            # any platform, with cargo-binstall
 cargo install jevgate --locked    # build from source; needs Rust 1.90 or later
 ```
 
-Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs an API key from [TypeSafe](https://console.typesafe.ai/settings/keys) or [OpenRouter](https://openrouter.ai/settings/keys), which serve the same model at the same price; a [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys) key is accepted too, but has not been tried with a real key yet. [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, the npm package, shell completions and man pages.
+Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs an API key from [TypeSafe](https://console.typesafe.ai/settings/keys) or [OpenRouter](https://openrouter.ai/settings/keys), which serve the same model at the same price; a [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys) key is accepted too, but has not been tried with a real key yet. [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, shell completions and man pages.
 
 ## Quick start
 
