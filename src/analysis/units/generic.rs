@@ -38,12 +38,16 @@ pub(super) fn walk(language: &Language, root: Node<'_>, source: &str, file: &mut
             .map(|t| t.name)
             .or(function.scope)
             .map_or("", |name| text(name, source));
-        // Elixir's function head, `add(cart, item)`, is a call of the
-        // function's own name.
-        let calls = tags
+        // The calls are in source order. Elixir's function head,
+        // `add(cart, item)`, is a call of the function's own name.
+        let range = function.node.byte_range();
+        let first = tags
             .calls
+            .partition_point(|name| name.start_byte() < range.start);
+        let calls = tags.calls[first..]
             .iter()
-            .filter(|name| inside(function.node, **name) && name.id() != function.name.id())
+            .take_while(|name| name.start_byte() < range.end)
+            .filter(|name| name.id() != function.name.id())
             .map(|name| text(*name, source).to_string())
             .collect();
         push(language, function, (owner, calls), source, file);

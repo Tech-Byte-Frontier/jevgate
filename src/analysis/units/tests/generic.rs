@@ -176,3 +176,14 @@ fn dart_scala_elixir_and_lua_definitions_are_units() {
     assert_eq!(file.units[0].doc, "Adds two numbers.");
     assert_eq!(facts("util.lua", LUA, "M::add").1, (2, 3));
 }
+
+#[test]
+fn a_generic_file_with_syntax_errors_fails_instead_of_returning_no_units() {
+    for (path, source) in [
+        ("broken.kt", "fun broken( {"),
+        ("broken.c", "int broken( {"),
+        ("broken.swift", "func broken( {"),
+    ] {
+        assert!(parse(Path::new(path), source).is_err(), "{path}");
+    }
+}

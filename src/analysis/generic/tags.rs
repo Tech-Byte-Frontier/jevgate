@@ -58,7 +58,7 @@ pub(crate) fn tags<'t>(language: &Language, root: Node<'t>, source: &'t str) -> 
 #[derive(Default)]
 struct Captured<'t> {
     definition: Option<(Node<'t>, Defines)>,
-    call: Option<Node<'t>>,
+    call: bool,
     name: Option<Node<'t>>,
     body: Option<Node<'t>>,
     scope: Option<Node<'t>>,
@@ -70,7 +70,7 @@ impl<'t> Captured<'t> {
             "name" => self.name = Some(node),
             "body" => self.body = Some(node),
             "scope" => self.scope = Some(node),
-            "reference.call" => self.call = Some(node),
+            "reference.call" => self.call = true,
             "definition.function" | "definition.method" => {
                 self.definition = Some((node, Defines::Function));
             }
@@ -93,7 +93,7 @@ impl<'t> Captured<'t> {
                 body: self.body,
                 scope: self.scope,
             });
-        } else if self.call.is_some() {
+        } else if self.call {
             tags.calls.push(name);
         }
     }
