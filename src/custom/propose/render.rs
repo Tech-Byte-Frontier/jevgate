@@ -24,12 +24,26 @@ pub struct Usage {
     pub usd: Option<f64>,
 }
 
-/// The files read, one line: `Read 2 instruction files, 41 lines: AGENTS.md, web/CLAUDE.md`.
+/// Files named on the line of files read; the rest are counted.
+const NAMED_FILES: usize = 10;
+
+/// Files a reason not to read them is listed for, one line each; more
+/// share one line, such as OmniRoute's 133 translated instruction files.
+const LISTED_SKIPS: usize = 3;
+
+/// The files read, one line: `Read 2 files, 41 lines: AGENTS.md, web/CLAUDE.md`.
 fn read_line(files: &[File]) -> String {
-    let lines: usize = files.iter().map(|f| f.lines.len()).sum();
-    let names: Vec<String> = files.iter().map(|f| slashed(&f.path)).collect();
     if files.is_empty() {
-        return "No agent instruction file found; name one, such as `jevgate rules propose CONTRIBUTING.md`.".into();
+        return "No agent instruction file to read; name one, such as `jevgate rules propose CONTRIBUTING.md`.".into();
+    }
+    let lines: usize = files.iter().map(|f| f.lines.len()).sum();
+    let mut names: Vec<String> = files
+        .iter()
+        .take(NAMED_FILES)
+        .map(|f| slashed(&f.path))
+        .collect();
+    if files.len() > NAMED_FILES {
+        names.push(format!("and {} more", files.len() - NAMED_FILES));
     }
     format!(
         "Read {}, {}: {}",
@@ -39,11 +53,32 @@ fn read_line(files: &[File]) -> String {
     )
 }
 
-/// Files left out, one line each.
+/// Files left out and why: one line each, or one line for a reason more
+/// than [`LISTED_SKIPS`] files share.
 fn skipped_lines(skipped: &[Skipped]) -> Vec<String> {
-    skipped
-        .iter()
-        .map(|s| format!("Not read: {} ({})", slashed(&s.path), s.reason))
+    let mut reasons: Vec<(&str, Vec<&Skipped>)> = Vec::new();
+    for file in skipped {
+        match reasons
+            .iter_mut()
+            .find(|(reason, _)| *reason == file.reason)
+        {
+            Some((_, files)) => files.push(file),
+            None => reasons.push((&file.reason, vec![file])),
+        }
+    }
+    reasons
+        .into_iter()
+        .flat_map(|(reason, files)| {
+            if files.len() > LISTED_SKIPS {
+                let first = slashed(&files[0].path);
+                let many = count(files.len(), "file");
+                return vec![format!("Not read: {many}, such as {first} ({reason})")];
+            }
+            files
+                .iter()
+                .map(|file| format!("Not read: {} ({reason})", slashed(&file.path)))
+                .collect()
+        })
         .collect()
 }
 

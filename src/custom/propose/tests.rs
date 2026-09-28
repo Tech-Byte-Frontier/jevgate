@@ -620,6 +620,72 @@ fn a_file_outside_the_upload_patterns_is_not_read() {
 }
 
 #[test]
+fn translations_are_read_only_when_named() {
+    let project = Project::new();
+    project.write("AGENTS.md", AGENTS);
+    let locales = ["fr", "ja", "pt-br", "zh-hans"];
+    for locale in locales {
+        project.write(
+            &format!("docs/i18n/{locale}/CLAUDE.md"),
+            "- Nunca registre corpos.\n",
+        );
+    }
+    let context = context(&project);
+    let read = |paths: &[&str]| -> (Vec<String>, Vec<String>) {
+        let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        let (files, skipped) = super::files::read(&paths, &context, 65_536).unwrap();
+        let read = files.iter().map(|f| proposal::slashed(&f.path)).collect();
+        let left = skipped.iter().map(|s| proposal::slashed(&s.path)).collect();
+        (read, left)
+    };
+    let translation = |locale: &str| format!("docs/i18n/{locale}/CLAUDE.md");
+    let all: Vec<String> = locales.map(translation).to_vec();
+    assert_eq!(read(&[]), (vec!["AGENTS.md".into()], all.clone()));
+    assert_eq!(read(&["docs"]), (Vec::new(), all));
+    assert_eq!(
+        read(&[".", "docs/i18n/ja", "docs/i18n/fr/CLAUDE.md"]),
+        (
+            vec!["AGENTS.md".into(), translation("fr"), translation("ja")],
+            vec![translation("pt-br"), translation("zh-hans")]
+        ),
+        "a translation named, or under a directory named inside it, is read"
+    );
+    let printed = propose(
+        &project,
+        &arguments(ProposeFormat::Table, true),
+        &mut Rules::default(),
+    );
+    assert!(
+        printed.stdout.ends_with(
+            "\nNot read: 4 files, such as docs/i18n/fr/CLAUDE.md (A translation under a locale directory; name it to read it.)"
+        ),
+        "{}",
+        printed.stdout
+    );
+}
+
+#[test]
+fn a_repository_without_instruction_files_asks_nothing() {
+    let project = Project::new();
+    project.write("src/lib.rs", "fn main() {}\n");
+    let mut rules = Rules::default();
+    let printed = propose(
+        &project,
+        &arguments(ProposeFormat::Table, false),
+        &mut rules,
+    );
+    assert_eq!((printed.code, rules.calls), (0, 0));
+    assert!(
+        printed.stdout.starts_with(
+            "No agent instruction file to read; name one, such as `jevgate rules propose CONTRIBUTING.md`."
+        ),
+        "{}",
+        printed.stdout
+    );
+    assert!(proposals(&project).is_empty());
+}
+
+#[test]
 fn rules_apply_where_their_file_loads() {
     let project = Project::new();
     project.write("app/[locale]/CLAUDE.md", "- Never read cookies here.\n");

@@ -99,7 +99,8 @@ pub struct ProposeArgs {
     /// Instruction files or directories to read [default: every instruction file an agent loads]
     ///
     /// A directory selects the agent instruction files under it. A file is
-    /// read whatever its name, such as CONTRIBUTING.md.
+    /// read whatever its name, such as CONTRIBUTING.md. Translations under a
+    /// locale directory (`docs/i18n/ja/CLAUDE.md`) are read only when named.
     pub paths: Vec<PathBuf>,
     /// Output format [default: table; json with --show-requests]
     #[arg(long, value_enum)]
