@@ -10,7 +10,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -225,12 +225,9 @@ impl Snapshot<'_> {
             Instant::now() < self.deadline,
             "Git {name} did not finish in the hook's time"
         );
-        let mut child = Command::new("git")
-            .arg("-C")
-            .arg(self.root)
+        let mut child = super::git_in(self.root)
             .args(args)
             .env("GIT_INDEX_FILE", self.scratch)
-            .env("GIT_OPTIONAL_LOCKS", "0")
             .env_remove("GIT_LITERAL_PATHSPECS")
             .stdin(if input.is_some() {
                 Stdio::piped()

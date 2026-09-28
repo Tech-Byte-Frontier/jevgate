@@ -257,9 +257,8 @@ fn a_snapshot_holds_untracked_files_but_not_ignored_ones_and_leaves_the_index_al
 
 /// Whether the project's object store holds `id`.
 fn stored(project: &Project, id: &str) -> bool {
-    std::process::Command::new("git")
+    super::git_in(&project.0)
         .args(["cat-file", "-e", id])
-        .current_dir(&*project.0)
         .status()
         .unwrap()
         .success()
