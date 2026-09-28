@@ -83,25 +83,27 @@ impl FileUnits {
     /// left out, documentation above a left-out unit included: 1.0 for a
     /// clean parse.
     pub fn coverage(&self, source: &str) -> f64 {
-        let out: Vec<(usize, usize)> = self
-            .left_out_code(source)
+        let lines: Vec<&str> = source.split('\n').collect();
+        // Whether each line, from 1, is left out: each entry marks its own
+        // lines, so a file with thousands of errors stays linear.
+        let mut out = vec![false; lines.len() + 1];
+        for l in self.left_out_code(source) {
+            let first = line_of(source, l.span.start);
+            for mark in &mut out[first.min(l.end_line)..=l.end_line.min(lines.len())] {
+                *mark = true;
+            }
+        }
+        let code: Vec<bool> = lines
             .iter()
-            .map(|l| (line_of(source, l.span.start), l.end_line))
-            .collect();
-        let lines: Vec<usize> = source
-            .split('\n')
             .enumerate()
             .filter(|(_, line)| !line.trim().is_empty())
-            .map(|(index, _)| index + 1)
+            .map(|(index, _)| out[index + 1])
             .collect();
-        if lines.is_empty() {
+        if code.is_empty() {
             return 1.0;
         }
-        let left = lines
-            .iter()
-            .filter(|&&line| out.iter().any(|&(a, b)| a <= line && line <= b))
-            .count();
-        1.0 - left as f64 / lines.len() as f64
+        let left = code.iter().filter(|&&left| left).count();
+        1.0 - left as f64 / code.len() as f64
     }
 
     /// Leave out the test cases whose syntax holds an error, with the units
