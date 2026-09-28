@@ -282,6 +282,33 @@ fn alias_answers_expire_one_by_one_and_keep_their_age_when_carried() {
 }
 
 #[test]
+fn an_alias_answer_that_expires_in_a_session_is_asked_once_and_replaced() {
+    let project = Project::new();
+    let mut options = args();
+    options.model = Some("jev-latest".into());
+    options.cache_ttl_secs = Some(3600);
+    let mut request = three_questions();
+    request["model"] = json!("jev-latest");
+    let context = project.context();
+    let store = storage::Store::open(&project.0).unwrap();
+    let mut shifting = Shifting::default();
+    let mut watch = session(&options, &context, &store, &mut shifting);
+    let first = watch.queries(&[&request]);
+    edit_answers(&project, |answers| {
+        for answer in answers.values_mut() {
+            answer["created_at"] = json!(schema::now() - 7200);
+        }
+    });
+    let renewed = watch.queries(&[&request]);
+    let kept = watch.queries(&[&request]);
+    drop(watch);
+    assert_eq!(shifting.calls, 2, "asked again once, when it expired");
+    assert_ne!(long(&renewed[0]), long(&first[0]), "the new answer is used");
+    assert!(kept[0].result.as_ref().unwrap().2, "and kept");
+    assert_eq!(long(&kept[0]), long(&renewed[0]));
+}
+
+#[test]
 fn paid_tokens_are_what_was_sent_and_a_file_counts_its_answers_shares() {
     let project = Project::new();
     project.write("lib.rs", &format!("{}{}", function("a"), function("b")));

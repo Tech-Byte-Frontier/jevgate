@@ -100,6 +100,9 @@ pub(crate) type Answered = BTreeMap<String, BTreeSet<String>>;
 /// What the cache holds for one planned request.
 pub(super) struct Lookup {
     pub(super) state: String,
+    /// Seconds an answer about the state stays current; none for a pinned
+    /// model, whose answers never expire.
+    ttl: Option<u64>,
     /// Cached answers by question name.
     pub(super) found: BTreeMap<String, CachedAnswer>,
     /// The found answers read from the request's whole entry of an earlier
@@ -122,6 +125,7 @@ impl Lookup {
     ) -> Self {
         let mut lookup = Self {
             state: state_key(request),
+            ttl: cache_ttl(args.model(), args.cache_ttl_secs()),
             found: BTreeMap::new(),
             carried: BTreeMap::new(),
             missing: Vec::new(),
@@ -130,8 +134,7 @@ impl Lookup {
             lookup.missing = questions(request).map(|(name, _)| name.clone()).collect();
             return lookup;
         };
-        let ttl = cache_ttl(args.model(), args.cache_ttl_secs());
-        let stored = cache.answers(&lookup.state, ttl);
+        let stored = cache.answers(&lookup.state, lookup.ttl);
         let this_run = answered.get(&lookup.state);
         for (name, question) in questions(request) {
             let key = question_key(name, question);
@@ -149,7 +152,7 @@ impl Lookup {
         if !lookup.missing.is_empty()
             && !args.refresh
             && let Some((body, created_at)) = cache
-                .request(&request_key(request), ttl)
+                .request(&request_key(request), lookup.ttl)
                 .filter(|(body, _)| response::validate(body, request).is_ok())
         {
             lookup.carry(request, &body, created_at);
@@ -205,7 +208,9 @@ impl Lookup {
 
     /// Save the answers the provider's `body` gives to `sent`, except where
     /// this invocation already answered the question about the state, and
-    /// return when they were given.
+    /// return when they were given. An alias's answer this invocation gave
+    /// can expire within it, in a `--watch` session longer than the TTL:
+    /// the new answer then replaces it, as it replaces any expired answer.
     pub(super) fn keep(
         &mut self,
         store: &crate::storage::Store,
@@ -215,7 +220,7 @@ impl Lookup {
     ) -> Result<u64> {
         let timestamp = schema::now();
         let this_run = answered.entry(self.state.clone()).or_default();
-        let mut earlier = store.reader().answers(&self.state, None);
+        let mut earlier = store.reader().answers(&self.state, self.ttl);
         earlier.retain(|key, _| this_run.contains(key));
         let fresh = self.answered_by(sent, body, timestamp, &earlier);
         let keys: Vec<String> = fresh.keys().cloned().collect();
@@ -427,6 +432,7 @@ mod tests {
         assert!(stored.get("input_tokens").is_none(), "{stored}");
         let lookup = Lookup {
             state: state_key(&request),
+            ttl: None,
             found,
             carried: BTreeMap::new(),
             missing: Vec::new(),
