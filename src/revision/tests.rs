@@ -104,9 +104,11 @@ fn changes_from_git_hold_each_files_lines_and_its_base_text() {
     project.write("legacy/one.rs", "fn one() {}\n");
     project.write(".gitattributes", "marked.rs -diff\n");
     project.write("marked.rs", "fn marked() {\n    one();\n}\n");
+    project.write("Cargo.lock", "version = 3\n");
     project.commit_all();
     std::fs::remove_dir_all(project.0.join("legacy")).unwrap();
     project.write("marked.rs", "fn marked() {\n    two();\n}\n");
+    project.write("Cargo.lock", "version = 4\n");
     let edited = LIB
         .replace("    one();", "    uno();")
         .replace("    three();\n", "");
@@ -115,10 +117,17 @@ fn changes_from_git_hold_each_files_lines_and_its_base_text() {
     project.write("renamed.rs", "fn kept() {\n    stays();\n    more();\n}\n");
     std::fs::remove_file(project.0.join("notes.md")).unwrap();
     project.write("new.rs", "fn fresh() {}\n");
+    let judged = ["src/lib.rs", "renamed.rs", "marked.rs", "new.rs"].map(Path::new);
     let changes = Changes::load(&project.0, "HEAD")
         .unwrap()
-        .with_lines(&project.0)
+        .with_lines(&project.0, judged)
         .unwrap();
+    assert!(changes.paths.contains_key(Path::new("Cargo.lock")));
+    assert_eq!(
+        changes.lines.keys().collect::<Vec<_>>(),
+        ["marked.rs", "renamed.rs", "src/lib.rs"].map(Path::new),
+        "only the judged files are diffed, and a renamed one with its old name"
+    );
     assert_eq!(changes.paths[Path::new("new.rs")], None);
     assert_eq!(
         changes.paths[Path::new("renamed.rs")].as_deref(),
@@ -176,7 +185,7 @@ fn a_root_below_the_git_top_level_sees_its_own_paths() {
     let root = project.0.join("pkg");
     let changes = Changes::load(&root, "HEAD")
         .unwrap()
-        .with_lines(&root)
+        .with_lines(&root, [Path::new("lib.rs")])
         .unwrap();
     assert_eq!(
         changes.paths.keys().collect::<Vec<_>>(),
@@ -187,4 +196,23 @@ fn a_root_below_the_git_top_level_sees_its_own_paths() {
         .unwrap();
     assert_eq!(file.lines, lines(&[(2, 2)], &[]));
     assert_eq!(file.before().unwrap().1, LIB);
+}
+
+#[test]
+fn paths_are_diffed_in_batches_that_keep_a_renamed_files_names_together() {
+    let groups = [vec!["a.rs"], vec!["b.rs", "old/b.rs"], vec!["c.rs"]];
+    // Each name counts with the space that follows it: 5, 14 and 5 bytes.
+    assert_eq!(
+        batches(&groups, 19),
+        [vec!["a.rs", "b.rs", "old/b.rs"], vec!["c.rs"]]
+    );
+    assert_eq!(
+        batches(&groups, 10),
+        [vec!["a.rs"], vec!["b.rs", "old/b.rs"], vec!["c.rs"]],
+        "a group longer than the limit is a batch of its own, never split"
+    );
+    assert!(
+        batches(&[], 10).is_empty(),
+        "no path, no diff of everything"
+    );
 }

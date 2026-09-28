@@ -74,10 +74,17 @@ fn base_judges_changed_lines_unless_whole_files_is_given() {
     git(&project, &["commit", "-qm", "baseline"]);
     std::fs::write(project.0.join("lib.rs"), source.replacen("+ 1", "+ 2", 1)).unwrap();
     // `f` and `g` share a pack; the change touched `f` alone.
-    let functions = |flags: &[&str]| {
-        let mut arguments = vec!["--base", "HEAD", "--show-requests"];
-        arguments.extend_from_slice(flags);
-        let report = dry_run(&project, &arguments);
+    let functions = |flags: &[&str], environment: &[(&str, &str)]| {
+        let output = project
+            .command()
+            .args(["check", "--dry-run", "--format", "json"])
+            .args(["--base", "HEAD", "--show-requests"])
+            .args(flags)
+            .envs(environment.iter().copied())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let names: Vec<String> = report["initial_requests"][0]["state"]["functions"]
             .as_array()
             .unwrap()
@@ -86,12 +93,15 @@ fn base_judges_changed_lines_unless_whole_files_is_given() {
             .collect();
         (report["scope"].clone(), names)
     };
+    let changed = (serde_json::json!("changed-lines"), vec!["f".to_string()]);
+    assert_eq!(functions(&[], &[]), changed);
     assert_eq!(
-        functions(&[]),
-        (serde_json::json!("changed-lines"), vec!["f".to_string()])
+        functions(&[], &[("GIT_DIFF_OPTS", "--unified=6")]),
+        changed,
+        "Git lets GIT_DIFF_OPTS outrank -U0, which would count context lines as changed"
     );
     assert_eq!(
-        functions(&["--whole-files"]),
+        functions(&["--whole-files"], &[]),
         (
             serde_json::json!("whole-files"),
             vec!["f".to_string(), "g".to_string()]

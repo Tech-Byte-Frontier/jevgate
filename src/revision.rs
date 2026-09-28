@@ -16,8 +16,8 @@ pub struct Changes {
     /// Current path -> previous path; None denotes a new or untracked file.
     pub paths: BTreeMap<PathBuf, Option<PathBuf>>,
     pub deleted: Vec<PathBuf>,
-    /// The lines changed in each file that existed at the revision, once
-    /// read by [`Changes::with_lines`].
+    /// The lines changed in each judged file that existed at the revision,
+    /// once read by [`Changes::with_lines`].
     pub lines: BTreeMap<PathBuf, Lines>,
 }
 
@@ -139,6 +139,8 @@ fn git_path<'a>(fields: &mut impl Iterator<Item = &'a [u8]>, missing: &str) -> R
     )?))
 }
 
+/// Git in `root`, without taking optional locks. GIT_DIFF_OPTS is dropped:
+/// Git lets it outrank `-U0`, and its context lines would count as changed.
 fn git_command(root: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     command
@@ -146,7 +148,8 @@ fn git_command(root: &Path, args: &[&str]) -> Command {
         .arg("-C")
         .arg(root)
         .args(args)
-        .env("GIT_OPTIONAL_LOCKS", "0");
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env_remove("GIT_DIFF_OPTS");
     command
 }
 
@@ -211,37 +214,57 @@ fn tracked_changes(root: &Path, revision: &str) -> Result<ChangedPaths> {
     Ok((paths, deleted))
 }
 
-/// The lines each modified or renamed file changed since `revision`, from
-/// one `git diff -U0` read as it streams: only hunk headers and paths are
-/// kept, since the patch of a regenerated lockfile can run to many
-/// megabytes. Added and deleted files are left out; an added one changed
-/// throughout. `--text` gives the lines of a file `.gitattributes` marks
-/// `-diff` or `binary`, which Git would otherwise report only as changed.
-fn changed_lines(root: &Path, revision: &str) -> Result<BTreeMap<PathBuf, Lines>> {
-    let mut child = git_command(
-        root,
-        &[
-            "diff",
-            "-U0",
-            "--text",
-            "--inter-hunk-context=0",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--find-renames",
-            "--relative",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "--diff-filter=MRT",
-            revision,
-            "--",
-        ],
-    )
-    .stdin(Stdio::null())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .spawn()
-    .context("Cannot run Git")?;
+/// Bytes of paths given to one `git diff`, well under the 32,767
+/// characters a Windows command line holds.
+const PATHSPEC_BYTES: usize = 16 * 1024;
+
+/// `groups` of paths joined in order into batches of about `limit` bytes,
+/// a group never split: a renamed file's two names must be diffed together.
+fn batches<'a>(groups: &[Vec<&'a str>], limit: usize) -> Vec<Vec<&'a str>> {
+    let mut batches: Vec<Vec<&str>> = Vec::new();
+    let mut bytes = 0;
+    for group in groups {
+        let size: usize = group.iter().map(|path| path.len() + 1).sum();
+        if batches.is_empty() || bytes + size > limit {
+            batches.push(Vec::new());
+            bytes = 0;
+        }
+        bytes += size;
+        batches.last_mut().unwrap().extend(group);
+    }
+    batches
+}
+
+/// The lines each of `paths` changed since `revision`, when it was modified
+/// or renamed, from one `git diff -U0` read as it streams: only hunk
+/// headers and paths are kept, since a patch can run to many megabytes.
+/// Added and deleted files are left out; an added one changed throughout.
+/// `--text` gives the lines of a file `.gitattributes` marks `-diff` or
+/// `binary`, which Git would otherwise report only as changed.
+fn changed_lines(root: &Path, revision: &str, paths: &[&str]) -> Result<BTreeMap<PathBuf, Lines>> {
+    let mut args = vec![
+        "diff",
+        "-U0",
+        "--text",
+        "--inter-hunk-context=0",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--find-renames",
+        "--relative",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--diff-filter=MRT",
+        revision,
+        "--",
+    ];
+    args.extend_from_slice(paths);
+    let mut child = git_command(root, &args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Cannot run Git")?;
     // Read apart from the patch, so a long warning cannot block Git.
     let errors = child.stderr.take().map(|mut stderr| {
         std::thread::spawn(move || {
@@ -479,9 +502,33 @@ impl Changes {
         })
     }
 
-    /// The same changes with the lines of each file they touched.
-    pub fn with_lines(mut self, root: &Path) -> Result<Self> {
-        self.lines = changed_lines(root, &self.revision)?;
+    /// The same changes with the lines each of the `judged` files changed,
+    /// when it existed at the revision. Only those files are diffed, each
+    /// with its name before a rename: a changed binary or a regenerated
+    /// lockfile the check never reads costs nothing, which matters to
+    /// `--watch`, whose every poll collects the files anew. A 150 MB binary
+    /// diffed as text took 0.59 s and 460 MB of memory in Git.
+    pub fn with_lines<'a>(
+        mut self,
+        root: &Path,
+        judged: impl IntoIterator<Item = &'a Path>,
+    ) -> Result<Self> {
+        let mut groups: Vec<Vec<&str>> = Vec::new();
+        for path in judged {
+            let Some(Some(previous)) = self.paths.get(path) else {
+                continue;
+            };
+            let mut names: Vec<&str> = [path, previous.as_path()]
+                .iter()
+                .filter_map(|name| name.to_str())
+                .collect();
+            names.dedup();
+            groups.push(names);
+        }
+        for batch in batches(&groups, PATHSPEC_BYTES) {
+            self.lines
+                .extend(changed_lines(root, &self.revision, &batch)?);
+        }
         Ok(self)
     }
 

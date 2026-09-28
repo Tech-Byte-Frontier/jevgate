@@ -135,38 +135,39 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
             None => inputs.push(input),
         }
     }
-    if let (Some(changes), Some(removed)) = (&changes, &removed) {
-        mark_changes(&mut inputs, changes, &context.root, removed);
+    if let (Some(changes), Some(removed)) = (changes, &removed) {
+        mark_changes(&mut inputs, changes, &context.root, removed)?;
     }
     Ok(inputs)
 }
 
-/// With `--base`, what changed since the fork point with it, with the lines
-/// of each file the change touched when only those are judged.
+/// With `--base`, what changed since the fork point with it.
 fn load_changes(args: &CheckArgs, context: &ConfigContext) -> Result<Option<Changes>> {
-    let Some(base) = &args.base else {
-        return Ok(None);
-    };
-    let changes = Changes::load(&context.root, base)?;
-    Ok(Some(if args.changed_lines() {
-        changes.with_lines(&context.root)?
-    } else {
-        changes
-    }))
+    args.base
+        .as_ref()
+        .map(|base| Changes::load(&context.root, base))
+        .transpose()
 }
 
 /// Record on each input what the change did to it, so only the units it
-/// touched are judged; a file it added stays whole, and a document it left
-/// alone keeps the mark it was selected with.
+/// touched are judged. The lines are read only for the files read to be
+/// judged, once they are known. A file the change added stays whole, and a
+/// document it left alone keeps the mark it was selected with.
 fn mark_changes(
     inputs: &mut [Input],
-    changes: &Changes,
+    changes: Changes,
     root: &Path,
     removed: &Arc<BTreeSet<PathBuf>>,
-) {
+) -> Result<()> {
+    let judged = inputs
+        .iter()
+        .filter(|i| i.changed.is_none() && i.source.is_some())
+        .map(|i| i.result.path.as_path());
+    let changes = changes.with_lines(root, judged)?;
     for input in inputs.iter_mut().filter(|i| i.changed.is_none()) {
         input.changed = changes.file(root, &input.result.path, removed);
     }
+    Ok(())
 }
 
 /// Application source and tests in scope, with their roles.
