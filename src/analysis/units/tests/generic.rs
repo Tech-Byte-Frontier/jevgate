@@ -161,6 +161,27 @@ fn a_cpp_header_named_h_is_read_and_named_as_cpp() {
 }
 
 #[test]
+fn a_generic_file_s_symbols_are_its_functions() {
+    let symbols = |path: &str, source: &str| {
+        crate::locations::collect(Path::new(path), source, Path::new("."))
+            .unwrap()
+            .1
+    };
+    assert_eq!(
+        symbols("editor.c", C),
+        [("tabs".to_string(), 14), ("lines".to_string(), 30)]
+    );
+    let elixir: Vec<String> = symbols("cart.ex", ELIXIR)
+        .into_iter()
+        .map(|s| s.0)
+        .collect();
+    assert_eq!(
+        elixir,
+        ["Shop.Cart::add", "Shop.Cart::total", "Shop.Cart::helper"]
+    );
+}
+
+#[test]
 fn dart_and_scala_operators_are_units() {
     let dart = "class Money {\n  final int cents;\n  const Money(this.cents);\n\n  Money operator +(Money other) {\n    final sum = cents + other.cents;\n    return Money(sum);\n  }\n}\n";
     assert_eq!(

@@ -37,12 +37,29 @@ pub fn collect(path: &Path, source: &str, _root: &Path) -> Result<(bool, Vec<(St
     let tree = parse(path, source)?;
     if let Some(tree) = &tree {
         let mut locations = Vec::new();
-        visit(tree.root_node(), source, &mut locations);
+        match crate::analysis::generic::read(path, source) {
+            Some(_) => generic_functions(path, source, &mut locations),
+            None => visit(tree.root_node(), source, &mut locations),
+        }
         if locations.len() <= MAX_LOCATIONS {
             return Ok((true, locations));
         }
     }
     Ok((tree.is_some(), line_windows(source)))
+}
+
+/// The functions and methods of a language of the generic tier, which its
+/// tag query finds: `visit` reads the other languages' kinds, and named
+/// every C, C++ and Dart function `anonymous` and no Elixir one.
+fn generic_functions(path: &Path, source: &str, locations: &mut Vec<(String, usize)>) {
+    let units = crate::analysis::units::parse(path, source).unwrap_or_default();
+    locations.extend(
+        units
+            .units
+            .into_iter()
+            .filter(|unit| unit.callable())
+            .map(|unit| (unit.name, unit.line)),
+    );
 }
 
 /// The function's own name, or the name of the binding that holds it.
