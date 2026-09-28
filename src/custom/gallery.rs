@@ -34,7 +34,6 @@ pub const ENTRIES: &[Entry] = &[
     entry!("resource-leak"),
     entry!("thin-handlers"),
     entry!("n-plus-one"),
-    entry!("global-state"),
 ];
 
 impl Entry {

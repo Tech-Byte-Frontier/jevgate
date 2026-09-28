@@ -152,14 +152,14 @@ fn adding_again_keeps_the_same_file_and_refuses_an_edited_one_without_force() {
 fn every_name_is_checked_before_any_file_is_written() {
     let project = Project::new();
     let config: Config = toml::from_str(
-        "[[question]]\nid = \"global-state\"\nquestion = \"Does it share state?\"\nunit = \"function\"\n",
+        "[[question]]\nid = \"n-plus-one\"\nquestion = \"Does it query in a loop?\"\nunit = \"function\"\n",
     )
     .unwrap();
-    let names = ["resource-leak".to_string(), "global-state".to_string()];
+    let names = ["resource-leak".to_string(), "n-plus-one".to_string()];
     for force in [false, true] {
         let error = refused(add(&project.0, &config.question, &names, force));
         assert!(
-            error.contains("custom/global-state is already defined in jevgate.toml"),
+            error.contains("custom/n-plus-one is already defined in jevgate.toml"),
             "{error}"
         );
     }

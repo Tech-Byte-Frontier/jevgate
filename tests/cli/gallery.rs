@@ -93,10 +93,10 @@ fn adding_warns_when_git_ignores_the_questions() {
 fn force_replaces_a_question_file_that_no_longer_loads() {
     let project = Project::new();
     std::fs::create_dir_all(project.0.join(".jevgate/questions")).unwrap();
-    let broken = project.0.join(".jevgate/questions/global-state.toml");
+    let broken = project.0.join(".jevgate/questions/thin-handlers.toml");
     std::fs::write(
         &broken,
-        "question = \"Does it share state?\"\nunit = \"function\"\nthreshold = 2\n",
+        "question = \"Does it do business work?\"\nunit = \"function\"\nthreshold = 2\n",
     )
     .unwrap();
     let rules = project.command().arg("rules").output().unwrap();
@@ -105,10 +105,10 @@ fn force_replaces_a_question_file_that_no_longer_loads() {
         Some(2),
         "every command that loads questions stops"
     );
-    let refused = add(&project, &["global-state"]);
+    let refused = add(&project, &["thin-handlers"]);
     assert_eq!(refused.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&refused.stderr).contains("--force replaces it"));
-    let replaced = add(&project, &["--force", "global-state"]);
+    let replaced = add(&project, &["--force", "thin-handlers"]);
     assert!(
         replaced.status.success(),
         "{}",
@@ -116,5 +116,5 @@ fn force_replaces_a_question_file_that_no_longer_loads() {
     );
     let rules = project.command().arg("rules").output().unwrap();
     assert!(rules.status.success());
-    assert!(String::from_utf8_lossy(&rules.stdout).contains("custom/global-state"));
+    assert!(String::from_utf8_lossy(&rules.stdout).contains("custom/thin-handlers"));
 }

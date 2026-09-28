@@ -15,15 +15,14 @@ jevgate check --fail-on custom=report               # ask them without failing t
 | [todo-without-owner](#todo-without-owner) | comment | review at 0.95 | 7 | 973 | 31 | 31 (100%) |
 | [swallowed-errors](#swallowed-errors) | function | review at 0.80 | 6 | 1,550 | 17 | 14 (82%) |
 | [resource-leak](#resource-leak) | function | review at 0.80 | 6 | 1,212 | 14 | 12 (86%) |
-| [thin-handlers](#thin-handlers) | request handler | review at 0.80 | 9 | 566 | 13 | 12 (92%) |
-| [n-plus-one](#n-plus-one) | function | consider at 0.80 | 7 | 1,457 | 5 | 4 (80%) |
-| [global-state](#global-state) | function | consider at 0.80 | 7 | 1,119 | 4 | 3 (75%) |
+| [thin-handlers](#thin-handlers) | request handler | review at 0.80 | 12 | 645 | 13 | 12 (92%) |
+| [n-plus-one](#n-plus-one) | function | consider at 0.80 | 11 | 1,864 | 7 | 5 (71%) |
 
 ## How they were measured
 
-Each question was asked of three to nine projects where it applies, without the built-in questions, with jev-1.13.0 in September 2026. Every finding at the question's threshold was labeled from the code: right, wrong, or debatable when competent maintainers would disagree. A debatable finding counts as not right. The numbers above are of the files as shipped: replayed from the cached answers, they ask exactly what was measured.
+Each question was asked of 6 to 12 projects where it applies, without the built-in questions, with jev-1.13.0 in September 2026. Every finding at the question's threshold was labeled from the code: right, wrong, or debatable when competent maintainers would disagree. A debatable finding counts as not right. The numbers above are of the files as shipped: replayed from the cached answers, they ask exactly what was measured.
 
-A question ships at `review` when at least 80% of its findings were right over at least 10 findings, and at `consider` from 60%, or at 80% over fewer. A question's first wording was revised at most once, and a project whose findings informed the wording or threshold is counted as tuned; the sections say which. Of the 30 projects, 22 are open source and 8 are the maintainer's own.
+A question ships at `review` when at least 80% of its findings were right over at least 10 findings, and at `consider` from 60%, or at 80% over fewer. A question's first wording was revised at most once, and a project whose findings informed the wording or threshold is counted as tuned; the sections say which. Of the 29 projects, 24 are open source and 5 are the maintainer's own. Four of them (microblog, laravel-realworld, nest-realworld and bakerydemo) were asked last, of the files as shipped: they added one right and one debatable n-plus-one finding, none in 79 more handlers, and two wrong findings that took a sixth question, global-state, out of the gallery.
 
 The counts are small. They say how often a question is right when it fires, not how much it finds: no one labeled the units it cleared.
 
@@ -69,7 +68,7 @@ On 6 projects (1,212 functions), 12 of 14 findings were right, 9 of them in java
 
 Does a request handler do business work itself, such as calculations, rules or several data changes, instead of reading the request, calling a service and building the response? It is asked of the functions in files its `paths` match: controllers, handlers, routes and views under common names. Change `paths` to where your handlers live.
 
-On 9 projects (566 handlers), 12 of 13 findings were right, 11 of them in lobsters, whose Rails controllers hold the login rules, moderation records and karma changes (`LoginController::login`, `StoriesController::destroy`), and one in linkace, whose single sign-on callback links accounts and sets defaults for new users. Debatable: linkace's `saveAppSettings`, mostly input copied onto settings. The Django, ASP.NET, Express, Symfony and NestJS projects had none.
+On 12 projects (645 handlers), 12 of 13 findings were right, 11 of them in lobsters, whose Rails controllers hold the login rules, moderation records and karma changes (`LoginController::login`, `StoriesController::destroy`), and one in linkace, whose single sign-on callback links accounts and sets defaults for new users. Debatable: linkace's `saveAppSettings`, mostly input copied onto settings. The Django, Wagtail, ASP.NET, Express, Symfony, Laravel and NestJS projects had none.
 
 ```toml
 {{#include ../../gallery/thin-handlers.toml}}
@@ -79,28 +78,19 @@ On 9 projects (566 handlers), 12 of 13 findings were right, 11 of them in lobste
 
 Does a function run a database query or a network call once per item of a loop, where one query or call could handle all the items?
 
-On 7 projects (1,457 functions), 4 of 5 findings were right: linkace's HTML and CSV exports, which query each link's tags (and lists) over all of a user's links; lobsters' `MessagesController::batch_delete`, a query and a save per selected message; spring-realworld's `createNew`, a lookup and an insert per tag. Debatable: linkace's `getOldTaxonomyItems`, one lookup per item of a form shown again after a validation error, a handful at most. It is a consider: 5 findings are too few to block on.
+On 11 projects (1,864 functions), 5 of 7 findings were right: linkace's HTML and CSV exports, which query each link's tags (and lists) over all of a user's links; lobsters' `MessagesController::batch_delete`, a query and a save per selected message; spring-realworld's `createNew` and laravel-realworld's `ArticleController::store`, a lookup and an insert per tag of an article. Debatable: linkace's `getOldTaxonomyItems`, one lookup per item of a form shown again after a validation error, a handful at most, and bakerydemo's random-data command, one insert per item, where `bulk_create` would skip the `save()` its models may rely on. It is a consider: 71% right.
 
 ```toml
 {{#include ../../gallery/n-plus-one.toml}}
 ```
 
-## global-state
-
-Does a function both read and change a global, module-level or static variable, or other mutable state every caller shares? Lazy initialization, caches, constants and per-request objects are fine.
-
-On 7 projects (1,119 functions), 3 of 4 findings were right, all in the maintainer's own projects: two functions that dispose of and replace a module's database engine and session maker through `global`, and a monitor loop that reads and changes six module globals. Wrong: a `main` that only assigns a start time. It is a consider: 4 findings are too few to block on.
-
-```toml
-{{#include ../../gallery/global-state.toml}}
-```
-
 ## Measured and left out
 
-Nine more questions were measured the same way and are not shipped: under 60% right, or too few findings to measure.
+Ten more questions were measured the same way and are not shipped: under 60% right, or too few findings to measure.
 
 | Question | Asked | Findings | Right | Why it is left out |
 |---|---|---|---|---|
+| global-state | Does this function both read and change a global, module-level or static variable? | 6 on 11 | 3 | Two Laravel model factories that count a static timestamp offset down on purpose, in seed data, and a `main` that only assigns a start time. The three right: functions that replace a module's database engine through `global`, and a loop that changes six module globals. |
 | log-and-rethrow | Does this function log an error and then also return or rethrow it? | 7 on 7 projects | 4 | A gRPC handler that logs and passes the error to its callback, which answers the client; two logging decorators whose job is to log what passes through (debatable). |
 | flaky-test | Can this test pass or fail from one run to the next with no code change? | 11 on 6 | 6 | Tests asserting that many random draws are not all equal, which fail with a negligible chance, and timing margins of seconds. |
 | test-name-mismatch | Does this test's name promise what its assertions do not check? | 17 on 6 | 7 | Go test names that name the unit under test, type-level tests, a test whose check is the race detector; 0 of 5 right on projects it was not tuned on. |
