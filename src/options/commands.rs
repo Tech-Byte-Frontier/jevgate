@@ -238,6 +238,7 @@ Exit codes:
   2      Run incomplete (no key, provider rejection, request budget reached), invalid
          configuration or invalid usage
   128+N  Interrupted by signal N
+  `jevgate hook` always exits 0: agents read 2 as a block, so its JSON reply says what happened
 
 Files (at the repository root):
   jevgate.toml            Configuration; `jevgate init` writes a commented one

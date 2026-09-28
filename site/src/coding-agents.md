@@ -20,6 +20,45 @@ is right, or say why the code should stay as it is.
 | 1 | The gate failed: act on the findings listed |
 | 2 | The run could not finish (no key, provider rejection, request budget); report it, don't treat it as a pass |
 
+## In the agent's loop: `jevgate hook`
+
+`jevgate hook` runs as a hook of the agent, so the check happens without being asked for. It reads one hook event as JSON on stdin and prints one JSON reply:
+
+- **When a turn starts** (the person sends a prompt), it records a snapshot of the working tree under `.jevgate/turns/`: tracked and untracked files, not ignored ones. The repository's own index and stash list are never touched.
+- **After each edit**, it checks the edited files against that snapshot and passes their findings to the agent as context, one line each: `- path:line level rule (fails the gate): why Next: step`. A finding already given this turn is counted, not repeated. It never blocks after an edit.
+- **When the turn ends**, it checks every file the turn changed. While findings fail the gate, it keeps the agent working with those findings as the reason: at most 3 times a turn, and not again when the agent changed nothing since the last time (for example because a finding is wrong and it said so). Findings that don't fail the gate are counted for the person, not sent to the agent.
+
+A reply lists at most 10 findings and stays under 8,000 characters, which every agent reads whole; `.jevgate/latest.json` holds the rest, as after any check. Checks use the repository's `jevgate.toml` (rules, upload patterns, `fail_on`) and key like `jevgate check`, so what blocks the agent is what fails your gate. An edit re-asks only the requests that hold what it changed, so the end of the turn is mostly answered from the cache.
+
+The hook always exits 0 and speaks through its JSON: agents read exit 2 as "block" and exit 1 as a silent error, the opposite of `check`. A missing key, an HTTP 402, an outage, a check that runs past its time, another JevGate process holding the repository's session lock, or a directory outside Git never blocks the agent, and is always said: to the person as a message, and to the agent as context (at the next prompt, when it happened at the end of a turn).
+
+The hook detects the agent from the event; `--agent` names it. It gives up after 10 s at a session or turn start, 30 s after an edit and 50 s at the end of a turn (`--timeout` sets one budget for every event); set the agent's own hook timeouts above those, as below.
+
+| Agent | Where the hooks go | Events |
+|---|---|---|
+| Claude Code (also Devin CLI) | `.claude/settings.json`, or `~/.claude/settings.json` for every repository | `SessionStart`, `UserPromptSubmit`, `PostToolUse` (`Edit\|Write\|MultiEdit\|NotebookEdit`), `Stop` |
+| Codex | `.codex/hooks.json` or `~/.codex/hooks.json`, same shape; approve new hooks in `/hooks` | `SessionStart`, `UserPromptSubmit`, `PostToolUse` (`apply_patch`), `Stop` |
+| Gemini CLI | `hooks` in `.gemini/settings.json`; `timeout` is in milliseconds | `SessionStart`, `BeforeAgent`, `AfterTool` (`write_file\|replace`), `AfterAgent` |
+| Cursor | `.cursor/hooks.json`, running `jevgate hook --agent cursor` | `beforeSubmitPrompt`, `postToolUse` (`Write`), `stop` |
+| Copilot CLI, VS Code | the repository's `.claude/settings.json` (VS Code with `chat.useClaudeHooks`) | Claude Code's |
+| OpenCode | a plugin relaying `session.created`, `chat.message`, `tool.execute.after` and `session.idle` to `jevgate hook --agent opencode` | |
+
+For Claude Code:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "jevgate hook", "timeout": 20}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "jevgate hook", "timeout": 20}]}],
+    "PostToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit",
+                     "hooks": [{"type": "command", "command": "jevgate hook", "timeout": 40}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "jevgate hook", "timeout": 60}]}]
+  }
+}
+```
+
+Cursor also runs the hooks in Claude Code's files, and Copilot CLI those in the repository's `.claude/settings.json`: configure JevGate in one of them per agent, or it runs twice. Gemini CLI starts hooks without your shell's environment, so `TYPESAFE_API_KEY` may not reach them; `jevgate auth login` or the repository's `.env` works there.
+
 ## As an MCP server
 
 `jevgate mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdin and stdout, so an agent can call JevGate as a tool instead of running a shell command. Register it, started in the repository:

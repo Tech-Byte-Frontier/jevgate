@@ -41,6 +41,24 @@ A provider error ends with the provider's request id when it sent one (`; reques
 
 Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to six attempts before the run gives up, pausing 1, 2, 4, 8 and 8 seconds (each up to a quarter longer, so requests spread out), or as long as the provider asks when that is longer (`retry-after-ms`, or `Retry-After` in seconds or as a date, at most 30 seconds). A pause holds every request of the run. An attempt that has not answered within 20 seconds, or whose connection drops, is retried once, and a connection that fails before anything is sent is tried four times. Requests start at least 50 ms apart, within TypeSafe's limit of 1,200 a minute, and at most 6 are sent at once with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key (`--concurrency` or `concurrency` sets it).
 
+## The agent hook says it could not check
+
+`jevgate hook` never blocks the agent when a check cannot finish; it says why, as `JevGate could not check this turn: REASON. Nothing was blocked.` The reasons are the ones above, and a few of its own:
+
+**`… is not in a Git repository, so JevGate cannot tell what a turn changed`**
+: The hook compares snapshots of the working tree, which needs Git. Run `git init`, or leave the hook out of that agent's settings for directories outside Git.
+
+**`another JevGate process in this repository (a check, --watch or another hook) held its session lock`**
+: The hook waits up to 10 s for another JevGate process in the same repository, such as a `check --watch`, then lets the agent go on. Stop the watch while the agent works, or rely on the hook instead.
+
+**`the check did not finish within 30 s`**
+: The provider was slow, or the turn changed many files. The answers received so far are cached, so the next check continues from them. Raise `--timeout`, and the agent's own hook timeout above it.
+
+**`JevGate did not check this turn: it has no snapshot of the turn's start`**
+: The hook that runs when a prompt is sent (`UserPromptSubmit`, `BeforeAgent`, `beforeSubmitPrompt`) is not configured. The end of the turn records a snapshot, so the next turn is checked.
+
+Nothing at all appears: check that the agent runs the hook (Claude Code's `/hooks`, Codex's `/hooks`, which also approves new or changed hooks, Gemini CLI's `/hooks panel`, Cursor's Hooks output channel), and that `jevgate` is on the `PATH` the agent starts hooks with.
+
 ## Many files are uncertain
 
 A file is `uncertain` when some of its answers stayed undecided after the follow-up questions. JevGate reports this instead of hiding it or counting the file as clear. `--verbose` lists each undecided unit and the question it stayed undecided on. It never fails the gate unless you ask for that with `--fail-on uncertain`.
