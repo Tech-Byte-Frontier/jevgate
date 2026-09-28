@@ -161,7 +161,7 @@ A call that carries a progress token (`_meta.progressToken`) gets a progress not
 
 ## Watching while editing
 
-`jevgate check --watch` re-checks the selected files after each save and prints one JSON report per line. Alongside it, `jevgate serve` answers local tools, never browser pages, with read-only JSON:
+`jevgate check --watch` re-checks the selected files after each save and prints one JSON report per line. It reads the configuration once, so it stops when `jevgate.toml`, the root `.gitignore` or a [custom question](custom-questions.md) file changes, and says to restart it. Alongside it, `jevgate serve` answers local tools, never browser pages, with read-only JSON:
 
 | Path | What it returns |
 |---|---|
