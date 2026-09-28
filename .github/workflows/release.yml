@@ -4,8 +4,8 @@ name: Release
 # the tag's message body becomes the notes of a GitHub release that carries the
 # binaries, their checksums and build provenance; then the Homebrew formula in
 # Tech-Byte-Frontier/homebrew-tap installs it, and the npm launcher
-# @tech-byte-frontier/jevgate of the same version runs it. Every step can be
-# rerun safely.
+# @tech-byte-frontier/jevgate of the same version is staged on npm, where it
+# goes live once the maintainer approves it. Every step can be rerun safely.
 on:
   push:
     tags: ["v*"]
@@ -132,7 +132,8 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     # npm trusts only this workflow in this environment (trusted publishing), and
-    # adds the package's provenance itself.
+    # only to stage a version: it goes live when the maintainer approves it on
+    # npmjs.com with their second factor, so this job alone cannot publish.
     environment: npm
     permissions:
       contents: read
@@ -144,17 +145,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Trusted publishing needs npm 11.5.1 or later, which Node 24 releases
-      # bring. No package cache: nothing restored runs next to the publish token.
+      # No package cache: nothing restored runs next to the publish token.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: Publish the npm launcher
+      # Staged publishing needs npm 11.15.0 or later: install a known one rather
+      # than take the one Node brings.
+      - name: Install npm
+        run: npm install --global npm@11.20.0
+      - name: Stage the npm launcher
         run: |
           npm_version=$(npm --version)
-          [ "$(printf '%s\n' 11.5.1 "$npm_version" | sort -V | head -n 1)" = 11.5.1 ] || { echo "::error::npm $npm_version is older than 11.5.1, which trusted publishing needs"; exit 1; }
+          [ "$(printf '%s\n' 11.15.0 "$npm_version" | sort -V | head -n 1)" = 11.15.0 ] || { echo "::error::npm $npm_version is older than 11.15.0, which staged publishing needs"; exit 1; }
           name=$(jq -r .name npm/package.json)
           version=$(jq -r .version npm/package.json)
           [ "$TAG" = "v$version" ] || { echo "::error::Tag $TAG does not match npm/package.json version $version"; exit 1; }
@@ -163,5 +167,7 @@ jobs:
             exit 0
           fi
           # The package ships the release's checksums, which tie it to these binaries.
+          # A version already staged and not yet approved stops a rerun here.
           gh release download "$TAG" --pattern SHA256SUMS --dir npm
-          npm publish ./npm --access public
+          npm stage publish ./npm --access public --provenance
+          echo "::notice::$name $version is staged: approve it on npmjs.com (the package's Staged Packages) to publish it"
