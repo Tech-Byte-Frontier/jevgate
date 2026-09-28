@@ -76,6 +76,18 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// The unit in the plural-ready form a dimension counts it by.
+    pub fn noun(self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::File => "file",
+            Self::Test => "test",
+            Self::Section => "section",
+            Self::Comment => "comment",
+            Self::Hunk => "changed hunk",
+        }
+    }
+
     /// What one request states about the unit, for `jevgate rules`.
     fn evidence(self) -> &'static str {
         match self {
@@ -135,6 +147,7 @@ pub struct Question {
     pub guidance: Option<String>,
     pub unit: Kind,
     pub paths: Vec<String>,
+    matcher: globset::GlobSet,
     pub threshold: f64,
     pub level: Strength,
     pub next_step: String,
@@ -149,6 +162,22 @@ pub struct Question {
 }
 
 impl Question {
+    /// The id after `custom/`.
+    pub fn id(&self) -> &str {
+        &self.rule[catalog::CUSTOM_GROUP.len() + 1..]
+    }
+
+    /// Whether it applies to the file at `path`, relative to the root.
+    pub fn applies_to(&self, path: &Path) -> bool {
+        self.paths.is_empty() || self.matcher.is_match(path)
+    }
+
+    /// Whether its `paths` name files, so a `file` or `hunk` question also
+    /// reads text files JevGate does not otherwise select.
+    pub fn names_files(&self) -> bool {
+        !self.paths.is_empty() && matches!(self.unit, Kind::File | Kind::Hunk)
+    }
+
     /// The gate levels it fails at when no configured level addresses it:
     /// its own, since a question someone wrote and committed is an opt-in.
     pub fn default_levels(&self) -> Vec<FailOn> {
@@ -328,6 +357,7 @@ fn validate(spec: &Spec, id: &str, source: PathBuf) -> Result<Question> {
         guidance: checked.guidance,
         unit: spec.unit,
         paths: spec.paths.clone(),
+        matcher: checked.matcher,
         threshold: checked.threshold,
         level,
         source,
@@ -343,6 +373,7 @@ struct Checked {
     guidance: Option<String>,
     next_step: Option<String>,
     threshold: f64,
+    matcher: globset::GlobSet,
 }
 
 /// The fields of `spec` a person writes freely, checked; the first problem
@@ -362,12 +393,12 @@ fn checked(spec: &Spec) -> Result<Checked, String> {
             THRESHOLDS.end()
         ));
     }
-    crate::boundary::globs(&spec.paths)
-        .map_err(|error| format!("invalid paths {:?}: {error}", spec.paths))?;
     Ok(Checked {
         background: text(&spec.background, "background", TEXT_CHARS)?,
         guidance: text(&spec.guidance, "guidance", TEXT_CHARS)?,
         next_step: text(&spec.next_step, "next_step", NEXT_STEP_CHARS)?,
+        matcher: crate::boundary::globs(&spec.paths)
+            .map_err(|error| format!("invalid paths {:?}: {error}", spec.paths))?,
         question,
         threshold,
     })

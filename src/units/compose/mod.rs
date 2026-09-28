@@ -14,8 +14,8 @@ use super::{
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
-        doc_pair_wording, document_wording, function_wording, handler_wording, law_wording,
-        module_wording, outline_wording, pair_wording, part_wording, plan_wording,
+        custom_wording, doc_pair_wording, document_wording, function_wording, handler_wording,
+        law_wording, module_wording, outline_wording, pair_wording, part_wording, plan_wording,
         privilege_wording, question_label, section_wording, security_wording, stale_wording,
         test_pair_wording, test_wording, values_wording,
     },
@@ -95,7 +95,9 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment], first: &[&Planned]) -> C
             let count = counts.remove(rule).unwrap_or_default();
             let concern = concern.get(rule).copied().unwrap_or(0.0);
             let undecided = undecided.remove(rule).unwrap_or_default();
-            (rule.to_string(), dimension(rule, count, concern, undecided))
+            let question = plan.questions.iter().find(|q| q.rule == *rule).copied();
+            let dimension = dimension((rule, question), count, concern, undecided);
+            (rule.to_string(), dimension)
         })
         .collect();
     // Strongest first, so a note never sits above a review or consider.
@@ -325,7 +327,7 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
 const SHOWN_VALUES: usize = 3;
 
 /// The unit, where it is and the questions it left undecided, each as it
-/// was asked; with no answers, why.
+/// was asked; with no answers, why. A custom unit's is its question.
 fn undecided_unit(
     plan: &FilePlan,
     unit: &UnitPlan,
@@ -333,7 +335,13 @@ fn undecided_unit(
     quotes: Quotes,
 ) -> Undecided {
     let open = open_questions(unit, answers);
-    let mut questions: Vec<String> = open.iter().map(|q| question_label(q).to_string()).collect();
+    let mut questions: Vec<String> = open
+        .iter()
+        .map(|q| match &unit.detail {
+            Detail::Custom(question) => question.question.clone(),
+            _ => question_label(q).to_string(),
+        })
+        .collect();
     if answers.is_empty() {
         questions.push("no answer".into());
     }
@@ -361,8 +369,16 @@ fn undecided_unit(
     }
 }
 
-/// The questions whose answers left a unit undecided.
+/// The questions whose answers left a unit undecided: a custom unit is
+/// asked its one question.
 fn open_questions(unit: &UnitPlan, answers: &Answers<'_>) -> Vec<&'static str> {
+    if let Detail::Custom(_) = unit.detail {
+        return answers
+            .get(super::answers::CUSTOM)
+            .map(|_| super::answers::CUSTOM)
+            .into_iter()
+            .collect();
+    }
     let get = |q: &str| answers.get(q).copied();
     let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
         .then(|| value_signals(&get, &unit.detail, true))
@@ -418,13 +434,23 @@ fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<&'static str> {
         .collect()
 }
 
-/// A rule's status is its most severe unit outcome.
-fn dimension(rule: &str, count: UnitCounts, concern: f64, undecided: Vec<Undecided>) -> Dimension {
+/// A rule's status is its most severe unit outcome. A custom question
+/// names its units and gives its own version.
+fn dimension(
+    (rule, question): (&str, Option<&crate::custom::Question>),
+    count: UnitCounts,
+    concern: f64,
+    undecided: Vec<Undecided>,
+) -> Dimension {
+    let (noun, version) = match question {
+        Some(question) => (question.unit.noun(), question.version.clone()),
+        None => (noun(rule), catalog::rule_version(rule).into()),
+    };
     Dimension {
-        decision_basis: basis(rule, &count),
+        decision_basis: basis(noun, &count),
         status: counted_status(&count),
         concern_probability: concern,
-        rule_version: catalog::rule_version(rule).into(),
+        rule_version: version,
         units: count,
         undecided,
     }
@@ -473,8 +499,9 @@ pub(super) fn file_status(
     }
 }
 
-fn basis(rule: &str, count: &UnitCounts) -> String {
-    let noun = match rule {
+/// What a built-in rule's units are called.
+fn noun(rule: &str) -> &'static str {
+    match rule {
         catalog::FILE_ORGANIZATION => "outline",
         catalog::FUNCTION_SIMPLIFICATION => "function",
         catalog::SHARED_LOGIC => "candidate pair",
@@ -490,7 +517,11 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::DOC_STALENESS => "document check",
         catalog::DOC_DUPLICATION => "section pair",
         _ => "test pair",
-    };
+    }
+}
+
+/// How many units were judged and with what outcomes, and what was not.
+fn basis(noun: &str, count: &UnitCounts) -> String {
     let plural = |n: usize| if n == 1 { "" } else { "s" };
     let mut parts = Vec::new();
     if count.judged == 0 && count.needs_context == 0 {
@@ -683,6 +714,15 @@ fn finding(
             comment_wording(name, &[(&unit.locations[0], reason)], strength)
         }
         Detail::Test { .. } => test_wording(name, strength, answers),
+        Detail::Custom(question) => {
+            if matches!(
+                question.unit,
+                crate::custom::Kind::File | crate::custom::Kind::Hunk
+            ) {
+                symbol = None;
+            }
+            custom_wording(question, name)
+        }
         Detail::Law => law_wording(name, strength, answers),
         Detail::TestPair { .. } => {
             symbol = None;
@@ -705,7 +745,10 @@ fn finding(
         message,
         action: action.into(),
         symbol,
-        rule_version: catalog::rule_version(unit.rule).into(),
+        rule_version: match &unit.detail {
+            Detail::Custom(question) => question.version.clone(),
+            _ => catalog::rule_version(unit.rule).into(),
+        },
         concern_probability: p,
         locations,
         quote: unit.quote.clone(),

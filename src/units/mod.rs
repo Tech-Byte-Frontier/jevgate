@@ -6,6 +6,7 @@ mod answers;
 mod client_app;
 mod comments;
 pub mod compose;
+mod custom;
 mod documents;
 mod drift;
 mod duplicates;
@@ -34,6 +35,7 @@ mod workflows;
 
 use answers::Questions;
 pub use answers::{Asked, record};
+pub(crate) use custom::MAX_UNITS as MAX_CUSTOM_UNITS;
 use evidence::{FileContext, compact, identity, pack, pack_runs, request, unique_ids};
 pub use follow_ups::{doc_checks, kinds, locates, parts, rechecks, settles, traces, value_kinds};
 pub use guards::{Steering, weaker_answer, weaker_request};
@@ -311,6 +313,8 @@ pub enum Detail {
         /// first answer says it asserts internal details.
         confirm: Option<FollowUp>,
     },
+    /// A unit a custom question asks about.
+    Custom(&'static crate::custom::Question),
     TestPair {
         names: [String; 2],
         subject: String,
@@ -394,7 +398,8 @@ impl UnitPlan {
             | Detail::Handler { .. }
             | Detail::Access(_)
             | Detail::Job { .. }
-            | Detail::Law => Vec::new(),
+            | Detail::Law
+            | Detail::Custom(_) => Vec::new(),
         };
         self.recheck.iter().chain(planned)
     }
@@ -409,6 +414,8 @@ pub struct FilePlan {
     /// Comments and strings addressed to a reviewer that some request of
     /// the file sends, each asked whether it is written to steer the reviewer.
     pub steering: Vec<Steering>,
+    /// The custom questions among `rules`, which say what their units are.
+    pub questions: Vec<&'static crate::custom::Question>,
 }
 
 impl UnitPlan {

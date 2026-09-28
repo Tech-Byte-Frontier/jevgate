@@ -181,6 +181,20 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Resul
             format,
         )));
     }
+    if input.result.role == crate::inventory::TEXT {
+        return Ok(Plan::Ready(View {
+            classification: classification(
+                TEXT,
+                "deterministic",
+                "custom",
+                "A file a custom question's paths name. Only file and hunk questions judge it.",
+                language(&input.result.path),
+            ),
+            application: false,
+            tests: false,
+            test_lines: Vec::new(),
+        }));
+    }
     let configuration = match input.result.role.as_str() {
         crate::inventory::SQL => Some((
             "SQL. The access-control rule judges its policies, SECURITY DEFINER functions and grants.",
@@ -244,6 +258,8 @@ fn document(kind: &str, reason: &str, language: &str) -> View {
 pub(crate) const INSTRUCTIONS: &str = "instructions";
 pub(crate) const DOCS: &str = "docs";
 pub(crate) const TESTS: &str = "tests";
+/// The classification kind of a file only custom questions read.
+pub(crate) const TEXT: &str = "text";
 
 fn view(input: &Input, args: &CheckArgs, classification: Classification) -> View {
     if classification.kind == TESTS {

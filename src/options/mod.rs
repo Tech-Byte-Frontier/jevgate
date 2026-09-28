@@ -348,11 +348,25 @@ impl CheckArgs {
     }
 
     /// Whether a rule that judges application source is selected. Access
-    /// control judges SpacetimeDB modules as well as SQL.
+    /// control judges SpacetimeDB modules as well as SQL, and every custom
+    /// question but one about documentation sections reads source.
     pub fn code_rules(&self) -> bool {
         self.rules
             .iter()
             .any(|r| crate::catalog::find(r).is_some_and(|rule| self.code_rules_include(rule.key)))
+            || self.custom_code()
+    }
+
+    /// Whether a selected custom question reads source files: every one but
+    /// a question about documentation sections.
+    pub fn custom_code(&self) -> bool {
+        self.custom()
+            .any(|q| q.unit != crate::custom::Kind::Section)
+    }
+
+    /// The custom questions this run asks.
+    pub fn custom(&self) -> impl Iterator<Item = &'static crate::custom::Question> + '_ {
+        self.questions.iter().filter(|q| self.enabled(&q.rule))
     }
 
     /// The key of a rule named by its ID or key, built-in or custom.

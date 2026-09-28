@@ -22,12 +22,15 @@ fn a_question_names_its_rule_and_takes_the_defaults() {
     let questions = configured(QUESTION).unwrap();
     let question = &questions[0];
     assert_eq!(question.rule, "custom/no-body-logs");
+    assert_eq!(question.id(), "no-body-logs");
     assert_eq!(question.threshold, 0.8);
     assert_eq!(
         (question.level, question.unit),
         (Strength::Review, Kind::Function)
     );
     assert_eq!(question.default_levels(), [FailOn::Review]);
+    assert!(question.applies_to(Path::new("deep/any.rs")));
+    assert!(!question.names_files());
     assert!(
         question
             .next_step
@@ -69,6 +72,17 @@ fn every_field_counts_toward_the_version_and_levels_follow_the_level() {
     };
     assert_eq!(levels("consider"), [FailOn::Consider]);
     assert_eq!(levels("note"), [FailOn::None]);
+}
+
+#[test]
+fn paths_choose_files_and_let_file_and_hunk_questions_name_other_text() {
+    let text = QUESTION.replace("\"function\"", "\"hunk\"") + "paths = [\"infra/**/*.tf\"]\n";
+    let question = &configured(&text).unwrap()[0];
+    assert!(question.applies_to(Path::new("infra/net/main.tf")));
+    assert!(!question.applies_to(Path::new("src/main.rs")));
+    assert!(question.names_files());
+    let function = QUESTION.to_string() + "paths = [\"src/**\"]\n";
+    assert!(!configured(&function).unwrap()[0].names_files());
 }
 
 #[test]

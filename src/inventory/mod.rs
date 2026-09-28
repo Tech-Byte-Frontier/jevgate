@@ -1,6 +1,7 @@
 mod django;
 mod documents;
 mod spacetimedb;
+mod texts;
 
 use super::{
     options::CheckArgs,
@@ -9,13 +10,14 @@ use super::{
 use crate::{boundary::Boundary, config::ConfigContext, discovery, revision::Changes};
 use anyhow::{Context, Result, ensure};
 use django::{select_settings, unescaped_templates};
-use documents::{add_documents, load_document};
+use documents::{add_documents, load_document, sections};
 use spacetimedb::{keep_module_packages, spacetimedb_package};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
+use texts::add_texts;
 
 #[derive(Clone)]
 pub struct Input {
@@ -118,7 +120,7 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
     if args.enabled(crate::catalog::INJECTION) {
         unescaped_templates(context, &boundary, &mut inputs);
     }
-    if args.documentation() {
+    if args.documentation() || sections(args) {
         // A document the change left alone is judged for the paths it removed.
         let broken = removed
             .as_ref()
@@ -126,6 +128,13 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
             .map(|r| (&in_scope as &dyn Fn(&Path) -> bool, r));
         add_documents(args, context, &boundary, (&selected, broken), &mut inputs)?;
     }
+    add_texts(
+        args,
+        context,
+        (&boundary, &selected),
+        changes.as_ref(),
+        &mut inputs,
+    )?;
     // SQL is also a source extension, so the code rules' walk may have listed
     // the file already; the configuration rule's role replaces that entry.
     for (relative, role) in configuration_files(args, context, &in_scope, &changed)? {
@@ -274,6 +283,9 @@ pub const SQL_CONTEXT: &str = "sql-context";
 pub const WORKFLOW: &str = "workflow";
 /// The role of project documentation such as a README or a docs page.
 pub const DOCS: &str = "docs";
+/// The role of a text file a custom `file` or `hunk` question's paths name,
+/// which no built-in rule reads.
+pub const TEXT: &str = "text";
 
 fn load(
     (path, role): (PathBuf, String),

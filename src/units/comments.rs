@@ -59,10 +59,7 @@ pub(super) fn plan(
         }
         asked += usize::from(asks);
         let unit = comment.unit.map(|i| &units[i]);
-        let owner = unit.map_or_else(
-            || comment.definition.as_deref().unwrap_or(TOP_LEVEL),
-            |u| u.name.as_str(),
-        );
+        let owner = owner(comment, unit);
         let count = seen.entry(owner.to_string()).or_default();
         *count += 1;
         let id = format!("comment:{owner}#{count}");
@@ -177,6 +174,15 @@ fn send(
     }
 }
 
+/// The name of the unit a comment belongs to: the definition it documents
+/// or sits in, else the one a docstring opens, else `top-level code`.
+pub(super) fn owner<'a>(comment: &'a Comment, unit: Option<&'a Unit>) -> &'a str {
+    unit.map_or_else(
+        || comment.definition.as_deref().unwrap_or(TOP_LEVEL),
+        |u| u.name.as_str(),
+    )
+}
+
 /// What kind of comment it is, alone, with the definition it sits in when
 /// that fits.
 fn kind(
@@ -218,7 +224,7 @@ fn placement_text(placement: Placement) -> &'static str {
     }
 }
 
-fn comment_state(comment: &Comment, unit: Option<&Unit>) -> Value {
+pub(super) fn comment_state(comment: &Comment, unit: Option<&Unit>) -> Value {
     let mut state = json!({
         "text": comment.text,
         "placement": placement_text(comment.placement),

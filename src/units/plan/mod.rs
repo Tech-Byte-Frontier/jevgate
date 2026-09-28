@@ -11,11 +11,14 @@ pub(super) struct Scope<'a> {
     documents: Vec<usize>,
     /// SQL and workflow files, judged by the access-control and workflow rules.
     configuration: Vec<usize>,
+    /// Files only custom `file` and `hunk` questions read: source files
+    /// without a parser (`true`) and text files their `paths` name.
+    texts: Vec<(usize, bool)>,
 }
 
 use super::{
-    Detail, FileContext, FilePlan, Plan, Planned, UnitPlan, access, documents, drift, handlers,
-    instructions, workflows,
+    Detail, FileContext, FilePlan, Plan, Planned, UnitPlan, access, custom, documents, drift,
+    handlers, instructions, workflows,
 };
 
 use crate::{
@@ -81,7 +84,8 @@ impl Scope<'_> {
 }
 
 /// Plan every selected file's units; `root` is the repository, whose README
-/// says whether its comments are written for learners.
+/// says whether its comments are written for learners, and whose Git history
+/// gives custom questions their changed hunks.
 pub fn plan(
     inputs: &[Input],
     views: &BTreeMap<usize, View>,
@@ -92,12 +96,14 @@ pub fn plan(
     let unanswered = |request: &serde_json::Value| crate::requests::unanswered(root, args, request);
     let budget = Limits::new(budget, &unanswered);
     let mut result = Plan::default();
-    let scope = parsed_scope(inputs, views, &mut result.skipped);
+    let mut custom = custom::Planner::new(args, root);
+    let scope = parsed_scope(inputs, views, &mut result.skipped, &custom);
     let mut shared = Shared::new(&scope, args);
     shared.teaching = crate::docs::teaching(root);
     shared.laravel = root.join("artisan").is_file();
     for &owner in &scope.owners {
-        let file = plan_file(&scope, &shared, owner, args, budget, &mut result.requests);
+        let requests = (&mut result.requests, &mut custom);
+        let file = plan_file(&scope, &shared, owner, args, budget, requests);
         result.files.insert(owner, file);
     }
     if shared.enabled(catalog::SENSITIVE_DATA) {
@@ -123,13 +129,24 @@ pub fn plan(
     plan_workflows(&scope, args, budget, &mut result);
     for &owner in &scope.documents {
         let file = plan_document(
-            &inputs[owner],
-            owner,
+            (owner, &inputs[owner]),
             args,
             budget,
             &drift,
-            &mut result.requests,
+            (&mut result.requests, &mut custom),
         );
+        result.files.insert(owner, file);
+    }
+    for &(owner, source) in &scope.texts {
+        let input = &inputs[owner];
+        let text = input.source.as_deref().unwrap_or("");
+        let language = custom::language(&input.result.path);
+        let context = FileContext::plain((owner, input), (language, text), args, budget);
+        let mut file = FilePlan {
+            path: input.result.path.clone(),
+            ..Default::default()
+        };
+        custom.text(&context, source, &mut file, &mut result.requests);
         result.files.insert(owner, file);
     }
     keep_changed(inputs, &mut result);
@@ -204,32 +221,23 @@ fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: Limits<'_>, resul
             path: input.result.path.clone(),
             ..Default::default()
         };
-        let context = FileContext {
-            owner,
-            path: &input.result.path,
-            language: "YAML",
-            source: input.source.as_deref().unwrap_or(""),
-            source_hash: &input.result.source_hash,
-            model: args.model(),
-            budget,
-            project: args.project.as_deref(),
-            framework: None,
-            changed: input.changed.as_ref(),
-        };
+        let source = input.source.as_deref().unwrap_or("");
+        let context = FileContext::plain((owner, input), ("YAML", source), args, budget);
         workflows::plan(&context, &mut file, &mut result.requests);
         result.files.insert(owner, file);
     }
 }
 
-/// The documentation rules for one agent instruction file.
+/// The documentation rules and custom questions for one agent instruction
+/// file or project document.
 fn plan_document(
-    input: &Input,
-    owner: usize,
+    (owner, input): (usize, &Input),
     args: &CheckArgs,
     budget: Limits<'_>,
     drift: &drift::Shared<'_>,
-    requests: &mut Vec<Planned>,
+    (requests, custom): (&mut Vec<Planned>, &mut custom::Planner),
 ) -> FilePlan {
+    let since = requests.len();
     let mut file = FilePlan {
         path: input.result.path.clone(),
         ..Default::default()
@@ -237,18 +245,8 @@ fn plan_document(
     // Other formats are read as Markdown with the file's own lines.
     let source =
         crate::docs::format::view(&input.result.path, input.source.as_deref().unwrap_or(""));
-    let context = FileContext {
-        owner,
-        path: &input.result.path,
-        language: crate::docs::format::Format::of(&input.result.path).language(),
-        source: &source,
-        source_hash: &input.result.source_hash,
-        model: args.model(),
-        budget,
-        project: args.project.as_deref(),
-        framework: None,
-        changed: input.changed.as_ref(),
-    };
+    let language = crate::docs::format::Format::of(&input.result.path).language();
+    let context = FileContext::plain((owner, input), (language, &source), args, budget);
     if input.result.role == crate::inventory::DOCS {
         if args.enabled(catalog::LARGE_DOCS) {
             documents::plan(&context, &mut file, requests);
@@ -259,15 +257,18 @@ fn plan_document(
         instructions::plan(&context, repository, &mut file, requests);
     }
     drift.plan(&context, &mut file, requests);
+    custom.document(&context, &mut file, (requests, since));
     file
 }
 
 /// Parse every selected file and the explicit context. Files without a parser
-/// or with syntax errors are skipped with a reason.
+/// or with syntax errors are skipped with a reason, unless a custom question
+/// that needs no parser reads a file without one.
 fn parsed_scope<'a>(
     inputs: &'a [Input],
     views: &'a BTreeMap<usize, View>,
     skipped: &mut BTreeMap<usize, String>,
+    custom: &custom::Planner,
 ) -> Scope<'a> {
     let mut scope = Scope {
         owners: Vec::new(),
@@ -277,9 +278,14 @@ fn parsed_scope<'a>(
         context: Vec::new(),
         documents: Vec::new(),
         configuration: Vec::new(),
+        texts: Vec::new(),
     };
     for (&owner, view) in views {
         let input = &inputs[owner];
+        if view.classification.kind == crate::file_kind::TEXT {
+            scope.texts.push((owner, false));
+            continue;
+        }
         if [crate::file_kind::INSTRUCTIONS, crate::file_kind::DOCS]
             .contains(&view.classification.kind.as_str())
         {
@@ -296,6 +302,7 @@ fn parsed_scope<'a>(
                 scope.units.insert(owner, units);
                 scope.owners.push(owner);
             }
+            Ok(_) if custom.reads_text(&input.result.path) => scope.texts.push((owner, true)),
             Ok(_) => {
                 let reason = format!(
                     "No {} parser; units cannot be located, so this file was not judged.",

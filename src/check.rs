@@ -122,10 +122,25 @@ pub fn judge(
     session.publish(report)
 }
 
+/// Say which selected custom questions this run cannot ask, and what they
+/// need: a question about changed hunks needs `--base`, and one about tests
+/// needs them judged.
+fn unasked(args: &CheckArgs) {
+    for question in args.custom() {
+        let needs = match question.unit {
+            crate::custom::Kind::Hunk if args.base.is_none() => "--base",
+            crate::custom::Kind::Test if !args.include_tests => "--include-tests",
+            _ => continue,
+        };
+        note!("jevgate: {} was not asked: it needs {needs}", question.rule);
+    }
+}
+
 /// `check`: judge the selected files, apply the gate and report.
 pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
     validate(args)?;
     cancellation::install()?;
+    unasked(args);
     let scope = inventory::scope(args, context)?;
     let inputs = inventory::collect(args, context, &scope)?;
     let store = if args.dry_run {

@@ -18,15 +18,16 @@ pub(super) fn add_documents(
     inputs: &mut Vec<Input>,
 ) -> Result<()> {
     let repository = Arc::new(crate::docs::scan(&context.root)?);
+    let every = cross_document(args) || sections(args);
     let instructions = repository
         .readers
         .keys()
-        .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT) || cross_document(args))
+        .filter(|_| args.enabled(crate::catalog::AGENT_CONTEXT) || every)
         .map(|p| (p, INSTRUCTIONS));
     let docs = repository
         .docs
         .iter()
-        .filter(|_| args.enabled(crate::catalog::LARGE_DOCS) || cross_document(args))
+        .filter(|_| args.enabled(crate::catalog::LARGE_DOCS) || every)
         .map(|p| (p, DOCS));
     for (relative, role) in instructions.chain(docs) {
         let judged = (role == DOCS || repository.judged(relative))
@@ -111,6 +112,12 @@ pub(super) fn load_document(
         // dvja's docs hold a Markdown file with NUL bytes, which made the run incomplete.
         Err(error) => unread(result, error),
     })
+}
+
+/// Whether a custom question asks about documentation sections.
+pub(super) fn sections(args: &CheckArgs) -> bool {
+    args.custom()
+        .any(|q| q.unit == crate::custom::Kind::Section)
 }
 
 /// Whether a rule that compares or checks every kind of document is selected.

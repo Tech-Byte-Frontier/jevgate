@@ -58,3 +58,55 @@ fn an_invalid_question_stops_every_command_that_reads_the_configuration() {
         );
     }
 }
+
+#[test]
+fn a_dry_run_plans_custom_questions_and_a_reviewed_config_leaves_the_directory_out() {
+    let project = with_questions(&[("body-logs", BODY_LOGS)]);
+    let report = dry_run(&project, &["--rule", "custom"]);
+    assert_eq!(stages(&report), ["custom"]);
+    assert_eq!(report["rules"], serde_json::json!(["custom/body-logs"]));
+    assert_eq!(report["stages"]["custom"]["planned_requests"], 1);
+    assert_eq!(
+        report["fail_on_rules"]["custom/body-logs"],
+        serde_json::json!(["consider"])
+    );
+    std::fs::write(project.0.join("policy.toml"), "").unwrap();
+    let reviewed = dry_run(&project, &["--config", "policy.toml"]);
+    assert!(
+        !reviewed["rules"].to_string().contains("custom/"),
+        "--config reads only its own [[question]] tables"
+    );
+    let output = project
+        .command()
+        .args([
+            "check",
+            "--dry-run",
+            "--config",
+            "policy.toml",
+            "--rule",
+            "custom",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("none is defined"));
+}
+
+#[test]
+fn a_hunk_question_without_base_says_it_was_not_asked() {
+    let project = with_questions(&[(
+        "no-unwrap",
+        "question = \"Does this change add an unwrap?\"\nunit = \"hunk\"\n",
+    )]);
+    let output = project
+        .command()
+        .args(["check", "--dry-run", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("custom/no-unwrap was not asked: it needs --base"),
+        "{error}"
+    );
+}

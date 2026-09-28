@@ -13,8 +13,8 @@ use crate::{
     options::CheckArgs,
     token_budget::Limits,
     units::{
-        FileContext, FilePlan, Plan, Planned, comments, duplicates, functions, guards, hardcoded,
-        laws, outline, packs, spacetimedb, test_units,
+        FileContext, FilePlan, Plan, Planned, comments, custom, duplicates, functions, guards,
+        hardcoded, laws, outline, packs, spacetimedb, test_units,
     },
 };
 use std::{
@@ -23,15 +23,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Every rule's units and requests for one selected file.
+/// Every rule's units and requests for one selected file, then its custom
+/// questions', which may ride in those requests.
 pub(super) fn plan_file(
     scope: &Scope<'_>,
     shared: &Shared<'_>,
     owner: usize,
     args: &CheckArgs,
     budget: Limits<'_>,
-    requests: &mut Vec<Planned>,
+    (requests, custom): (&mut Vec<Planned>, &mut custom::Planner),
 ) -> FilePlan {
+    let since = requests.len();
     let input = &scope.inputs[owner];
     let view = &scope.views[&owner];
     let context = file_context(input, owner, args, budget);
@@ -132,6 +134,19 @@ pub(super) fn plan_file(
     {
         plan_module(shared, &context, framework, &mut file, requests);
     }
+    let judged_tests = view.tests && args.include_tests;
+    let code = custom::Code {
+        units: &scope.units[&owner].units,
+        test_lines: &lines,
+        application: view.application,
+        tests: judged_tests.then(|| {
+            shared
+                .cases
+                .get(context.path)
+                .map_or(&[][..], Vec::as_slice)
+        }),
+    };
+    custom.code(&context, code, &mut file, (requests, since));
     file
 }
 

@@ -31,7 +31,30 @@ pub(super) struct FileContext<'a> {
     pub changed: Option<&'a crate::revision::FileChange>,
 }
 
-impl FileContext<'_> {
+impl<'a> FileContext<'a> {
+    /// A file's facts without a framework role, read from `source` as
+    /// `language`: a document's Markdown view, a workflow, or a file only
+    /// custom questions read.
+    pub(super) fn plain(
+        (owner, input): (usize, &'a crate::inventory::Input),
+        (language, source): (&'static str, &'a str),
+        args: &'a crate::options::CheckArgs,
+        budget: Limits<'a>,
+    ) -> Self {
+        Self {
+            owner,
+            path: &input.result.path,
+            language,
+            source,
+            source_hash: &input.result.source_hash,
+            model: args.model(),
+            budget,
+            project: args.project.as_deref(),
+            framework: None,
+            changed: input.changed.as_ref(),
+        }
+    }
+
     /// Whether lines `start..=end` of this file are judged: the whole file
     /// is, or the change touched them.
     pub(super) fn judges(&self, start: usize, end: usize) -> bool {
@@ -121,11 +144,10 @@ pub(super) fn request(
     questions: Questions,
 ) -> (Value, Asked) {
     let (mut questions, asked) = questions.finish();
-    if state["file"]["framework"].is_string() {
-        point_to(&mut questions, FRAMEWORK_NOTE);
-    }
-    if state["file"]["notation"].is_string() {
-        point_to(&mut questions, NOTATION_NOTE);
+    for fact in facts(&state) {
+        for body in questions.values_mut() {
+            point_to(body, fact);
+        }
     }
     let sources: Vec<_> = sources
         .iter()
@@ -150,18 +172,27 @@ const BEND_NOTATION: &str = "Bend 2 (bendlang/bend 2.0.x), not Bend 1: a pure, a
 
 const NOTATION_NOTE: &str = "`file.notation` explains the language's notation.";
 
-/// Point every question at a fact the state holds beside the file's code:
+/// The notes every question about `state` points to, for the facts it
+/// holds beside the file's code, in the order they are added.
+pub(super) fn facts(state: &Value) -> impl Iterator<Item = &'static str> {
+    [
+        (state["file"]["framework"].is_string(), FRAMEWORK_NOTE),
+        (state["file"]["notation"].is_string(), NOTATION_NOTE),
+    ]
+    .into_iter()
+    .filter_map(|(held, note)| held.then_some(note))
+}
+
+/// Point a question at a fact the state holds beside the file's code:
 /// stated only in the state, a client component's role did not clear its
 /// browser requests, since the questions never pointed at it.
-fn point_to(questions: &mut serde_json::Map<String, Value>, fact: &str) {
-    for body in questions.values_mut() {
-        let instructions = &mut body["instructions"];
-        let note = match instructions["note"].as_str() {
-            Some(note) => format!("{fact} {note}"),
-            None => fact.to_string(),
-        };
-        instructions["note"] = Value::String(note);
-    }
+pub(super) fn point_to(body: &mut Value, fact: &str) {
+    let instructions = &mut body["instructions"];
+    let note = match instructions["note"].as_str() {
+        Some(note) => format!("{fact} {note}"),
+        None => fact.to_string(),
+    };
+    instructions["note"] = Value::String(note);
 }
 
 /// Greedy packing in order: at most `limit` items and `PACK_BYTES` of state.

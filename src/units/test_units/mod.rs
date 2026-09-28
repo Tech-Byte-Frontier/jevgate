@@ -317,7 +317,7 @@ fn recheck_questions(id: &str, ruby: bool) -> Questions {
 /// declared in. An RSpec example reads as a sentence that continues its
 /// groups (`describe Registry` … `it "finds a registered object"`), and the
 /// outer group often names the class under test.
-fn test_item(case: &TestCase, source: &str, ruby: bool) -> Value {
+pub(super) fn test_item(case: &TestCase, source: &str, ruby: bool) -> Value {
     let mut item = json!({"name": case.name, "source": source});
     if ruby && !case.suite.is_empty() {
         item["suite"] = json!(case.suite.join(" > "));

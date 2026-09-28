@@ -2,6 +2,7 @@
 mod access;
 mod changed;
 mod comments;
+mod custom;
 mod django;
 mod documentation;
 mod duplicates;

@@ -669,7 +669,7 @@ impl Changes {
 
     /// The two sides a diff of this change compares: the revision and the
     /// working tree, or the turn's two snapshots.
-    fn sides(&self) -> Vec<&str> {
+    pub(crate) fn sides(&self) -> Vec<&str> {
         std::iter::once(self.revision.as_str())
             .chain(self.now.as_deref())
             .collect()

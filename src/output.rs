@@ -485,7 +485,7 @@ fn emit_summary(out: &mut impl Write, report: &Report) -> Result<()> {
             writeln!(out, "{label} {n}: {reason}")?;
         }
     }
-    Ok(())
+    emit_capped(out, report)
 }
 
 /// Each reason the files of `status` give, with how many give it: a run that
@@ -505,6 +505,28 @@ pub(crate) fn reasons(report: &Report, status: Status) -> BTreeMap<&str, usize> 
             .or_default() += 1;
     }
     reasons
+}
+
+/// Custom questions that reached their cap of units a run, with how many
+/// units each left unasked.
+fn emit_capped(out: &mut impl Write, report: &Report) -> Result<()> {
+    let mut omitted = BTreeMap::<&str, usize>::new();
+    for file in &report.files {
+        for (rule, dimension) in &file.dimensions {
+            if crate::catalog::custom(rule) && dimension.units.omitted > 0 {
+                *omitted.entry(rule).or_default() += dimension.units.omitted;
+            }
+        }
+    }
+    for (rule, n) in omitted {
+        writeln!(
+            out,
+            "{rule} left {} unasked: a question asks about at most {} units a run; narrow its paths.",
+            count(n, "unit"),
+            crate::units::MAX_CUSTOM_UNITS
+        )?;
+    }
+    Ok(())
 }
 
 /// Estimated tokens each harness loads at session start, then loading facts.
