@@ -17,7 +17,7 @@ jobs:
       - uses: Tech-Byte-Frontier/jevgate-action@v1
         with:
           api-key: ${{ secrets.TYPESAFE_API_KEY }}
-          version: 0.25.0
+          version: 0.30.0
 ```
 
 The action installs a checked release binary, keeps `.jevgate/cache` in the Actions cache and runs `jevgate check --base <pull request base> --format github`; `args` passes more flags, such as `--rule default --rule security` to add the security rules to the default ones. Naming a rule replaces the selection, and a selection without a mature rule level never fails the default gate: `--rule security` alone reports security findings without ever failing the gate. It runs on Linux, macOS and Windows runners. For an OpenRouter or Vercel AI Gateway key, leave `api-key` out and set the key's variable in the step's `env`, such as `OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}`, with `version` 0.26.0 or later; jevgate-action 1.2 adds `api-key-kind: openrouter` or `api-key-kind: vercel` for the same.
@@ -66,7 +66,7 @@ Before each commit, with [pre-commit](https://pre-commit.com), review what is st
 ```yaml
 repos:
   - repo: https://github.com/Tech-Byte-Frontier/jevgate
-    rev: v0.25.0
+    rev: v0.30.0
     hooks:
       - id: jevgate-system   # the jevgate on PATH; `jevgate` builds it with Rust instead
 ```
