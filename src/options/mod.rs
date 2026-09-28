@@ -219,7 +219,7 @@ pub struct CheckArgs {
     /// Follow-up requests depend on answers and are not known in advance.
     #[arg(long, requires = "dry_run", help_heading = OUTPUT)]
     pub show_requests: bool,
-    /// Model, as the key's provider names it; pin a version for repeatable results [default: jev-1.13.0]
+    /// Model, as the key's provider names it; pin a version for repeatable results [default: the key's provider's model]
     ///
     /// The default follows the key: jev-1.13.0 with a TypeSafe key,
     /// typesafe/jev-1.13 with an OpenRouter key, typesafe-ai/jev with a Vercel
