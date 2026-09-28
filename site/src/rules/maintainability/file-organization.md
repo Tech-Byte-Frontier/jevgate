@@ -6,7 +6,7 @@
 
 A finding says a file holds parts that would be easier to find in modules of their own, and it names the group of members to move. It is right when the named group is a feature or a job a reader would look for apart from the rest: a URL scraper inside a model, or a diff engine inside a renderer. It is wrong when the file is small and holds one subject, when the named group cuts a feature in half, or when its members cannot move, such as a class's own methods. Of the 84 findings labeled wrong or debatable so far outside Bend 2 code, 13 named a group that was no coherent part and 11 were on small files about one subject.
 
-A file of fewer than 250 lines gets at most a note, a group holding three quarters of a file's members is not named, and a test file's split is at most a consider.
+A file of fewer than 250 lines gets at most a note, a group holding three quarters or more of a file's members is not named, and a test file's split is at most a consider.
 
 ## Findings it got wrong
 

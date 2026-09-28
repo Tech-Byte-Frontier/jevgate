@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a GitHub Actions job can run text that people outside the repository write, or runs pull request code while it holds secrets or a write token. It is right for `${{ github.event.pull_request.title }}` inside a `run` script, or a `pull_request_target` job that checks out the pull request's head and runs it with secrets. It is wrong when outside text reaches only an action's input rather than a shell, or when the job runs only code from the base branch. Two findings have been labeled on the corpus, one right and one wrong, so the rule is not measured yet.
+A finding says a GitHub Actions job can run text that people outside the repository write, or runs pull request code while it holds secrets or a write token. It is right for `${{ github.event.pull_request.title }}` inside a `run` script, or a `pull_request_target` job that checks out the pull request's head and runs it with secrets. It is wrong when outside text reaches only an action's input rather than a shell, or when the job runs only code from the base branch. Two findings have been labeled on the corpus, one right and one wrong: too few to measure the rule.
 
 ## Findings it got wrong
 

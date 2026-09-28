@@ -29,7 +29,7 @@ Each release changed questions and composition until wrong findings on the tuned
 
 ## Measure your own
 
-`jevgate baseline mark wrong PATH:LINE` records that a finding is wrong, and `jevgate baseline stats` counts each rule's findings marked wrong, so a team can see how often each rule is right on its own code. A wrong finding reported with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml) is how the rules improve.
+When you accept findings with `jevgate baseline`, `jevgate baseline mark intended|later|wrong PATH:LINE` records whether each was right (meant that way, or to fix later) or wrong, and `jevgate baseline stats` gives each rule's rate of wrong findings among those marked: the same measure, on your own code. A wrong finding reported with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml) is how the rules improve.
 
 ## The unseen projects
 
