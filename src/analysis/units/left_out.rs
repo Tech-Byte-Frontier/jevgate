@@ -96,11 +96,17 @@ impl FileUnits {
             if self.left_out.iter().any(|l| contains(&l.span, &case.span)) {
                 continue;
             }
-            let error = self
-                .errors
+            // Its first error: outside every unit, or in a unit it holds.
+            let loose = self.errors.iter().filter(|e| contains(&case.span, e));
+            let held = self
+                .left_out
                 .iter()
-                .find(|e| contains(&case.span, e))
-                .map_or(case.span.start, |e| e.start);
+                .filter(|l| contains(&case.span, &l.span));
+            let error_line = loose
+                .map(|e| line_of(source, e.start))
+                .chain(held.map(|l| l.error_line))
+                .min()
+                .unwrap_or(case.line);
             self.units.retain(|u| !contains(&case.span, &u.span));
             self.left_out.retain(|l| !contains(&case.span, &l.span));
             self.errors.retain(|e| !contains(&case.span, e));
@@ -109,7 +115,7 @@ impl FileUnits {
                 span: case.span,
                 line: case.line,
                 end_line: case.end_line,
-                error_line: line_of(source, error),
+                error_line,
             });
         }
         self.left_out.sort_by_key(|l| (l.span.start, l.span.end));

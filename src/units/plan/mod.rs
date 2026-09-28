@@ -332,8 +332,10 @@ fn parsed_scope<'a>(
         let source = input.source.as_deref().unwrap_or("");
         match parsed::parse(&input.result.path, source) {
             Ok(mut units) if units.parsed => {
-                if units.partial() {
-                    leave_out_tests(input, view, &mut units);
+                if units.partial()
+                    && (view.tests || view.classification.kind == crate::file_kind::TESTS)
+                {
+                    leave_out_tests(input, &scope.test_lines(owner), &mut units);
                 }
                 scope.units.insert(owner, units);
                 scope.owners.push(owner);
@@ -362,25 +364,14 @@ fn parsed_scope<'a>(
     scope
 }
 
-/// Leave out the test cases a partial parse broke, where test rules or the
-/// test outline judge them: inside a test view's lines, or anywhere in a
-/// test file.
-fn leave_out_tests(input: &Input, view: &View, units: &mut FileUnits) {
-    let tests_kind = view.classification.kind == crate::file_kind::TESTS;
-    if !view.tests && !tests_kind {
-        return;
-    }
+/// Leave out the test cases a partial parse broke, inside the file's test
+/// `lines`, where the test rules and a test file's outline judge them.
+fn leave_out_tests(input: &Input, lines: &[Range<usize>], units: &mut FileUnits) {
     let source = input.source.as_deref().unwrap_or("");
     let broken = crate::analysis::test_map::broken_cases(&input.result.path, source)
         .unwrap_or_default()
         .into_iter()
-        .filter(|case| {
-            tests_kind
-                || view
-                    .test_lines
-                    .iter()
-                    .any(|r| (r.start_line..=r.end_line).contains(&case.line))
-        })
+        .filter(|case| lines.iter().any(|l| l.contains(&case.line)))
         .collect();
     units.leave_out_tests(broken, source);
 }
