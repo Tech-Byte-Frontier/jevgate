@@ -43,7 +43,7 @@ jevgate init --agent claude --remove           # take out what JevGate wrote
 
 It changes only JevGate's parts of each file:
 
-- **Merged, not replaced.** A hook is JevGate's when it runs `jevgate hook`, wherever `jevgate` lives. Other tools' hooks keep their place, also in a group shared with JevGate's, and the rest of the file keeps its key order, indentation, line ends and byte-order mark; a file written on one line is laid out over several. Running it again changes nothing.
+- **Merged, not replaced.** A hook is JevGate's when it runs `jevgate hook`, wherever `jevgate` lives. Other tools' hooks keep their place, also in a group shared with JevGate's, and the rest of the file keeps its key order, indentation, line ends, byte-order mark and the text of its numbers and strings; a file written on one line is laid out over several, and a `hooks` object JevGate's hooks leave empty is taken out. Running it again changes nothing.
 - **The text** sits between `<!-- jevgate:begin … -->` and `<!-- jevgate:end -->` in a file others write too, or is a file of JevGate's own where the agent reads a directory of rules. A file of that name that JevGate did not write is left alone.
 - **All or nothing.** Every file is read before the first is written, so a settings file that is not plain JSON (Gemini CLI accepts comments) stops the run with nothing written.
 - **`--remove`** takes out JevGate's hooks and text and nothing else, and deletes a file only when JevGate's parts were all it held.

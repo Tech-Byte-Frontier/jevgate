@@ -3,20 +3,41 @@
 //! newline, so adding JevGate's hooks to someone's settings changes only
 //! those lines. `serde_json`'s own map sorts keys, and its `preserve_order`
 //! feature would also reorder the request bodies whose hashes key the answer
-//! cache, asking every cached question again.
+//! cache, asking every cached question again. Numbers and strings JevGate
+//! does not change keep their text (`1e3`, `1.50`, a 30-digit integer,
+//! `"\/"`): read as values, they came back as `1000.0`, `1.5`,
+//! `1.2345678901234568e+29` and `"/"`, and stayed so after `--remove`.
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize, de, ser::SerializeMap};
+use serde_json::value::RawValue;
 use std::fmt;
 
 /// A JSON value whose objects keep their keys in the order they were read.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) enum Json {
     Null,
     Bool(bool),
-    Number(serde_json::Number),
-    String(String),
+    /// A number, as its text.
+    Number(Box<RawValue>),
+    /// A string's value, and its text when it was read from a file.
+    String(String, Option<Box<RawValue>>),
     Array(Vec<Json>),
     Object(Vec<(String, Json)>),
+}
+
+impl PartialEq for Json {
+    /// Numbers are equal when written alike, strings when their values are.
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Null, Self::Null) => true,
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Number(a), Self::Number(b)) => a.get() == b.get(),
+            (Self::String(a, _), Self::String(b, _)) => a == b,
+            (Self::Array(a), Self::Array(b)) => a == b,
+            (Self::Object(a), Self::Object(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl Json {
@@ -63,7 +84,7 @@ impl Json {
 
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Self::String(text) => Some(text),
+            Self::String(text, _) => Some(text),
             _ => None,
         }
     }
@@ -87,75 +108,73 @@ impl Json {
 
 impl From<&str> for Json {
     fn from(text: &str) -> Self {
-        Self::String(text.to_string())
+        Self::String(text.to_string(), None)
     }
 }
 
 impl From<u64> for Json {
     fn from(number: u64) -> Self {
-        Self::Number(number.into())
+        Self::Number(RawValue::from_string(number.to_string()).expect("a number is JSON"))
     }
 }
 
 impl<'de> Deserialize<'de> for Json {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(Visitor)
+        let raw = Box::<RawValue>::deserialize(deserializer)?;
+        Self::from_raw(raw).map_err(de::Error::custom)
     }
 }
 
-struct Visitor;
+impl Json {
+    /// The value `raw` holds, whose numbers and strings keep their text.
+    fn from_raw(raw: Box<RawValue>) -> serde_json::Result<Self> {
+        let text = raw.get();
+        Ok(match text.as_bytes().first() {
+            Some(b'{') => Self::Object(
+                serde_json::from_str::<Entries>(text)?
+                    .0
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, Self::from_raw(value)?)))
+                    .collect::<serde_json::Result<_>>()?,
+            ),
+            Some(b'[') => Self::Array(
+                serde_json::from_str::<Vec<Box<RawValue>>>(text)?
+                    .into_iter()
+                    .map(Self::from_raw)
+                    .collect::<serde_json::Result<_>>()?,
+            ),
+            Some(b'"') => Self::String(serde_json::from_str(text)?, Some(raw)),
+            Some(b't' | b'f') => Self::Bool(serde_json::from_str(text)?),
+            Some(b'n') => Self::Null,
+            _ => Self::Number(raw),
+        })
+    }
+}
 
-impl<'de> de::Visitor<'de> for Visitor {
-    type Value = Json;
+/// An object's entries in the order they were read, values unread.
+struct Entries(Vec<(String, Box<RawValue>)>);
+
+impl<'de> Deserialize<'de> for Entries {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(EntriesVisitor)
+    }
+}
+
+struct EntriesVisitor;
+
+impl<'de> de::Visitor<'de> for EntriesVisitor {
+    type Value = Entries;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a JSON value")
+        formatter.write_str("a JSON object")
     }
 
-    fn visit_unit<E>(self) -> Result<Json, E> {
-        Ok(Json::Null)
-    }
-
-    fn visit_bool<E>(self, value: bool) -> Result<Json, E> {
-        Ok(Json::Bool(value))
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Json, E> {
-        Ok(Json::Number(value.into()))
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Json, E> {
-        Ok(Json::Number(value.into()))
-    }
-
-    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Json, E> {
-        serde_json::Number::from_f64(value)
-            .map(Json::Number)
-            .ok_or_else(|| E::custom("a number JSON cannot hold"))
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Json, E> {
-        Ok(Json::String(value.to_string()))
-    }
-
-    fn visit_string<E>(self, value: String) -> Result<Json, E> {
-        Ok(Json::String(value))
-    }
-
-    fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Json, A::Error> {
-        let mut items = Vec::new();
-        while let Some(item) = seq.next_element()? {
-            items.push(item);
-        }
-        Ok(Json::Array(items))
-    }
-
-    fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Json, A::Error> {
+    fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Entries, A::Error> {
         let mut entries = Vec::new();
-        while let Some(entry) = map.next_entry::<String, Json>()? {
+        while let Some(entry) = map.next_entry::<String, Box<RawValue>>()? {
             entries.push(entry);
         }
-        Ok(Json::Object(entries))
+        Ok(Entries(entries))
     }
 }
 
@@ -164,8 +183,8 @@ impl Serialize for Json {
         match self {
             Self::Null => serializer.serialize_unit(),
             Self::Bool(value) => serializer.serialize_bool(*value),
-            Self::Number(number) => number.serialize(serializer),
-            Self::String(text) => serializer.serialize_str(text),
+            Self::Number(raw) | Self::String(_, Some(raw)) => raw.serialize(serializer),
+            Self::String(text, None) => serializer.serialize_str(text),
             Self::Array(items) => items.serialize(serializer),
             Self::Object(entries) => {
                 let mut map = serializer.serialize_map(Some(entries.len()))?;
@@ -299,6 +318,17 @@ mod tests {
         for text in ["[1]", "{\"a\": 1} // comment", "{\"a\":", "\"text\""] {
             assert!(parse(text).is_err(), "{text:?}");
         }
+    }
+
+    #[test]
+    fn numbers_and_strings_keep_their_text() {
+        let text = "{\n  \"days\": 1e3,\n  \"ratio\": 1.50,\n  \"big\": 123456789012345678901234567890,\n  \"name\": \"caf\\u00e9 \\/ path\",\n  \"list\": [\n    -0.0,\n    \"\\t\"\n  ]\n}\n";
+        assert_eq!(round_trip(text), text);
+        let (value, _) = parse(text).unwrap();
+        assert_eq!(
+            value.get("name").and_then(Json::as_str),
+            Some("café / path")
+        );
     }
 
     #[test]
