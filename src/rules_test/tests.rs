@@ -402,10 +402,21 @@ fn an_example_is_found_when_any_of_its_units_is_and_undecided_passes() {
         "an undecided passing example is not a finding"
     );
     let (_, examples) = reported(&report);
-    assert_eq!(examples[0]["close"], true);
+    assert_eq!(
+        (examples[0]["close"].clone(), examples[1]["close"].clone()),
+        (json!(true), json!(false))
+    );
     assert!(
         table(&report).contains(
-            "  ok     failing 1  yes 0.83  src/orders.rs: `charge` (within 0.05 of 0.80)\n"
+            "  ok     failing 1  yes 0.83  src/orders.rs: `charge` (within 0.10 of 0.80)\n"
         )
+    );
+    let mut exactly = Marked::new("req.body");
+    exactly.yes = 0.7;
+    let (_, examples) = reported(&tested(&context, &["--refresh"], &mut exactly).unwrap());
+    assert_eq!(
+        (examples[0]["result"].clone(), examples[0]["close"].clone()),
+        (json!("wrong"), json!(false)),
+        "0.10 away is not within 0.10"
     );
 }

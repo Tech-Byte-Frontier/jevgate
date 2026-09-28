@@ -13,9 +13,14 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, io::Write, path::PathBuf};
 
-/// An example whose answer is this close to its threshold is marked: it is
-/// the first to flip when a model's answers move.
-const MARGIN: f64 = 0.05;
+/// An example whose answer is closer than this to its threshold is marked:
+/// it is the first to flip when a model's answers move. Asked seven times
+/// (four `--refresh` runs and the `jev-latest` and `jev-preview` aliases of
+/// jev-1.13.0), 23 examples of five questions written from real instruction
+/// files moved 0.01 at the median, 0.05 at the 95th percentile and at most
+/// 0.09 between any two asks; the one that flipped sat 0.04 above its
+/// threshold.
+const MARGIN: f64 = 0.10;
 
 /// What an example's answers say, as the report names it.
 const RIGHT: &str = "right";
@@ -361,7 +366,9 @@ impl Judged {
                 .map(|(unit, _)| unit.subject.clone()),
             yes: top.map(|(_, (yes, _))| yes),
             found: judged.then_some(found),
-            close: top.is_some_and(|(_, (yes, _))| (yes - threshold).abs() < MARGIN),
+            close: top.is_some_and(|(_, (yes, _))| {
+                !crate::policy::probability_at_least((yes - threshold).abs(), MARGIN)
+            }),
             cached: judged && case.cached,
             units: case
                 .units
