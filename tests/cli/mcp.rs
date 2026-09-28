@@ -53,7 +53,8 @@ fn reply_to(messages: &[Value], id: u64) -> (&Value, Vec<&Value>) {
 }
 
 /// Write a clear answer to every first-pass request a dry run plans into
-/// the project's answer cache, as a run would have saved it, so a check is
+/// the project's answer cache, keyed and stored as a run saves it
+/// (`requests::judgment_key`, `storage::Store::save`), so a check is
 /// answered wholly from the cache and needs no key. Returns how many.
 fn cache_clear_answers(project: &Project) -> usize {
     use sha2::Digest;
