@@ -143,9 +143,10 @@ pub(super) fn snapshot(
         .context("Cannot take a snapshot of the working tree")
 }
 
-/// Remove turn files, and scratch indexes a killed hook left, idle for a week.
-pub(super) fn prune(root: &Path) {
-    let Ok(entries) = std::fs::read_dir(root.join(".jevgate/turns")) else {
+/// Remove the files of `directory` idle for a week: turn files and scratch
+/// indexes a killed hook left under `.jevgate/turns/`, or marks outside Git.
+pub(super) fn prune(directory: &Path) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
         return;
     };
     for entry in entries.flatten() {

@@ -21,7 +21,7 @@ pub(crate) use review::REPORT_COMMAND;
 use crate::transport;
 use agents::{Event, Kind, Reply};
 use anyhow::{Result, bail};
-use events::{Hook, failed};
+use events::{Hook, OutsideGit, failed, first_outside};
 use review::Evaluators;
 use serde_json::{Value, json};
 use std::{
@@ -177,6 +177,7 @@ pub(crate) fn respond(input: &Value, options: Options, host: &Host) -> Answer {
         Kind::Other => Reply::default(),
         _ => match Hook::open(&event, host, deadline) {
             Ok(hook) => hook.handle(),
+            Err(error) if error.is::<OutsideGit>() && !first_outside(&event) => Reply::default(),
             Err(error) => failed(&event, &what(&event), &format!("{error:#}")),
         },
     };

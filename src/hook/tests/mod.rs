@@ -621,17 +621,21 @@ fn a_session_lock_held_by_another_process_never_blocks() {
 }
 
 #[test]
-fn outside_git_nothing_is_checked_blocked_or_written() {
+fn outside_git_nothing_is_checked_blocked_or_written_and_it_is_said_once() {
     let project = Project::new();
     project.write("lib.rs", &long_function("f"));
     let host = reviewing();
-    for event in [prompt("go"), edit(&project, "lib.rs"), stop(false)] {
-        let reply = send(&project, &host, event);
-        assert!(reply.get("decision").is_none(), "{reply}");
-        assert!(
-            message(&reply).contains("is not in a Git repository"),
-            "{reply}"
-        );
+    let first = send(&project, &host, prompt("go"));
+    assert!(
+        message(&first).contains("is not in a Git repository (or Git cannot run), so JevGate cannot tell what a turn changed; it says so once a session"),
+        "{first}"
+    );
+    assert!(
+        context(&first).contains("is not in a Git repository"),
+        "{first}"
+    );
+    for event in [edit(&project, "lib.rs"), stop(false)] {
+        assert_eq!(send(&project, &host, event), json!({}));
     }
     assert!(!project.0.join(".jevgate").exists());
 }

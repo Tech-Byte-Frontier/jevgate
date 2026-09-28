@@ -29,6 +29,42 @@ pub(super) fn failed(event: &Event, what: &str, reason: &str) -> Reply {
     }
 }
 
+/// The session's directory is not in a Git work tree, or Git cannot run.
+#[derive(Debug)]
+pub(super) struct OutsideGit(PathBuf);
+
+impl std::error::Error for OutsideGit {}
+impl std::fmt::Display for OutsideGit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} is not in a Git repository (or Git cannot run), so JevGate cannot tell what a turn changed; it says so once a session",
+            self.0.display()
+        )
+    }
+}
+
+/// Whether the session of `event` has not yet been told that its directory
+/// is outside Git. Hooks set up for a user run in every directory an agent
+/// opens, so a session there would otherwise hear it at every prompt, edit
+/// and stop. An empty mark in the system's temporary directory remembers
+/// it; when it cannot be written, the session is told again.
+pub(super) fn first_outside(event: &Event) -> bool {
+    let directory = std::env::temp_dir().join("jevgate-hook");
+    let key = format!(
+        "{}\n{}",
+        event.session,
+        event.cwd.as_deref().unwrap_or(Path::new("")).display()
+    );
+    let mark = directory.join(&crate::schema::hash(key.as_bytes())[..32]);
+    let _ = std::fs::create_dir_all(&directory);
+    turn::prune(&directory);
+    !matches!(
+        std::fs::OpenOptions::new().write(true).create_new(true).open(mark),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists
+    )
+}
+
 /// One event in its repository.
 pub(super) struct Hook<'a> {
     event: &'a Event,
@@ -43,19 +79,15 @@ pub(super) struct Hook<'a> {
 
 impl<'a> Hook<'a> {
     /// The repository of the event's directory; it must be a Git work tree,
-    /// so no state is written into a directory that is not one.
+    /// so no state is written into a directory that is not one. Outside one
+    /// the error is [`OutsideGit`].
     pub(super) fn open(event: &'a Event, host: &'a Host, deadline: Instant) -> Result<Self> {
         let cwd = event.cwd.as_deref().unwrap_or(&host.cwd);
         let cwd = cwd
             .canonicalize()
             .with_context(|| format!("Cannot open the session's directory {}", cwd.display()))?;
         let root = config::repository_root(&cwd);
-        let index = crate::revision::index_file(&root).with_context(|| {
-            format!(
-                "{} is not in a Git repository (or Git cannot run), so JevGate cannot tell what a turn changed",
-                root.display()
-            )
-        })?;
+        let index = crate::revision::index_file(&root).ok_or_else(|| OutsideGit(root.clone()))?;
         Ok(Self {
             event,
             host,
@@ -117,7 +149,7 @@ impl<'a> Hook<'a> {
                 }
             }
             _ => {
-                turn::prune(&self.root);
+                turn::prune(&self.root.join(".jevgate/turns"));
                 self.begin(previous.and_then(|turn| turn.notice))
             }
         }
