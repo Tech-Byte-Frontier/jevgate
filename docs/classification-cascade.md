@@ -132,6 +132,18 @@ signatures, or one candidate pair.
    a full pass but saved a half to two thirds as much per edit, and left
    whole files in one run (`clones.rs`, `literals.rs`); one in four
    overtakes it after 31 to 40 edits.
+   Every rule's questions about a function ride in its one pack
+   (`src/units/packs.rs`): the split and flatten questions, the
+   hardcoded-value questions with the function's literal values, and each
+   security rule's presence questions with its framework evidence, so its
+   source is sent once. Each rule packed its own functions before, and a
+   function all three judged was sent three times. With every rule, the
+   corpus's first pass plans 20% fewer requests and bills about 11% less
+   input (22% less on the function packs, measured on 28 projects); a rule
+   alone asks exactly what it asked. A function's answers moved as much as
+   when only its pack's companions change (0.018 on the split's top level,
+   both), and no rule's labeled findings got worse. In a file whose framework
+   role is set, split questions are packed apart, without the role.
    With `--base`, only what the change touched is asked: units whose lines
    it added or modified, or removed lines inside; copies where either copy
    changed; a file's outline, or a large document's, only when the change

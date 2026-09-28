@@ -2,7 +2,11 @@
 //! functions, asked in one request per pack, so each function's source is
 //! uploaded once. Function simplification, hardcoded values and the security
 //! rules each packed the functions they judge, so a function all three
-//! judged was sent three times.
+//! judged was sent three times. With every rule, the corpus's first pass
+//! plans 20% fewer requests and bills 11% less input (the function packs
+//! 22% less, 16.8M to 13.1M tokens on 28 projects). An answer moves as much
+//! as when only its pack's companions change: the split's top level by 0.018
+//! on average either way, on nine projects.
 use super::{
     Asked, FileContext, FilePlan, Planned, Questions, functions, hardcoded, pack_runs, security,
 };
