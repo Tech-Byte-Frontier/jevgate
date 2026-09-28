@@ -462,6 +462,25 @@ fn a_rule_a_tool_checks_is_not_proposed_and_one_a_test_run_shows_is() {
 }
 
 #[test]
+fn a_file_a_person_wrote_among_the_proposals_keeps_its_name() {
+    let project = Project::new();
+    project.write("AGENTS.md", AGENTS);
+    let hand = "question = \"Does this function log a body?\"\nunit = \"function\"\n";
+    project.write(&format!("{PROPOSALS}/{}.toml", IDS[0]), hand);
+    proposed(&project);
+    assert_eq!(
+        std::fs::read_to_string(proposal_file(&project, IDS[0])).unwrap(),
+        hand
+    );
+    let moved = format!("{}-2", IDS[0]);
+    assert!(
+        proposal_file(&project, &moved).exists(),
+        "{:?}",
+        proposals(&project)
+    );
+}
+
+#[test]
 fn a_copy_of_a_rule_in_another_file_is_proposed_once() {
     let project = Project::new();
     project.write("AGENTS.md", AGENTS);

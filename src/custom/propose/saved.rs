@@ -44,8 +44,9 @@ impl Saved {
                 saved.accepted.entry(marker).or_insert(None);
             }
         }
-        for (id, marker) in markers(&custom::within(root, PROPOSALS)) {
-            saved.taken.insert(id.clone());
+        let proposals = custom::within(root, PROPOSALS);
+        saved.taken.extend(ids(&proposals));
+        for (id, marker) in markers(&proposals) {
             saved.proposed.insert(marker, id);
         }
         saved
@@ -75,6 +76,14 @@ impl Saved {
         *id = free;
         Status::New
     }
+}
+
+/// The id of each question file in `directory`, marked or not: a file a
+/// person wrote there keeps its name.
+fn ids(directory: &Path) -> Vec<String> {
+    let files = custom::question_files(directory).unwrap_or_default();
+    let stem = |path: &PathBuf| Some(path.file_stem()?.to_string_lossy().into_owned());
+    files.iter().filter_map(stem).collect()
 }
 
 /// The id and marker of each question file in `directory` that has one.
