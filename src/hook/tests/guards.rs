@@ -30,18 +30,26 @@ fn reason(reply: &Value) -> String {
         .map_or_else(|| reply.to_string(), str::to_string)
 }
 
+/// The stop of a turn, begun by `host`'s answers, that writes `code` to
+/// `lib.rs`: blocked, since the allow comment the turn wrote in it accepts
+/// nothing within the turn.
+fn blocked_after_writing(project: &Project, host: &Host, code: &str) -> Value {
+    send(project, host, prompt("change lib.rs"));
+    project.write("lib.rs", code);
+    let blocked = send(project, host, stop(false));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+    blocked
+}
+
 #[test]
 fn an_allow_comment_added_in_the_turn_does_not_let_the_agent_stop() {
     let project = repository();
     let host = reviewing();
-    send(&project, &host, prompt("refactor"));
     let allowed = format!(
         "// jevgate: allow(function-simplification) it reads as one job\n{}",
         long_function("f")
     );
-    project.write("lib.rs", &allowed);
-    let blocked = send(&project, &host, stop(false));
-    assert_eq!(blocked["decision"], "block", "{blocked}");
+    let blocked = blocked_after_writing(&project, &host, &allowed);
     let why = reason(&blocked);
     assert!(
         why.contains("- lib.rs:2 review maintainability/function-simplification (fails the gate; accepted this turn): "),
@@ -81,10 +89,7 @@ fn an_allow_comment_moved_or_copied_in_the_turn_does_not_let_the_agent_stop() {
             &format!("{allow}{}{}", function("legacy"), function("f")),
         );
         project.git(&["commit", "-qam", "an accepted function"]);
-        send(&project, &host, prompt("grow f"));
-        project.write("lib.rs", &edited);
-        let blocked = send(&project, &host, stop(false));
-        assert_eq!(blocked["decision"], "block", "{blocked}");
+        let blocked = blocked_after_writing(&project, &host, &edited);
         assert!(
             reason(&blocked).contains(&format!(
                 "- lib.rs:{} review maintainability/function-simplification (fails the gate; accepted this turn): ",
@@ -257,15 +262,11 @@ fn a_question_the_turn_deletes_lowers_or_breaks_does_not_let_the_agent_stop() {
 fn an_allow_comment_naming_a_custom_question_does_not_let_the_agent_stop() {
     for named in ["custom/body-logs", "custom"] {
         let project = questioned(false);
-        let host = reviewing();
-        send(&project, &host, prompt("log the orders"));
         let allowed = format!(
             "// jevgate: allow({named}) the body is redacted upstream\n{}",
             long_function("charge")
         );
-        project.write("lib.rs", &allowed);
-        let blocked = send(&project, &host, stop(false));
-        assert_eq!(blocked["decision"], "block", "{named}: {blocked}");
+        let blocked = blocked_after_writing(&project, &reviewing(), &allowed);
         assert!(
             reason(&blocked).contains(
                 "- lib.rs:2 review custom/body-logs (fails the gate; accepted this turn): "
