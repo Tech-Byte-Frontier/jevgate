@@ -3,7 +3,9 @@ name: Release
 # checks run and the binaries build first, then the crate goes to crates.io and
 # the tag's message body becomes the notes of a GitHub release that carries the
 # binaries, their checksums and build provenance; then the Homebrew formula in
-# Tech-Byte-Frontier/homebrew-tap installs it. Every step can be rerun safely.
+# Tech-Byte-Frontier/homebrew-tap installs it, and the npm launcher
+# @tech-byte-frontier/jevgate of the same version runs it. Every step can be
+# rerun safely.
 on:
   push:
     tags: ["v*"]
@@ -126,3 +128,40 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -qam "jevgate ${TAG#v}"
           git push
+  npm:
+    needs: publish
+    runs-on: ubuntu-latest
+    # npm trusts only this workflow in this environment (trusted publishing), and
+    # adds the package's provenance itself.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Trusted publishing needs npm 11.5.1 or later, which Node 24 releases
+      # bring. No package cache: nothing restored runs next to the publish token.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Publish the npm launcher
+        run: |
+          npm_version=$(npm --version)
+          [ "$(printf '%s\n' 11.5.1 "$npm_version" | sort -V | head -n 1)" = 11.5.1 ] || { echo "::error::npm $npm_version is older than 11.5.1, which trusted publishing needs"; exit 1; }
+          name=$(jq -r .name npm/package.json)
+          version=$(jq -r .version npm/package.json)
+          [ "$TAG" = "v$version" ] || { echo "::error::Tag $TAG does not match npm/package.json version $version"; exit 1; }
+          if [ -n "$(npm view "$name@$version" version 2>/dev/null)" ]; then
+            echo "npm already has $name $version"
+            exit 0
+          fi
+          # The package ships the release's checksums, which tie it to these binaries.
+          gh release download "$TAG" --pattern SHA256SUMS --dir npm
+          npm publish ./npm --access public
