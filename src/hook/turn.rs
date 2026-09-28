@@ -12,7 +12,7 @@ use std::{
 /// Turn files untouched this long belong to finished sessions and are removed.
 const KEPT_SECS: u64 = 7 * 24 * 60 * 60;
 /// A turn file is at most a few kilobytes; a larger one was not written here.
-const MAX_BYTES: u64 = 65_536;
+pub(super) const MAX_BYTES: u64 = 65_536;
 /// Findings a turn remembers giving the agent: about 20 KB of fingerprints.
 const MAX_REPORTED: usize = 256;
 
@@ -97,7 +97,7 @@ impl Turn {
 }
 
 /// `.jevgate/turns/` under `root`, created when missing.
-fn directory(root: &Path) -> Result<PathBuf> {
+pub(super) fn directory(root: &Path) -> Result<PathBuf> {
     let directory = storage::state_directory(root)?.join("turns");
     std::fs::create_dir_all(&directory)?;
     Ok(directory)

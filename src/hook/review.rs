@@ -5,6 +5,7 @@
 //! comments as they were when the turn began: accepting a finding or
 //! loosening the gate is the person's decision, so the agent's edits to
 //! them count from the next turn, and the person is told of each.
+use super::outage::{Waiting, Watch, Watched};
 use crate::{
     check,
     config::{Config, ConfigContext},
@@ -31,14 +32,49 @@ const LOCK_WAIT: Duration = Duration::from_secs(10);
 /// jevgate.toml is read up to this size, as the baseline is.
 const CONFIG_BYTES: u64 = crate::baseline::BASELINE_BYTES;
 const LOCK_POLL: Duration = Duration::from_millis(100);
+/// The stack of the thread a check runs on: 8 MiB, a main thread's on
+/// Linux and macOS, where `jevgate check` runs.
+const WORKER_STACK: usize = 8 * 1024 * 1024;
 /// The `command` of the reports the hook's checks publish: a few files a
 /// turn changed, which `baseline` must not take for the repository's.
 pub(crate) const REPORT_COMMAND: &str = "hook";
 
-/// Builds the evaluator a check asks: the provider in production, a script
-/// in tests.
+/// Builds the evaluator a check asks, which gives up on what would run past
+/// the deadline: the provider in production, a script in tests.
 pub(crate) type Evaluators =
-    dyn Fn(&CheckArgs, &ConfigContext) -> Result<Box<dyn Evaluator + Send>> + Send + Sync;
+    dyn Fn(&CheckArgs, &ConfigContext, Instant) -> Result<Box<dyn Evaluator + Send>> + Send + Sync;
+
+/// How a hook check asks: the evaluator built for its deadline, or, while
+/// the hook waits out a provider failure, none, with why.
+pub(super) struct Asking {
+    pub evaluators: Arc<Evaluators>,
+    pub deadline: Instant,
+    pub waiting: Option<String>,
+}
+
+impl Asking {
+    /// The evaluator for one check, watched by `watch`.
+    fn evaluator<'w>(
+        &self,
+        args: &CheckArgs,
+        context: &ConfigContext,
+        watch: &'w Watch,
+    ) -> Result<Watched<'w>> {
+        let inner: Box<dyn Evaluator + Send> = match &self.waiting {
+            Some(why) => Box::new(Waiting(why.clone())),
+            None => (self.evaluators)(args, context, self.deadline)?,
+        };
+        Ok(Watched { inner, watch })
+    }
+}
+
+/// Why a hook check could not finish, and the provider's failure when it
+/// is one the hook waits out.
+#[derive(Debug)]
+pub(super) struct Unfinished {
+    pub reason: String,
+    pub outage: Option<String>,
+}
 
 /// What one hook check covers.
 pub(super) struct Scope {
@@ -98,33 +134,67 @@ pub(super) struct Place {
     pub root: PathBuf,
 }
 
-/// Check `scope` in `place` and wait for it until `deadline`. The error
-/// says why the check could not finish, for the person and the agent.
+/// Check `scope` in `place` and wait for it until the deadline. The error
+/// says why the check could not finish, for the person and the agent, and
+/// what it met of the provider.
 pub(super) fn check(
     place: Place,
     scope: Scope,
-    evaluators: Arc<Evaluators>,
-    deadline: Instant,
-) -> std::result::Result<Checked, String> {
+    asking: Asking,
+) -> std::result::Result<Checked, Unfinished> {
     let started = Instant::now();
+    let deadline = asking.deadline;
     // The wait for the lock ends first, so its reason reaches the reply.
     let lock_until =
         (started + LOCK_WAIT).min(deadline.checked_sub(LOCK_POLL * 2).unwrap_or(started));
+    let watch = Arc::new(Watch::default());
+    let watching = Arc::clone(&watch);
     let (sender, receiver) = mpsc::channel();
     // The thread is left behind at the deadline; the process exits after the
-    // reply, and the answers it received are already in the cache.
-    std::thread::spawn(move || {
-        let checked = context(&place, &scope)
-            .and_then(|context| run(context, scope, evaluators.as_ref(), lock_until));
-        let _ = sender.send(checked.map_err(|e| format!("{e:#}")));
-    });
+    // reply, and the answers it received are already in the cache. Its
+    // stack is a main thread's: a parse of deeply nested code recurses, and
+    // the 2 MiB of a spawned thread aborted on a 1,500-branch `else if`
+    // chain that `jevgate check` judges.
+    let worker = std::thread::Builder::new()
+        .stack_size(WORKER_STACK)
+        .spawn(move || {
+            let checked = context(&place, &scope)
+                .and_then(|context| run(context, scope, (&asking, &watching), lock_until));
+            let _ = sender.send(checked.map_err(|e| format!("{e:#}")));
+        });
+    if let Err(error) = worker {
+        return Err(Unfinished {
+            reason: format!("the check could not start ({error})"),
+            outage: None,
+        });
+    }
+    let waited = (deadline.saturating_duration_since(started).as_millis() + 500) / 1000;
     match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
-            "the check did not finish within {} s (answers received so far are cached)",
-            (deadline.saturating_duration_since(started).as_millis() + 500) / 1000
-        )),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err("the check stopped unexpectedly".into()),
+        Ok(Ok(checked)) => Ok(checked),
+        Ok(Err(reason)) => Err(Unfinished {
+            reason,
+            outage: watch.failure(),
+        }),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(match watch.failure() {
+            Some(failure) => Unfinished {
+                reason: format!("{failure}; the check did not finish within {waited} s"),
+                outage: Some(failure),
+            },
+            None if watch.silent() => Unfinished {
+                reason: format!("the provider did not answer within {waited} s"),
+                outage: Some(format!("no answer within {waited} s")),
+            },
+            None => Unfinished {
+                reason: format!(
+                    "the check did not finish within {waited} s (answers received so far are cached)"
+                ),
+                outage: None,
+            },
+        }),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(Unfinished {
+            reason: "the check stopped unexpectedly".into(),
+            outage: None,
+        }),
     }
 }
 
@@ -147,7 +217,7 @@ fn context(place: &Place, scope: &Scope) -> Result<ConfigContext> {
 fn run(
     context: ConfigContext,
     scope: Scope,
-    evaluators: &Evaluators,
+    (asking, watch): (&Asking, &Watch),
     lock_until: Instant,
 ) -> Result<Checked> {
     let args = arguments(&context, scope)?;
@@ -165,8 +235,8 @@ fn run(
     let store = open_store(&context.root, lock_until)?;
     let (previous, mut report) = check::first_snapshot(&args, &context, &inputs);
     report.command = REPORT_COMMAND.into();
-    let mut evaluator = evaluators(&args, &context)?;
-    let mut session = check::session(&args, &context, &store, evaluator.as_mut());
+    let mut evaluator = asking.evaluator(&args, &context, watch)?;
+    let mut session = check::session(&args, &context, &store, &mut evaluator);
     check::judge(&mut session, &inputs, previous.as_ref(), &mut report)?;
     if !report.complete {
         bail!(incomplete(&report));

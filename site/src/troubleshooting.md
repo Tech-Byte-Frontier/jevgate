@@ -52,7 +52,10 @@ Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–52
 : The hook waits up to 10 s for another JevGate process in the same repository, such as a `check --watch`, then lets the agent go on. Stop the watch while the agent works, or rely on the hook instead.
 
 **`the check did not finish within 30 s`**
-: The provider was slow, or the turn changed many files. The answers received so far are cached, so the next check continues from them. Raise `--timeout`, and the agent's own hook timeout above it.
+: The turn changed many files. The answers received so far are cached, so the next check continues from them. If this repeats, raise `--timeout`, and the agent's own hook timeout above it.
+
+**`the provider did not answer within 30 s`**, or a provider's failure such as **`TypeSafe HTTP 503`** or **`Cannot connect to TypeSafe`**
+: The provider timed out, refused the connection, limited the rate or failed. No retry it asks for runs past the hook's time, and for the next 5 minutes the hook's checks use only cached answers, saying **`the provider failed a few minutes ago (…), so JevGate asks it again in N minutes`** when those do not cover an edit. An outage then holds the agent once, not at every edit. Raising `--timeout` does not help here. A turn whose end could not be checked is checked with the next one.
 
 **`JevGate did not check this turn: it has no snapshot of the turn's start`**
 : The hook that runs when a prompt is sent (`UserPromptSubmit`, `BeforeAgent`, `beforeSubmitPrompt`) is not configured. The end of the turn records a snapshot, so the next turn is checked.

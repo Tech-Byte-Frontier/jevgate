@@ -30,7 +30,7 @@ fn repository() -> Project {
 /// Checks answered by `evaluator`, one per check.
 fn host(evaluator: impl Fn() -> Box<dyn Evaluator + Send> + Send + Sync + 'static) -> Host {
     Host {
-        evaluators: Arc::new(move |_, _| Ok(evaluator())),
+        evaluators: Arc::new(move |_, _, _| Ok(evaluator())),
         cwd: PathBuf::from("/nonexistent"),
     }
 }
@@ -444,16 +444,7 @@ fn a_session_start_records_a_turn_only_when_the_session_has_none() {
 #[test]
 fn a_provider_failure_never_blocks_and_is_told_to_the_person_and_the_agent() {
     let failures = [
-        (
-            Failing(|| {
-                let failure = Failure {
-                    status: 402,
-                    ..Failure::default()
-                };
-                provider_error(&TYPESAFE, failure).into()
-            }),
-            "TypeSafe HTTP 402",
-        ),
+        (Failing(credits_exhausted), "TypeSafe HTTP 402"),
         (
             Failing(|| Unsent(&TYPESAFE).into()),
             "Cannot connect to TypeSafe",
@@ -475,15 +466,15 @@ fn a_provider_failure_never_blocks_and_is_told_to_the_person_and_the_agent() {
         let stopped = send(&project, &host, stop(false));
         assert_eq!(stopped.as_object().unwrap().len(), 1, "{stopped}");
         assert!(
-            message(&stopped).starts_with(&format!("JevGate could not check this turn: {said}")),
+            message(&stopped).starts_with("JevGate could not check this turn: ")
+                && message(&stopped).contains(said),
             "{stopped}"
         );
         assert!(message(&stopped).ends_with("Nothing was blocked."));
         let next = send(&project, &host, prompt("go on"));
         assert!(
-            context(&next).starts_with(&format!(
-                "JevGate could not check the last turn's changes ({said}"
-            )),
+            context(&next).starts_with("JevGate could not check the last turn's changes (")
+                && context(&next).contains(said),
             "the agent hears of it at the next turn: {next}"
         );
         assert_eq!(context(&send(&project, &host, prompt("again"))), "", "once");
@@ -493,10 +484,10 @@ fn a_provider_failure_never_blocks_and_is_told_to_the_person_and_the_agent() {
 #[test]
 fn a_turn_whose_stop_could_not_be_checked_is_checked_with_the_next() {
     let project = repository();
-    let unreachable = host(|| Box::new(Failing(|| Unsent(&TYPESAFE).into())));
+    let exhausted = host(|| Box::new(Failing(credits_exhausted)));
     send(&project, &reviewing(), prompt("refactor"));
     project.write("lib.rs", &long_function("f"));
-    let failed = send(&project, &unreachable, stop(false));
+    let failed = send(&project, &exhausted, stop(false));
     assert!(failed.get("decision").is_none(), "{failed}");
     let next = send(&project, &reviewing(), prompt("add notes"));
     assert!(
@@ -524,6 +515,60 @@ fn a_turn_whose_stop_could_not_be_checked_is_checked_with_the_next() {
     );
 }
 
+/// A provider out of credits: HTTP 402, which waiting does not fix.
+fn credits_exhausted() -> anyhow::Error {
+    let failure = Failure {
+        status: 402,
+        ..Failure::default()
+    };
+    provider_error(&TYPESAFE, failure).into()
+}
+
+/// A provider that cannot be reached, counting in `0` what it was asked.
+struct Unreachable(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Evaluator for Unreachable {
+    fn evaluate(&mut self, _: &Value) -> anyhow::Result<Value> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err(Unsent(&TYPESAFE).into())
+    }
+}
+
+#[test]
+fn a_provider_outage_is_waited_out_from_the_cache_for_five_minutes() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let project = repository();
+    let asked = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&asked);
+    let down = host(move || Box::new(Unreachable(Arc::clone(&counted))));
+    send(&project, &down, prompt("refactor"));
+    project.write("lib.rs", &long_function("f"));
+    let first = send(&project, &down, edit(&project, "lib.rs"));
+    assert!(
+        context(&first).starts_with("JevGate could not check lib.rs (Cannot connect to TypeSafe"),
+        "{first}"
+    );
+    let before = asked.load(Ordering::Relaxed);
+    assert!(before > 0);
+    project.write("lib.rs", &long_function("g"));
+    let second = send(&project, &down, edit(&project, "lib.rs"));
+    assert_eq!(asked.load(Ordering::Relaxed), before, "nothing was asked");
+    assert!(
+        message(&second).contains("lib.rs: the provider failed a few minutes ago (Cannot connect to TypeSafe; request was not sent), so JevGate asks it again in 5 minutes and uses only cached answers until then"),
+        "{second}"
+    );
+    // Five minutes on, the provider is asked again, and an answer ends the wait.
+    let record = project.0.join(".jevgate/turns/outage.json");
+    let mut outage: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    outage["at"] = json!(crate::schema::now() - 301);
+    std::fs::write(&record, outage.to_string()).unwrap();
+    assert_eq!(
+        send(&project, &reviewing(), stop(false))["decision"],
+        "block"
+    );
+    assert!(!record.exists());
+}
+
 #[test]
 fn a_slow_provider_is_cut_at_the_budget() {
     let project = repository();
@@ -538,8 +583,12 @@ fn a_slow_provider_is_cut_at_the_budget() {
     );
     assert!(reply.get("decision").is_none());
     assert!(
-        message(&reply).contains("the check did not finish within 2 s"),
+        message(&reply).contains("the provider did not answer within 2 s"),
         "{reply}"
+    );
+    assert!(
+        project.0.join(".jevgate/turns/outage.json").exists(),
+        "a provider that answers nothing in time is waited out"
     );
 }
 
@@ -588,4 +637,27 @@ fn an_invalid_configuration_never_blocks() {
     let reply = send(&project, &host, stop(false));
     assert!(reply.get("decision").is_none());
     assert!(message(&reply).contains("no-such-rule"), "{reply}");
+}
+
+/// Not on Windows, whose debug builds take larger stack frames; the stack
+/// matters most where `jevgate check` has a main thread's 8 MiB.
+#[cfg(not(windows))]
+#[test]
+fn deeply_nested_code_is_checked_with_a_main_threads_stack() {
+    // 1,000 branches: a debug build overflowed a spawned thread's 2 MiB at
+    // 700 and passed 2,400 on 8 MiB.
+    let project = repository();
+    let host = reviewing();
+    send(&project, &host, prompt("add a table"));
+    let mut code = String::from("pub fn pick(x: i32) -> i32 {\n    if x == 0 { 0 }\n");
+    for i in 1..1_000 {
+        code.push_str(&format!("    else if x == {i} {{ {i} }}\n"));
+    }
+    code.push_str("    else { -1 }\n}\n");
+    project.write("lib.rs", &code);
+    let reply = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&reply).starts_with("JevGate reviewed lib.rs after this edit"),
+        "{reply}"
+    );
 }

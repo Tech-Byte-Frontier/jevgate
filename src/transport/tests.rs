@@ -103,6 +103,34 @@ fn server_errors_retry_and_an_interrupted_request_is_sent_twice_at_most() {
 }
 
 #[test]
+fn a_retry_or_a_pause_past_the_deadline_is_not_waited() {
+    let access = ProviderAccess {
+        deadline: Some(Instant::now() + Duration::from_secs(2)),
+        ..fast()
+    };
+    let start = Instant::now();
+    let (outcome, calls) = sends(
+        &access,
+        vec![Err(failed(503, None, Some(30)).into()), Ok(json!({}))],
+    );
+    assert_eq!((calls, outcome.retries), (1, 0));
+    assert!(start.elapsed() < Duration::from_secs(2));
+    let error = outcome.result.unwrap_err();
+    assert!(
+        error.to_string().starts_with("TypeSafe HTTP 503") && transient(&error),
+        "the provider's own failure: {error}"
+    );
+    access.pause(Duration::from_secs(30));
+    let (outcome, calls) = sends(&access, vec![Ok(json!({}))]);
+    assert_eq!(calls, 0, "a request behind another's pause is not sent");
+    let message = outcome.result.unwrap_err().to_string();
+    assert!(
+        message.contains("past the time this check has"),
+        "{message}"
+    );
+}
+
+#[test]
 fn validation_transport_and_account_errors_are_sent_once() {
     for error in [
         anyhow::Error::from(failed(422, None, None)),

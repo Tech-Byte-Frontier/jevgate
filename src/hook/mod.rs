@@ -8,6 +8,7 @@
 //! always says so. What each event does is in `events`.
 mod agents;
 mod events;
+mod outage;
 mod review;
 #[cfg(test)]
 mod tests;
@@ -85,13 +86,13 @@ pub fn run(args: &HookArgs) -> Result<u8> {
         timeout: args.timeout.map(Duration::from_secs),
     };
     let host = Host {
-        evaluators: Arc::new(|args, context| {
+        evaluators: Arc::new(|args, context, deadline| {
             let client = transport::Client::new(
                 &crate::check::credential_path(args, context),
                 args.env_file.is_some(),
                 args.provider,
             )?;
-            Ok(Box::new(client))
+            Ok(Box::new(client.until(deadline)))
         }),
         cwd: std::env::current_dir().unwrap_or_default(),
     };

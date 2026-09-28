@@ -187,6 +187,16 @@ impl Client {
         })
     }
 
+    /// Give up on a retry, or a pause another request's failure asked for,
+    /// that would end past `deadline`: the agent hook answers by then, and
+    /// a provider asking for 30 s would otherwise hold every edit for its
+    /// whole budget (29.8 s after an edit measured against a 503 asking
+    /// for `retry-after-ms: 30000`). The failure is then the answer.
+    pub fn until(mut self, deadline: Instant) -> Self {
+        self.access.deadline = Some(deadline);
+        self
+    }
+
     fn credential(&mut self) -> Result<&str> {
         if self.key.is_none() {
             let credential = crate::auth::sources::resolve(&self.key_file, self.explicit_file)?;
@@ -294,6 +304,8 @@ struct ProviderAccess {
     interval: Duration,
     /// The provider the requests go to, named in the messages.
     service: &'static Service,
+    /// No retry or pause runs past it.
+    deadline: Option<Instant>,
 }
 
 impl Default for ProviderAccess {
@@ -307,6 +319,7 @@ impl Default for ProviderAccess {
             next_start: Mutex::new(Instant::now()),
             interval: REQUEST_INTERVAL,
             service: &TYPESAFE,
+            deadline: None,
         }
     }
 }
@@ -373,13 +386,26 @@ impl ProviderAccess {
         }
     }
 
-    fn wait(&self) {
-        let until = *self.cooldown.lock().unwrap();
-        if let Some(remaining) =
-            until.and_then(|until| until.checked_duration_since(Instant::now()))
-        {
+    /// Wait out the shared pause; an error when it ends past the deadline.
+    fn wait(&self) -> Result<()> {
+        let Some(until) = *self.cooldown.lock().unwrap() else {
+            return Ok(());
+        };
+        ensure!(
+            self.deadline.is_none_or(|deadline| until < deadline),
+            "{} request not sent: the provider asked to wait past the time this check has",
+            self.service.label
+        );
+        if let Some(remaining) = until.checked_duration_since(Instant::now()) {
             std::thread::sleep(remaining);
         }
+        Ok(())
+    }
+
+    /// Whether a pause of `pause` from now ends past the deadline.
+    fn past_deadline(&self, pause: Duration) -> bool {
+        self.deadline
+            .is_some_and(|deadline| Instant::now() + pause >= deadline)
     }
 
     /// Take the next start time, `interval` after the one before, and sleep until it.
@@ -416,7 +442,9 @@ impl ProviderAccess {
     ) -> (Result<Value>, u32) {
         let mut retry = 0;
         loop {
-            self.wait();
+            if let Err(error) = self.wait() {
+                return (Err(error), retry);
+            }
             self.pace();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| send(request)))
                 .unwrap_or_else(|_| {
@@ -437,8 +465,14 @@ impl ProviderAccess {
                     retry,
                 );
             }
+            let pause = delay
+                .unwrap_or_default()
+                .max(self.backoff(index, retry + 1));
+            if self.past_deadline(pause) {
+                return (result, retry);
+            }
             retry += 1;
-            self.pause(delay.unwrap_or_default().max(self.backoff(index, retry)));
+            self.pause(pause);
             // A rejected sibling or an edited source stops the retry like a first send.
             if let Err(error) = self
                 .check()
@@ -504,6 +538,13 @@ fn retry_delay(error: &anyhow::Error) -> Option<(Option<Duration>, u32)> {
     error
         .downcast_ref::<Unsent>()
         .map(|_| (None, UNSENT_ATTEMPTS))
+}
+
+/// Whether `error` is a provider failure that passes with time: a rate
+/// limit, an overload, a server or gateway error, a timeout, or a connection
+/// that failed or dropped. Asking again at once rarely helps.
+pub(crate) fn transient(error: &anyhow::Error) -> bool {
+    retry_delay(error).is_some()
 }
 
 impl Outcome {

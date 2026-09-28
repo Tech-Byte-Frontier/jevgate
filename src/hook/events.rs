@@ -5,6 +5,7 @@
 use super::{
     Host,
     agents::{self, Event, Kind, Reply},
+    outage,
     review::{self, Checked, Flagged},
     text,
     turn::{self, Turn},
@@ -332,18 +333,34 @@ impl<'a> Hook<'a> {
         }
     }
 
-    /// Run one check in the repository.
+    /// Run one check in the repository: without asking the provider while
+    /// the hook waits out its failure, and waiting one out when the check
+    /// meets it.
     fn check(&self, scope: review::Scope) -> Result<Checked, String> {
         let place = review::Place {
             cwd: self.cwd.clone(),
             root: self.root.clone(),
         };
-        review::check(
-            place,
-            scope,
-            Arc::clone(&self.host.evaluators),
-            self.deadline,
-        )
+        let waiting = outage::current(&self.root);
+        let asking = review::Asking {
+            evaluators: Arc::clone(&self.host.evaluators),
+            deadline: self.deadline,
+            waiting: waiting.as_ref().map(text::waiting),
+        };
+        match review::check(place, scope, asking) {
+            Ok(checked) => {
+                if waiting.is_none() {
+                    outage::clear(&self.root);
+                }
+                Ok(checked)
+            }
+            Err(unfinished) => {
+                if let Some(failure) = unfinished.outage.filter(|_| waiting.is_none()) {
+                    outage::record(&self.root, &failure);
+                }
+                Err(unfinished.reason)
+            }
+        }
     }
 }
 
