@@ -106,11 +106,9 @@ fn security_runs_only_when_selected() {
         "fn load(conn: &Connection, table: &str) {\n    conn.execute(&format!(\"DELETE FROM {table}\"), []).unwrap();\n}\n",
     )
     .unwrap();
-    assert!(!stages(&dry_run(&project, &[])).contains(&"security".to_string()));
-    assert_eq!(
-        stages(&dry_run(&project, &["--rule", "security"])),
-        ["security"]
-    );
+    let injection = "f0_interpreted".to_string();
+    assert!(!asked(&project, &[]).contains(&injection));
+    assert!(asked(&project, &["--rule", "security"]).contains(&injection));
 }
 
 #[test]
@@ -142,16 +140,16 @@ fn skipped_rules_and_rule_levels_shape_the_run() {
         JUDGED_RS.replace("total * 2", "total * 86400"),
     )
     .unwrap();
-    let values = "values".to_string();
+    let environment = "f0_environment".to_string();
     assert!(
-        !stages(&dry_run(&project, &[])).contains(&values),
+        !asked(&project, &[]).contains(&environment),
         "hardcoded values is opt-in"
     );
-    let opted_in = dry_run(
+    let opted_in = asked(
         &project,
         &["--rule", "default", "--rule", "hardcoded-values"],
     );
-    assert!(stages(&opted_in).contains(&values));
+    assert!(opted_in.contains(&environment));
     let preview = dry_run(
         &project,
         &[

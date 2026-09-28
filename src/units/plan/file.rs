@@ -14,7 +14,7 @@ use crate::{
     token_budget::Limits,
     units::{
         FileContext, FilePlan, Plan, Planned, comments, duplicates, functions, guards, hardcoded,
-        laws, outline, spacetimedb, test_units,
+        laws, outline, packs, spacetimedb, test_units,
     },
 };
 use std::{
@@ -41,8 +41,11 @@ pub(super) fn plan_file(
     };
     let lines = scope.test_lines(owner);
     let cases = shared.cases.get(context.path).cloned().unwrap_or_default();
+    // What function simplification, hardcoded values and security ask about
+    // each function, sent together once every rule has planned.
+    let mut asks = Vec::new();
     if shared.enabled(catalog::FUNCTION_SIMPLIFICATION) {
-        plan_functions(scope, &context, view, &lines, &cases, &mut file, requests);
+        asks = plan_functions(scope, &context, view, &lines, &cases, &mut file);
     }
     if shared.enabled(catalog::FILE_ORGANIZATION) {
         plan_outline(scope, shared, &context, view, &lines, &mut file, requests);
@@ -60,13 +63,13 @@ pub(super) fn plan_file(
         && !benchmark
     {
         let predicates = &shared.law_predicates;
-        plan_values(
+        asks.extend(plan_values(
             &scope.units[&owner],
             &context,
             (&lines, predicates),
             &mut file,
             requests,
-        );
+        ));
     }
     // Laravel's configuration files come from the framework and its
     // packages, with their documentation as comments: on two Laravel apps,
@@ -88,8 +91,11 @@ pub(super) fn plan_file(
         .filter(|rule| shared.enabled(rule))
         .collect();
     if !rules.is_empty() && view.application {
-        plan_security(scope, shared, &context, &lines, &rules, &mut file, requests);
+        asks.extend(plan_security(
+            scope, shared, &context, &lines, &rules, &mut file, requests,
+        ));
     }
+    packs::send(&context, asks, &mut file, requests);
     if shared.enabled(catalog::SHARED_LOGIC) && (view.application || view.tests) {
         file.rules.insert(catalog::SHARED_LOGIC, 0);
         let pairs = &shared.pairs;
@@ -290,7 +296,8 @@ fn test_names(path: &Path, source: &str) -> BTreeSet<String> {
     names
 }
 
-/// Callables and module constants outside tests.
+/// Callables and module constants outside tests; returns what the first
+/// pass asks about the callables.
 /// A Bend 2 law's predicates and the defs only they call hold its samples,
 /// so their literals are not asked about.
 fn plan_values(
@@ -299,16 +306,17 @@ fn plan_values(
     (lines, predicates): (&[Range<usize>], &BTreeSet<String>),
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
-) {
+) -> Vec<packs::FunctionAsk> {
     file.rules.insert(catalog::HARDCODED_VALUES, 0);
     let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
     // A Bend 2 proof's literals state its property (`1n+p`, `{Nat.add(x,
     // 0n) == x : Nat}`), and a type-level def's are part of a type.
-    let units: Vec<&Unit> = parsed
+    let units: Vec<(usize, &Unit)> = parsed
         .units
         .iter()
-        .filter(|u| u.callable() && u.role == Role::Code && outside_tests(u.line))
-        .filter(|u| !predicates.contains(&u.name))
+        .enumerate()
+        .filter(|(_, u)| u.callable() && u.role == Role::Code && outside_tests(u.line))
+        .filter(|(_, u)| !predicates.contains(&u.name))
         .collect();
     // With a change judged, only the constants on its lines are asked.
     let constants: Vec<_> = parsed
@@ -317,7 +325,7 @@ fn plan_values(
         .filter(|c| outside_tests(c.line) && context.judges(c.line, c.end_line))
         .cloned()
         .collect();
-    hardcoded::plan(context, &units, &constants, file, requests);
+    hardcoded::plan(context, &units, &constants, file, requests)
 }
 
 /// The claims of a Bend 2 file outside tests, with the defs they name: the
@@ -419,7 +427,8 @@ fn plan_module(
 /// support (not test cases) with the test view. A Bend 2 proof is left out:
 /// its steps follow the cases of what it proves, not jobs a reader could
 /// pull apart, and the 16 function-simplification findings on proofs across
-/// 41 Bend 2 projects were all wrong (2 more debatable).
+/// 41 Bend 2 projects were all wrong (2 more debatable). Returns what the
+/// first pass asks about them.
 fn plan_functions(
     scope: &Scope<'_>,
     context: &FileContext<'_>,
@@ -427,13 +436,13 @@ fn plan_functions(
     lines: &[Range<usize>],
     cases: &[TestCase],
     file: &mut FilePlan,
-    requests: &mut Vec<Planned>,
-) {
-    let judged: Vec<&Unit> = scope.units[&context.owner]
+) -> Vec<packs::FunctionAsk> {
+    let judged: Vec<(usize, &Unit)> = scope.units[&context.owner]
         .units
         .iter()
-        .filter(|u| u.callable() && u.role != Role::Proof)
-        .filter(|u| {
+        .enumerate()
+        .filter(|(_, u)| u.callable() && u.role != Role::Proof)
+        .filter(|(_, u)| {
             if lines.iter().any(|l| u.overlaps(l)) {
                 view.tests
                     && !cases
@@ -444,10 +453,11 @@ fn plan_functions(
             }
         })
         .collect();
-    if view.application || !judged.is_empty() {
-        file.rules.insert(catalog::FUNCTION_SIMPLIFICATION, 0);
-        functions::plan(context, &judged, scope, file, requests);
+    if !view.application && judged.is_empty() {
+        return Vec::new();
     }
+    file.rules.insert(catalog::FUNCTION_SIMPLIFICATION, 0);
+    functions::plan(context, &judged, scope, file)
 }
 
 pub(super) fn java(path: &Path) -> bool {

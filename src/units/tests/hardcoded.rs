@@ -30,8 +30,9 @@ fn judged(
 fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
     let (project, options) = hardcoded_project();
     let (_, plan) = planned(&project, &options);
-    assert_eq!(stages(&plan), ["values", "constants"]);
-    let values = &plan.requests[0].request["state"]["functions"];
+    assert_eq!(stages(&plan), ["constants", "functions"]);
+    let functions = first_request(&plan, "functions");
+    let values = &functions["state"]["functions"];
     assert_eq!(
         values.as_array().unwrap().len(),
         1,
@@ -41,10 +42,10 @@ fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
         values[0]["values"],
         json!(["\"db.internal:5432\"", "30_000"])
     );
-    let questions = plan.requests[0].request["questions"].as_object().unwrap();
+    let questions = functions["questions"].as_object().unwrap();
     assert_eq!(questions.len(), 3);
     assert_eq!(
-        plan.requests[1].request["state"]["constants"][0]["value"],
+        first_request(&plan, "constants")["state"]["constants"][0]["value"],
         "\"eu-west-1\""
     );
 }
@@ -405,9 +406,9 @@ fn a_value_added_to_one_run_of_functions_leaves_the_other_runs_alone() {
         source
     };
     let rules = [catalog::HARDCODED_VALUES];
-    let (sizes, before) = packs(&[("lib.rs", &source(false))], &rules, "values");
+    let (sizes, before) = packs(&[("lib.rs", &source(false))], &rules, "functions");
     assert_eq!(sizes, [4, 5, 1]);
-    let (sizes, after) = packs(&[("lib.rs", &source(true))], &rules, "values");
+    let (sizes, after) = packs(&[("lib.rs", &source(true))], &rules, "functions");
     assert_eq!(sizes, [4, 6, 1]);
     only_changed(&before, &after, 1);
 }

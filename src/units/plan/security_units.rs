@@ -13,12 +13,14 @@ use crate::{
         units::{FileUnits, Unit},
     },
     catalog,
-    units::{FileContext, FilePlan, Planned, security},
+    units::{FileContext, FilePlan, Planned, packs, security},
 };
 use std::ops::Range;
 
 /// Application functions outside tests and the file's setup statements; the
-/// injection recheck shows up to three callers of each function.
+/// injection recheck shows up to three callers of each function. Returns
+/// what the first pass asks about the functions, which the file's function
+/// packs send with the other rules' questions.
 pub(super) fn plan_security(
     scope: &Scope<'_>,
     shared: &Shared<'_>,
@@ -27,7 +29,7 @@ pub(super) fn plan_security(
     rules: &[&'static str],
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
-) {
+) -> Vec<packs::FunctionAsk> {
     for rule in rules {
         file.rules.insert(rule, 0);
     }
@@ -38,7 +40,8 @@ pub(super) fn plan_security(
     let subjects: Vec<security::Subject<'_>> = parsed
         .units
         .iter()
-        .filter(|u| u.reaches_out(bend) && outside_tests(u.line))
+        .enumerate()
+        .filter(|(_, u)| u.reaches_out(bend) && outside_tests(u.line))
         .map(|unit| function_subject(scope, shared, context, unit, rules))
         .collect();
     let mut setup = security::setup_subject(context, &parsed.setup, &shared.constants)
@@ -66,7 +69,7 @@ pub(super) fn plan_security(
             );
         }
     }
-    security::plan(
+    let asks = security::plan(
         context,
         &subjects,
         setup,
@@ -80,8 +83,9 @@ pub(super) fn plan_security(
     // templates' code is tags that write a value unescaped, which injection
     // judges by where the value comes from. Asked whether they turn off
     // escaping, each `raw` or `html_safe` tag of RailsGoat's views said yes,
-    // even around a user's numeric id. Without a rule that judges it,
-    // nothing is asked: such a request asked no question.
+    // even around a user's numeric id. It is packed alone, never with the
+    // file's functions, and not at all without a rule that judges it: such a
+    // request asked no question.
     let jsp = matches!(
         context.path.extension().and_then(|e| e.to_str()),
         Some("jsp" | "jspf")
@@ -94,18 +98,21 @@ pub(super) fn plan_security(
     if let Some(code) = security::template_subject(context, &parsed.template_code)
         && !judged.is_empty()
     {
-        security::plan(context, &[code], None, &judged, false, file, requests);
+        let code = security::plan(context, &[code], None, &judged, false, file, requests);
+        packs::send(context, code, file, requests);
     }
+    asks
 }
 
-/// A function with the evidence its enabled rules need: callers for
-/// injection, the errors its callees create for sensitive data, Django's
-/// facts, and the templates it renders.
+/// A function, at `position` among its file's parsed units, with the
+/// evidence its enabled rules need: callers for injection, the errors its
+/// callees create for sensitive data, Django's facts, and the templates it
+/// renders.
 fn function_subject<'a>(
     scope: &'a Scope<'_>,
     shared: &'a Shared<'_>,
     context: &FileContext<'_>,
-    unit: &'a Unit,
+    (position, unit): (usize, &'a Unit),
     rules: &[&'static str],
 ) -> security::Subject<'a> {
     let parsed = &scope.units[&context.owner];
@@ -116,7 +123,7 @@ fn function_subject<'a>(
     };
     let mut subject = security::function_subject(
         context,
-        unit,
+        (position, unit),
         callers,
         (&shared.enums, &shared.types),
         &shared.constants,

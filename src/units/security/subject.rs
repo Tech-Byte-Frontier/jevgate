@@ -4,6 +4,9 @@ use super::*;
 
 /// A function or setup statements that the security rules judge.
 pub(in crate::units) struct Subject<'a> {
+    /// Its position among its file's parsed units, which orders the function
+    /// packs every rule shares; code outside them comes after them all.
+    pub position: usize,
     pub name: String,
     /// `function` or `module`: the state key and the source path.
     pub kind: &'static str,
@@ -66,15 +69,17 @@ impl Subject<'_> {
     }
 }
 
+/// The subject of the unit at `position` among its file's parsed units.
 pub(in crate::units) fn function_subject<'a>(
     file: &FileContext<'_>,
-    unit: &'a Unit,
+    (position, unit): (usize, &'a Unit),
     callers: Vec<(String, String)>,
     (enums, types): (&BTreeMap<String, String>, &BTreeMap<String, String>),
     constants: &BTreeMap<String, Vec<String>>,
 ) -> Subject<'a> {
     let source = unit.source(file.source).to_string();
     Subject {
+        position,
         name: unit.name.clone(),
         kind: "function",
         constants: named_constants(file, &source, constants),
@@ -182,6 +187,7 @@ pub(in crate::units) fn setup_subject<'a>(
         (MODULE_SETUP, "module")
     };
     Some(Subject {
+        position: AFTER_UNITS,
         name: name.into(),
         kind,
         constants: named_constants(file, &source, constants),
@@ -213,6 +219,7 @@ pub(in crate::units) fn template_subject<'a>(
         .map(|(range, ..)| &file.source[range.clone()])
         .collect();
     Some(Subject {
+        position: AFTER_UNITS,
         name: TEMPLATE_CODE.into(),
         kind: "function",
         source: source.join("\n"),
@@ -229,6 +236,10 @@ pub(in crate::units) fn template_subject<'a>(
         test_path: false,
     })
 }
+
+/// The position of code outside the file's parsed units, such as a PHP page
+/// script: security packed it after the functions.
+const AFTER_UNITS: usize = usize::MAX;
 
 /// The name of the unit that holds a server template's code.
 pub(in crate::units) const TEMPLATE_CODE: &str = "template code";

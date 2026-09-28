@@ -165,21 +165,25 @@ fn only_questions_about_values_carry_the_framework_role() {
     let route = "export async function GET(request: Request) {\n  const url = new URL(request.url);\n  const name = url.searchParams.get('name') ?? 'guest';\n  if (name.length > 40) {\n    return new Response('too long', { status: 400 });\n  }\n  const greeting = `Hello, ${name}`;\n  return new Response(greeting);\n}\n";
     let (project, mut options) = next_project(&[("app/hello/route.ts", route)]);
     options.rules.push(catalog::FUNCTION_SIMPLIFICATION.into());
+    options.rules.push(catalog::HARDCODED_VALUES.into());
     let (_, plan) = planned(&project, &options);
     let requests = requests_of(&plan, "app/hello/route.ts");
-    let stage = |r: &Value| r["jevgate"]["stage"].as_str().unwrap().to_string();
-    let with_role: Vec<String> = requests
-        .iter()
-        .filter(|r| r["state"]["file"]["framework"].is_string())
-        .map(|r| stage(r))
-        .collect();
-    let without: Vec<String> = requests
-        .iter()
-        .filter(|r| r["state"]["file"]["framework"].is_null())
-        .map(|r| stage(r))
-        .collect();
-    assert_eq!(with_role, ["security"]);
-    assert_eq!(without, ["functions"], "how code reads needs no role");
+    // The questions of the function packs sent with or without the role.
+    let asked = |role: bool| -> Vec<&str> {
+        requests
+            .iter()
+            .filter(|r| r["jevgate"]["stage"] == "functions")
+            .filter(|r| r["state"]["file"]["framework"].is_string() == role)
+            .flat_map(|r| r["questions"].as_object().unwrap().keys())
+            .map(|key| key.split_once('_').unwrap().1)
+            .collect()
+    };
+    assert_eq!(asked(false), ["split"], "how code reads needs no role");
+    let with_role = asked(true);
+    for question in ["environment", "special", "interpreted", "weakened"] {
+        assert!(with_role.contains(&question), "{question}: {with_role:?}");
+    }
+    assert!(!with_role.contains(&"split"));
 }
 
 const PORTAL: &str = "'use server';\n\nimport { redirect } from 'next/navigation';\n\nexport async function goToSection(section: string) {\n  redirect(`/account/${section}?tab=billing`);\n}\n";

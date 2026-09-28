@@ -11,6 +11,7 @@ mod hardcoded;
 mod laws;
 mod nextjs;
 mod organization;
+mod packs;
 mod pipeline;
 mod security;
 mod test_rules;
@@ -28,19 +29,29 @@ use anyhow::Result;
 use serde_json::json;
 
 fn planned(project: &Project, options: &CheckArgs) -> (Vec<Input>, Plan) {
+    planned_with(project, options, &TokenBudget::default())
+}
+
+/// The plan of `project` whose unit requests must fit `budget`, or be
+/// answered in its cache; files are classified under the default budget.
+fn planned_with(
+    project: &Project,
+    options: &CheckArgs,
+    budget: &TokenBudget,
+) -> (Vec<Input>, Plan) {
     let inputs = crate::inventory::collect(options, &project.context(), &[]).unwrap();
-    let budget = TokenBudget::default();
+    let classify = TokenBudget::default();
     let views = inputs
         .iter()
         .enumerate()
-        .filter_map(
-            |(i, input)| match crate::file_kind::plan(input, options, budget.uncached()) {
+        .filter_map(|(i, input)| {
+            match crate::file_kind::plan(input, options, classify.uncached()) {
                 Ok(crate::file_kind::Plan::Ready(view)) => Some((i, view)),
                 _ => None,
-            },
-        )
+            }
+        })
         .collect();
-    let plan = plan(&inputs, &views, options, &budget, &project.0);
+    let plan = plan(&inputs, &views, options, budget, &project.0);
     (inputs, plan)
 }
 

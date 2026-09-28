@@ -583,10 +583,14 @@ fn a_function_added_to_one_run_is_the_only_security_request_asked_again() {
     let (sizes, before) = packs(
         &[("lib.rs", &source(false))],
         &catalog::SECURITY,
-        "security",
+        "functions",
     );
     assert_eq!(sizes, [3, 2, 4, 5]);
-    let (sizes, after) = packs(&[("lib.rs", &source(true))], &catalog::SECURITY, "security");
+    let (sizes, after) = packs(
+        &[("lib.rs", &source(true))],
+        &catalog::SECURITY,
+        "functions",
+    );
     assert_eq!(sizes, [3, 3, 4, 5]);
     only_changed(&before, &after, 1);
 }

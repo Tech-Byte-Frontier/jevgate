@@ -171,9 +171,11 @@ fn a_config_file_given_by_path_replaces_the_repository_one() {
     std::fs::write(project.0.join("jevgate.toml"), "rules = [\"security\"]\n").unwrap();
     std::fs::create_dir_all(project.0.join("policy")).unwrap();
     std::fs::write(project.0.join("policy/ci.toml"), "fail_on = [\"none\"]\n").unwrap();
-    assert_eq!(stages(&dry_run(&project, &[])), ["security"]);
-    let reviewed = dry_run(&project, &["--config", "policy/ci.toml"]);
-    assert!(!stages(&reviewed).contains(&"security".to_string()));
+    let injection = "f0_interpreted".to_string();
+    assert!(asked(&project, &[]).contains(&injection));
+    let ci = ["--config", "policy/ci.toml"];
+    assert!(!asked(&project, &ci).contains(&injection));
+    let reviewed = dry_run(&project, &ci);
     assert_eq!(reviewed["fail_on"], serde_json::json!(["none"]));
     let missing = project
         .command()

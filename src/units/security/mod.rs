@@ -1,15 +1,17 @@
-//! Security: packed function sources with presence Nouls per enabled rule,
-//! then one trace follow-up per unit whose presence is not clear (which
-//! statement, what kind, where its values come from, whether they are
-//! handled), and for injection a recheck with up to three callers when the
-//! origin stays unclear. A file's top-level setup statements are one more
-//! unit for unsafe settings; a PHP file's top-level statements are a page
-//! script, judged like a function by every rule. `subject` builds what each
-//! unit is judged on and `settle` holds the Choices that settle an undecided
-//! check.
+//! Security: presence Nouls per enabled rule about each function, asked in
+//! the function packs every rule shares (`packs`), then one trace follow-up
+//! per unit whose presence is not clear (which statement, what kind, where
+//! its values come from, whether they are handled), and for injection a
+//! recheck with up to three callers when the origin stays unclear. A file's
+//! top-level setup statements are one more unit for unsafe settings; a PHP
+//! file's top-level statements are a page script, judged like a function by
+//! every rule. `subject` builds what each unit is judged on and `settle`
+//! holds the Choices that settle an undecided check.
 use super::{
     Asked, Block, Confirms, Detail, FileContext, FilePlan, Planned, Presence, Questions, Settle,
-    UnitPlan, compact, identity, pack_runs, questions, unique_ids,
+    UnitPlan, compact, identity,
+    packs::{Ask, FunctionAsk},
+    questions, unique_ids,
 };
 use crate::{
     analysis::{errors::CreatedError, sites::Site, units::Unit},
@@ -34,10 +36,11 @@ pub(super) const PRESENCE: [(&str, &[&str]); 3] = [
 /// Callers shown when the origin of an injection's values stays unclear.
 pub(super) const CALLERS: usize = 3;
 
-/// Plan every enabled rule's units for these subjects. Functions and a PHP
-/// page script are packed; the module setup, when present, is judged for
-/// unsafe settings only. `django` marks Django code, whose presence
-/// questions name its calls.
+/// Plan every enabled rule's units for these subjects, and return what
+/// their first pass asks about each function and PHP page script, which
+/// `packs` sends with the other rules' questions about the same functions.
+/// The module setup, when present, is judged for unsafe settings only.
+/// `django` marks Django code, whose presence questions name its calls.
 pub(super) fn plan(
     file: &FileContext<'_>,
     functions: &[Subject<'_>],
@@ -46,7 +49,7 @@ pub(super) fn plan(
     django: bool,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
-) {
+) -> Vec<FunctionAsk> {
     let (script, setup) = match setup {
         Some(subject) if subject.name == SCRIPT => (Some(subject), None),
         other => (None, other),
@@ -60,48 +63,32 @@ pub(super) fn plan(
         .iter()
         .map(|rule| unique_ids(prefix(rule), judged.iter().map(|s| s.name.as_str())))
         .collect();
-    let mut items: Vec<Item> = Vec::new();
+    let mut asks = Vec::new();
     for (index, subject) in judged.iter().enumerate() {
         let units = rules
             .iter()
             .zip(&ids)
             .map(|(rule, ids)| push_unit(file, out, subject, rule, &ids[index]))
             .collect();
-        items.push((units, subject.state()));
-    }
-    // Runs end after subjects' names, so a function added, removed or
-    // resized re-asks only its own run.
-    let packs = pack_runs(
-        items,
-        |(_, state)| state["name"].as_str().unwrap_or_default(),
-        |(_, state)| state,
-        |(units, _)| {
-            units
-                .iter()
-                .any(|(_, index, _)| file.judges_unit(&out.units[*index]))
-        },
-    );
-    for group in packs {
-        send(file, group, "functions", django, out, requests);
+        asks.push(FunctionAsk {
+            position: subject.position,
+            name: subject.name.clone(),
+            source: subject.source.clone(),
+            ask: Ask::Presence {
+                units,
+                evidence: subject.evidence.clone(),
+                django,
+            },
+        });
     }
     if let Some(setup) = setup.filter(|s| !s.sites.is_empty())
         && rules.contains(&UNSAFE_SETTINGS)
     {
         let id = format!("{}:module", prefix(UNSAFE_SETTINGS));
         let unit = push_unit(file, out, &setup, UNSAFE_SETTINGS, &id);
-        let mut state = setup.state();
-        if let Some(object) = state.as_object_mut() {
-            object.remove("name");
-        }
-        send(
-            file,
-            vec![(vec![unit], state)],
-            "module",
-            django,
-            out,
-            requests,
-        );
+        send_module(file, (unit, &setup), django, out, requests);
     }
+    asks
 }
 
 fn prefix(rule: &str) -> &'static str {
@@ -113,14 +100,14 @@ fn prefix(rule: &str) -> &'static str {
 }
 
 /// One rule's unit for a subject, with its trace and (for injection) recheck
-/// follow-ups; returns (rule, unit index, id).
+/// follow-ups; returns its index.
 fn push_unit(
     file: &FileContext<'_>,
     out: &mut FilePlan,
     subject: &Subject<'_>,
     rule: &'static str,
     id: &str,
-) -> (&'static str, usize, String) {
+) -> usize {
     let trace =
         Some(trace(file, subject, rule, id)).filter(|(request, _)| file.budget.fits(request));
     let recheck = (rule == INJECTION)
@@ -176,98 +163,71 @@ fn push_unit(
         },
         recheck: recheck.map(Into::into),
     });
-    (rule, out.units.len() - 1, id.to_string())
+    out.units.len() - 1
 }
 
-type Item = (Vec<(&'static str, usize, String)>, Value);
-
-/// A pack that is too large is sent one subject at a time; a subject that
-/// still does not fit needs context.
-fn send(
+/// The module setup's request, or its unit needing context when it does
+/// not fit.
+fn send_module(
     file: &FileContext<'_>,
-    group: Vec<Item>,
-    key: &str,
+    (unit, setup): (usize, &Subject<'_>),
     django: bool,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
-    let (request, asked) = presence_request(file, &group, key, django);
+    let mut state = setup.state();
+    if let Some(object) = state.as_object_mut() {
+        object.remove("name");
+    }
+    let mut questions = Questions::default();
+    let judged = [(out.units[unit].rule, out.units[unit].id.as_str())];
+    ask(
+        &mut questions,
+        file,
+        ("m0", "module.source", &state),
+        &judged,
+        django,
+    );
+    let state = json!({"file": file.file_state(), "module": state});
+    let (request, asked) = file.request("security", state, questions);
     if file.budget.fits(&request) {
         requests.push(Planned {
             owner: file.owner,
             request,
             asked,
         });
-        return;
-    }
-    for item in group {
-        let (request, asked) = presence_request(file, std::slice::from_ref(&item), key, django);
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        } else {
-            for (_, index, _) in &item.0 {
-                let unit = &mut out.units[*index];
-                unit.presence = Presence::NeedsContext;
-                unit.recheck = None;
-                if let Detail::Security {
-                    trace,
-                    settles,
-                    confirms,
-                    ..
-                } = &mut unit.detail
-                {
-                    *trace = None;
-                    settles.clear();
-                    **confirms = Confirms::default();
-                }
-            }
-        }
+    } else {
+        out.units[unit].unsent();
     }
 }
 
-fn presence_request(
+/// Each rule's presence questions about one function or the module setup:
+/// named `{key}_{question}`, they point at `code`; the source and framework
+/// evidence in `state` choose their wording. `units` are each rule and the
+/// id of its unit.
+pub(super) fn ask(
+    questions: &mut Questions,
     file: &FileContext<'_>,
-    items: &[Item],
-    key: &str,
+    (key, code, state): (&str, &str, &Value),
+    units: &[(&'static str, &str)],
     django: bool,
-) -> (Value, Asked) {
-    let mut questions = Questions::default();
-    for (index, (units, _)) in items.iter().enumerate() {
-        let code = if key == "module" {
-            "module.source".to_string()
-        } else {
-            format!("functions[{index}].source")
-        };
-        let source = items[index].1["source"].as_str().unwrap_or_default();
-        let deserializers = questions::deserializers_named(file.language, source);
-        let xml = questions::parses_xml(file.source, source);
-        let rendered = !django && items[index].1.get(RENDERED).is_some();
-        for (rule, _, id) in units {
-            for question in presence_questions(rule) {
-                questions.ask(
-                    format!("{}{index}_{question}", &key[..1]),
-                    presence_body(question, &code, (django, rendered), (deserializers, xml)),
-                    id,
-                    rule,
-                    question,
-                    Pass::First,
-                );
-            }
+) {
+    let source = state["source"].as_str().unwrap_or_default();
+    let deserializers = questions::deserializers_named(file.language, source);
+    let xml = questions::parses_xml(file.source, source);
+    let rendered = !django && state.get(RENDERED).is_some();
+    for (rule, id) in units {
+        for question in presence_questions(rule) {
+            questions.ask(
+                format!("{key}_{question}"),
+                presence_body(question, code, (django, rendered), (deserializers, xml)),
+                id,
+                rule,
+                question,
+                Pass::First,
+            );
         }
     }
-    let state = if key == "module" {
-        json!({"file": file.file_state(), "module": items[0].1})
-    } else {
-        json!({
-            "file": file.file_state(),
-            "functions": items.iter().map(|(_, state)| state.clone()).collect::<Vec<_>>(),
-        })
-    };
-    file.request("security", state, questions)
 }
 
 pub(super) fn presence_questions(rule: &str) -> &'static [&'static str] {

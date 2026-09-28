@@ -145,3 +145,17 @@ fn dry_run(project: &Project, rules: &[&str]) -> serde_json::Value {
     arguments.extend_from_slice(rules);
     project.preview(&arguments)
 }
+
+/// The names of the questions a dry run with `rules` plans to ask, such as
+/// `f0_interpreted` for the first function of a pack; none when it plans no
+/// request, and the report then leaves `initial_requests` out.
+fn asked(project: &Project, rules: &[&str]) -> Vec<String> {
+    let mut arguments = vec!["--show-requests"];
+    arguments.extend_from_slice(rules);
+    dry_run(project, &arguments)["initial_requests"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|request| request["questions"].as_object().unwrap().keys().cloned())
+        .collect()
+}

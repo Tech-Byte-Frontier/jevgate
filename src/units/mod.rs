@@ -22,6 +22,7 @@ mod laws;
 mod nextjs;
 mod outcome;
 pub(crate) mod outline;
+mod packs;
 mod plan;
 pub mod questions;
 mod security;
@@ -408,6 +409,33 @@ pub struct FilePlan {
     /// Comments and strings addressed to a reviewer that some request of
     /// the file sends, each asked whether it is written to steer the reviewer.
     pub steering: Vec<Steering>,
+}
+
+impl UnitPlan {
+    /// Too large to send even alone: it needs context, and none of its
+    /// follow-ups is asked.
+    fn unsent(&mut self) {
+        self.presence = Presence::NeedsContext;
+        self.recheck = None;
+        match &mut self.detail {
+            Detail::Function { blocks, locate } => {
+                blocks.clear();
+                *locate = None;
+            }
+            Detail::Values { locate, .. } => *locate = None,
+            Detail::Security {
+                trace,
+                settles,
+                confirms,
+                ..
+            } => {
+                *trace = None;
+                settles.clear();
+                **confirms = Confirms::default();
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Default)]
