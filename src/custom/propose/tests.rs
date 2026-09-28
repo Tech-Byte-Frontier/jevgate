@@ -197,6 +197,15 @@ fn a_comment_keeps_the_line_numbers_below_it() {
     assert_eq!(texts(&found), [(4, "Never log bodies", None)]);
 }
 
+#[test]
+fn a_byte_order_mark_hides_no_heading_or_frontmatter() {
+    let found = lines("\u{feff}# Rules\n\n- Never log bodies\n");
+    assert_eq!(texts(&found), [(3, "Never log bodies", None)]);
+    assert_eq!(found[0].heading, "Rules");
+    let found = lines("\u{feff}---\nglobs: src/**\n---\n- Never log bodies\n");
+    assert_eq!(texts(&found), [(4, "Never log bodies", None)]);
+}
+
 /// A file of `text` as `propose` reads it.
 fn file(path: &str, text: &str) -> File {
     File {
@@ -683,6 +692,29 @@ fn a_repository_without_instruction_files_asks_nothing() {
         printed.stdout
     );
     assert!(proposals(&project).is_empty());
+}
+
+/// A directory named with a line break cannot end a proposal's comment and
+/// add a key to the question file.
+#[cfg(unix)]
+#[test]
+fn a_path_cited_in_a_comment_holds_no_line_break() {
+    let project = Project::new();
+    project.write(
+        "x\nlevel = \"review\"\n#/CLAUDE.md",
+        "- Never log request bodies.\n",
+    );
+    proposed(&project);
+    let path = proposal_file(&project, IDS[0]);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.starts_with(
+            "# Proposed by `jevgate rules propose` from xlevel = \"review\"#/CLAUDE.md:1.\n"
+        ),
+        "{text}"
+    );
+    let question = custom::read_file(&path, "p.toml".into()).unwrap();
+    assert_eq!(question.level, crate::schema::Strength::Note);
 }
 
 #[test]

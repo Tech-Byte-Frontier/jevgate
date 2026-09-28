@@ -20,6 +20,9 @@ const BIDI_CONTROLS: [char; 9] = [
     '\u{2069}',
 ];
 
+/// Invisible at the start of a file, which some editors write.
+const BYTE_ORDER_MARK: char = '\u{feff}';
+
 /// One candidate: a list item or a paragraph.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line {
@@ -36,8 +39,10 @@ pub struct Line {
     pub text: String,
 }
 
-/// The candidates of `source`, in order.
+/// The candidates of `source`, in order. A byte-order mark would hide the
+/// first line's heading or frontmatter.
 pub fn lines(source: &str) -> Vec<Line> {
+    let source = source.strip_prefix(BYTE_ORDER_MARK).unwrap_or(source);
     let blanked = markdown::blank_comments(source);
     let all: Vec<&str> = blanked.lines().collect();
     let mut found = Vec::new();
@@ -271,16 +276,17 @@ fn without_marker(item: &str) -> &str {
         .unwrap_or(rest)
 }
 
-/// Words joined by single spaces, without control or bidirectional
-/// characters: a TOML comment cannot hold the first, and both would reach
-/// the terminal.
+/// Whether a character is kept in what is quoted or shown: no control
+/// character, which a TOML comment cannot hold and a terminal acts on, and
+/// no bidirectional control or byte-order mark, which are invisible.
+pub fn printable(c: char) -> bool {
+    !c.is_control() && !BIDI_CONTROLS.contains(&c) && c != BYTE_ORDER_MARK
+}
+
+/// Words joined by single spaces, of [`printable`] characters only.
 fn clean(text: &str) -> String {
     text.split_whitespace()
-        .map(|word| {
-            word.chars()
-                .filter(|c| !c.is_control() && !BIDI_CONTROLS.contains(c))
-                .collect::<String>()
-        })
+        .map(|word| word.chars().filter(|c| printable(*c)).collect::<String>())
         .filter(|word| !word.is_empty())
         .collect::<Vec<_>>()
         .join(" ")

@@ -127,7 +127,7 @@ impl Proposal {
         let path = slashed(&file.path);
         let (unit, unit_probability) = answered.unit();
         let citation = format!("{path}:{}", line.start_line);
-        let (question, quoted) = question(unit, &line.text, &citation, &file.path);
+        let (question, quoted) = question(unit, &line.text, (&path, line.start_line));
         Self {
             id: slug(&line.text).unwrap_or_else(|| fallback_id(&file.path, line.start_line)),
             status: Status::New,
@@ -239,18 +239,17 @@ fn noun(unit: Kind) -> &'static str {
 /// whether the rule is quoted whole: a rule too long for the question is
 /// quoted up to its last sentence that fits. A path too long to cite leaves
 /// its file name.
-fn question(unit: Kind, text: &str, citation: &str, path: &std::path::Path) -> (String, bool) {
+fn question(unit: Kind, text: &str, (path, line): (&str, usize)) -> (String, bool) {
     let frame = |quote: &str, citation: &str| {
         format!(
             "Does this {} break the project rule \"{quote}\" ({citation})?",
             noun(unit)
         )
     };
-    let mut citation = citation.to_string();
+    let mut citation = format!("{path}:{line}");
     if frame("…", &citation).chars().count() > QUESTION_CHARS / 2 {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        let line = citation.rsplit(':').next().unwrap_or_default().to_string();
-        citation = format!("{}:{line}", name.unwrap_or_default());
+        let name = path.rsplit('/').next().unwrap_or(path);
+        citation = format!("{name}:{line}");
     }
     let room = QUESTION_CHARS.saturating_sub(frame("", &citation).chars().count());
     let quote = shortened(text, room);
@@ -341,10 +340,17 @@ fn fallback_id(path: &std::path::Path, line: usize) -> String {
     format!("{stem}-{line}")
 }
 
-/// A relative path with `/` between its parts, as questions cite it.
+/// A relative path with `/` between its parts, as questions cite it, of
+/// [`printable`](super::lines::printable) characters: a directory name can
+/// hold a line break, which would end a proposal's comment and start a key.
 pub fn slashed(path: &std::path::Path) -> String {
     path.iter()
-        .map(|part| part.to_string_lossy())
-        .collect::<Vec<_>>()
+        .map(|part| {
+            let part = part.to_string_lossy();
+            part.chars()
+                .filter(|c| super::lines::printable(*c))
+                .collect()
+        })
+        .collect::<Vec<String>>()
         .join("/")
 }
