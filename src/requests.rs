@@ -82,12 +82,12 @@ fn hash_of(value: &impl serde::Serialize) -> String {
     schema::hash(&serde_json::to_vec(value).unwrap())
 }
 
-/// The key of every answer about one uploaded state: the rubric, the model and
-/// the state. TypeSafe answers each question of a request independently of
-/// the others, so an answer is kept by its state and question alone: sent
-/// whole and one question at a time, five times each, 51 questions of nine
-/// JevGate requests moved 0.005 on average, within their own spread across
-/// sends (0.007; a permutation test found no batching effect, p = 0.31).
+/// The key of every answer about one uploaded state. TypeSafe answers each
+/// question of a request independently of the others, so an answer is kept
+/// by its state and question alone: sent whole and one question at a time,
+/// five times each, 51 questions of nine JevGate requests moved 0.005 on
+/// average, within their own spread across sends (0.007; a permutation test
+/// found no batching effect, p = 0.31).
 fn state_key(request: &Value) -> String {
     hash_of(&(schema::RUBRIC, &request["model"], &request["state"]))
 }

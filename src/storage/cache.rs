@@ -41,7 +41,7 @@ struct StateEntry {
     answers: BTreeMap<String, CachedAnswer>,
 }
 
-/// A whole request's answer, as versions before per-question caching kept it.
+/// A whole request's answer, under the hash of the request: read, never written.
 #[derive(Serialize, Deserialize)]
 struct RequestEntry {
     request_hash: String,
@@ -87,7 +87,8 @@ impl CacheReader {
         (!directory.is_symlink() && directory.is_dir()).then_some(Self { directory })
     }
 
-    /// The current answers about `state`, by question key.
+    /// The answers about `state` by question key, without those `ttl` has
+    /// expired or that claim a time in the future.
     pub fn answers(&self, state: &str, ttl: Option<u64>) -> BTreeMap<String, CachedAnswer> {
         let mut answers = read_json::<StateEntry>(&state_path(&self.directory, state))
             .filter(|entry| entry.state_hash == state)
@@ -154,8 +155,7 @@ impl Store {
         atomic(&path, &bytes, durability)
     }
 
-    /// Write a whole-request entry as versions before per-question caching
-    /// did, to test reading them.
+    /// Write a whole-request entry, to test reading them.
     #[cfg(test)]
     pub fn save_request(&self, hash: &str, response: &Value, created_at: u64) -> Result<()> {
         let entry = RequestEntry {

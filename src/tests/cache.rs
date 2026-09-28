@@ -45,6 +45,17 @@ fn ask(
     session(options, &context, &store, mock).queries(requests)
 }
 
+/// A project whose cache answers `three_questions`, which the returned mock
+/// was asked, with the default options.
+fn answered_once() -> (Project, CheckArgs, Mock, Value) {
+    let project = Project::new();
+    let options = args();
+    let mut mock = Mock::default();
+    let request = three_questions();
+    ask(&project, &options, &mut mock, &[&request]);
+    (project, options, mock, request)
+}
+
 /// Save `request`'s answer as versions before per-question caching did: one
 /// entry for the whole request, under the hash of the rubric and the request.
 fn save_whole(project: &Project, request: &Value, created_at: u64) {
@@ -67,11 +78,7 @@ fn reworded(request: &Value, name: &str) -> Value {
 
 #[test]
 fn a_reworded_or_added_question_is_asked_alone() {
-    let project = Project::new();
-    let options = args();
-    let mut mock = Mock::default();
-    let first = three_questions();
-    ask(&project, &options, &mut mock, &[&first]);
+    let (project, options, mut mock, first) = answered_once();
     assert_eq!(asked(&mock), [["long", "named", "nested"]]);
     let second = reworded(&first, "nested");
     let receipts = ask(&project, &options, &mut mock, &[&second]);
@@ -102,11 +109,7 @@ fn a_reworded_or_added_question_is_asked_alone() {
 
 #[test]
 fn the_token_calibration_divides_the_bytes_sent_by_their_tokens() {
-    let project = Project::new();
-    let options = args();
-    let mut mock = Mock::default();
-    let first = three_questions();
-    ask(&project, &options, &mut mock, &[&first]);
+    let (project, options, mut mock, first) = answered_once();
     let context = project.context();
     let store = storage::Store::open(&project.0).unwrap();
     let observed = {
@@ -235,11 +238,7 @@ fn refresh_asks_each_question_once_in_a_run() {
 
 #[test]
 fn refresh_asks_every_question_and_cache_only_needs_every_answer() {
-    let project = Project::new();
-    let mut options = args();
-    let mut mock = Mock::default();
-    let request = three_questions();
-    ask(&project, &options, &mut mock, &[&request]);
+    let (project, mut options, mut mock, request) = answered_once();
     options.cache_only = true;
     let second = reworded(&request, "named");
     let receipts = ask(&project, &options, &mut mock, &[&second]);
@@ -365,11 +364,7 @@ fn a_dry_run_counts_the_questions_the_cache_answers_and_prices_the_rest() {
 
 #[test]
 fn a_deleted_corrupt_or_linked_state_file_is_asked_again() {
-    let project = Project::new();
-    let options = args();
-    let mut mock = Mock::default();
-    let request = three_questions();
-    ask(&project, &options, &mut mock, &[&request]);
+    let (project, options, mut mock, request) = answered_once();
     let path = state_file(&project);
     std::fs::write(&path, b"{\"state_hash\":").unwrap();
     ask(&project, &options, &mut mock, &[&request]);
@@ -396,11 +391,7 @@ fn a_deleted_corrupt_or_linked_state_file_is_asked_again() {
 
 #[test]
 fn only_tampered_answers_are_asked_again() {
-    let project = Project::new();
-    let options = args();
-    let mut mock = Mock::default();
-    let request = three_questions();
-    ask(&project, &options, &mut mock, &[&request]);
+    let (project, options, mut mock, request) = answered_once();
     edit_answers(&project, |answers| {
         let mut answers = answers.values_mut();
         answers.next().unwrap()["answer"]["noul"] = json!(1.5);
