@@ -434,7 +434,7 @@ fn answered(received: &Received) -> Reply {
 }
 
 #[test]
-fn an_exchange_sends_the_bearer_key_and_keeps_the_request_id() {
+fn an_exchange_sends_the_bearer_key_and_keeps_only_a_checked_request_id() {
     let (provider, endpoint) =
         mock(|received| answered(received).header(REQUEST_ID, "req_01J9-abc"));
     let answer = send(&agent(ATTEMPT_TIMEOUT), &endpoint, "test-key", &question()).unwrap();
@@ -456,6 +456,16 @@ fn an_exchange_sends_the_bearer_key_and_keeps_the_request_id() {
     assert_eq!(
         answer["request_id"], "gen-dec-1789738314-X5e5",
         "a response's own id stands in"
+    );
+    let (_, forged) = mock(|received| {
+        let mut body = crate::tests::answer(&received.json(), 0);
+        body["request_id"] = json!("not an id \u{1b}[31m<script>\nline2");
+        Reply::json(200, &body)
+    });
+    let answer = send(&agent(ATTEMPT_TIMEOUT), &forged, "k", &question()).unwrap();
+    assert!(
+        answer.get("request_id").is_none(),
+        "a request_id the body sends itself is not an id that was checked"
     );
 }
 

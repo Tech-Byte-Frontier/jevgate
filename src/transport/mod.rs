@@ -585,10 +585,14 @@ fn send(agent: &ureq::Agent, endpoint: &Endpoint, key: &str, request: &Value) ->
             ureq::Error::Timeout(_) | ureq::Error::Io(_) => Interrupted(service).into(),
             _ => anyhow::anyhow!("{} returned invalid or oversized JSON", service.label),
         })?;
-    if let Some(id) = id.or_else(|| request_id(answer["id"].as_str()))
-        && let Some(fields) = answer.as_object_mut()
-    {
-        fields.insert("request_id".into(), Value::String(id));
+    // A `request_id` the body carries itself is replaced by the checked id,
+    // or dropped without one, as a cached answer drops it.
+    let id = id.or_else(|| request_id(answer["id"].as_str()));
+    if let Some(fields) = answer.as_object_mut() {
+        match id {
+            Some(id) => fields.insert("request_id".into(), Value::String(id)),
+            None => fields.remove("request_id"),
+        };
     }
     Ok(answer)
 }
