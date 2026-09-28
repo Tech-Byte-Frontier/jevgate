@@ -3,7 +3,8 @@
 //! claude` writes, and both carry the crate's version, which pins the plugin
 //! users get and the release binary the launcher downloads. After changing the
 //! hooks or bumping the version, `JEVGATE_WRITE_PACKAGES=1 cargo test
-//! packages` rewrites them.
+//! packages` rewrites them. The docs' hooks for setting up by hand are the
+//! same, which that leaves to a person.
 use super::{
     agents, hooks,
     json::{self, Json},
@@ -12,6 +13,9 @@ use super::{
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 const VERSIONED: [&str; 2] = ["plugin/.claude-plugin/plugin.json", "npm/package.json"];
 const PLUGIN_HOOKS: &str = "plugin/hooks/hooks.json";
+/// The page whose JSON example after [`BY_HAND`] sets up Claude Code's hooks.
+const DOCS: &str = "site/src/coding-agents.md";
+const BY_HAND: &str = "By hand, for Claude Code";
 
 /// The plugin's `hooks/hooks.json`: Claude Code's hooks from the same table
 /// `init --agent claude` writes into settings.
@@ -71,5 +75,22 @@ fn init_finds_the_plugins_hooks() {
         hooks::handlers(&document),
         4,
         "`init --agent claude --remove` finds each of them"
+    );
+}
+
+#[test]
+fn the_docs_set_up_by_hand_the_hooks_init_writes() {
+    let page = std::fs::read_to_string(format!("{ROOT}/{DOCS}")).unwrap_or_default();
+    let example = page
+        .split_once(BY_HAND)
+        .and_then(|(_, rest)| rest.split_once("```json\n"))
+        .and_then(|(_, rest)| rest.split_once("\n```"))
+        .map(|(example, _)| example)
+        .expect("a JSON example after the by-hand heading");
+    let shown: serde_json::Value = serde_json::from_str(example).unwrap();
+    let written: serde_json::Value = serde_json::from_str(&plugin_hooks()).unwrap();
+    assert_eq!(
+        shown, written,
+        "{DOCS} sets up other hooks than `init --agent claude` writes"
     );
 }

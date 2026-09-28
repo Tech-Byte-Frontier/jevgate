@@ -313,11 +313,14 @@ Examples:
                                               Clients configured with JSON, such as Cursor";
 
 const HOOK_EXAMPLES: &str = "\
-Examples (the command each agent's hook configuration runs):
+Examples (`jevgate init --agent` writes each agent's hooks):
   jevgate hook                      Claude Code, Codex, Gemini CLI, Copilot CLI: detected from the event
   jevgate hook --agent cursor       Cursor's own hooks.json
   jevgate hook --agent opencode     OpenCode, through JevGate's plugin
   jevgate hook --timeout 20         Give up after 20 seconds, whatever the event
+
+Claude Code and Codex run `jevgate hook || echo '{\"systemMessage\": …}'` and Gemini CLI
+`jevgate hook; exit 0`, so a missing or older jevgate says so instead of blocking the agent.
 
 Events: a session or turn start records the working tree (SessionStart, UserPromptSubmit,
 BeforeAgent, beforeSubmitPrompt); an edit is checked (PostToolUse, AfterTool, postToolUse);

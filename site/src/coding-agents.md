@@ -101,16 +101,16 @@ The hook detects the agent from the event; `--agent` names it. It gives up after
 | Copilot CLI, VS Code | the repository's `.claude/settings.json` (VS Code with `chat.useClaudeHooks`) | Claude Code's |
 | OpenCode | a plugin relaying `session.created`, `chat.message`, `tool.execute.after` and `session.idle` to `jevgate hook --agent opencode` | |
 
-`jevgate init --agent` writes these for you. By hand, for Claude Code:
+`jevgate init --agent` writes these for you, and the [plugin](#the-claude-code-plugin) carries the same hooks. By hand, for Claude Code, add them to `.claude/settings.json`. Each runs `jevgate hook || echo '{"systemMessage": …}'`, which says so instead of blocking when `jevgate` is missing or older than 0.27:
 
 ```json
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "jevgate hook", "timeout": 20}]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "jevgate hook", "timeout": 20}]}],
+    "SessionStart": [{"hooks": [{"type": "command", "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'", "timeout": 20}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'", "timeout": 20}]}],
     "PostToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit",
-                     "hooks": [{"type": "command", "command": "jevgate hook", "timeout": 40}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "jevgate hook", "timeout": 60}]}]
+                     "hooks": [{"type": "command", "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'", "timeout": 40, "statusMessage": "JevGate is checking the edit"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'", "timeout": 60, "statusMessage": "JevGate is checking this turn"}]}]
   }
 }
 ```
