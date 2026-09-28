@@ -45,7 +45,7 @@ def rules_page(rules, version):
         "`--fail-on TARGET=LEVEL`, `[rules]`, `[[scope]]` and `jevgate: allow(…)` comments.",
         "",
         "*Fails by default* names the levels that fail the check under the default gate level,",
-        "`mature`: those right at least 80% of the time over at least 20 findings labeled by hand on",
+        "`mature`: those right at least 80% of the time over at least 20 findings labeled from the code on",
         "projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected.",
         "The other findings are reported without failing it.",
         "*Reviews right* and *considers right* give how many labeled findings were right on",

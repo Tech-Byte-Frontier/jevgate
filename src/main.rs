@@ -82,8 +82,8 @@ use options::JevCommand;
 /// function, a file outline, a pair of copies, a test, a documentation
 /// section. It asks TypeSafe Jev short, typed questions about each one, and
 /// code, not a chat model, composes the answers into findings. Each finding
-/// has a location, a probability and a next step, and undecided answers are
-/// reported as uncertain instead of hidden.
+/// has a location, how often findings like it were right and a next step,
+/// and undecided answers are reported as uncertain instead of hidden.
 ///
 /// Rule groups: maintainability (on by default, except hardcoded values),
 /// tests (with --include-tests), and the opt-in security and documentation

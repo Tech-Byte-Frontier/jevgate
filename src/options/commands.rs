@@ -79,10 +79,10 @@ pub enum JevCommand {
     /// `--rule`, `--skip-rule`, `--fail-on TARGET=LEVEL` and `[rules]`.
     ///
     /// Each rule shows how often its reviews and considers were right on
-    /// projects JevGate was never tuned on, from findings labeled by hand. The
-    /// levels right at least 80% of the time over at least 20 labels are
-    /// mature: by default only they fail the check (`--fail-on mature`), and
-    /// the other findings are reported without failing it.
+    /// projects JevGate was never tuned on, from findings labeled from the
+    /// code. The levels right at least 80% of the time over at least 20
+    /// labels are mature: by default only they fail the check (`--fail-on
+    /// mature`), and the other findings are reported without failing it.
     Rules {
         /// `table` for people; `json` adds scope, evidence unit, version, labels per level and decision policy
         #[arg(long, value_enum, default_value_t = RulesFormat::Table)]

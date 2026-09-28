@@ -750,7 +750,7 @@ signatures, or one candidate pair.
 6. **Gate.** `--fail-on`, `[[scope]]` levels per path and the baseline act on
    composed findings only. The default level, `mature`, fails only on the
    rules and levels whose findings were right at least 80% of the time on
-   projects never used for tuning, over at least 20 hand labels
+   projects never used for tuning, over at least 20 labels
    (`maturity::TABLE`); a probability says how sure an answer is, not how
    often such findings are right. Baseline entries can carry a reason
    (`intended`, `later`, `wrong`) that survives rewrites; `baseline stats`

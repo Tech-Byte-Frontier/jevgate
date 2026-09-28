@@ -1,7 +1,7 @@
 //! Which rules and levels fail the gate by default. A rule and level is
 //! mature when its findings were right at least 80% of the time on projects
-//! JevGate was never tuned on, over at least 20 findings labeled by hand from
-//! the code. The default gate level, `mature`, fails only on those; every
+//! JevGate was never tuned on, over at least 20 findings labeled from the
+//! code. The default gate level, `mature`, fails only on those; every
 //! other finding is reported without failing the check, until its rule and
 //! level measure up. The concern probability could not decide this: on those
 //! projects, reviews were right 55%, 46%, 56% and 61% of the time with a
@@ -18,8 +18,8 @@ pub const MIN_LABELS: u32 = 20;
 /// The share of those findings, in percent, that must be right.
 pub const MIN_PERCENT_RIGHT: u32 = 80;
 
-/// Findings of one rule and level labeled by hand: how many were right, of
-/// how many labeled. A debatable label counts as not right.
+/// Findings of one rule and level labeled from the code: how many were
+/// right, of how many labeled. A debatable label counts as not right.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Labels {
     pub right: u32,
@@ -85,7 +85,7 @@ const fn row(rule: &'static str, level: Strength, unseen: [u32; 2], tuned: [u32;
     }
 }
 
-/// Measured on 2026-09-28 from the corpus's hand labels
+/// Measured on 2026-09-28 from the corpus's labels
 /// (`evaluation/labels`, joined by fingerprint) and JevGate's findings with the
 /// shared-logic consider threshold of `policy::CALIBRATED`, replayed from the
 /// answer cache over the 94 labeled projects outside Bend 2; the few files
