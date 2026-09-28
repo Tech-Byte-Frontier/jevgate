@@ -803,7 +803,18 @@ fn the_accept_message_says_what_the_question_needs() {
     let text = super::accept::accepted(&context(&project).questions[0]);
     assert_eq!(
         text,
-        "Accepted custom/q into .jevgate/questions/q.toml; commit it.\n  It is a note, which never fails the gate: set level = \"review\" to enforce it.\n  It is asked only with --base."
+        "Accepted custom/q into .jevgate/questions/q.toml; commit it.\n  It is a note, which never fails the gate: add guidance and a [[failing]] and a [[passing]] example, run `jevgate rules test --rule custom/q`, then set level = \"review\" to enforce it.\n  It is asked only with --base."
+    );
+    project.write(
+        ".jevgate/questions/q.toml",
+        "question = \"Does this function log a request body?\"\nunit = \"function\"\nguidance = \"An id is fine.\"\n",
+    );
+    let text = super::accept::accepted(&context(&project).questions[0]);
+    assert!(
+        text.ends_with(
+            "  It fails the gate on its reviews without examples, and a rule quoted alone can answer close to its threshold: add them and run `jevgate rules test --rule custom/q`."
+        ),
+        "{text}"
     );
 }
 

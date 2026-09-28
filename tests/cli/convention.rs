@@ -10,9 +10,12 @@ use serde_json::{Value, json};
 const AGENTS: &str =
     "# Conventions\n\n- Never log request bodies.\n- Run `cargo test` before pushing.\n";
 
-/// What a person adds to the proposal before accepting it: a level that
-/// fails the gate, and a failing and a passing example from the code.
-const REVIEWED: &str = r#"
+/// What a person adds to the proposal before accepting it, as the proposal
+/// says: a line of guidance, and a failing and a passing example from the
+/// code; with the level raised, it fails the gate.
+const GUIDANCE: &str = "guidance = \"Logging a request's id, method or path is fine; logging its body, or a field of it, breaks the rule.\"\n";
+
+const EXAMPLES: &str = r#"
 [[failing]]
 path = "src/orders.rs"
 code = '''
@@ -113,8 +116,15 @@ fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request() {
         proposed.contains("the project rule \"Never log request bodies.\" (AGENTS.md:3)?"),
         "it quotes and cites the line: {proposed}"
     );
-    assert!(proposed.contains("level = \"note\""), "{proposed}");
-    let reviewed = proposed.replace("level = \"note\"", "level = \"review\"") + REVIEWED;
+    assert!(proposed.contains("level = \"note\"\n"), "{proposed}");
+    assert!(
+        proposed.contains("run `jevgate rules test --rule custom/never-log-request-bodies`"),
+        "it says to add guidance and examples and test them first: {proposed}"
+    );
+    let reviewed = proposed.replace(
+        "level = \"note\"\n",
+        &format!("level = \"review\"\n{GUIDANCE}"),
+    ) + EXAMPLES;
     std::fs::write(&proposal, reviewed).unwrap();
     let (code, text) = jevgate(&["rules", "accept", "never-log-request-bodies"]);
     assert_eq!(code, Some(0), "{text}");
@@ -132,8 +142,27 @@ fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request() {
         "the accepted question is committed, the cache is not"
     );
 
-    let (code, text) = jevgate(&["rules", "test"]);
+    let (code, text) = jevgate(&["rules", "test", "--format", "json"]);
     assert_eq!(code, Some(0), "its examples pass: {text}");
+    // The report on stdout comes first, then what stderr said.
+    let tested: Value = serde_json::Deserializer::from_str(&text)
+        .into_iter()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert_eq!(tested["passed"], true, "{tested}");
+    let results: Vec<(&str, &str)> = tested["questions"][0]["examples"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["expected"].as_str().unwrap(),
+                e["result"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(results, [("failing", "right"), ("passing", "right")]);
 
     let rule = "custom/never-log-request-bodies";
     std::fs::write(

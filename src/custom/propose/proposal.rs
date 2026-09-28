@@ -177,7 +177,9 @@ impl Proposal {
                 self.unit_probability
             ),
             accept.to_string(),
-            "It starts as a note, which never fails the gate: raise level to \"review\" once its findings are right.".into(),
+            "It starts as a note, which never fails the gate. A rule quoted alone can answer close to".into(),
+            "the threshold: before raising level to \"review\", add guidance (what breaks the rule and".into(),
+            format!("what only looks like it) and a [[failing]] and a [[passing]] example, and run `jevgate rules test --rule custom/{}`.", self.id),
         ]
         .iter()
         .map(|line| format!("# {line}\n"))
