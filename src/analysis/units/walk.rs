@@ -14,6 +14,8 @@ use crate::analysis::{bend, text};
 use std::collections::BTreeSet;
 use tree_sitter::Node;
 
+/// Place the definitions `node` holds in `file` as units, each owned by
+/// `owner` or by the type it belongs to, walking into what holds them.
 pub(super) fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
     // What a parser could not read holds no definitions to judge.
     if node.is_error() {
@@ -52,112 +54,21 @@ pub(super) fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUni
                 children(body, source, owner, file);
             }
         }
-        // PHP: `return function (App $app) { … };` configures its includer.
-        "return_statement" if crate::analysis::php::returned_closure(node).is_some() => {
-            if let Some(closure) = crate::analysis::php::returned_closure(node) {
-                let definition = Definition {
-                    outer: node,
-                    node: closure,
-                    body: closure.child_by_field_name("body"),
-                };
-                let name = crate::analysis::php::RETURNED_CLOSURE;
-                push(definition, name, owner, Kind::Function, source, file);
-            }
-        }
-        // Go: `func (s *Store) Find(…)` is a method of `Store`; a C# or Java
-        // method belongs to the class, struct, record, interface or enum
-        // around it.
-        "method_declaration" => {
-            let receiver = node
-                .child_by_field_name("receiver")
-                .and_then(|r| r.named_child(0))
-                .and_then(|p| p.child_by_field_name("type"))
-                .map(|t| base_type(text(t, source).trim_start_matches('*')));
-            function(
-                node,
-                node,
-                source,
-                receiver.as_deref().unwrap_or(owner),
-                file,
-            );
-        }
+        "return_statement" => php_closure(node, source, owner, file),
+        "method_declaration" => method(node, source, owner, file),
         "constructor_declaration"
         | "destructor_declaration"
         | "compact_constructor_declaration" => {
             function(node, node, source, owner, file);
         }
-        // A C# property or indexer whose accessors have statement bodies.
-        "property_declaration" | "indexer_declaration" => {
-            let accessors = node.child_by_field_name("accessors").filter(|list| {
-                let mut cursor = list.walk();
-                list.named_children(&mut cursor).any(|accessor| {
-                    accessor
-                        .child_by_field_name("body")
-                        .is_some_and(|b| b.kind() == "block")
-                })
-            });
-            if let Some(accessors) = accessors {
-                let name = match node.kind() {
-                    "indexer_declaration" => "this".to_string(),
-                    _ => name_of(node, source),
-                };
-                let definition = Definition {
-                    outer: node,
-                    node,
-                    body: Some(accessors),
-                };
-                push(definition, &name, owner, Kind::Method, source, file);
-            }
-        }
+        "property_declaration" | "indexer_declaration" => property(node, source, owner, file),
         "namespace_declaration" => {
             if let Some(body) = node.child_by_field_name("body") {
                 children(body, source, owner, file);
             }
         }
-        // C# top-level statements: minimal API route handlers and middleware
-        // written inline, and local functions.
-        "global_statement" => {
-            let Some(statement) = node.named_child(0) else {
-                return;
-            };
-            if statement.kind() == "local_function_statement" {
-                function(node, statement, source, owner, file);
-                return;
-            }
-            let callbacks = csharp_callbacks(statement, source);
-            let single = callbacks.len() == 1;
-            for (name, lambda) in callbacks {
-                let definition = Definition {
-                    outer: if single { node } else { lambda },
-                    node: lambda,
-                    body: lambda.child_by_field_name("body"),
-                };
-                push(definition, &name, owner, Kind::Function, source, file);
-            }
-        }
-        "type_declaration" => {
-            let mut cursor = node.walk();
-            let specs: Vec<Node<'_>> = node
-                .named_children(&mut cursor)
-                .filter(|c| matches!(c.kind(), "type_spec" | "type_alias"))
-                .collect();
-            let single = specs.len() == 1;
-            for spec in specs {
-                let definition = Definition {
-                    outer: if single { node } else { spec },
-                    node: spec,
-                    body: None,
-                };
-                push(
-                    definition,
-                    &name_of(spec, source),
-                    "",
-                    Kind::Type,
-                    source,
-                    file,
-                );
-            }
-        }
+        "global_statement" => top_level_statement(node, source, owner, file),
+        "type_declaration" => type_specs(node, source, file),
         // Ruby: `module Billing` and `class Invoice < Base` own their methods.
         "module" | "class"
             if node
@@ -203,34 +114,7 @@ pub(super) fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUni
         {
             children(node, source, owner, file)
         }
-        "expression_statement" => {
-            if let Some((object, name, function)) = assigned_function(node, source) {
-                let definition = Definition {
-                    outer: node,
-                    node: function,
-                    body: function.child_by_field_name("body"),
-                };
-                push(definition, name, object, Kind::Method, source, file);
-                return;
-            }
-            let callbacks = if node
-                .named_child(0)
-                .is_some_and(crate::analysis::php::registers)
-            {
-                crate::analysis::php::registered_callbacks(node, source)
-            } else {
-                registered_callbacks(node, source)
-            };
-            let single = callbacks.len() == 1;
-            for (name, function) in callbacks {
-                let definition = Definition {
-                    outer: if single { node } else { function },
-                    node: function,
-                    body: function.child_by_field_name("body"),
-                };
-                push(definition, &name, owner, Kind::Function, source, file);
-            }
-        }
+        "expression_statement" => statement_functions(node, source, owner, file),
         "block"
             if node
                 .parent()
@@ -296,35 +180,7 @@ pub(super) fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUni
             function(node, node, source, owner, file);
         }
         "lexical_declaration" | "variable_declaration" => {
-            let mut cursor = node.walk();
-            for declarator in node.named_children(&mut cursor) {
-                if declarator.kind() != "variable_declarator" {
-                    continue;
-                }
-                let Some(value) = declarator.child_by_field_name("value") else {
-                    continue;
-                };
-                // `const f = () => …`, or a callback registered through a call such as
-                // `const view = database.view(options, (ctx) => …)` or `memo(forwardRef(…))`.
-                let name = declarator
-                    .child_by_field_name("name")
-                    .map(|n| text(n, source).to_string())
-                    .unwrap_or_default();
-                let Some(function) = callback(value, 2) else {
-                    // `export const actions = { default: async (event) => … }`, as
-                    // SvelteKit form actions and handler maps write it.
-                    if let Some(object) = object_literal(value) {
-                        object_functions(object, source, &name, file);
-                    }
-                    continue;
-                };
-                let definition = Definition {
-                    outer: node,
-                    node: value,
-                    body: function.child_by_field_name("body"),
-                };
-                push(definition, &name, owner, Kind::Function, source, file);
-            }
+            declared_functions(node, source, owner, file);
         }
         "struct_item"
         | "enum_item"
@@ -340,6 +196,179 @@ pub(super) fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUni
             }
         }
         _ => {}
+    }
+}
+
+/// PHP: the closure a file returns, as `return function (App $app) { … };`
+/// configures the file that includes it.
+fn php_closure(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    if let Some(closure) = crate::analysis::php::returned_closure(node) {
+        let definition = Definition {
+            outer: node,
+            node: closure,
+            body: closure.child_by_field_name("body"),
+        };
+        let name = crate::analysis::php::RETURNED_CLOSURE;
+        push(definition, name, owner, Kind::Function, source, file);
+    }
+}
+
+/// Go: `func (s *Store) Find(…)` is a method of `Store`; a C# or Java method
+/// belongs to the class, struct, record, interface or enum around it.
+fn method(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let receiver = node
+        .child_by_field_name("receiver")
+        .and_then(|r| r.named_child(0))
+        .and_then(|p| p.child_by_field_name("type"))
+        .map(|t| base_type(text(t, source).trim_start_matches('*')));
+    function(
+        node,
+        node,
+        source,
+        receiver.as_deref().unwrap_or(owner),
+        file,
+    );
+}
+
+/// A C# property or indexer whose accessors have statement bodies, as one
+/// method; an indexer is named `this`.
+fn property(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let accessors = node.child_by_field_name("accessors").filter(|list| {
+        let mut cursor = list.walk();
+        list.named_children(&mut cursor).any(|accessor| {
+            accessor
+                .child_by_field_name("body")
+                .is_some_and(|b| b.kind() == "block")
+        })
+    });
+    if let Some(accessors) = accessors {
+        let name = match node.kind() {
+            "indexer_declaration" => "this".to_string(),
+            _ => name_of(node, source),
+        };
+        let definition = Definition {
+            outer: node,
+            node,
+            body: Some(accessors),
+        };
+        push(definition, &name, owner, Kind::Method, source, file);
+    }
+}
+
+/// C# top-level statements: minimal API route handlers and middleware
+/// written inline, and local functions.
+fn top_level_statement(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let Some(statement) = node.named_child(0) else {
+        return;
+    };
+    if statement.kind() == "local_function_statement" {
+        function(node, statement, source, owner, file);
+        return;
+    }
+    let callbacks = csharp_callbacks(statement, source);
+    registered(node, callbacks, source, owner, file);
+}
+
+/// Go: each type a `type` declaration defines, grouped ones included.
+fn type_specs(node: Node<'_>, source: &str, file: &mut FileUnits) {
+    let mut cursor = node.walk();
+    let specs: Vec<Node<'_>> = node
+        .named_children(&mut cursor)
+        .filter(|c| matches!(c.kind(), "type_spec" | "type_alias"))
+        .collect();
+    let single = specs.len() == 1;
+    for spec in specs {
+        let definition = Definition {
+            outer: if single { node } else { spec },
+            node: spec,
+            body: None,
+        };
+        push(
+            definition,
+            &name_of(spec, source),
+            "",
+            Kind::Type,
+            source,
+            file,
+        );
+    }
+}
+
+/// The functions a statement defines: one a module assigns to an object's
+/// property (`assigned_function`), or those it registers through a call,
+/// such as route handlers.
+fn statement_functions(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    if let Some((object, name, function)) = assigned_function(node, source) {
+        let definition = Definition {
+            outer: node,
+            node: function,
+            body: function.child_by_field_name("body"),
+        };
+        push(definition, name, object, Kind::Method, source, file);
+        return;
+    }
+    let callbacks = if node
+        .named_child(0)
+        .is_some_and(crate::analysis::php::registers)
+    {
+        crate::analysis::php::registered_callbacks(node, source)
+    } else {
+        registered_callbacks(node, source)
+    };
+    registered(node, callbacks, source, owner, file);
+}
+
+/// Each function `statement` registers, named by its registration: a lone
+/// one spans the whole statement, and each of several only its own code.
+fn registered<'t>(
+    statement: Node<'t>,
+    callbacks: Vec<(String, Node<'t>)>,
+    source: &str,
+    owner: &str,
+    file: &mut FileUnits,
+) {
+    let single = callbacks.len() == 1;
+    for (name, function) in callbacks {
+        let definition = Definition {
+            outer: if single { statement } else { function },
+            node: function,
+            body: function.child_by_field_name("body"),
+        };
+        push(definition, &name, owner, Kind::Function, source, file);
+    }
+}
+
+/// The functions a `const`, `let` or `var` declaration binds, each named
+/// by its variable.
+fn declared_functions(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let mut cursor = node.walk();
+    for declarator in node.named_children(&mut cursor) {
+        if declarator.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(value) = declarator.child_by_field_name("value") else {
+            continue;
+        };
+        // `const f = () => …`, or a callback registered through a call such as
+        // `const view = database.view(options, (ctx) => …)` or `memo(forwardRef(…))`.
+        let name = declarator
+            .child_by_field_name("name")
+            .map(|n| text(n, source).to_string())
+            .unwrap_or_default();
+        let Some(function) = callback(value, 2) else {
+            // `export const actions = { default: async (event) => … }`, as
+            // SvelteKit form actions and handler maps write it.
+            if let Some(object) = object_literal(value) {
+                object_functions(object, source, &name, file);
+            }
+            continue;
+        };
+        let definition = Definition {
+            outer: node,
+            node: value,
+            body: function.child_by_field_name("body"),
+        };
+        push(definition, &name, owner, Kind::Function, source, file);
     }
 }
 
