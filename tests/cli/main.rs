@@ -2,6 +2,7 @@
 //! project helper is here.
 mod auth;
 mod changes;
+mod convention;
 mod gallery;
 mod gateway;
 #[path = "../support/git.rs"]
