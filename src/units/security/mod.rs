@@ -8,8 +8,8 @@
 //! unit is judged on and `settle` holds the Choices that settle an undecided
 //! check.
 use super::{
-    Asked, Block, Detail, FileContext, FilePlan, Planned, Presence, Questions, Settle, UnitPlan,
-    compact, identity, pack_runs, questions, unique_ids,
+    Asked, Block, Confirms, Detail, FileContext, FilePlan, Planned, Presence, Questions, Settle,
+    UnitPlan, compact, identity, pack_runs, questions, unique_ids,
 };
 use crate::{
     analysis::{errors::CreatedError, sites::Site, units::Unit},
@@ -126,6 +126,15 @@ fn push_unit(
     let checked = (rule == INJECTION)
         .then(|| confirm_checks(file, subject, id))
         .flatten();
+    let queried = (rule == INJECTION)
+        .then(|| confirm_query(file, subject, id))
+        .flatten();
+    let rendered = (rule == UNSAFE_SETTINGS)
+        .then(|| confirm_html(file, subject, id))
+        .flatten();
+    let readers = (rule == SENSITIVE_DATA)
+        .then(|| confirm_readers(file, subject, id))
+        .flatten();
     let logging = (rule == SENSITIVE_DATA)
         .then(|| confirm_logging(file, subject, id))
         .flatten();
@@ -148,9 +157,14 @@ fn push_unit(
             },
             trace: trace.map(Into::into),
             settles,
-            confirm: confirm.map(Into::into),
-            checked: checked.map(Into::into),
-            logging: logging.map(Into::into),
+            confirms: Box::new(Confirms {
+                values: confirm.map(Into::into),
+                checked: checked.map(Into::into),
+                queried: queried.map(Into::into),
+                rendered: rendered.map(Into::into),
+                readers: readers.map(Into::into),
+                logging: logging.map(Into::into),
+            }),
             django: subject.django,
             test_path: subject.test_path,
         },
@@ -196,17 +210,13 @@ fn send(
                 if let Detail::Security {
                     trace,
                     settles,
-                    confirm,
-                    checked,
-                    logging,
+                    confirms,
                     ..
                 } = &mut unit.detail
                 {
                     *trace = None;
                     settles.clear();
-                    *confirm = None;
-                    *checked = None;
-                    *logging = None;
+                    **confirms = Confirms::default();
                 }
             }
         }
@@ -605,6 +615,83 @@ fn confirm_checks(
     let mut state = with_callers(file, subject);
     if !subject.types.is_empty() {
         state["types_named_in_parameters"] = json!(subject.types);
+    }
+    let (request, asked) = file.request("locate", state, questions);
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// What the values of an SQL, command or code finding hold where they enter
+/// it, asked only after a finding whose one concern is one of those: the
+/// function, the functions that call it and the project's types its
+/// parameters name.
+fn confirm_query(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    id: &str,
+) -> Option<(Value, Asked)> {
+    let code = subject.code();
+    let types = !subject.types.is_empty();
+    let mut questions = Questions::default();
+    questions.ask(
+        "query_values".into(),
+        questions::query_values(&code, !subject.callers.is_empty(), types),
+        id,
+        INJECTION,
+        "query_values",
+        Pass::Locate,
+    );
+    let mut state = with_callers(file, subject);
+    if types {
+        state["types_named_in_parameters"] = json!(subject.types);
+    }
+    let (request, asked) = file.request("locate", state, questions);
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// What the HTML a weak-settings finding writes without escaping holds,
+/// asked only after a finding its escaping check raised: the function alone.
+fn confirm_html(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(Value, Asked)> {
+    let code = subject.code();
+    let mut questions = Questions::default();
+    questions.ask(
+        "raw_html".into(),
+        questions::raw_html(&code),
+        id,
+        UNSAFE_SETTINGS,
+        "raw_html",
+        Pass::Locate,
+    );
+    let state = json!({
+        "file": file.file_state(),
+        subject.kind: subject.state(),
+    });
+    let (request, asked) = file.request("locate", state, questions);
+    file.budget.fits(&request).then_some((request, asked))
+}
+
+/// Who reads the error text of an error-detail finding, asked only after
+/// such a finding: the function and the opening of the project's README.
+fn confirm_readers(
+    file: &FileContext<'_>,
+    subject: &Subject<'_>,
+    id: &str,
+) -> Option<(Value, Asked)> {
+    let code = subject.code();
+    let mut questions = Questions::default();
+    questions.ask(
+        "error_readers".into(),
+        questions::error_readers(&code, file.project.is_some()),
+        id,
+        SENSITIVE_DATA,
+        "error_readers",
+        Pass::Locate,
+    );
+    let mut state = json!({
+        "file": file.file_state(),
+        subject.kind: subject.state(),
+    });
+    if let Some(opening) = file.project {
+        state["project"] = json!({"readme_opening": opening});
     }
     let (request, asked) = file.request("locate", state, questions);
     file.budget.fits(&request).then_some((request, asked))

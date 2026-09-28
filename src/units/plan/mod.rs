@@ -155,6 +155,7 @@ fn plan_workflows(scope: &Scope<'_>, args: &CheckArgs, budget: Limits<'_>, resul
             source_hash: &input.result.source_hash,
             model: args.model(),
             budget,
+            project: args.project.as_deref(),
             framework: None,
         };
         workflows::plan(&context, &mut file, &mut result.requests);
@@ -186,6 +187,7 @@ fn plan_document(
         source_hash: &input.result.source_hash,
         model: args.model(),
         budget,
+        project: args.project.as_deref(),
         framework: None,
     };
     if input.result.role == crate::inventory::DOCS {

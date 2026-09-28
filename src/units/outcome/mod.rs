@@ -27,11 +27,11 @@ pub(super) use comments::{comment_concern_kind, comment_outcome, comment_signals
 use documentation::staleness_outcome;
 pub(super) use documentation::{document_outcome, document_split, section_signals};
 pub(super) use exposure::{
-    Messages, django_settings_outcome, exposure_outcome, logs_found, messages, opted_in,
-    settings_module_outcome,
+    Messages, django_settings_outcome, errors_found, escape_found, exposure_outcome, inert_html,
+    logs_found, messages, not_logged, opted_in, private_readers, settings_module_outcome,
 };
 pub(super) use injection::{
-    RESOURCE_CHECKS, confirmable, harmless, injection_outcome, origin_outcome,
+    QUERIED, RESOURCE_CHECKS, confirmable, harmless, injection_outcome, origin_outcome,
 };
 pub(super) use maintainability::{
     PartAnswers, benign_key, function_outcome, organization_outcome, separable_part, several_kind,

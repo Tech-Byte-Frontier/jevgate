@@ -166,6 +166,11 @@ pub struct CheckArgs {
     /// Levels for the files `[[scope]]` entries match, in configuration order.
     #[arg(skip)]
     pub path_fail_on: Vec<PathLevels>,
+    /// The opening of the repository's README when the upload boundary
+    /// permits it: what the program is and who runs it, for the question of
+    /// who reads an error-detail finding's responses.
+    #[arg(skip)]
+    pub project: Option<String>,
     /// Output format [default: agent; jsonl with --watch; json with --show-requests]
     #[arg(long, value_enum, help_heading = OUTPUT)]
     pub format: Option<Format>,

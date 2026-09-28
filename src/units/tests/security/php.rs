@@ -156,7 +156,9 @@ pub(super) fn php_page(
     let mut options = args();
     options.rules = vec![catalog::INJECTION.into()];
     let mut eval = scripted(0);
-    eval.overrides = nouls.iter().map(|(q, p)| (*q, noul_at(*p))).collect();
+    eval.overrides = standing();
+    eval.overrides
+        .extend(nouls.iter().map(|(q, p)| (*q, noul_at(*p))));
     eval.overrides.push(("origin", origin));
     eval.overrides.extend(settles);
     let report = run(&project, &options, &mut eval);

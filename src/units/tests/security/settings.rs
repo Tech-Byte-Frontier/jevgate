@@ -83,7 +83,10 @@ impl crate::transport::Evaluator for Recording {
 
 pub(super) fn recording(nouls: &[(&'static str, f64)]) -> Recording {
     let mut inner = scripted(0);
-    inner.overrides = nouls.iter().map(|&(q, p)| (q, noul_at(p))).collect();
+    inner.overrides = standing();
+    inner
+        .overrides
+        .extend(nouls.iter().map(|&(q, p)| (q, noul_at(p))));
     Recording {
         inner,
         requests: Vec::new(),

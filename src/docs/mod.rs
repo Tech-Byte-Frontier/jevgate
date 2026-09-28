@@ -126,6 +126,51 @@ const TEACHING: [&str; 8] = [
     "all comments in this project",
 ];
 
+/// Characters of a README's opening sent as what the project is.
+const OPENING_CHARS: usize = 1_200;
+
+/// The opening of the README at the repository root, when the upload
+/// boundary permits it: its prose and headings without images, badges or
+/// HTML, up to `OPENING_CHARS` characters. Only questions about who reads a
+/// program's responses send it.
+pub fn project_opening(root: &Path, boundary: &crate::boundary::Boundary) -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.to_lowercase().starts_with("readme"))
+        .collect();
+    // README.md before README.rst or a translated README_zh.md.
+    names.sort_by_key(|n| (n.len(), !n.to_lowercase().ends_with(".md")));
+    let name = names.first()?;
+    if !boundary.permits(Path::new(name)) {
+        return None;
+    }
+    let text = crate::inventory::read_source(&root.join(name), TEACHING_READ_BYTES).ok()?;
+    let mut opening = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let decoration = line.starts_with('<')
+            || line.starts_with("![")
+            || line.starts_with("[![")
+            || line.starts_with("[!")
+            || line.starts_with("---");
+        if line.is_empty() || decoration {
+            continue;
+        }
+        if !opening.is_empty() {
+            opening.push('\n');
+        }
+        opening.push_str(line);
+        if opening.chars().count() >= OPENING_CHARS {
+            break;
+        }
+    }
+    let opening: String = opening.chars().take(OPENING_CHARS).collect();
+    (!opening.is_empty()).then_some(opening)
+}
+
 /// Bytes of a README or CONTRIBUTING file read for the teaching phrases.
 const TEACHING_READ_BYTES: u64 = 262_144;
 

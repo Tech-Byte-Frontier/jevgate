@@ -144,6 +144,7 @@ fn file_context<'a>(
         source_hash: &input.result.source_hash,
         model: args.model(),
         budget,
+        project: args.project.as_deref(),
         framework: crate::components::server_template(&input.result.path)
             .then(|| crate::components::TEMPLATE_SCRIPT.to_string())
             .or_else(|| {
