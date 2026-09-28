@@ -155,8 +155,11 @@ pub(super) fn sections(file: &FileContext<'_>) -> Vec<Item> {
         .collect()
 }
 
-/// The whole file. Its findings are identified by its path alone: a
-/// judgment of all of it has no smaller part to follow through edits.
+/// The whole file. Its findings are identified by its text, as a
+/// function's are by its code: a judgment of all of it has no smaller part
+/// to follow through edits, and one identified by its path alone would
+/// leave a baselined file exempt from the question whatever it came to
+/// hold.
 pub(super) fn whole(file: &FileContext<'_>) -> Item {
     let lines = file.source.lines().count().max(1);
     Item {
@@ -166,7 +169,7 @@ pub(super) fn whole(file: &FileContext<'_>) -> Item {
         location: file.location(1, lines, None),
         reach: (1, lines),
         lines,
-        identity: identity(&["file"]),
+        identity: identity(&["file", &compact(file.source)]),
         quote: None,
         run: String::new(),
     }

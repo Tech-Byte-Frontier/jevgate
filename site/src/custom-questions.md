@@ -75,7 +75,7 @@ function auditOrder(req: Request) {
 }
 ```
 
-A finding keeps its fingerprint through unrelated edits, as the built-in rules' do: a function's by its name and code, a hunk's by what it changes and where, a file's by its path.
+A finding keeps its fingerprint through unrelated edits, as the built-in rules' do: a function's by its name and code, a hunk's by what it changes and where. A file's is its path and text, so a baselined finding of a `file` question covers the file as it was: once the file is edited, the question is asked of it again, as it is of an edited function.
 
 ## Writing a question
 

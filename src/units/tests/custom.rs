@@ -254,6 +254,37 @@ fn a_finding_keeps_its_fingerprint_through_an_unrelated_edit() {
 }
 
 #[test]
+fn a_file_finding_is_identified_by_what_the_file_holds() {
+    let toml = r#"
+[[question]]
+id = "no-secrets"
+question = "Does this file hold a hardcoded secret?"
+unit = "file"
+"#;
+    let project = Project::new();
+    let options = configured(toml, &["custom"]);
+    let fingerprint = |project: &Project| {
+        let report = run(project, &options, &mut Custom { yes: 0.95 });
+        findings_of(&report, "custom/no-secrets")[0]
+            .fingerprint
+            .clone()
+    };
+    project.write("lib.rs", &function("charge"));
+    let before = fingerprint(&project);
+    project.write("lib.rs", &function("charge").replace("    ", "  "));
+    assert_eq!(fingerprint(&project), before, "only its spacing changed");
+    project.write(
+        "lib.rs",
+        &format!("{}{}", function("charge"), function("other")),
+    );
+    assert_ne!(
+        fingerprint(&project),
+        before,
+        "an accepted finding does not cover what the file came to hold"
+    );
+}
+
+#[test]
 fn test_comment_and_section_questions_ride_in_their_built_in_requests() {
     let toml = r#"
 [[question]]
