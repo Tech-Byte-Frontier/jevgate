@@ -168,7 +168,15 @@ impl Snapshot<'_> {
             .iter()
             .zip(large)
             .try_for_each(|(text, file)| fs::write(text, file.stand_in()));
-        let listed: String = texts.iter().map(|t| format!("{}\n", t.display())).collect();
+        // Named from the root, with `/`: a Windows root in its `\\?\` form is
+        // not a path Git reads.
+        let listed: String = texts
+            .iter()
+            .map(|text| {
+                let name = text.strip_prefix(self.root).unwrap_or(text);
+                format!("{}\n", name.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
         let ids = written.map_err(anyhow::Error::from).and_then(|()| {
             self.git(
                 &["hash-object", "-w", "--no-filters", "--stdin-paths"],
