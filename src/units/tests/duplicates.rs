@@ -133,7 +133,7 @@ fn a_consider_from_the_same_steps_answer_needs_its_measured_threshold() {
     let short_copy = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\treturn StringUtil.releaseBuilder(builder);\n";
     let mut options = args();
     only(&mut options, catalog::SHARED_LOGIC);
-    let strength = |files: &[(String, String)], same: Value| {
+    let finding = |files: &[(String, String)], same: Value| {
         let project = Project::new();
         for (path, text) in files {
             project.write(path, text);
@@ -148,9 +148,11 @@ fn a_consider_from_the_same_steps_answer_needs_its_measured_threshold() {
             .files
             .iter()
             .flat_map(|f| &f.findings)
-            .map(|f| f.strength)
             .next()
+            .cloned()
     };
+    let strength =
+        |files: &[(String, String)], same: Value| finding(files, same).map(|f| f.strength);
     let copies = [
         ("a.rs".to_string(), LOAD.to_string()),
         (
@@ -159,10 +161,14 @@ fn a_consider_from_the_same_steps_answer_needs_its_measured_threshold() {
                 .replace("\"name\"", "\"title\""),
         ),
     ];
-    // 0.15 on "different work that only looks alike": a note.
-    assert_eq!(
-        strength(&copies, spread(0.15, 0.35, 0.5)),
-        Some(Strength::Note)
+    // 0.15 on "different work that only looks alike": a note, which does
+    // not call application code test cases.
+    let note = finding(&copies, spread(0.15, 0.35, 0.5)).unwrap();
+    assert_eq!(note.strength, Strength::Note);
+    assert!(
+        note.message.contains("repeat related steps") && !note.message.contains("test"),
+        "{}",
+        note.message
     );
     assert_eq!(
         strength(&copies, spread(0.1, 0.4, 0.5)),

@@ -186,11 +186,18 @@ pub(in crate::units) fn pair_wording(
         "across test cases"
     };
     match strength {
-        Strength::Note => (
+        Strength::Note if in_tests => (
             format!(
                 "{name} repeat steps {place}; writing each case out is common in tests.{renamed}"
             ),
             "Optional: a fixture, helper or table of cases if the steps grow",
+        ),
+        // Outside tests a copy is a note when a cap lowers it, as for example
+        // code or a same-steps answer below its measured threshold, where most
+        // copies were different work that only looks alike.
+        Strength::Note => (
+            format!("{name} repeat related steps; they may not need one implementation.{renamed}"),
+            "Optional: share the steps if the copies start changing together",
         ),
         Strength::Consider if in_cases => (
             format!("{name} repeat the same steps {place}.{renamed}"),
