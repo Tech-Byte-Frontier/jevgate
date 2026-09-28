@@ -3,7 +3,11 @@
 //! for the same unit sends, so a question can ride in that stage's request.
 use super::hunks::Hunk;
 use crate::{
-    analysis::{line_of, test_map::TestCase, units::Unit},
+    analysis::{
+        line_of,
+        test_map::TestCase,
+        units::{FileUnits, Unit},
+    },
     schema::Location,
     units::{FileContext, comments, compact, identity, instructions, test_units, unique_ids},
 };
@@ -88,16 +92,18 @@ pub(super) fn tests(file: &FileContext<'_>, cases: &[TestCase]) -> Vec<Item> {
 }
 
 /// Comments and docstrings outside `tests`, as the comments rule collects
-/// them, each with the code it is about.
+/// them, each with the code it is about: none inside code a syntax error
+/// left out, whose owner the parser could not read.
 pub(super) fn comments(
     file: &FileContext<'_>,
-    units: &[Unit],
+    parsed: &FileUnits,
     tests: &[Range<usize>],
 ) -> Vec<Item> {
+    let units = &parsed.units;
     let found = crate::analysis::comments::comments(file.path, file.source, units)
         .unwrap_or_default()
         .into_iter()
-        .filter(|c| !tests.iter().any(|l| l.contains(&c.line)))
+        .filter(|c| !tests.iter().any(|l| l.contains(&c.line)) && parsed.intact(&c.span))
         .collect::<Vec<_>>();
     let owners: Vec<&str> = found
         .iter()

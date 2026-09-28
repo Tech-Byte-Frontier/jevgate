@@ -121,7 +121,7 @@ fn read_as<'a>(kind: Kind, example: &ExampleFile<'a>) -> (&'static str, std::bor
     let path = example.path;
     let language = match kind {
         Kind::Section => crate::docs::format::Format::of(path).language(),
-        _ if crate::syntax::supported(path) => crate::file_kind::language(path),
+        _ if crate::syntax::supported(path) => crate::file_kind::read_language(path, example.text),
         _ => super::language(path),
     };
     let source = match kind {
@@ -145,14 +145,23 @@ fn items_of(kind: Kind, file: &FileContext<'_>) -> Result<Vec<Item>> {
                 file.language,
                 kind.noun()
             );
-            match kind {
+            let found = match kind {
                 Kind::Function => items::functions(file, &parsed.units, &[]),
-                Kind::Comment => items::comments(file, &parsed.units, &[]),
+                Kind::Comment => items::comments(file, &parsed, &[]),
                 _ => items::tests(
                     file,
                     &crate::analysis::test_map::cases(file.path, file.source)?,
                 ),
-            }
+            };
+            // A check skips a file whose syntax errors leave nothing to
+            // judge, with that reason; "it holds no function" would send the
+            // author looking for one.
+            ensure!(
+                !(found.is_empty() && parsed.partial()),
+                "the {} parser could not read it",
+                file.language
+            );
+            found
         }
     })
 }

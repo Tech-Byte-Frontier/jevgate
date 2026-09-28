@@ -59,6 +59,17 @@ fn an_example_is_asked_as_a_check_asks_its_file_with_only_its_question() {
             "scripts/deploy.sh",
             "#!/bin/sh\nrsync -a dist/ host:/srv\n",
         ),
+        // A preview language, and a `.h` header read as C++ by its code.
+        (
+            "function",
+            "src/Shop.kt",
+            "fun total(values: List<Int>): Int {\n    var sum = 0\n    for (value in values) {\n        sum += value\n    }\n    return sum * 2 + 1\n}\n",
+        ),
+        (
+            "function",
+            "include/cart.h",
+            "#include <vector>\n\nnamespace shop {\ninline int total(const std::vector<int>& values) {\n  int sum = 0;\n  for (int value : values) {\n    sum += value;\n  }\n  return sum * 2 + 1;\n}\n}\n",
+        ),
     ];
     for (unit, path, text) in cases {
         let toml = format!(
@@ -125,11 +136,16 @@ fn an_example_without_a_unit_to_ask_is_an_error_saying_what_it_lacks() {
         ),
         (
             "function",
-            "App.kt",
-            "fun main() {\n    println(\"hi\")\n}\n",
-            "JevGate has no Kotlin parser, and a function question needs one",
+            "main.zig",
+            "pub fn main() void {}\n",
+            "JevGate has no Zig parser, and a function question needs one",
         ),
-        ("function", "src/lib.rs", "fn broken( {\n", "syntax"),
+        (
+            "function",
+            "src/lib.rs",
+            "fn broken( {\n",
+            "the Rust parser could not read it",
+        ),
         (
             "test",
             "src/lib.rs",

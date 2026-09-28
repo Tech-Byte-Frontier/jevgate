@@ -35,14 +35,16 @@ Every mistake is an error that names the question and its file. In `jevgate.toml
 
 | `unit` | Asked about | Needs |
 |---|---|---|
-| `function` | Each function and method of application code outside tests, of any size | A [supported language](languages.md) |
+| `function` | Each function and method of application code outside tests, of any size | A [language JevGate parses](languages.md), preview ones included |
 | `test` | Each test case | `include_tests`, as the test rules do |
-| `comment` | Each comment and docstring of application code, with the code it is about | A supported language |
+| `comment` | Each comment and docstring of application code, with the code it is about | A language JevGate parses |
 | `section` | Each heading section with text of the agent instruction files and project documentation | |
 | `file` | The whole file | |
 | `hunk` | Each changed hunk since `--base`, with three lines of context (a new or untracked file is added throughout; a long hunk is asked in parts of 80 lines) | `--base` |
 
-`file` and `hunk` work in any language. Without `paths` they read the source and test files JevGate reads, a Kotlin or Swift file it cannot parse included. With `paths` they also read any other text file the globs name that Git tracks, such as `infra/**/*.tf` or `scripts/*.sh`: `git add` a new one first. An untracked file in a CI workspace can be a credential another step wrote there, such as `google-github-actions/auth`'s `gha-creds-*.json`, which `paths = ["*.json"]` would otherwise send. Generated files, binary or non-UTF-8 files, hidden paths, files larger than `max_file_bytes` and paths outside `upload_allow` and `upload_deny` are never read. A file skipped for syntax errors stays skipped.
+`file` and `hunk` work in any language. Without `paths` they read the source and test files JevGate reads, a Zig file it cannot parse included. With `paths` they also read any other text file the globs name that Git tracks, such as `infra/**/*.tf` or `scripts/*.zsh`: `git add` a new one first. An untracked file in a CI workspace can be a credential another step wrote there, such as `google-github-actions/auth`'s `gha-creds-*.json`, which `paths = ["*.json"]` would otherwise send. Generated files, binary or non-UTF-8 files, hidden paths, files larger than `max_file_bytes` and paths outside `upload_allow` and `upload_deny` are never read. A file the parser could not read stays skipped, and in a file it read in part, a function or comment inside code it could not read is not asked about, as the built-in rules leave it out.
+
+The [preview languages](languages.md#support-levels) are read as the others are: a `function` or `comment` question asks about a Kotlin or Swift file's functions and comments, and its findings fail the gate at the question's level there too, since a team measures its question by its examples rather than by JevGate's labels. A `test` question waits for their tests, which JevGate does not judge yet.
 
 A `hunk` question without `--base`, and a `test` question without `--include-tests`, are not asked, and the check says so on stderr.
 

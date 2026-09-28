@@ -143,7 +143,7 @@ pub(super) fn plan_file(
     }
     let judged_tests = view.tests && args.include_tests;
     let code = custom::Code {
-        units: &scope.units[&owner].units,
+        parsed: &scope.units[&owner],
         test_lines: &lines,
         application: view.application,
         tests: judged_tests.then(|| {

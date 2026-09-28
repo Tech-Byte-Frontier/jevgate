@@ -179,6 +179,65 @@ fn a_function_no_built_in_request_sends_is_asked_in_one_of_its_own() {
     assert_eq!(custom_keys(&plan, "custom").len(), 2);
 }
 
+/// A Kotlin function large enough for function simplification to judge
+/// (six body lines), as `function` is in Rust.
+fn kotlin_function(name: &str) -> String {
+    format!(
+        "fun {name}(values: List<Int>): Int {{\n    var total = 0\n    for (value in values) {{\n        total += value\n    }}\n    val doubled = total * 2\n    return doubled + 1\n}}\n"
+    )
+}
+
+#[test]
+fn a_function_question_reaches_the_functions_of_a_preview_language() {
+    let project = Project::new();
+    let tiny = "fun id(): Int = 1\n";
+    project.write("Shop.kt", &format!("{}{tiny}", kotlin_function("charge")));
+    let options = configured(BODY_LOGS, &[catalog::FUNCTION_SIMPLIFICATION, "custom"]);
+    let (_, plan) = planned(&project, &options);
+    // `charge` rides in the function-simplification request that sends it;
+    // `id`, too small for that rule, is asked in a request of its own.
+    assert_eq!(custom_keys(&plan, "functions"), ["custom_0_body_logs"]);
+    assert_eq!(custom_keys(&plan, "custom"), ["custom_0_body_logs"]);
+    for (stage, name) in [("functions", "charge"), ("custom", "id")] {
+        let request = first_request(&plan, stage);
+        assert_eq!(request["state"]["file"]["language"], "Kotlin", "{stage}");
+        assert_eq!(request["state"]["functions"][0]["name"], name, "{stage}");
+    }
+    let report = run(&project, &options, &mut Custom { yes: 0.9 });
+    let found: Vec<_> = findings_of(&report, "custom/body-logs")
+        .iter()
+        .map(|f| f.symbol.as_deref())
+        .collect();
+    assert_eq!(found, [Some("charge"), Some("id")]);
+}
+
+#[test]
+fn a_comment_question_skips_a_comment_the_parser_left_out_with_its_unit() {
+    let toml = r#"
+[[question]]
+id = "owned-todos"
+question = "Does this comment hold a TODO without an owner?"
+unit = "comment"
+"#;
+    // tree-sitter-swift cannot read `as? T ?? fallback`, so `label` is left
+    // out, and its comment with it, as the comments rule leaves it out.
+    let project = Project::new();
+    project.write(
+        "View.swift",
+        "// TODO: name the view after its screen.\nstruct View {}\n\nfunc label(item: Any) -> String {\n    // TODO: show the item's title when it has one.\n    let text = item as? String ?? \"none\"\n    return text\n}\n",
+    );
+    let (_, plan) = planned(&project, &configured(toml, &["custom"]));
+    let file = file_plan(&plan, "View.swift");
+    assert_eq!(file.left_out[0].unit, "label", "{:?}", file.left_out);
+    let asked: Vec<&str> = plan
+        .requests
+        .iter()
+        .flat_map(|p| p.request["state"]["comments"].as_array().unwrap())
+        .map(|c| c["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(asked, ["// TODO: name the view after its screen."]);
+}
+
 #[test]
 fn yes_at_the_threshold_is_a_finding_at_the_question_level_that_fails_the_gate() {
     let project = Project::new();
@@ -437,19 +496,24 @@ unit = "file"
 id = "strict-shell"
 question = "Does this script run without `set -euo pipefail`?"
 unit = "file"
-paths = ["scripts/*.sh"]
+paths = ["scripts/*.zsh"]
 level = "consider"
 "#;
+    // Zig has no parser, and zsh no grammar: Bash and Kotlin, which 0.30
+    // reads, are code files now (`a_function_question_reaches_…`).
     let project = Project::new();
     project.write("lib.rs", &function("charge"));
-    project.write("App.kt", "fun main() {\n    println(\"hi\")\n}\n");
-    project.write("scripts/deploy.sh", "#!/bin/sh\nrsync -a dist/ host:/srv\n");
+    project.write("main.zig", "pub fn main() void {}\n");
+    project.write(
+        "scripts/deploy.zsh",
+        "#!/bin/zsh\nrsync -a dist/ host:/srv\n",
+    );
     project.write("notes.txt", "not named by any question\n");
     let options = configured(toml, &["custom"]);
     let (inputs, plan) = planned(&project, &options);
     let script = inputs
         .iter()
-        .find(|i| i.result.path.ends_with("deploy.sh"))
+        .find(|i| i.result.path.ends_with("deploy.zsh"))
         .unwrap();
     assert_eq!(
         script.result.role,
@@ -473,8 +537,8 @@ level = "consider"
         asked,
         [
             ("lib.rs".to_string(), "custom_0_one_feature".to_string()),
-            ("App.kt".into(), "custom_0_one_feature".into()),
-            ("scripts/deploy.sh".into(), "custom_0_strict_shell".into()),
+            ("main.zig".into(), "custom_0_one_feature".into()),
+            ("scripts/deploy.zsh".into(), "custom_0_strict_shell".into()),
         ]
     );
     let script_request = &plan.requests[2].request;
@@ -483,7 +547,7 @@ level = "consider"
         script_request["state"]["file"]["source"]
             .as_str()
             .unwrap()
-            .starts_with("#!/bin/sh")
+            .starts_with("#!/bin/zsh")
     );
     assert_eq!(
         script_request["questions"]["custom_0_strict_shell"]["instructions"]["question"],
@@ -630,13 +694,13 @@ fn a_hunk_question_asks_about_each_change_since_the_base_in_any_language() {
 id = "no-unwrap"
 question = "Does this change add an `unwrap()` on a value that can be missing?"
 unit = "hunk"
-paths = ["**/*.rs", "**/*.kt"]
+paths = ["**/*.rs", "**/*.zig"]
 "#;
     let project = Project::new();
     let body: String = (1..=30).map(|n| format!("    let v{n} = {n};\n")).collect();
     project.write("lib.rs", &format!("fn long() {{\n{body}}}\n"));
-    let kotlin: String = (1..=10).map(|n| format!("fun f{n}() = {n}\n")).collect();
-    project.write("old.kt", &kotlin);
+    let zig: String = (1..=10).map(|n| format!("const f{n} = {n};\n")).collect();
+    project.write("old.zig", &zig);
     git(&project, &["init", "-q"]);
     git(&project, &["add", "."]);
     git(&project, &["commit", "-qm", "base"]);
@@ -645,8 +709,8 @@ paths = ["**/*.rs", "**/*.kt"]
         body.replace("let v20 = 20;", "let v20 = find().unwrap();")
     );
     project.write("lib.rs", &edited);
-    git(&project, &["mv", "old.kt", "renamed.kt"]);
-    project.write("renamed.kt", &format!("{kotlin}fun added() = find()!!\n"));
+    git(&project, &["mv", "old.zig", "renamed.zig"]);
+    project.write("renamed.zig", &format!("{zig}const added = find().?;\n"));
     project.write("fresh.rs", "fn fresh() {\n    find().unwrap();\n}\n");
     let mut options = configured(toml, &["custom"]);
     options.base = Some(crate::revision::resolve(&project.0, "HEAD").unwrap());
@@ -665,7 +729,7 @@ paths = ["**/*.rs", "**/*.kt"]
     assert_eq!(custom_units(&plan, "lib.rs")[0].name, "line 21");
     assert_eq!(custom_units(&plan, "fresh.rs")[0].name, "lines 1–3");
     assert_eq!(
-        hunks("renamed.kt"),
+        hunks("renamed.zig"),
         [(11, 11)],
         "a rename is diffed against its old path"
     );
@@ -704,7 +768,7 @@ paths = ["**/*.rs", "**/*.kt"]
     assert!(
         plan.skipped
             .values()
-            .any(|reason| reason.starts_with("No Kotlin parser")),
+            .any(|reason| reason.starts_with("No Zig parser")),
         "a file it cannot parse stays skipped with its reason"
     );
     assert!(

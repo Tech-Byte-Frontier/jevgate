@@ -16,7 +16,7 @@ use super::{
     pack, pack_runs, questions::EVIDENCE,
 };
 use crate::{
-    analysis::{test_map::TestCase, units::Unit},
+    analysis::{test_map::TestCase, units::FileUnits},
     custom::{Kind, Question},
     options::CheckArgs,
 };
@@ -43,7 +43,10 @@ pub(crate) const MAX_UNITS: usize = 2_000;
 
 /// What a code file offers custom questions.
 pub(super) struct Code<'a> {
-    pub units: &'a [Unit],
+    /// Its units, and what syntax errors left out of them: a comment inside
+    /// code the parser could not read is not asked about, as the comments
+    /// rule leaves it out.
+    pub parsed: &'a FileUnits,
     /// Test code: functions and comments in it are not asked about.
     pub test_lines: &'a [Range<usize>],
     /// Whether its code outside `test_lines` is application code.
@@ -200,10 +203,10 @@ impl Planner {
     ) -> Option<Vec<Item>> {
         match (kind, offered) {
             (Kind::Function, Offered::Code(code)) if code.application => {
-                Some(items::functions(file, code.units, code.test_lines))
+                Some(items::functions(file, &code.parsed.units, code.test_lines))
             }
             (Kind::Comment, Offered::Code(code)) if code.application => {
-                Some(items::comments(file, code.units, code.test_lines))
+                Some(items::comments(file, code.parsed, code.test_lines))
             }
             (Kind::Test, Offered::Code(code)) => code.tests.map(|cases| items::tests(file, cases)),
             (Kind::Section, Offered::Document) => Some(items::sections(file)),
