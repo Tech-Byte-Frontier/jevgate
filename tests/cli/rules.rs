@@ -55,6 +55,19 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
         simplification["review"]["unseen"],
         serde_json::json!({"right": 20, "labeled": 23})
     );
+    let shared = rule("shared_logic");
+    assert_eq!(
+        shared["thresholds_validated"], true,
+        "its consider threshold"
+    );
+    assert_eq!(
+        rule("function_simplification")["thresholds_validated"],
+        false
+    );
+    let dataset = shared["evaluation_dataset"].as_str().unwrap();
+    assert!(dataset.contains("never tuned on"), "{dataset}");
+    let laws = rule("laws")["evaluation_dataset"].as_str().unwrap();
+    assert!(laws.contains("Bend 2"), "{laws}");
     for arguments in [
         vec!["check", "--rule", "contracts", "--dry-run"],
         vec!["record"],
@@ -93,7 +106,8 @@ fn rules_table_names_rules_groups_and_opt_in_rules() {
     );
     assert_eq!(
         row("maintainability/hardcoded-values"),
-        "maintainability/hardcoded-values opt-in - 13% of 8 17% of 29"
+        "maintainability/hardcoded-values opt-in - 1 of 8 17% of 29",
+        "below 20 labels, the counts, as a finding says it is not yet measured"
     );
     assert!(table.contains("BLOCKS: the levels that fail the check by default"));
     assert!(

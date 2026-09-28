@@ -33,9 +33,16 @@ impl Labels {
         (self.labeled > 0).then(|| (200 * self.right + self.labeled) / (2 * self.labeled))
     }
 
-    /// "87% of 23"; none without labels.
+    /// "87% of 23", or below [`MIN_LABELS`], where a finding says "not yet
+    /// measured", the counts: "2 of 5", as the site gives them; none without
+    /// labels.
     pub fn summary(self) -> Option<String> {
-        self.percent().map(|p| format!("{p}% of {}", self.labeled))
+        let p = self.percent()?;
+        Some(if self.labeled >= MIN_LABELS {
+            format!("{p}% of {}", self.labeled)
+        } else {
+            format!("{} of {}", self.right, self.labeled)
+        })
     }
 
     /// How often such findings were right, for a reader: "right 87% of the
@@ -153,6 +160,18 @@ pub fn unmeasured(rule: &str) -> &'static str {
         BEND_2_ONLY
     } else {
         "none labeled yet on projects JevGate was never tuned on"
+    }
+}
+
+/// Where the labels behind `rule`'s levels come from.
+pub fn dataset(rule: &str) -> String {
+    if bend_2_only(rule) {
+        format!("findings {BEND_2_ONLY}")
+    } else {
+        format!(
+            "findings labeled from the code on the corpus: 25 projects JevGate was never tuned on (`unseen`) and the projects it was tuned on (`tuned`); {}accuracy.html",
+            catalog::SITE
+        )
     }
 }
 
@@ -274,14 +293,19 @@ mod tests {
         );
         assert_eq!(value["consider"]["mature"], false);
         assert_eq!(describe(catalog::LAWS), json!({}));
-        let unseen = |rule| measure(rule, Review).unwrap().unseen.summary();
-        assert_eq!(unseen(catalog::SHARED_LOGIC).as_deref(), Some("54% of 85"));
+        let unseen = |rule| measure(rule, Review).unwrap().unseen;
         assert_eq!(
-            unseen(catalog::HARDCODED_VALUES).as_deref(),
-            Some("13% of 8"),
-            "12.5% rounds up"
+            unseen(catalog::SHARED_LOGIC).summary().as_deref(),
+            Some("54% of 85")
         );
-        assert_eq!(unseen(catalog::ACCESS_CONTROL), None);
+        let few = unseen(catalog::HARDCODED_VALUES);
+        assert_eq!(
+            few.summary().as_deref(),
+            Some("1 of 8"),
+            "no share below 20"
+        );
+        assert_eq!(few.percent(), Some(13), "12.5% rounds up");
+        assert_eq!(unseen(catalog::ACCESS_CONTROL).summary(), None);
     }
 
     #[test]

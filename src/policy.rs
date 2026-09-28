@@ -44,6 +44,12 @@ const SHARED_CONSIDER: Calibrated = Calibrated {
 /// question keeps the shared thresholds.
 pub(crate) const CALIBRATED: [Calibrated; 1] = [SHARED_CONSIDER];
 
+/// Whether a threshold was measured for one of `rule`'s questions (a
+/// catalog key) and kept on the projects never used for tuning.
+pub(crate) fn calibrated(rule: &str) -> bool {
+    CALIBRATED.iter().any(|entry| entry.rule == rule)
+}
+
 /// Aggregating and normalizing binary floats can move an exact decimal boundary
 /// by a few machine rounding units. This is only an arithmetic allowance, not a
 /// confidence margin; raw probabilities and the configured thresholds stay intact.

@@ -16,8 +16,6 @@ pub struct Rule {
     pub inspection: &'static str,
     pub acceptable_example: &'static str,
     pub requires_tests: bool,
-    pub evaluation_dataset: &'static str,
-    pub thresholds_validated: bool,
 }
 
 /// The documentation site, published from `site/` with each release.
@@ -51,8 +49,6 @@ pub const DOC_STALENESS: &str = "doc_staleness";
 pub const DOC_DUPLICATION: &str = "doc_duplication";
 pub const DOCUMENTATION: [&str; 4] = [AGENT_CONTEXT, LARGE_DOCS, DOC_STALENESS, DOC_DUPLICATION];
 
-const DATASET: &str = "focused development set; not calibrated";
-
 pub fn rules() -> Vec<Rule> {
     vec![
         Rule {
@@ -66,8 +62,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Would moving some members into a separate module (or tests into a separate test file) make the file easier to navigate and maintain?",
             acceptable_example: "One algorithm, one type and its helpers, one feature, or the tests of one subject",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "maintainability/function-simplification",
@@ -80,8 +74,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Would splitting the function into named functions make it easier to understand? For control flow nested four deep or four-branch chains: would flattening it help?",
             acceptable_example: "One job whose steps belong together or already call named functions",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "maintainability/shared-logic",
@@ -94,8 +86,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Do the two sites perform the same steps for the same purpose, so one shared implementation would serve both?",
             acceptable_example: "Different work that only looks alike, or repetition the behavior requires",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "maintainability/hardcoded-values",
@@ -111,8 +101,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a value fixed in code change between deployments, need a descriptive name, or special-case one identity?",
             acceptable_example: "Messages, formats, protocol names and values whose meaning the code around them makes clear",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/injection",
@@ -125,8 +113,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a variable that another party controls reach the text of a query, command, code, markup, file path, requested URL or redirect target, or a deserializer, without being bound, escaped or checked?",
             acceptable_example: "Bound query parameters, argument lists, escaping templates, and values the program fixes or checks",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/sensitive-data",
@@ -139,8 +125,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the function log a password, token, key or personal data, or send internal error details to a remote client? Does an error handler send clients more than the program's own messages and codes?",
             acceptable_example: "Logging record ids and messages; generic error responses with details kept in server logs",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/unsafe-settings",
@@ -153,8 +137,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the code turn off a security check or choose a weak setting: certificate verification, password hashing, random tokens, CORS, cookies, or secrets in environment variables the build puts into browser code?",
             acceptable_example: "MD5 for cache keys, non-cryptographic random for shuffling, secure defaults",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/access-control",
@@ -167,8 +149,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a policy let every user it applies to reach other users' rows, or trust a value users can change? Does a SECURITY DEFINER function leave search_path open or skip checking the caller? Does a grant open writes or private reads to every user? Does a public table hold users' own data, a view return other users' rows, or a reducer change rows its arguments choose, or admin-only settings, without checking the caller?",
             acceptable_example: "Policies tied to the user, account or membership; role checks; restrictive policies; public data; grants narrowed by row-level security; reducers that check the caller through `ctx.sender`, the module owner, an admin or a trusted service identity, or run only on a schedule",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/workflows",
@@ -181,8 +161,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Can a run script execute text that people outside the repository write? Does a job run pull request code while it has secrets or a write token?",
             acceptable_example: "Untrusted text passed through env variables; pull_request workflows; jobs that run only the base branch's code",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "tests/value",
@@ -195,8 +173,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the test check only its mocks, recompute the expected value with the code's own logic, assert internal details, or mix unrelated behaviors?",
             acceptable_example: "A test that checks a result or effect a caller can observe",
             requires_tests: true,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "tests/redundancy",
@@ -209,8 +185,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Do the two tests check the same behavior, with different or equivalent inputs?",
             acceptable_example: "Tests of different behaviors of one function",
             requires_tests: true,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "tests/laws",
@@ -223,8 +197,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the comment above a law promise more than, or something other than, what the law states, so a definition could break the promise while every proof passes?",
             acceptable_example: "A comment that puts its law in words; laws that declare a signature or a primitive",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/agent-context",
@@ -237,8 +209,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a section restate what the repository's files show, give generic advice, repeat what linters check, or record past work?",
             acceptable_example: "Project-specific commands, constraints, decisions and workflows the code does not show",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/large-docs",
@@ -251,8 +221,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Would splitting the document make it easier to find and maintain, or does it mainly record past work?",
             acceptable_example: "One long guide, reference or concept, and living procedures",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/staleness",
@@ -265,8 +233,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Is the document a plan whose work is finished, or does a section tell the reader to use a path or script that no longer exists?",
             acceptable_example: "Outputs a command writes, local or ignored files, examples, and paths named as removed",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/duplication",
@@ -279,8 +245,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does one section state everything the other states, or do the two give different values or instructions for the same thing?",
             acceptable_example: "Sections on the same subject where each adds something",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/comments",
@@ -293,8 +257,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a comment only repeat its code, hold sentences that add nothing, narrate an edit instead of the code as it is, or hold code turned off?",
             acceptable_example: "Reasons, constraints, caveats, references, and documentation of what a definition returns or guarantees beyond its signature",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
     ]
 }
@@ -455,8 +417,9 @@ pub fn table() -> String {
     lines.extend(rules.iter().map(|rule| table_row(rule, width)));
     lines.push(String::new());
     lines.push(format!(
-        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected. The rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
+        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected. The rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
         crate::maturity::MIN_PERCENT_RIGHT,
+        crate::maturity::MIN_LABELS,
         crate::maturity::MIN_LABELS
     ));
     lines.push(format!(
@@ -500,14 +463,20 @@ fn table_row(rule: &Rule, width: usize) -> String {
     )
 }
 
+/// Every rule for `jevgate rules --format json`: its catalog entry, its
+/// labels per level (`maturity`) and where they come from
+/// (`evaluation_dataset`), whether a threshold was measured for one of its
+/// questions (`thresholds_validated`), and the decision policy.
 pub fn describe() -> Value {
     Value::Array(
         rules()
             .into_iter()
             .map(|r| {
-                let maturity = crate::maturity::describe(r.key);
+                let key = r.key;
                 let mut value = serde_json::to_value(r).unwrap();
-                value["maturity"] = maturity;
+                value["maturity"] = crate::maturity::describe(key);
+                value["evaluation_dataset"] = crate::maturity::dataset(key).into();
+                value["thresholds_validated"] = crate::policy::calibrated(key).into();
                 value["decision_policy"] = serde_json::json!(policy());
                 value
             })
