@@ -15,7 +15,7 @@ level = "review"
 next_step = "Log the request id instead of the body."
 ```
 
-One question per file works too: `.jevgate/questions/no-body-logs.toml` holds the same keys, and its file name is its id.
+One question per file works too: `.jevgate/questions/no-body-logs.toml` holds the same keys, and its file name is its id. The [question gallery](question-gallery.md) has measured questions to start from, which `jevgate rules add NAME` writes there.
 
 | Key | Default | Meaning |
 |---|---|---|
