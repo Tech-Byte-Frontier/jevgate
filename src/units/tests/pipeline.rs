@@ -239,7 +239,7 @@ fn a_request_refused_as_beyond_the_context_leaves_its_units_unsent() {
 }
 
 /// The rules whose first pass asks about functions.
-const FUNCTION_RULES: [&str; 5] = [
+pub(super) const FUNCTION_RULES: [&str; 5] = [
     catalog::FUNCTION_SIMPLIFICATION,
     catalog::HARDCODED_VALUES,
     catalog::INJECTION,
@@ -249,7 +249,7 @@ const FUNCTION_RULES: [&str; 5] = [
 
 /// A function every rule of `FUNCTION_RULES` judges: five body lines, a
 /// literal value and a query built from its parameter.
-fn queried(name: &str) -> String {
+pub(super) fn queried(name: &str) -> String {
     format!(
         "fn {name}(conn: &Connection, table: &str) -> Result<usize> {{\n    let mut total = 0;\n    for row in conn.query(&format!(\"SELECT id FROM {{table}}\"), [])? {{\n        total += row.get::<usize>(0)?;\n    }}\n    let floor = total.max(40);\n    Ok(floor)\n}}\n"
     )

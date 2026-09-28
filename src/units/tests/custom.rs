@@ -107,6 +107,61 @@ fn a_function_question_rides_in_the_request_that_already_sends_the_function() {
 }
 
 #[test]
+fn a_function_question_rides_in_the_pack_every_rule_asks_about_the_function_in() {
+    use super::pipeline::{FUNCTION_RULES, queried};
+    let project = Project::new();
+    project.write("lib.rs", &queried("load"));
+    let rules: Vec<&str> = FUNCTION_RULES.into_iter().chain(["custom"]).collect();
+    let (_, plan) = planned(&project, &configured(BODY_LOGS, &rules));
+    assert_eq!(stages(&plan), ["functions"], "0.28's one pack a function");
+    let questions = plan.requests[0].request["questions"].as_object().unwrap();
+    for key in [
+        "f0_split",
+        "f0_environment",
+        "f0_interpreted",
+        "custom_0_body_logs",
+    ] {
+        assert!(questions.contains_key(key), "{key}: {:?}", questions.keys());
+    }
+}
+
+#[test]
+fn a_question_added_to_a_cached_project_is_the_only_one_asked() {
+    use super::pipeline::{FUNCTION_RULES, queried};
+    let project = Project::new();
+    project.write("lib.rs", &queried("load"));
+    run(
+        &project,
+        &configured("", &FUNCTION_RULES),
+        &mut Mock::default(),
+    );
+    let rules: Vec<&str> = FUNCTION_RULES.into_iter().chain(["custom"]).collect();
+    let mut options = configured(BODY_LOGS, &rules);
+    options.dry_run = true;
+    let preview = crate::tests::snapshot(&project, &options).1;
+    let pack = &preview.stages["functions"];
+    assert_eq!(
+        pack.planned_questions - pack.planned_cached_questions,
+        1,
+        "the dry run prices only the new question"
+    );
+    options.dry_run = false;
+    let mut mock = Mock::default();
+    run(&project, &options, &mut mock);
+    assert_eq!(mock.requests.len(), 1);
+    let sent: Vec<&String> = mock.requests[0]["questions"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    assert_eq!(
+        sent,
+        ["custom_0_body_logs"],
+        "each built-in answer about the pack comes from the cache"
+    );
+}
+
+#[test]
 fn a_function_no_built_in_request_sends_is_asked_in_one_of_its_own() {
     let tiny = "fn tiny() -> i32 {\n    1\n}\n";
     let project = Project::new();
