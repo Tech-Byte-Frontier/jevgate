@@ -118,7 +118,18 @@ pub fn missing(
         }
     }
     if !scripts.is_empty() {
-        for script in commands(text) {
+        let tracks = |names: &[&str]| {
+            history.tracked.iter().any(|p| {
+                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                    names.contains(&n) || n.ends_with(".mk") && names.contains(&"*.mk")
+                })
+            })
+        };
+        let runners = Runners {
+            make: tracks(&["Makefile", "makefile", "GNUmakefile", "*.mk"]),
+            just: tracks(&["justfile", "Justfile", ".justfile"]),
+        };
+        for script in commands(text, runners) {
             if !scripts.contains(&script) && found.insert(format!("script:{script}")) {
                 out.push(Missing {
                     name: script,
@@ -504,7 +515,17 @@ fn link_targets(text: &str) -> Vec<String> {
 /// starts: at the start of a code line or an inline code span, after a
 /// prompt, or after `&&`, `||`, `;` or `|`. The same word inside a comment
 /// or a sentence, such as "make sure", is not a command.
-fn commands(text: &str) -> Vec<String> {
+/// The build tools whose targets the repository can declare: `make` and
+/// `just` name a target only when it tracks a Makefile or justfile.
+/// openclaw documents `make routing-isolation` from a separate models
+/// repository and has no Makefile.
+#[derive(Clone, Copy)]
+struct Runners {
+    make: bool,
+    just: bool,
+}
+
+fn commands(text: &str, runners: Runners) -> Vec<String> {
     let (prose, code) = split_fences(text);
     let spans = prose.into_iter().flat_map(line_spans).map(|(_, span)| span);
     let mut out = Vec::new();
@@ -518,7 +539,9 @@ fn commands(text: &str) -> Vec<String> {
             let next = |n: usize| words.get(n).copied().unwrap_or("");
             let script = match next(0) {
                 "pnpm" | "yarn" | "npm" if next(1) == "run" => next(2),
-                "pnpm" | "yarn" | "make" | "just" => next(1),
+                "pnpm" | "yarn" => next(1),
+                "make" if runners.make => next(1),
+                "just" if runners.just => next(1),
                 _ => continue,
             };
             let name_like = script
@@ -550,13 +573,24 @@ mod tests {
     /// The missing names of `text`, a section of `docs/intro.md`, in a
     /// repository tracking a few files and with two removed.
     fn found(text: &str) -> Vec<(String, Fate)> {
+        found_in(
+            &[
+                "src/app.ts",
+                "docs/guide.md",
+                "src/services/quota.ts",
+                "Makefile",
+                "justfile",
+            ],
+            text,
+        )
+    }
+
+    /// The missing names of `text` in a repository tracking `tracked`.
+    fn found_in(tracked: &[&str], text: &str) -> Vec<(String, Fate)> {
         let project = crate::tests::Project::new();
         project.write("src/app.ts", "");
         let history = History {
-            tracked: ["src/app.ts", "docs/guide.md", "src/services/quota.ts"]
-                .into_iter()
-                .map(PathBuf::from)
-                .collect(),
+            tracked: tracked.iter().map(PathBuf::from).collect(),
             tags: BTreeSet::new(),
             removed: [
                 (PathBuf::from("src/old.ts"), None),
@@ -627,6 +661,16 @@ mod tests {
         let text =
             "```sh\npnpm quality\npnpm run lint\nnpm install\n```\nIn prose, make the build.";
         assert_eq!(found(text), [("lint".to_string(), Fate::NoScript)]);
+    }
+
+    #[test]
+    fn make_targets_are_checked_only_where_a_makefile_is_tracked() {
+        let text = "Run `make routing-isolation` from the models repository.";
+        assert_eq!(found_in(&["src/app.ts"], text), []);
+        assert_eq!(
+            found_in(&["src/app.ts", "build/rules.mk"], text),
+            [("routing-isolation".to_string(), Fate::NoScript)]
+        );
     }
 
     #[test]
