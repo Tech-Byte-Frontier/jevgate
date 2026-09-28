@@ -1,6 +1,6 @@
 ; Dart: classes, mixins, extensions and enums, top-level functions,
-; getters and setters, methods (constructors, getters and setters among
-; them), and calls.
+; getters and setters, methods (constructors, getters, setters and
+; operators among them), and calls.
 (class_declaration name: (identifier) @name) @definition.class
 (mixin_declaration name: (identifier) @name) @definition.class
 (extension_declaration name: (identifier) @name) @definition.class
@@ -14,7 +14,8 @@
      (getter_signature name: (identifier) @name)
      (setter_signature name: (identifier) @name)
      (constructor_signature name: (identifier) @name)
-     (factory_constructor_signature . (identifier) @name)])) @definition.method
+     (factory_constructor_signature . (identifier) @name)
+     (operator_signature operator: _ @name)])) @definition.method
 
 (call_expression function: (identifier) @name) @reference.call
 (call_expression function: (member_expression property: (identifier) @name)) @reference.call

@@ -19,6 +19,16 @@ pub(super) const ELIXIR: &str = "defmodule Shop.Cart do\n  @moduledoc \"A cart.\
 
 pub(super) const LUA: &str = "-- Utilities.\nlocal M = {}\n\n--- Adds two numbers.\n-- Returns the larger when they differ.\nfunction M.add(a, b)\n  if a > b then\n    return a\n  elseif a == b then\n    return 0\n  else\n    for i = 1, 10 do\n      print(i)\n    end\n  end\n  return a + b\nend\n\nfunction M:send(x)\n  return self.value + x\nend\n\nlocal function helper(x)\n  return M.add(x, 1)\nend\n\nM.other = function(y)\n  return helper(y)\nend\n\nreturn M\n";
 
+/// C++ methods that return a reference or a pointer, an operator, and
+/// members defined outside their class under a namespace.
+pub(super) const CPP_MEMBERS: &str = "#include <string>\n\nnamespace shop {\nclass Cart {\n public:\n  const std::string& name() const {\n    return name_;\n  }\n  Cart* self() {\n    return this;\n  }\n  bool operator==(const Cart& other) const {\n    return name_ == other.name_;\n  }\n  Cart& clear();\n  void add(int x);\n\n private:\n  std::string name_;\n};\n}  // namespace shop\n\nshop::Cart& shop::Cart::clear() {\n  items_.clear();\n  return *this;\n}\n\nvoid shop::Cart::add(int x) {\n  items_.push_back(x);\n}\n";
+
+/// A SwiftUI view: its `body` and other computed properties, and a
+/// subscript, hold its code.
+pub(super) const SWIFT_VIEW: &str = "import SwiftUI\n\nstruct SettingsView: View {\n    @State private var enabled = false\n\n    var body: some View {\n        VStack {\n            Toggle(\"Enabled\", isOn: $enabled)\n            Text(label)\n        }\n        .padding()\n    }\n\n    private var label: String {\n        enabled ? \"On\" : \"Off\"\n    }\n\n    subscript(index: Int) -> Int {\n        get { index * 2 }\n        set { print(newValue) }\n    }\n}\n";
+
+const KOTLIN_MEMBERS: &str = "class Cache(private val size: Int) {\n    private val entries = mutableMapOf<String, String>()\n\n    init {\n        require(size > 0)\n        warm()\n    }\n\n    constructor() : this(16) {\n        println(\"default\")\n    }\n\n    val full: Boolean\n        get() {\n            val used = entries.size\n            return used >= size\n        }\n\n    private fun warm() {\n        entries[\"a\"] = \"b\"\n    }\n}\n";
+
 /// Each unit's name, kind and the line its definition starts on, below
 /// the comments its span includes.
 fn outline(path: &str, source: &str) -> Vec<(String, Kind, usize)> {
@@ -96,6 +106,59 @@ fn c_functions_and_types_are_units_and_prototypes_are_not() {
     );
     let file = parse(Path::new("cart.cpp"), CPP).unwrap();
     assert!(file.units[2].signature.starts_with("template <typename T>"));
+}
+
+#[test]
+fn cpp_members_returning_references_operators_and_qualified_members_are_units() {
+    assert_eq!(
+        outline("cart.cpp", CPP_MEMBERS),
+        owned(&[
+            ("Cart::name", Kind::Method, 6),
+            ("Cart::self", Kind::Method, 9),
+            ("Cart::operator==", Kind::Method, 12),
+            ("Cart::clear", Kind::Method, 23),
+            ("Cart::add", Kind::Method, 28),
+        ])
+    );
+}
+
+#[test]
+fn swift_computed_properties_and_subscripts_and_kotlin_members_are_units() {
+    assert_eq!(
+        outline("SettingsView.swift", SWIFT_VIEW),
+        owned(&[
+            ("SettingsView::body", Kind::Method, 6),
+            ("SettingsView::label", Kind::Method, 14),
+            ("SettingsView::subscript", Kind::Method, 18),
+        ])
+    );
+    let (lines, _, _, calls) = facts("SettingsView.swift", SWIFT_VIEW, "SettingsView::body");
+    assert_eq!(lines, 4);
+    assert!(calls.contains(&"Toggle".to_string()), "{calls:?}");
+    assert_eq!(
+        outline("Cache.kt", KOTLIN_MEMBERS),
+        owned(&[
+            ("Cache::init", Kind::Method, 4),
+            ("Cache::constructor", Kind::Method, 9),
+            ("Cache::full", Kind::Method, 13),
+            ("Cache::warm", Kind::Method, 19),
+        ])
+    );
+    assert_eq!(facts("Cache.kt", KOTLIN_MEMBERS, "Cache::full").0, 2);
+}
+
+#[test]
+fn dart_and_scala_operators_are_units() {
+    let dart = "class Money {\n  final int cents;\n  const Money(this.cents);\n\n  Money operator +(Money other) {\n    final sum = cents + other.cents;\n    return Money(sum);\n  }\n}\n";
+    assert_eq!(
+        outline("money.dart", dart),
+        owned(&[("Money::+", Kind::Method, 5)])
+    );
+    let scala = "case class Path(parts: List[String]) {\n  def /(part: String): Path = {\n    val next = parts :+ part\n    Path(next)\n  }\n}\n";
+    assert_eq!(
+        outline("Path.scala", scala),
+        owned(&[("Path::/", Kind::Method, 2)])
+    );
 }
 
 #[test]

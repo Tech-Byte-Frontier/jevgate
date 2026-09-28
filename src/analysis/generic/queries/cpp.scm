@@ -1,24 +1,30 @@
-; C++: C's definitions, methods written in their class, members defined
-; outside it (`Cart::add`, owned by the scope they name), destructors,
-; templates with their `template` line, classes, and calls.
+; C++: functions and methods, their declarator reached through the pointer
+; or reference they return; a qualified name (`Cart::add`, `ns::Cart::add`)
+; names the type it is written in, and an operator (`operator==`) itself;
+; templates with their `template` line; classes, structs, unions, enums and
+; typedefs; and calls.
 (function_definition
-  declarator: (function_declarator declarator: (identifier) @name)) @definition.function
-(function_definition
-  declarator: (function_declarator declarator: (field_identifier) @name)) @definition.method
-(function_definition
-  declarator: (function_declarator declarator: (destructor_name) @name)) @definition.method
-(function_definition
-  declarator: (function_declarator
-    declarator: (qualified_identifier scope: (_) @scope name: [(identifier) (destructor_name)] @name))) @definition.method
-(function_definition
-  declarator: (pointer_declarator
-    declarator: (function_declarator declarator: (identifier) @name))) @definition.function
-(function_definition
-  declarator: (reference_declarator
-    (function_declarator declarator: (identifier) @name))) @definition.function
+  declarator: [
+    (function_declarator declarator: [
+      (identifier) (field_identifier) (destructor_name) (operator_name)
+      (qualified_identifier) (template_function)] @name)
+    (pointer_declarator declarator: (function_declarator declarator: [
+      (identifier) (field_identifier) (operator_name) (qualified_identifier)] @name))
+    (pointer_declarator declarator: (pointer_declarator declarator: (function_declarator
+      declarator: [(identifier) (field_identifier) (qualified_identifier)] @name)))
+    (reference_declarator (function_declarator declarator: [
+      (identifier) (field_identifier) (operator_name) (qualified_identifier)] @name))
+  ]) @definition.function
 (template_declaration
   (function_definition
-    declarator: (function_declarator declarator: [(identifier) (field_identifier)] @name)
+    declarator: [
+      (function_declarator declarator: [
+        (identifier) (field_identifier) (operator_name) (qualified_identifier)] @name)
+      (pointer_declarator declarator: (function_declarator declarator: [
+        (identifier) (field_identifier) (qualified_identifier)] @name))
+      (reference_declarator (function_declarator declarator: [
+        (identifier) (field_identifier) (operator_name) (qualified_identifier)] @name))
+    ]
     body: (_) @body)) @definition.function
 
 (class_specifier name: (type_identifier) @name body: (_)) @definition.class

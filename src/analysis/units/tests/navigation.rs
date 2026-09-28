@@ -1,12 +1,13 @@
 //! The generic tier against GitHub's code navigation: every definition a
 //! grammar's own `tags.scm` finds is a unit or owns one.
-use super::generic::{C, CPP, DART, ELIXIR, LUA, SWIFT};
+use super::generic::{C, CPP, CPP_MEMBERS, DART, ELIXIR, LUA, SWIFT, SWIFT_VIEW};
 use super::*;
 
 /// The function, method and type names a grammar's own `tags.scm` finds in
 /// `source`, as GitHub's code navigation shows them: C and C++ tag the
 /// declarator of a prototype as they tag a definition's, so a declarator
-/// outside every function definition is left out.
+/// outside every function definition is left out, and Swift names a
+/// subscript by its parameter (`index`), where JevGate names it `subscript`.
 fn navigation_names(language: tree_sitter::Language, tags: &str, source: &str) -> Vec<String> {
     use tree_sitter::StreamingIterator;
     let mut parser = tree_sitter::Parser::new();
@@ -32,7 +33,8 @@ fn navigation_names(language: tree_sitter::Language, tags: &str, source: &str) -
         let prototype = defined.node.kind() == "function_declarator"
             && std::iter::successors(defined.node.parent(), |n| n.parent())
                 .all(|n| n.kind() != "function_definition");
-        if !prototype {
+        let parameter = name.node.parent().is_some_and(|p| p.kind() == "parameter");
+        if !prototype && !parameter {
             names.push(name.node.utf8_text(source.as_bytes()).unwrap().to_string());
         }
     }
@@ -55,8 +57,20 @@ fn every_definition_github_s_navigation_tags_is_a_unit_or_owns_one() {
             tree_sitter_cpp::TAGS_QUERY,
         ),
         (
+            "members.cpp",
+            CPP_MEMBERS,
+            tree_sitter_cpp::LANGUAGE,
+            tree_sitter_cpp::TAGS_QUERY,
+        ),
+        (
             "Shop.swift",
             SWIFT,
+            tree_sitter_swift::LANGUAGE,
+            tree_sitter_swift::TAGS_QUERY,
+        ),
+        (
+            "SettingsView.swift",
+            SWIFT_VIEW,
             tree_sitter_swift::LANGUAGE,
             tree_sitter_swift::TAGS_QUERY,
         ),

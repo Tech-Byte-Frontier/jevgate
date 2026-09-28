@@ -86,15 +86,29 @@ impl<'t> Captured<'t> {
             return;
         };
         if let Some((node, defines)) = self.definition {
+            let (name, scope) = qualified(name, self.scope);
             tags.definitions.push(Tag {
                 node,
                 name,
                 defines,
                 body: self.body,
-                scope: self.scope,
+                scope,
             });
         } else if self.call {
             tags.calls.push(name);
         }
     }
+}
+
+/// A qualified name's last segment and the type written before it: C++'s
+/// `ns::Cart::add` defines `add` in `Cart`, `Box<T>::get` defines `get` in
+/// `Box`, and `twice<int>` defines `twice`. Other names are themselves.
+fn qualified<'t>(mut name: Node<'t>, mut scope: Option<Node<'t>>) -> (Node<'t>, Option<Node<'t>>) {
+    while let Some(inner) = name.child_by_field_name("name") {
+        if let Some(outer) = name.child_by_field_name("scope") {
+            scope = Some(outer.child_by_field_name("name").unwrap_or(outer));
+        }
+        name = inner;
+    }
+    (name, scope)
 }
