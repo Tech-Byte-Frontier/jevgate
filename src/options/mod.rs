@@ -259,7 +259,7 @@ pub struct CheckArgs {
     /// expire. Also set by `cache_ttl_secs` in jevgate.toml.
     #[arg(long, value_name = "SECONDS", help_heading = BUDGETS)]
     pub cache_ttl_secs: Option<u64>,
-    /// Ignore cached answers for this invocation and ask again
+    /// Ignore the answers cached before this invocation and ask again
     #[arg(long, help_heading = BUDGETS)]
     pub refresh: bool,
     /// Use cached answers only and never contact the provider; unanswered units leave the run incomplete

@@ -9,7 +9,7 @@ const ROUNDING_PER_VALUE: f64 = 0.005;
 const MAX_MASS_ERROR: f64 = 0.05;
 const FLOAT_NOISE: f64 = 1e-9;
 /// A usage count above this is corrupt, not a real count, and is ignored.
-const MAX_REPORTED_TOKENS: u64 = 1_000_000_000;
+pub(crate) const MAX_REPORTED_TOKENS: u64 = 1_000_000_000;
 
 /// A response whose answers match the request's questions. Its `usage` is not
 /// required: a gateway need not pass TypeSafe's through, and such an answer

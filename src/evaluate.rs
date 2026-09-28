@@ -22,6 +22,8 @@ pub struct Session<'a> {
     pub budget: TokenBudget,
     /// Uploaded bytes and billed input tokens of fresh requests, for calibration.
     pub observed: (u64, u64),
+    /// The questions this invocation answered, by state.
+    pub answered: crate::requests::Answered,
 }
 
 pub struct SnapshotContext<'a> {
@@ -271,7 +273,7 @@ fn cached_purpose(
     request: &serde_json::Value,
     file: &mut FileResult,
 ) -> Result<Option<crate::file_kind::View>> {
-    let Some(body) = crate::requests::answered(root, args, request) else {
+    let Some(body) = crate::requests::cached(root, args, request) else {
         return Ok(None);
     };
     crate::file_kind::record_purpose(file, request, &body)?;

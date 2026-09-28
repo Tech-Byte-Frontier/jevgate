@@ -171,6 +171,7 @@ pub(super) fn session<'a>(
         paid: Default::default(),
         budget: token_budget::TokenBudget::default(),
         observed: (0, 0),
+        answered: Default::default(),
     }
 }
 

@@ -101,6 +101,28 @@ fn a_reworded_or_added_question_is_asked_alone() {
 }
 
 #[test]
+fn the_token_calibration_divides_the_bytes_sent_by_their_tokens() {
+    let project = Project::new();
+    let options = args();
+    let mut mock = Mock::default();
+    let first = three_questions();
+    ask(&project, &options, &mut mock, &[&first]);
+    let context = project.context();
+    let store = storage::Store::open(&project.0).unwrap();
+    let observed = {
+        let mut session = session(&options, &context, &store, &mut mock);
+        session.queries(&[&reworded(&first, "long")]);
+        session.observed
+    };
+    let sent = serde_json::to_vec(&mock.requests[1]).unwrap().len() as u64;
+    assert_eq!(
+        observed,
+        (sent, 10),
+        "one question and its state, not three"
+    );
+}
+
+#[test]
 fn whole_request_answers_of_an_earlier_version_keep_answering() {
     let project = Project::new();
     let options = args();
@@ -139,6 +161,76 @@ fn whole_request_answers_of_an_earlier_version_keep_answering() {
         &[&reworded(&request, "long")],
     );
     assert_eq!(asked(&mock), [["long"]]);
+}
+
+/// Answers its first request at the bottom of every scale and the others at the top.
+#[derive(Default)]
+struct Shifting {
+    calls: usize,
+}
+
+impl transport::Evaluator for Shifting {
+    fn evaluate(&mut self, request: &Value) -> anyhow::Result<Value> {
+        self.calls += 1;
+        Ok(answer(request, if self.calls == 1 { 0 } else { 2 }))
+    }
+}
+
+/// `request` asking its `long` question beside a question of its own.
+fn sharing_long(request: &Value) -> Value {
+    let mut other = request.clone();
+    other["questions"] = json!({
+        "long": request["questions"]["long"],
+        "short": {"type":"noul","instructions":{"question":"Is `source` short?"}},
+    });
+    other
+}
+
+fn long(receipt: &requests::Receipt) -> Value {
+    receipt.result.as_ref().unwrap().0["answers"]["long"].clone()
+}
+
+#[test]
+fn a_question_two_requests_ask_about_one_state_has_one_answer_in_a_run() {
+    let project = Project::new();
+    let options = args();
+    let first = three_questions();
+    let second = sharing_long(&first);
+    let mut shifting = Shifting::default();
+    let receipts = {
+        let context = project.context();
+        let store = storage::Store::open(&project.0).unwrap();
+        session(&options, &context, &store, &mut shifting).queries(&[&first, &second])
+    };
+    assert_eq!(shifting.calls, 2);
+    assert_eq!(
+        long(&receipts[0]),
+        long(&receipts[1]),
+        "one answer in the run"
+    );
+    let rerun = ask(&project, &options, &mut Mock::default(), &[&first, &second]);
+    assert_eq!(long(&rerun[0]), long(&receipts[0]), "the rerun reads it");
+    assert_eq!(long(&rerun[1]), long(&receipts[1]));
+}
+
+#[test]
+fn refresh_asks_each_question_once_in_a_run() {
+    let project = Project::new();
+    let mut options = args();
+    let first = three_questions();
+    ask(&project, &options, &mut Mock::default(), &[&first]);
+    options.refresh = true;
+    let context = project.context();
+    let store = storage::Store::open(&project.0).unwrap();
+    let mut mock = Mock::default();
+    let mut refreshed = session(&options, &context, &store, &mut mock);
+    refreshed.queries(&[&first]);
+    refreshed.queries(&[&sharing_long(&first)]);
+    drop(refreshed);
+    assert_eq!(
+        asked(&mock),
+        [vec!["long", "named", "nested"], vec!["short"]]
+    );
 }
 
 #[test]
@@ -220,6 +312,14 @@ fn state_file(project: &Project) -> std::path::PathBuf {
     files.into_iter().next().unwrap()
 }
 
+/// Change the answers in the one state file of `project`.
+fn edit_answers(project: &Project, edit: impl FnOnce(&mut serde_json::Map<String, Value>)) {
+    let path = state_file(project);
+    let mut entry: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    edit(entry["answers"].as_object_mut().unwrap());
+    std::fs::write(&path, entry.to_string()).unwrap();
+}
+
 #[test]
 fn a_dry_run_counts_the_questions_the_cache_answers_and_prices_the_rest() {
     let project = Project::new();
@@ -235,17 +335,10 @@ fn a_dry_run_counts_the_questions_the_cache_answers_and_prices_the_rest() {
     );
     options.dry_run = false;
     run(&project, &options, &mut Mock::default());
-    let path = state_file(&project);
-    let mut entry: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let first = entry["answers"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .next()
-        .unwrap()
-        .clone();
-    entry["answers"].as_object_mut().unwrap().remove(&first);
-    std::fs::write(&path, entry.to_string()).unwrap();
+    edit_answers(&project, |answers| {
+        let first = answers.keys().next().unwrap().clone();
+        answers.remove(&first);
+    });
     options.dry_run = true;
     let partial = preview(&options);
     assert_eq!(
@@ -302,27 +395,23 @@ fn a_deleted_corrupt_or_linked_state_file_is_asked_again() {
 }
 
 #[test]
-fn a_tampered_answer_is_asked_again_alone() {
+fn only_tampered_answers_are_asked_again() {
     let project = Project::new();
     let options = args();
     let mut mock = Mock::default();
     let request = three_questions();
     ask(&project, &options, &mut mock, &[&request]);
-    let path = state_file(&project);
-    let mut entry: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let first = entry["answers"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .next()
-        .unwrap()
-        .clone();
-    entry["answers"][&first]["answer"]["noul"] = json!(1.5);
-    std::fs::write(&path, entry.to_string()).unwrap();
-    ask(&project, &options, &mut mock, &[&request]);
+    edit_answers(&project, |answers| {
+        let mut answers = answers.values_mut();
+        answers.next().unwrap()["answer"]["noul"] = json!(1.5);
+        answers.next().unwrap()["input_tokens"] = json!(u64::MAX);
+    });
+    let receipts = ask(&project, &options, &mut mock, &[&request]);
     assert_eq!(
         asked(&mock)[1].len(),
-        1,
-        "only the invalid answer is asked again"
+        2,
+        "only the invalid answers are asked again"
     );
+    let (body, _, _) = receipts[0].result.as_ref().unwrap();
+    assert!(body["usage"]["input_tokens"].as_u64().unwrap() < 1_000);
 }

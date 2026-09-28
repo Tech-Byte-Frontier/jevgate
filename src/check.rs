@@ -101,6 +101,7 @@ pub fn session<'a>(
         paid: Default::default(),
         budget: token_budget::TokenBudget::load(&context.root),
         observed: (0, 0),
+        answered: Default::default(),
     }
 }
 

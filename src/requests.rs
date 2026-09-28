@@ -9,7 +9,10 @@ use crate::{
 };
 use anyhow::{Result, ensure};
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 pub(super) type SourceHashes = BTreeMap<String, Option<String>>;
 
@@ -141,12 +144,18 @@ fn cached_answers<'r>(
         .collect()
 }
 
-/// A cached answer usable for `question` of `request`: well formed, and from
-/// the requested model when a version is pinned.
+/// A cached answer usable for `question` of `request`: well formed, with a
+/// real usage count, and from the requested model when a version is pinned.
 fn usable(answer: &CachedAnswer, question: &Value, request: &Value) -> bool {
     response::validate_model(&answer.model, request).is_ok()
         && response::validate_answer(&answer.answer, question).is_ok()
+        && answer.input_tokens.max(answer.output_tokens) <= response::MAX_REPORTED_TOKENS
 }
+
+/// The questions an invocation answered, by state key: with `--refresh` it
+/// asks each of them once, and a question two of its requests ask has one
+/// answer, the one the cache keeps.
+pub(super) type Answered = BTreeMap<String, BTreeSet<String>>;
 
 /// What the cache holds for one planned request.
 struct Lookup {
@@ -161,27 +170,35 @@ struct Lookup {
 }
 
 impl Lookup {
-    /// The cached answers to `request`: none with `--refresh` or without a
-    /// cache; otherwise its state's answers to its questions, and for the
-    /// questions they lack, the request's whole entry of an earlier version.
-    fn new(args: &CheckArgs, request: &Value, cache: Option<&CacheReader>) -> Self {
+    /// The cached answers to `request`: its state's answers to its
+    /// questions, and for the questions they lack, the request's whole entry
+    /// of an earlier version. With `--refresh`, only the answers this
+    /// invocation gave (`answered`).
+    fn new(
+        args: &CheckArgs,
+        request: &Value,
+        cache: Option<&CacheReader>,
+        answered: &Answered,
+    ) -> Self {
         let mut lookup = Self {
             state: state_key(request),
             found: BTreeMap::new(),
             carried: BTreeMap::new(),
             missing: Vec::new(),
         };
-        let Some(cache) = cache.filter(|_| !args.refresh) else {
+        let Some(cache) = cache else {
             lookup.missing = questions(request).map(|(name, _)| name.clone()).collect();
             return lookup;
         };
         let ttl = cache_ttl(args.model(), args.cache_ttl_secs());
         let stored = cache.answers(&lookup.state, ttl);
+        let this_run = answered.get(&lookup.state);
         for (name, question) in questions(request) {
             let key = question_key(name, question);
+            let current = !args.refresh || this_run.is_some_and(|keys| keys.contains(&key));
             match stored
                 .get(&key)
-                .filter(|answer| usable(answer, question, request))
+                .filter(|answer| current && usable(answer, question, request))
             {
                 Some(answer) => {
                     lookup.found.insert(name.clone(), answer.clone());
@@ -190,6 +207,7 @@ impl Lookup {
             }
         }
         if !lookup.missing.is_empty()
+            && !args.refresh
             && let Some((body, created_at)) = cache
                 .request(&request_key(request), ttl)
                 .filter(|(body, _)| response::validate(body, request).is_ok())
@@ -212,27 +230,69 @@ impl Lookup {
         self.missing.clear();
     }
 
-    /// Take the provider's `body` answering `sent`, given at `created_at`;
-    /// returns its answers by question key, to save.
+    /// Take the provider's `body` answering `sent`, given at `created_at`,
+    /// and return its answers to save, by question key. Where `earlier`, the
+    /// answers this invocation already gave about the state, holds one to the
+    /// same question, another request asked it too, and that answer is used:
+    /// the traces of two security rules about one unit ask one `dev_only`
+    /// Noul, and a rerun reads the answer the cache kept.
     fn answered_by(
         &mut self,
         sent: &Value,
         body: &Value,
         created_at: u64,
+        earlier: &BTreeMap<String, CachedAnswer>,
     ) -> BTreeMap<String, CachedAnswer> {
         let mut fresh = BTreeMap::new();
         for (name, question, answer) in cached_answers(sent, body, created_at) {
-            fresh.insert(question_key(name, question), answer.clone());
-            self.found.insert(name.clone(), answer);
+            let key = question_key(name, question);
+            match earlier
+                .get(&key)
+                .filter(|earlier| usable(earlier, question, sent))
+            {
+                Some(earlier) => {
+                    self.found.insert(name.clone(), earlier.clone());
+                }
+                None => {
+                    fresh.insert(key, answer.clone());
+                    self.found.insert(name.clone(), answer);
+                }
+            }
         }
         self.missing.clear();
         fresh
     }
 
-    /// `request` with only the questions to ask, or none when every one is answered.
-    fn unanswered(&self, request: &Value) -> Option<Value> {
+    /// Save the answers the provider's `body` gives to `sent`, except where
+    /// this invocation already answered the question about the state, and
+    /// return when they were given.
+    fn keep(
+        &mut self,
+        store: &crate::storage::Store,
+        answered: &mut Answered,
+        sent: &Value,
+        body: &Value,
+    ) -> Result<u64> {
+        let timestamp = schema::now();
+        let this_run = answered.entry(self.state.clone()).or_default();
+        let mut earlier = store.reader().answers(&self.state, None);
+        earlier.retain(|key, _| this_run.contains(key));
+        let fresh = self.answered_by(sent, body, timestamp, &earlier);
+        let keys: Vec<String> = fresh.keys().cloned().collect();
+        store.save_answers(&self.state, fresh)?;
+        this_run.extend(keys);
+        Ok(timestamp)
+    }
+
+    /// `request` with only the questions to ask: none when every one is
+    /// answered, and the request itself, not a copy, when none is (every
+    /// request of a first run).
+    fn unanswered<'r>(&self, request: &'r Value) -> Option<Cow<'r, Value>> {
         if self.missing.is_empty() {
             return None;
+        }
+        if self.found.is_empty() {
+            return Some(Cow::Borrowed(request));
         }
         let mut sent = request.clone();
         sent["questions"] = Value::Object(
@@ -241,7 +301,7 @@ impl Lookup {
                 .map(|(name, question)| (name.clone(), question.clone()))
                 .collect(),
         );
-        Some(sent)
+        Some(Cow::Owned(sent))
     }
 
     /// A response body answering the planned request from the found answers,
@@ -280,22 +340,35 @@ pub(super) fn unanswered(
     args: &CheckArgs,
     request: &Value,
 ) -> Option<Value> {
-    Lookup::new(args, request, CacheReader::peek(root).as_ref()).unanswered(request)
+    peek(root, args, request)
+        .unanswered(request)
+        .map(Cow::into_owned)
 }
 
 /// A dry run's cached answer to a whole planned request, read without
 /// opening the store; none while any question is unanswered.
-pub(super) fn answered(root: &std::path::Path, args: &CheckArgs, request: &Value) -> Option<Value> {
-    let lookup = Lookup::new(args, request, CacheReader::peek(root).as_ref());
+pub(super) fn cached(root: &std::path::Path, args: &CheckArgs, request: &Value) -> Option<Value> {
+    let lookup = peek(root, args, request);
     lookup.missing.is_empty().then(|| lookup.body(request).0)
 }
 
+/// The cached answers to `request`, read without opening the store while
+/// planning and in dry runs, before the invocation has answered anything.
+fn peek(root: &std::path::Path, args: &CheckArgs, request: &Value) -> Lookup {
+    Lookup::new(
+        args,
+        request,
+        CacheReader::peek(root).as_ref(),
+        &Answered::new(),
+    )
+}
+
 /// A planned request whose questions the cache does not all answer.
-struct Pending {
+struct Pending<'r> {
     /// Its index in the batch.
     index: usize,
     /// The request as sent: only its unanswered questions.
-    sent: Value,
+    sent: Cow<'r, Value>,
     lookup: Lookup,
 }
 
@@ -327,11 +400,15 @@ impl Session<'_> {
 
     /// Fill receipts from cached answers; return the requests still to send,
     /// each with only its unanswered questions.
-    fn answer_from_cache(&self, requests: &[&Value], receipts: &mut [Receipt]) -> Vec<Pending> {
+    fn answer_from_cache<'r>(
+        &self,
+        requests: &[&'r Value],
+        receipts: &mut [Receipt],
+    ) -> Vec<Pending<'r>> {
         let cache = self.store.reader();
         let mut pending = Vec::new();
         for (index, request) in requests.iter().enumerate() {
-            let mut lookup = Lookup::new(self.args, request, Some(&cache));
+            let mut lookup = Lookup::new(self.args, request, Some(&cache), &self.answered);
             let carried = std::mem::take(&mut lookup.carried);
             if !carried.is_empty() {
                 // A copy that cannot be written is made again from the
@@ -364,7 +441,7 @@ impl Session<'_> {
 
     /// Upload `pending` through the evaluator, rechecking each source first,
     /// and record every outcome in its receipt.
-    fn send(&mut self, pending: Vec<Pending>, receipts: &mut [Receipt]) {
+    fn send(&mut self, pending: Vec<Pending<'_>>, receipts: &mut [Receipt]) {
         let root = &self.context.root;
         let max_bytes = self.args.max_context_bytes.max(self.args.max_file_bytes);
         let before = |request: &Value| {
@@ -373,12 +450,13 @@ impl Session<'_> {
             // source was already verified while preparing the batch.
             require_paths(root, max_bytes, request, &mut SourceHashes::new())
         };
-        let (sent, mut lookups): (Vec<Value>, Vec<(usize, Lookup)>) = pending
+        let (sent, mut lookups): (Vec<_>, Vec<_>) = pending
             .into_iter()
             .map(|asked| (asked.sent, (asked.index, asked.lookup)))
             .unzip();
-        let batch: Vec<&Value> = sent.iter().collect();
+        let batch: Vec<&Value> = sent.iter().map(AsRef::as_ref).collect();
         let store = self.store;
+        let answered = &mut self.answered;
         let requests_count = &mut self.requests;
         let paid = &mut self.paid;
         let observed = &mut self.observed;
@@ -390,7 +468,7 @@ impl Session<'_> {
                 let (index, lookup) = &mut lookups[at];
                 *requests_count += u32::from(outcome.attempted);
                 let receipt = &mut receipts[*index];
-                let billed = record(store, &sent[at], lookup, outcome, receipt);
+                let billed = record(store, answered, &sent[at], lookup, outcome, receipt);
                 // An answer without usage says nothing of its tokens, so it
                 // stays out of the bytes-per-token calibration.
                 let metered = billed.as_ref().is_some_and(|b| b.input_tokens.is_some());
@@ -458,6 +536,7 @@ impl Usage {
 /// billed, even when its answers failed validation.
 fn record(
     store: &crate::storage::Store,
+    answered: &mut Answered,
     sent: &Value,
     lookup: &mut Lookup,
     outcome: crate::transport::Outcome,
@@ -487,13 +566,10 @@ fn record(
             output_tokens,
         });
         response::validate(&body, sent)?;
-        let timestamp = schema::now();
         let cached = lookup.found.len() as u64;
-        let fresh = lookup.answered_by(sent, &body, timestamp);
-        let asked = fresh.len() as u64;
-        store.save_answers(&lookup.state, fresh)?;
+        let timestamp = lookup.keep(store, answered, sent, &body)?;
         receipt.metrics.evaluated_judgments += 1;
-        receipt.metrics.asked_questions = asked;
+        receipt.metrics.asked_questions = question_count(sent);
         receipt.metrics.cached_questions = cached;
         Ok((lookup.body(sent).0, timestamp, false))
     });
