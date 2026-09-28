@@ -373,11 +373,15 @@ fn notes(target: Target) -> &'static [&'static str] {
         ],
         Target::Gemini => &[
             "With Gemini CLI's security.environmentVariableRedaction on, hooks do not get TYPESAFE_API_KEY: save your key with `jevgate auth login`, or keep it in the repository's .env.",
+            "Antigravity CLI reads GEMINI.md but not these hooks, and JevGate does not set it up yet: there the instructions tell the agent to check its changes itself.",
         ],
         Target::Opencode => &[
             "OpenCode loads the plugin when it starts. OpenCode 2 runs a different plugin API and does not load it yet.",
         ],
-        Target::Claude | Target::Cursor => &[],
+        Target::Cursor => &[
+            "Cursor shows JevGate's messages to you only in its Hooks output channel (View > Output > Hooks); the agent hears of a check that failed at its next edit.",
+        ],
+        Target::Claude => &[],
     }
 }
 

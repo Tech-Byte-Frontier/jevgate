@@ -87,20 +87,26 @@ impl<'a> Hook<'a> {
     /// A session's first turn begins when it starts, in case the agent sends
     /// no turn-start event for its first prompt. A session that has a turn
     /// keeps it: Claude Code and Codex also start a session after compacting
-    /// one in the middle of a turn.
+    /// one in the middle of a turn. The agent is told the hooks run.
     fn session_start(&self) -> Reply {
-        match self.load() {
+        let reply = match self.load() {
             Some(turn) => self.context(turn, None),
             None => self.begin(None),
-        }
+        };
+        greeted(reply)
     }
 
     /// A new turn begins, unless the prompt is this turn's block reason sent
     /// back (Gemini CLI and Cursor continue a blocked turn that way). After
     /// a stop that could not be checked, it begins where that turn did, so
-    /// the changes are checked once JevGate can check them.
+    /// the changes are checked once JevGate can check them. A session's
+    /// first turn tells the agent the hooks run, when its session start did
+    /// not (OpenCode's plugin sends none).
     fn turn_start(&self) -> Reply {
         let previous = self.load();
+        if previous.is_none() {
+            return greeted(self.begin(None));
+        }
         match previous {
             Some(turn) if turn.continued_by(&self.event.prompt) => self.context(turn, None),
             Some(turn) if turn.unchecked => {
@@ -361,6 +367,15 @@ impl<'a> Hook<'a> {
                 Err(unfinished.reason)
             }
         }
+    }
+}
+
+/// `reply` opened with the line that tells the agent JevGate's hooks run in
+/// its session. Its instructions ask it to check by hand without that line.
+fn greeted(reply: Reply) -> Reply {
+    Reply {
+        agent: text::joined(Some(text::RUNNING.into()), reply.agent, "\n\n"),
+        ..reply
     }
 }
 

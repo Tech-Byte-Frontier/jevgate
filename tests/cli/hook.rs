@@ -53,6 +53,10 @@ fn invalid_arguments_and_input_are_answered_with_exit_0() {
     }
 }
 
+/// What a session's first event tells the agent.
+const RUNNING: &str =
+    "JevGate's hooks run in this session: they check each edit and the end of each turn.";
+
 /// A Git repository with a short function committed as `lib.rs`.
 fn committed() -> Project {
     let project = Project::new();
@@ -68,8 +72,9 @@ fn without_a_key_every_event_passes_and_says_why() {
     let project = committed();
     let start = serde_json::json!({"hook_event_name": "UserPromptSubmit", "prompt": "go"});
     assert_eq!(
-        hook(project.command(), &[], &event(&project, start)).0,
-        serde_json::json!({})
+        hook(project.command(), &[], &event(&project, start)).0["hookSpecificOutput"]["additionalContext"],
+        RUNNING,
+        "a session's first turn says the hooks run"
     );
     std::fs::write(project.0.join("lib.rs"), JUDGED_RS.replace("+ 1", "+ 2")).unwrap();
     let edit = serde_json::json!({"hook_event_name": "PostToolUse", "tool_name": "Edit",
@@ -131,7 +136,10 @@ fn the_binary_blocks_a_turn_through_the_provider_until_its_finding_is_fixed() {
         hook(command, &[], &event(&project, fields)).0
     };
     let prompt = json!({"hook_event_name": "UserPromptSubmit", "prompt": "add the spread"});
-    assert_eq!(send(prompt), json!({}));
+    assert_eq!(
+        send(prompt)["hookSpecificOutput"]["additionalContext"],
+        RUNNING
+    );
     std::fs::write(project.0.join("lib.rs"), LONG_RS).unwrap();
     let blocked = send(json!({"hook_event_name": "Stop", "stop_hook_active": false}));
     assert_eq!(blocked["decision"], "block", "{blocked}");

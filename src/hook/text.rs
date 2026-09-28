@@ -306,6 +306,13 @@ pub(super) fn passed(after_block: bool, advisory: &[Flagged]) -> Option<String> 
     (!notes.is_empty()).then(|| notes.join(" "))
 }
 
+/// What the agent reads when a session starts: the instructions `init
+/// --agent` writes quote it, and ask an agent that never read it (hooks not
+/// trusted yet, an agent that reads the instructions but not the hooks) to
+/// check its changes itself.
+pub(super) const RUNNING: &str =
+    "JevGate's hooks run in this session: they check each edit and the end of each turn.";
+
 /// The person's note on a stop with no record of the turn's start.
 pub(super) const UNCHECKED_TURN: &str = "JevGate did not check this turn: it has no snapshot of the turn's start, so its prompt hook may not be installed. It checks from the next turn on.";
 

@@ -130,7 +130,12 @@ fn message(reply: &Value) -> &str {
 fn an_edit_gets_its_findings_as_context_and_never_blocks() {
     let project = repository();
     let host = reviewing();
-    assert_eq!(send(&project, &host, prompt("refactor")), json!({}));
+    assert_eq!(
+        context(&send(&project, &host, prompt("refactor"))),
+        text::RUNNING,
+        "a session's first turn says the hooks run"
+    );
+    assert_eq!(send(&project, &host, prompt("again")), json!({}));
     project.write("lib.rs", &long_function("f"));
     let reply = send(&project, &host, edit(&project, "lib.rs"));
     assert!(reply.get("decision").is_none(), "{reply}");
@@ -430,10 +435,14 @@ fn a_session_start_records_a_turn_only_when_the_session_has_none() {
     let project = repository();
     let host = reviewing();
     let start = json!({"hook_event_name": "SessionStart", "source": "startup"});
-    assert_eq!(send(&project, &host, start), json!({}));
+    assert_eq!(context(&send(&project, &host, start)), text::RUNNING);
     project.write("lib.rs", &long_function("f"));
     let compacted = json!({"hook_event_name": "SessionStart", "source": "compact"});
-    assert_eq!(send(&project, &host, compacted), json!({}));
+    assert_eq!(
+        context(&send(&project, &host, compacted)),
+        text::RUNNING,
+        "a compacted session hears it again"
+    );
     assert_eq!(
         send(&project, &host, stop(false))["decision"],
         "block",

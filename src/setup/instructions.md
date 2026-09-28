@@ -1,7 +1,9 @@
 <!-- jevgate:begin (written by `jevgate init --agent`; run it again to update this block, or add --remove to take it out) -->
 ## JevGate
 
-JevGate reviews code as you edit it, through hooks. After an edit, its findings on what the turn changed in the edited files arrive as context, one line each: `path:line level rule: why Next: step`. At the end of a turn, it keeps you working while findings marked "(fails the gate)" remain, at most 3 times a turn.
+JevGate reviews code as you edit it, through hooks. When they run, a session starts with the line "JevGate's hooks run in this session". After an edit, its findings on what the turn changed in the edited files arrive as context, one line each: `path:line level rule: why Next: step`. At the end of a turn, it keeps you working while findings marked "(fails the gate)" remain, at most 3 times a turn.
+
+If that line is not in this session, JevGate's hooks are not running for you (they may not be trusted yet, or this agent reads these instructions but not the hooks), and no silence from JevGate is a pass: before you finish, run `jevgate check --base HEAD` and act on its findings as below, or say that JevGate did not check your changes.
 
 - Fix findings marked "(fails the gate)" before you finish. Weigh the others: fix a `review` or `consider` finding when it is right, or leave the code and say why.
 - If a finding is mistaken, keep the code as it is and say why in your reply; JevGate does not block again when nothing changed.
