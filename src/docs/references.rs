@@ -306,13 +306,19 @@ fn present(root: &Path, base: &Path, name: &str, history: &History) -> bool {
     // import, names `i18n-mock.ts`.
     let suffix = format!("/{trimmed}");
     let module = Path::new(trimmed).extension().is_none();
-    let wanted: Vec<String> = candidates
-        .iter()
-        .map(|c| c.to_string_lossy().into_owned())
-        .collect();
+    // Compared with forward slashes: `normal` joins with the platform's
+    // separator, while tracked paths keep Git's.
+    let slashed = |p: &Path| {
+        p.iter()
+            .map(|part| part.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    };
+    let wanted: Vec<String> = candidates.iter().map(|c| slashed(c)).collect();
     history.tracked.iter().any(|p| {
+        let whole = slashed(p);
         let p = p.to_string_lossy();
-        let stem = p
+        let stem = whole
             .rsplit_once('.')
             .filter(|(_, e)| !e.contains('/'))
             .map(|(s, _)| s);
