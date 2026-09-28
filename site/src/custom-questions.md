@@ -168,7 +168,7 @@ Beside the default rules, 1,792 functions rode in function-simplification reques
 
 ## Where questions live
 
-`.jevgate/questions/` is meant to be committed. JevGate's own `.jevgate/.gitignore` keeps it tracked and the cache ignored. A `.gitignore` entry that ignores `.jevgate/` as a whole hides the questions too, and every check then says so: ignore `/.jevgate/*` and keep `!/.jevgate/questions/` instead.
+`.jevgate/questions/` is meant to be committed. JevGate's own `.jevgate/.gitignore` keeps it tracked and the cache ignored; the one versions before 0.29 wrote, which ignores everything, is rewritten by the next check that is not a dry run. A `.gitignore` entry that ignores `.jevgate/` as a whole hides the questions too. Every command says when Git ignores a question file, which rule does, and how to keep it: for a root entry, ignore `/.jevgate/*` and keep `!/.jevgate/questions/` instead.
 
 The question files are read with the repository's own `jevgate.toml`, once per run: `check --watch` stops when one changes, as it does for `jevgate.toml`, and the MCP server reads them afresh for each call. `--config FILE` reads only that file's `[[question]]` tables, so a pull request cannot edit a question to pass a policy a workflow applies with `--config`, and the check names the question files it left unread. `--questions DIR` reads question files from `DIR` instead, such as a copy of the base branch's; [Continuous integration](ci.md) has the recipe.
 

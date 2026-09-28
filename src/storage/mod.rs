@@ -72,10 +72,16 @@ fn ignore_state(directory: &Path) -> Result<()> {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }
-    } else if fs::read_to_string(&path).is_ok_and(|text| text == IGNORE_BEFORE) {
+    } else if written_before_questions(&path) {
         atomic(&path, IGNORE.as_bytes(), Durability::Synced)?;
     }
     Ok(())
+}
+
+/// Whether the `.gitignore` at `path` is the one JevGate wrote before
+/// custom questions, which the next check that writes its state rewrites.
+pub(crate) fn written_before_questions(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|text| text == IGNORE_BEFORE)
 }
 
 /// Hold the session lock for the life of the store, recording this process.

@@ -285,6 +285,21 @@ fn a_question_file_git_ignores_is_named_with_the_rule_that_ignores_it() {
     );
     project.write(".gitignore", "/.jevgate/*\n!/.jevgate/questions/\n");
     assert_eq!(ignored(&project.0, file), None);
+    // The `.gitignore` JevGate wrote in `.jevgate/` before 0.29 hides them
+    // whatever the root one says, until a check rewrites it.
+    project.write(".jevgate/.gitignore", "*\n");
+    let warning = ignored(&project.0, file).unwrap();
+    assert!(
+        warning.contains("(.jevgate/.gitignore:1:*)")
+            && warning.contains("an earlier JevGate wrote .jevgate/.gitignore, and the next check"),
+        "{warning}"
+    );
+    project.write(".jevgate/.gitignore", "*\n# kept by hand\n");
+    let warning = ignored(&project.0, file).unwrap();
+    assert!(
+        warning.ends_with("add `!questions/` and `!questions/**` to .jevgate/.gitignore"),
+        "{warning}"
+    );
 }
 
 const EXAMPLES: &str = r#"
