@@ -85,11 +85,16 @@ pub(super) fn tracked(directory: &Path) -> BTreeSet<PathBuf> {
     };
     let listed =
         crate::revision::git(root, &["ls-files", "-z", "--", ".jevgate/cache"]).unwrap_or_default();
+    // Joined a component at a time: Git names paths with `/`, which a
+    // Windows root in its verbatim `\\?\` form does not read as a separator.
     listed
         .split(|b| *b == 0)
         .filter_map(|name| std::str::from_utf8(name).ok())
         .filter(|name| !name.is_empty())
-        .map(|name| root.join(name))
+        .map(|name| {
+            name.split('/')
+                .fold(root.to_path_buf(), |path, part| path.join(part))
+        })
         .collect()
 }
 
