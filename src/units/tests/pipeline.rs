@@ -301,6 +301,26 @@ fn every_rule_asks_about_a_function_in_one_request_that_sends_it_once() {
 }
 
 #[test]
+fn a_preview_language_s_function_pack_asks_only_function_simplification() {
+    // A Kotlin function with a literal and a query built from its
+    // parameter: `queried` in Kotlin. Hardcoded values and the security
+    // rules know no Kotlin sites, sources or sinks, so of the five rules
+    // only function simplification asks, in the pack it sends alone.
+    let kotlin = "fun find(db: Database, table: String): Int {\n    var total = 0\n    for (row in db.query(\"SELECT id FROM $table\")) {\n        total += row.getInt(0)\n    }\n    val floor = maxOf(total, 40)\n    return floor\n}\n";
+    let packs = |rules: &[&str]| -> Vec<Value> {
+        let (project, options) = project_with(&[("Shop.kt", kotlin)], rules);
+        let (_, plan) = planned(&project, &options);
+        assert_eq!(stages(&plan), ["functions"], "{rules:?}");
+        plan.requests.into_iter().map(|p| p.request).collect()
+    };
+    let every = packs(&FUNCTION_RULES);
+    let keys: Vec<&String> = every[0]["questions"].as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["f0_split"]);
+    assert!(every[0]["state"]["functions"][0].get("values").is_none());
+    assert_eq!(every, packs(&[catalog::FUNCTION_SIMPLIFICATION]));
+}
+
+#[test]
 fn one_request_answers_every_rule_about_its_functions() {
     let (project, options) = project_with(&[("lib.rs", &queried("load"))], &FUNCTION_RULES);
     let report = run(&project, &options, &mut scripted(0));
