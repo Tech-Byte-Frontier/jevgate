@@ -169,3 +169,31 @@ Beside the default rules, 1,792 functions rode in function-simplification reques
 `.jevgate/questions/` is meant to be committed. JevGate's own `.jevgate/.gitignore` keeps it tracked and the cache ignored. A `.gitignore` entry that ignores `.jevgate/` as a whole hides the questions too, and every check then says so: ignore `/.jevgate/*` and keep `!/.jevgate/questions/` instead.
 
 The question files are read with the repository's own `jevgate.toml`. `--config FILE` reads only that file's `[[question]]` tables, so a pull request cannot edit a question to pass a policy a workflow applies with `--config`.
+
+## Proposed from instruction files
+
+Most teams have already written their conventions down for coding agents. `jevgate rules propose` reads the instruction files agents load (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and Cursor, Copilot, Windsurf, Cline, Kiro, Junie and Roo Code rules) and drafts a question from each line that states one. Name files or directories to read only those; a file named is read whatever its name, such as `jevgate rules propose CONTRIBUTING.md`.
+
+Each list item and paragraph is a candidate line. Code blocks, tables, headings, comments and `@path` imports are left out, and a line ending in a colon that opens a list introduces its items instead of being one. Jev is asked two questions of every line: whether it states a rule for how the code is written that one piece of the code shows, and whether a reviewer would read a function, a test, a comment, a documentation section, a file or a change to check it. Commands, workflow steps, facts about the project, records of past work, how the agent should behave and advice too vague to break are not rules. A line it calls a rule at 0.80 is then asked what would check it, and one that a formatter, linter, compiler or a script measuring lines or coverage checks at 0.80 is left out: a question would repeat that check at a price.
+
+Jev classifies; it writes nothing. Each proposal quotes its line, cites its file and line, and sends its section heading as background and the text that introduces it as guidance:
+
+```toml
+# Proposed by `jevgate rules propose` from AGENTS.md:3.
+# Jev: a rule to check (0.94), on each function (0.76).
+# Edit it, then accept it: jevgate rules accept prefer-undefined-for-absent-values
+# It starts as a note, which never fails the gate: raise level to "review" once its findings are right.
+# jevgate-proposal: 42fabc71fba2
+question = 'Does this function break the project rule "Prefer `undefined` for absent values. Do not add special handling for `null`." (AGENTS.md:3)?'
+background = 'The rule is from AGENTS.md, section "Conventions".'
+unit = "function"
+level = "note"
+```
+
+Proposals are written to `.jevgate/proposals/<id>.toml`, which Git ignores, never into the configuration. A rule in a nested file, such as `web/CLAUDE.md`, or in a Cursor rule with `globs`, gets those files as its `paths`. To accept one, read it, sharpen it (a `guidance` line saying what breaks the rule and what looks like it but does not), set its level, and run `jevgate rules accept <id>`: it checks the file as a question and moves it to `.jevgate/questions/`, where you commit it. Moving the file by hand works too; `accept` refuses a file that would not load, since a broken question file stops every check. `--format toml` prints the proposals as `[[question]]` tables for `jevgate.toml` instead, and `--format json` prints every line with its answers; neither writes anything.
+
+Answers are cached, so a second run asks only about lines that changed. It never replaces a proposal file, even one you are editing, and never proposes again a rule that is already a question: the `jevgate-proposal` comment marks both. A proposal you delete is proposed again on the next run; to set one aside, leave its file in `.jevgate/proposals/`, which is never asked. Translated copies of instruction files, under a locale directory such as `docs/i18n/ja/`, are read only when named: OmniRoute keeps its `CLAUDE.md` and `GEMINI.md` in 66 languages.
+
+Measured on the instruction files of six open-source projects never used to write it (ComfyUI, dify, headroom, herdr, multica and rtk; 656 lines), it proposed 271 questions: 197 a reviewer would keep with small edits, 14 wrong (workflow steps, permissions nothing can break, rules that need other files) and 60 debatable: 28 point to another document or to code elsewhere ("follow the Button contract", "reuse the existing helpers"), which one unit cannot show, and 12 are too vague to break. The unit was right for 189 of the 197. Of the 50 lines between 0.65 and 0.80, 6 were rules worth keeping. JevGate's own `AGENTS.md`, release steps and measurement practice, gets no proposal. The run took 155 requests and 572,000 input tokens ($0.024); `--dry-run` prices a run first without a key.
+
+A proposal quotes the rule as written, and a terse rule makes a borderline question: accepted as proposed, ky's rule above failed the gate on a function that turns a `null` timeout off, at 0.81 against its threshold of 0.80. With one line of guidance added, the same change answered 0.88, and the fixed function passed both times.

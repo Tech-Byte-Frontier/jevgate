@@ -173,3 +173,5 @@ A call that carries a progress token (`_meta.progressToken`) gets a progress not
 ## Documentation for agents
 
 The opt-in documentation rules judge the instruction files agents load at the start of every session (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and Cursor, Copilot, Windsurf, Cline, Kiro, Junie and Roo Code rules): sections that only restate the manifest or generic advice, and text loaded in every session that applies to one directory. Their considers on instruction files fail the check by default, the one consider level that does (22 of 24 were right on projects JevGate was never tuned on). `jevgate check --rule documentation` also estimates the tokens each harness loads.
+
+The conventions in those files can gate code too. `jevgate rules propose` drafts a [custom question](custom-questions.md#proposed-from-instruction-files) from each line that states a rule a reviewer could check in one function, test, comment, section, file or change, for a person to edit and accept; an accepted question fails the gate on code that breaks the rule, whether a person or an agent wrote it.
