@@ -331,6 +331,32 @@ fn a_turn_is_blocked_three_times_at_most() {
 }
 
 #[test]
+fn the_same_event_from_two_copies_of_the_hooks_is_answered_once() {
+    // Cursor runs Claude Code's hooks beside its own: two `jevgate hook`
+    // processes get the same stop at once.
+    let project = repository();
+    let host = reviewing();
+    send(&project, &host, prompt("refactor"));
+    project.write("lib.rs", &long_function("f"));
+    let event = from(&project, "session-1", stop(false));
+    let replies: Vec<Value> = std::thread::scope(|scope| {
+        let twins: Vec<_> = (0..2)
+            .map(|_| scope.spawn(|| respond(&event, Options::default(), &host).json))
+            .collect();
+        twins.into_iter().map(|twin| twin.join().unwrap()).collect()
+    });
+    let blocks = replies.iter().filter(|r| r["decision"] == "block").count();
+    assert_eq!(blocks, 1, "{replies:?}");
+    assert!(replies.contains(&json!({})), "{replies:?}");
+    let again = send(&project, &host, stop(true));
+    assert!(
+        message(&again)
+            .starts_with("JevGate lets the agent finish: nothing changed after its last block"),
+        "the same stop sent later is answered, and the turn counted one block: {again}"
+    );
+}
+
+#[test]
 fn a_stop_the_agent_did_not_continue_counts_blocks_again() {
     let project = repository();
     let host = reviewing();

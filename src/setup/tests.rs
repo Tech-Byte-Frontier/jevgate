@@ -618,6 +618,26 @@ fn hooks_running_twice_are_warned_about() {
 }
 
 #[test]
+fn a_repositorys_local_claude_code_settings_run_twice_in_cursor_too() {
+    let project = Project::new();
+    let places = places(&project);
+    let mut local = json::Json::Object(Vec::new());
+    hooks::install(&mut local, &agents::CLAUDE).unwrap();
+    write(
+        &places.root.join(".claude/settings.local.json"),
+        &json::render(&local, &json::Layout::default()),
+    );
+    let only_cursor = setup(&[Target::Cursor]);
+    let cursor = apply(&only_cursor, &places);
+    assert!(
+        cursor
+            .warnings(&only_cursor, &places)
+            .iter()
+            .any(|w| w.contains("twice in Cursor"))
+    );
+}
+
+#[test]
 fn a_repository_outside_git_is_warned_about() {
     let project = Project::new();
     let places = places(&project);

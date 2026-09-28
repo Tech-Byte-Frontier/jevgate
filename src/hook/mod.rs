@@ -176,7 +176,7 @@ pub(crate) fn respond(input: &Value, options: Options, host: &Host) -> Answer {
     let reply = match event.kind {
         Kind::Other => Reply::default(),
         _ => match Hook::open(&event, host, deadline) {
-            Ok(hook) => hook.handle(),
+            Ok(hook) => hook.handle(input),
             Err(error) if error.is::<OutsideGit>() && !first_outside(&event) => Reply::default(),
             Err(error) => failed(&event, &what(&event), &format!("{error:#}")),
         },

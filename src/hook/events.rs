@@ -98,7 +98,18 @@ impl<'a> Hook<'a> {
         })
     }
 
-    pub(super) fn handle(&self) -> Reply {
+    /// The reply to the event, `input` as the agent sent it: none when
+    /// another `jevgate hook` process took the same event.
+    pub(super) fn handle(&self, input: &serde_json::Value) -> Reply {
+        let mut same = input.clone();
+        if let Some(fields) = same.as_object_mut() {
+            // Two hook files may name the event their own way.
+            fields.remove("hook_event_name");
+        }
+        let key = format!("{:?} {:?} {same}", self.event.agent, self.event.kind);
+        let Some(_answering) = turn::claim(&self.root, &key) else {
+            return Reply::default();
+        };
         match self.event.kind {
             Kind::SessionStart => self.session_start(),
             Kind::TurnStart => self.turn_start(),

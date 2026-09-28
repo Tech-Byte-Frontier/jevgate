@@ -297,8 +297,12 @@ impl Plan {
     fn warnings(&self, setup: &AgentSetup, places: &Places) -> Vec<String> {
         let setting_up = |target| self.agents.iter().any(|(t, _)| *t == target);
         let hooked = |target| {
-            places
-                .hook_files(target)
+            let mut files = places.hook_files(target).to_vec();
+            if target == Target::Claude {
+                // Cursor reads a repository's local Claude Code settings too.
+                files.push(places.root.join(".claude/settings.local.json"));
+            }
+            files
                 .iter()
                 .any(|path| self.settings(path).is_some_and(|s| hooks::handlers(&s) > 0))
         };

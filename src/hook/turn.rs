@@ -143,6 +143,62 @@ pub(super) fn snapshot(
         .context("Cannot take a snapshot of the working tree")
 }
 
+/// How long a mark of an event holds: an agent that runs two copies of
+/// JevGate's hooks (Cursor running Claude Code's beside its own, or Claude
+/// Code the plugin's beside the settings') starts both at once, and each
+/// gave the agent the same findings and blocked its stop, the second as
+/// "block 1 of 3" again. A mark older than this was left by a process that
+/// was stopped before it removed it.
+const TWIN_SECS: u64 = 5;
+
+/// The event this process answers, marked while it does: an identical
+/// event another `jevgate hook` starts meanwhile is that event sent twice.
+pub(super) struct Claim(Option<PathBuf>);
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        if let Some(mark) = &self.0 {
+            let _ = std::fs::remove_file(mark);
+        }
+    }
+}
+
+/// This process's claim on the event `key` names; none when another process
+/// is answering it now. A mark created exclusively decides between two
+/// processes started together, and goes when the answer is written, so the
+/// same event sent again later is answered again.
+pub(super) fn claim(root: &Path, key: &str) -> Option<Claim> {
+    let Ok(directory) = directory(root) else {
+        return Some(Claim(None));
+    };
+    let mark = directory.join(format!("{}.event", file_name(key)));
+    let create = || {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&mark)
+    };
+    match create() {
+        Ok(_) => Some(Claim(Some(mark))),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if age(&mark).is_some_and(|age| age.as_secs() < TWIN_SECS) {
+                return None;
+            }
+            let _ = std::fs::remove_file(&mark);
+            Some(Claim(create().ok().map(|_| mark)))
+        }
+        Err(_) => Some(Claim(None)),
+    }
+}
+
+/// How long ago `path` was last written.
+fn age(path: &Path) -> Option<std::time::Duration> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+}
+
 /// Remove the files of `directory` idle for a week: turn files and scratch
 /// indexes a killed hook left under `.jevgate/turns/`, or marks outside Git.
 pub(super) fn prune(directory: &Path) {
@@ -150,14 +206,9 @@ pub(super) fn prune(directory: &Path) {
         return;
     };
     for entry in entries.flatten() {
-        let idle = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age.as_secs() > KEPT_SECS);
-        if idle {
-            let _ = std::fs::remove_file(entry.path());
+        let path = entry.path();
+        if age(&path).is_some_and(|age| age.as_secs() > KEPT_SECS) {
+            let _ = std::fs::remove_file(path);
         }
     }
 }

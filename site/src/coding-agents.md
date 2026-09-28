@@ -117,7 +117,7 @@ The hook detects the agent from the event; `--agent` names it. It gives up after
 }
 ```
 
-Cursor also runs the hooks in Claude Code's files, and Copilot CLI those in the repository's `.claude/settings.json`: configure JevGate in one of them per agent, or it runs twice.
+Cursor also runs the hooks in Claude Code's files (`~/.claude/settings.json`, `.claude/settings.json` and `.claude/settings.local.json`), and Copilot CLI those in the repository's `.claude/settings.json`: configure JevGate in one of them per agent. When two copies run anyway, the one that starts second while the first answers the same event replies with nothing, so the agent is told each finding and blocked once.
 
 ## As an MCP server
 
