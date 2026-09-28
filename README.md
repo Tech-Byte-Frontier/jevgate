@@ -7,11 +7,11 @@
 
 **JevGate is a code-review gate. It asks small, precise questions about your code and turns the answers into findings you can act on.**
 
-JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, a probability and a concrete next step, so an agent or CI job can act on it and a person can check it quickly.
+JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, a probability and a concrete next step, so an agent or CI job can act on it and a person can check it quickly. By default the gate fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on: among the default rules, function-simplification reviews, right 20 of the 23 times they were labeled there (87%).
 
-![JevGate's terminal output on zoxide: the gate fails on 3 review findings (a function mixing separate jobs, and two sets of importers repeating the same steps), 3 consider findings (a group of file helpers that could be a module, branching that hides a main path, an unexplained 7) and optional notes on unnamed values](site/src/images/terminal.svg)
+![JevGate's terminal output on zoxide: the gate fails on 1 function-simplification review (a function mixing separate jobs); 3 more reviews (a file holding several features, two sets of importers repeating the same steps) and a consider (branching that hides a main path) are reported without failing it, since their rules and levels are still being measured](site/src/images/terminal.svg)
 
-JevGate 0.22.0 on [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424b3f1033094ffd97da6d47585e38259), rerun from its answer cache, so it cost nothing; 9 of the 11 notes are left out.
+JevGate 0.26.0 on [zoxide](https://github.com/ajeetdsouza/zoxide/tree/09a18b4424b3f1033094ffd97da6d47585e38259), rerun from its answer cache, so it cost nothing.
 
 **[Documentation](https://tech-byte-frontier.github.io/jevgate/)** · [Rules](https://tech-byte-frontier.github.io/jevgate/reference/rules.html) · [Configuration](https://tech-byte-frontier.github.io/jevgate/configuration.html) · [CI](https://tech-byte-frontier.github.io/jevgate/ci.html) · [Troubleshooting](https://tech-byte-frontier.github.io/jevgate/troubleshooting.html) · [Changelog](CHANGELOG.md)
 
@@ -35,7 +35,7 @@ cargo binstall jevgate            # any platform, with cargo-binstall
 cargo install jevgate --locked    # build from source; needs Rust 1.90 or later
 ```
 
-Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs an API key from [TypeSafe](https://console.typesafe.ai/settings/keys), [OpenRouter](https://openrouter.ai/settings/keys) or [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys), which serve the same model at the same price. [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, shell completions and man pages.
+Releases have binaries for Linux, macOS and Windows with checksums and build provenance. Reviewing needs an API key from [TypeSafe](https://console.typesafe.ai/settings/keys) or [OpenRouter](https://openrouter.ai/settings/keys), which serve the same model at the same price; a [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok/api-keys) key is accepted too, but has not been tried with a real key yet. [Install](https://tech-byte-frontier.github.io/jevgate/install.html) covers verifying a download, shell completions and man pages.
 
 ## Quick start
 
@@ -49,7 +49,7 @@ jevgate baseline                          # accept today's findings; later check
 
 `jevgate check --report` writes the same findings to a local dashboard you can filter by path and classification, with each file's findings, undecided units and the answers behind them:
 
-![JevGate's HTML report on zoxide: totals for files, review and consider findings, notes and cost, then a list of files by classification, with src/util.rs open to show its review and consider findings, their next steps and one undecided unit](site/src/images/report.png)
+![JevGate's HTML report on zoxide: the gate's result and what fails it by default, totals for files, findings, notes and cost, then a list of files by classification, with src/util.rs open to show its two review findings, the one that fails the gate marked, and how each rule classified the file](site/src/images/report.png)
 
 `jevgate --help` gives the workflow, exit codes, files and environment, and `jevgate check --help` explains each flag and the JSON report. Coding agents can also call JevGate as a tool through its MCP server, `jevgate mcp` ([coding agents](https://tech-byte-frontier.github.io/jevgate/coding-agents.html)).
 
@@ -93,7 +93,7 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 
 - **What is uploaded:** only the selected units of source, bounded by `upload_allow` and `upload_deny`; `--dry-run --show-requests` prints every request body offline.
 - **Secrets:** out of scope on purpose, because judging secrets would mean uploading them. Use a local secret scanner.
-- **Cost:** every run prints its input tokens and an estimated cost, and cached answers cost nothing.
+- **Cost:** every run prints its input tokens and an estimated cost, and cached answers cost nothing, so a rerun of unchanged code sends no request. Jev 1.13 costs $0.042 per million input tokens: checked as pull requests with every rule and nothing cached, the last commits of 118 corpus projects sent 4.55M first-pass input tokens, $0.19 for all 118.
 
 [Privacy and cost](https://tech-byte-frontier.github.io/jevgate/privacy-and-cost.html) and [limits](https://tech-byte-frontier.github.io/jevgate/limits.html) say more, and [how it works](https://tech-byte-frontier.github.io/jevgate/how-it-works.html) explains the evidence units and how code turns answers into findings.
 
