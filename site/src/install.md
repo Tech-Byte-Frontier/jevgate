@@ -3,11 +3,14 @@
 ```sh
 brew install tech-byte-frontier/tap/jevgate   # macOS and Linux, with Homebrew
 curl -fsSL https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/main/install.sh | sh   # Linux and macOS
+npm install -g @tech-byte-frontier/jevgate    # any platform with Node 20 or later
 cargo binstall jevgate            # any platform, with cargo-binstall
 cargo install jevgate --locked    # build from source; needs Rust 1.90 or later
 ```
 
 Each [release](https://github.com/Tech-Byte-Frontier/jevgate/releases) has binaries for Linux (x86_64 and arm64, static), macOS (Apple silicon and Intel) and Windows (x86_64), with SHA-256 checksums and build provenance: `gh attestation verify <archive> --repo Tech-Byte-Frontier/jevgate`. The install script checks the checksum and installs to `~/.local/bin`; set `JEVGATE_VERSION` or `JEVGATE_INSTALL_DIR` to change the version or place.
+
+The npm package `@tech-byte-frontier/jevgate` runs the same binaries. On its first run it downloads the release archive of its own version from GitHub, checks it against the release's SHA-256 checksums, and keeps the binary in your cache directory (`~/Library/Caches/jevgate`, `$XDG_CACHE_HOME/jevgate` or `~/.cache/jevgate`, `%LOCALAPPDATA%\jevgate\cache`); later runs start it directly, with the same arguments and exit code. It has no dependencies and runs nothing when installed. `npx @tech-byte-frontier/jevgate check` runs it once without installing, but agents' hooks need `jevgate` on the `PATH`, which `npm install -g` provides. The unscoped npm package `jevgate` is a different project.
 
 `jevgate completions bash|zsh|fish|powershell` prints a shell completion script and `jevgate man` a man page; Homebrew installs both.
 
