@@ -53,13 +53,19 @@ fn invalid_arguments_and_input_are_answered_with_exit_0() {
     }
 }
 
-#[test]
-fn without_a_key_every_event_passes_and_says_why() {
+/// A Git repository with a short function committed as `lib.rs`.
+fn committed() -> Project {
     let project = Project::new();
     std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
     git(&project, &["init", "-q"]);
     git(&project, &["add", "lib.rs"]);
     git(&project, &["commit", "-qm", "start"]);
+    project
+}
+
+#[test]
+fn without_a_key_every_event_passes_and_says_why() {
+    let project = committed();
     let start = serde_json::json!({"hook_event_name": "UserPromptSubmit", "prompt": "go"});
     assert_eq!(
         hook(project.command(), &[], &event(&project, start)).0,
@@ -107,11 +113,7 @@ const LONG_RS: &str = "fn f(values: &[i32]) -> i32 {\n    let mut total = 0;\n  
 
 #[test]
 fn the_binary_blocks_a_turn_through_the_provider_until_its_finding_is_fixed() {
-    let project = Project::new();
-    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
-    git(&project, &["init", "-q"]);
-    git(&project, &["add", "lib.rs"]);
-    git(&project, &["commit", "-qm", "start"]);
+    let project = committed();
     // Jev's part, scripted: a concern only about the long function.
     let provider = MockProvider::start(|received| {
         let level = if received.body.contains("smallest") {

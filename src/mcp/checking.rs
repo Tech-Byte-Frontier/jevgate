@@ -230,9 +230,7 @@ mod tests {
 
     #[test]
     fn progress_is_sent_only_when_more_requests_are_answered() {
-        let project = crate::tests::Project::new();
-        project.write("a.rs", &crate::tests::function("a"));
-        let (_, mut report) = crate::tests::snapshot(&project, &crate::tests::args());
+        let mut report = crate::tests::one_function("a.rs");
         let mut progress = Progress::new(json!("t1"));
         let first = progress.notification(&report).unwrap();
         assert_eq!(first["method"], "notifications/progress");

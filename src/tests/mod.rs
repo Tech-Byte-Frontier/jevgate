@@ -182,6 +182,14 @@ pub(super) fn snapshot(
     (inputs, report)
 }
 
+/// The first snapshot of a project holding one short function, `a`, at
+/// `path`, with every rule selected: a report to shape in a test.
+pub(super) fn one_function(path: &str) -> schema::Report {
+    let project = Project::new();
+    project.write(path, &function("a"));
+    snapshot(&project, &args()).1
+}
+
 pub(super) fn run(
     project: &Project,
     options: &CheckArgs,

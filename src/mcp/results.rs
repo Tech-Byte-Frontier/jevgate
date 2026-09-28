@@ -403,9 +403,7 @@ mod tests {
     /// A settled report of one file, `src/a.rs`, holding `findings` and the
     /// function-simplification units left `undecided`.
     fn report(findings: Vec<Finding>, undecided: Vec<Undecided>) -> Report {
-        let project = crate::tests::Project::new();
-        project.write("src/a.rs", &crate::tests::function("a"));
-        let (_, mut report) = crate::tests::snapshot(&project, &crate::tests::args());
+        let mut report = crate::tests::one_function("src/a.rs");
         let file = &mut report.files[0];
         file.status = Status::Review;
         file.findings = findings;

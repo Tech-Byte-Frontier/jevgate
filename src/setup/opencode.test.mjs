@@ -13,10 +13,12 @@ const PLUGIN = path.join(path.dirname(fileURLToPath(import.meta.url)), "opencode
 const skip = process.platform === "win32";
 
 /**
- * The plugin loaded as OpenCode loads it, with a fake jevgate first on PATH that
- * records each event and answers by event name (`replies`), or fails as asked.
+ * A fake jevgate first on PATH, in a directory removed after the test, that records
+ * each event it reads and answers by event name (`replies`), or fails as asked; with
+ * `onPath` false, PATH holds only its empty directory. The directory, and the events
+ * it read.
  */
-async function opencode(t, { replies = {}, exit = 0, stderr = "", stdout, delayMs = 0, onPath = true } = {}) {
+function fakeJevgate(t, { replies = {}, exit = 0, stderr = "", stdout, delayMs = 0, onPath = true }) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "jevgate-opencode-"));
   const bin = path.join(directory, "bin");
   const log = path.join(directory, "events.jsonl");
@@ -46,6 +48,19 @@ setTimeout(() => {
     process.env.PATH = path_;
     fs.rmSync(directory, { recursive: true, force: true });
   });
+  const events = () =>
+    fs.existsSync(log)
+      ? fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+      : [];
+  return { directory, events };
+}
+
+/**
+ * The plugin loaded as OpenCode loads it, beside a fake jevgate (`fakeJevgate`'s
+ * options), with a client that records the prompts it sends and the toasts it shows.
+ */
+async function opencode(t, options = {}) {
+  const { directory, events } = fakeJevgate(t, options);
   // A copy per test, so each gets a fresh module and its own timeouts.
   const copy = path.join(directory, "jevgate.mjs");
   fs.copyFileSync(PLUGIN, copy);
@@ -58,10 +73,6 @@ setTimeout(() => {
     app: { log: async () => {} },
   };
   const hooks = await JevGate({ client, directory });
-  const events = () =>
-    fs.existsSync(log)
-      ? fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line))
-      : [];
   return { JevGate, hooks, prompts, toasts, events, directory };
 }
 
