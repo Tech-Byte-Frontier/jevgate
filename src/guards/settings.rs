@@ -27,11 +27,29 @@ enum Edit {
 /// hook's gate reads the file as the turn began, so the agent cannot switch
 /// the gate off by breaking it, and the person hears why the next turn
 /// cannot be checked. A question file's edit names the keys that changed, as
-/// jevgate.toml's does: its level, threshold, question or guidance.
-pub(super) fn settings_guard(
+/// jevgate.toml's does: its level, threshold, question or guidance; so does
+/// each `[[question]]` table of jevgate.toml the edit adds, deletes or
+/// changes, a question guard of its own.
+pub(super) fn settings_guard(path: &Path, before: Option<&str>, after: Option<&str>) -> Vec<Guard> {
+    let tables = match (before, after) {
+        (Some(before), Some(after)) if path == Path::new(CONFIG_FILE) => {
+            question_tables(path, before, after)
+        }
+        _ => Vec::new(),
+    };
+    file_guard(path, before, after, !tables.is_empty())
+        .into_iter()
+        .chain(tables)
+        .collect()
+}
+
+/// The guard of the file itself; `questions_apart` when its `[[question]]`
+/// tables have guards of their own, so its edit names only the other keys.
+fn file_guard(
     path: &Path,
     before: Option<&str>,
     after: Option<&str>,
+    questions_apart: bool,
 ) -> Option<Guard> {
     let baseline = path == Path::new(BASELINE_FILE);
     let kind = if baseline {
@@ -66,7 +84,7 @@ pub(super) fn settings_guard(
             let edit = if baseline {
                 baseline_edit(before, after)
             } else {
-                configuration_edit(before, after)
+                configuration_edit(before, after, questions_apart)
             };
             match edit {
                 Edit::Same => return None,
@@ -78,8 +96,9 @@ pub(super) fn settings_guard(
     Some(Guard::new(kind, path, None, &text, message))
 }
 
-/// The top-level settings whose values differ, as "fail_on, rules".
-fn configuration_edit(before: &str, after: &str) -> Edit {
+/// The top-level settings whose values differ, as "fail_on, rules"; less
+/// `question` when its tables are guarded apart (`questions_apart`).
+fn configuration_edit(before: &str, after: &str, questions_apart: bool) -> Edit {
     let (Ok(before), Ok(after)) = (
         toml::from_str::<toml::Table>(before),
         toml::from_str::<toml::Table>(after),
@@ -89,9 +108,15 @@ fn configuration_edit(before: &str, after: &str) -> Edit {
     let keys: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
     let changed: Vec<&str> = keys
         .into_iter()
+        .filter(|key| !(questions_apart && key.as_str() == QUESTION))
         .filter(|key| before.get(*key) != after.get(*key))
         .map(String::as_str)
         .collect();
+    named_keys(&changed)
+}
+
+/// `changed` keys as a phrase, at most [`SHOWN_KEYS`] of them.
+fn named_keys(changed: &[&str]) -> Edit {
     if changed.is_empty() {
         return Edit::Same;
     }
@@ -101,6 +126,82 @@ fn configuration_edit(before: &str, after: &str) -> Edit {
         named.push_str(&format!(" and {} more", changed.len() - shown));
     }
     Edit::Named(named)
+}
+
+/// The key of jevgate.toml's `[[question]]` tables.
+const QUESTION: &str = "question";
+
+/// A question guard for each `[[question]]` table of jevgate.toml, at
+/// `path`, that the edit from `before` to `after` added, deleted or
+/// changed, by its id: the same edit in a question file of its own names
+/// the question and its changed keys, where jevgate.toml's own guard said
+/// only that the file is "edited: question". None when either text does not
+/// parse, which the file's own guard says.
+fn question_tables(path: &Path, before: &str, after: &str) -> Vec<Guard> {
+    let (Ok(before), Ok(after)) = (
+        toml::from_str::<toml::Table>(before),
+        toml::from_str::<toml::Table>(after),
+    ) else {
+        return Vec::new();
+    };
+    let (before, after) = (by_id(&before), by_id(&after));
+    let ids: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
+    ids.into_iter()
+        .filter_map(|id| {
+            let message = match (before.get(id), after.get(id)) {
+                (was, Some(now)) if !loads(now) => format!(
+                    "is {} and does not load",
+                    if was.is_some() { "edited" } else { "added" }
+                ),
+                (None, Some(_)) => "is added".to_string(),
+                (Some(_), None) => "is deleted".to_string(),
+                (Some(was), Some(now)) => {
+                    let keys: BTreeSet<&String> = was.keys().chain(now.keys()).collect();
+                    let changed: Vec<&str> = keys
+                        .into_iter()
+                        .filter(|key| was.get(*key) != now.get(*key))
+                        .map(String::as_str)
+                        .collect();
+                    match named_keys(&changed) {
+                        Edit::Named(named) => format!("is edited: {named}"),
+                        _ => return None,
+                    }
+                }
+                (None, None) => return None,
+            };
+            let rule = format!("{}/{id}", crate::catalog::CUSTOM_GROUP);
+            Some(Guard::new(
+                Kind::Question,
+                path,
+                None,
+                &rule,
+                format!("[[question]] {rule} {message}"),
+            ))
+        })
+        .collect()
+}
+
+/// Whether a `[[question]]` table of jevgate.toml loads as a question.
+fn loads(table: &toml::Table) -> bool {
+    table
+        .clone()
+        .try_into::<crate::custom::Spec>()
+        .is_ok_and(|spec| {
+            let file = (Path::new(CONFIG_FILE), std::slice::from_ref(&spec));
+            crate::custom::load(Path::new("."), file, None).is_ok()
+        })
+}
+
+/// A configuration's `[[question]]` tables by their `id`.
+fn by_id(config: &toml::Table) -> BTreeMap<String, toml::Table> {
+    config
+        .get(QUESTION)
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_table)
+        .filter_map(|table| Some((table.get("id")?.as_str()?.to_string(), table.clone())))
+        .collect()
 }
 
 /// Findings the baseline accepts that it did not, those it no longer

@@ -211,6 +211,59 @@ fn edits_to_custom_question_files_name_what_they_change() {
 }
 
 #[test]
+fn edits_to_questions_in_jevgate_toml_name_the_question_and_what_changed() {
+    let project = repository();
+    let question = |id: &str, extra: &str| {
+        format!(
+            "[[question]]\nid = \"{id}\"\nquestion = \"Does this function log a request body?\"\nunit = \"function\"\n{extra}"
+        )
+    };
+    let gate = "rules = [\"default\"]\nfail_on = [\"review\"]\n";
+    project.write(
+        "jevgate.toml",
+        &format!(
+            "{gate}{}{}{}",
+            question("lowered", ""),
+            question("gone", ""),
+            question("kept", "")
+        ),
+    );
+    project.git(&["commit", "-qam", "questions in the configuration"]);
+    let broken =
+        "[[question]]\nid = \"broken\"\nquestion = \"Logs a body.\"\nunit = \"function\"\n";
+    project.write(
+        "jevgate.toml",
+        &format!(
+            "{gate}{}{}{}{broken}",
+            question("lowered", "level = \"note\"\n"),
+            question("kept", ""),
+            question("added", "")
+        ),
+    );
+    let scan = scanned(&project);
+    assert_eq!(
+        described(&scan),
+        [
+            "jevgate.toml [[question]] custom/added is added",
+            "jevgate.toml [[question]] custom/broken is added and does not load",
+            "jevgate.toml [[question]] custom/gone is deleted",
+            "jevgate.toml [[question]] custom/lowered is edited: level",
+        ],
+        "the questions alone changed, so jevgate.toml has no guard of its own"
+    );
+    assert!(scan.guards.iter().all(|g| g.kind == Kind::Question));
+    project.write(
+        "jevgate.toml",
+        &format!("rules = [\"all\"]\n{}", question("lowered", "")),
+    );
+    let both = described(&scanned(&project));
+    assert!(
+        both.contains(&"jevgate.toml is edited: fail_on, rules".to_string()),
+        "{both:?}"
+    );
+}
+
+#[test]
 fn a_file_the_change_makes_jevgate_skip_is_a_guard() {
     let project = repository();
     project.write(
