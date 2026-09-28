@@ -139,6 +139,7 @@ pub(super) fn agent(
     }
     emit_guards(out, report, verbose, style)?;
     emit_summary(out, report)?;
+    emit_preview(out, report)?;
     emit_left_out(out, report, verbose)?;
     if let Some(load) = &report.context_load {
         emit_context_load(out, load)?;
@@ -539,6 +540,51 @@ fn emit_capped(out: &mut impl Write, report: &Report) -> Result<()> {
             crate::units::MAX_CUSTOM_UNITS
         )?;
     }
+    Ok(())
+}
+
+/// The files of the preview languages (`analysis::generic`) and what reads
+/// them, by language: four rules read their code, and none their test
+/// files yet. Without it, a `--rule security` check of a Kotlin project
+/// passed with no word that security does not read Kotlin.
+fn emit_preview(out: &mut impl Write, report: &Report) -> Result<()> {
+    // Per language: files read, and test files not judged.
+    let mut languages = BTreeMap::<&str, (usize, usize)>::new();
+    for file in &report.files {
+        let class = match &file.classification {
+            Some(class) if file.status != Status::Skipped => class,
+            _ => continue,
+        };
+        if crate::analysis::generic::of(&file.path).is_none() {
+            continue;
+        }
+        let counts = languages.entry(class.language.as_str()).or_default();
+        if class.kind == crate::file_kind::TESTS {
+            counts.1 += 1;
+        } else {
+            counts.0 += 1;
+        }
+    }
+    if languages.is_empty() {
+        return Ok(());
+    }
+    let listed: Vec<String> = languages
+        .iter()
+        .map(|(language, &(read, tests))| match (read, tests) {
+            (read, 0) => format!("{language} ({})", count(read, "file")),
+            (0, tests) => format!("{language} ({} not judged yet)", count(tests, "test file")),
+            (read, tests) => format!(
+                "{language} ({}; {} not judged yet)",
+                count(read, "file"),
+                count(tests, "test file")
+            ),
+        })
+        .collect();
+    writeln!(
+        out,
+        "\nPreview languages, read only by function simplification, file organization, shared logic and comments: {}.",
+        listed.join(", ")
+    )?;
     Ok(())
 }
 

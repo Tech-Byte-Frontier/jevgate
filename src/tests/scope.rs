@@ -256,3 +256,34 @@ fn a_generic_language_gets_only_the_rules_its_units_serve_and_its_tests_are_not_
     assert!(!rust(&solo.requests).is_empty());
     assert_eq!(rust(&mock.requests), rust(&solo.requests));
 }
+
+#[test]
+fn the_agent_text_says_what_reads_a_preview_language_and_what_does_not() {
+    let project = Project::new();
+    project.write("src/shop.kt", KOTLIN_SHOP);
+    project.write(
+        "src/test/kotlin/ShopTest.kt",
+        "class ShopTest {\n    fun totals() {\n        check(openTotal(listOf()) == 0)\n    }\n}\n",
+    );
+    project.write("lib.rs", &function("a"));
+    let mut options = args();
+    options.rules = vec![crate::catalog::INJECTION.into()];
+    let mut mock = Mock::default();
+    let report = run(&project, &options, &mut mock);
+    let mut out = Vec::new();
+    crate::output::agent(&mut out, &report, false, crate::output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains(
+            "\nPreview languages, read only by function simplification, file organization, shared logic and comments: Kotlin (1 file; 1 test file not judged yet).\n"
+        ),
+        "{text}"
+    );
+    // A run with no preview file says nothing of them.
+    let rust = Project::new();
+    rust.write("lib.rs", &function("a"));
+    let report = run(&rust, &options, &mut Mock::default());
+    let mut out = Vec::new();
+    crate::output::agent(&mut out, &report, false, crate::output::Style::PLAIN).unwrap();
+    assert!(!String::from_utf8(out).unwrap().contains("Preview"));
+}
