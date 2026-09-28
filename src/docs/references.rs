@@ -290,11 +290,24 @@ fn present(root: &Path, base: &Path, name: &str, history: &History) -> bool {
     {
         return true;
     }
-    // A partial path such as `services/quota.ts` names a deeper file.
+    // A partial path such as `services/quota.ts` names a deeper file, and a
+    // module path without its extension, such as `web/test/i18n-mock` in an
+    // import, names `i18n-mock.ts`.
     let suffix = format!("/{trimmed}");
+    let module = Path::new(trimmed).extension().is_none();
+    let wanted: Vec<String> = candidates
+        .iter()
+        .map(|c| c.to_string_lossy().into_owned())
+        .collect();
     history.tracked.iter().any(|p| {
         let p = p.to_string_lossy();
-        p.ends_with(&suffix) || p.starts_with(&format!("{trimmed}/"))
+        let stem = p
+            .rsplit_once('.')
+            .filter(|(_, e)| !e.contains('/'))
+            .map(|(s, _)| s);
+        p.ends_with(&suffix)
+            || p.starts_with(&format!("{trimmed}/"))
+            || module && stem.is_some_and(|s| wanted.iter().any(|w| w == s) || s.ends_with(&suffix))
     })
 }
 
@@ -633,6 +646,15 @@ mod tests {
         let text = "Assign :attr:`flask.Flask.json` or :py:mod:`flask.json`; edit :file:`conf/app.json` and {download}`data/seed.json`.";
         let names: Vec<String> = found(text).into_iter().map(|(n, _)| n).collect();
         assert_eq!(names, ["conf/app.json", "data/seed.json"]);
+    }
+
+    #[test]
+    fn a_module_path_without_its_extension_names_its_file() {
+        let names: Vec<String> = found("Mock it with `src/services/quota` or `src/services/gone`.")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, ["src/services/gone"]);
     }
 
     #[test]
