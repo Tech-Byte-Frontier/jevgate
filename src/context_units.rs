@@ -304,6 +304,9 @@ fn line_number(source: &str, byte: usize) -> usize {
 }
 
 pub fn review_targets(path: &Path, source: &str) -> Vec<(String, SourceRange, String)> {
+    if crate::analysis::generic::of(path).is_some() {
+        return generic_targets(path, source);
+    }
     let Some(tree) = crate::syntax::parse(path, source).ok().flatten() else {
         return Vec::new();
     };
@@ -319,6 +322,23 @@ pub fn review_targets(path: &Path, source: &str) -> Vec<(String, SourceRange, St
             };
             let name = target_name(&unit, range.start_line);
             (name, range, source[unit.span].to_owned())
+        })
+        .collect()
+}
+
+/// The units of a language of the generic tier, which its tag query finds
+/// (`analysis::generic`): this file's walk reads the other languages' kinds.
+fn generic_targets(path: &Path, source: &str) -> Vec<(String, SourceRange, String)> {
+    let units = crate::analysis::units::parse(path, source).unwrap_or_default();
+    units
+        .units
+        .into_iter()
+        .map(|unit| {
+            let range = SourceRange {
+                start_line: unit.line,
+                end_line: unit.end_line,
+            };
+            (unit.name, range, source[unit.span].to_owned())
         })
         .collect()
 }

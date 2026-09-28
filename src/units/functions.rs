@@ -1,26 +1,30 @@
-//! Function simplification: packed function sources. Per function, a Score on
-//! whether splitting would help a reader and, only where the parser finds deep
-//! nesting or a long branch chain, a Score on whether flattening would help.
-//! A split finding is then located with one Choice among the body's blocks.
+//! Function simplification: per function, a Score on whether splitting would
+//! help a reader and, only where the parser finds deep nesting or a long
+//! branch chain, a Score on whether flattening would help, asked in the
+//! function packs every rule shares (`packs`). A split finding is then
+//! located with one Choice among the body's blocks.
 use super::{
-    Asked, Block, Detail, FileContext, FilePlan, Planned, Presence, Questions, Scope, UnitPlan,
-    compact, identity, pack_runs, questions, unique_ids,
+    Asked, Block, Detail, FileContext, FilePlan, Presence, Questions, Scope, UnitPlan, compact,
+    identity,
+    packs::{Ask, FunctionAsk},
+    questions, unique_ids,
 };
 use crate::{analysis::units::Unit, catalog::FUNCTION_SIMPLIFICATION, schema::Pass};
 use serde_json::{Value, json};
 
 const CALLEES: usize = 16;
 
+/// Plan a unit per function, each paired with its position among its file's
+/// parsed units, and return what the first pass asks about those judged.
 pub(super) fn plan(
     file: &FileContext<'_>,
-    units: &[&Unit],
+    units: &[(usize, &Unit)],
     scope: &Scope<'_>,
     out: &mut FilePlan,
-    requests: &mut Vec<Planned>,
-) {
-    let ids = unique_ids("function", units.iter().map(|u| u.name.as_str()));
-    let mut judged = Vec::new();
-    for (unit, id) in units.iter().zip(ids) {
+) -> Vec<FunctionAsk> {
+    let ids = unique_ids("function", units.iter().map(|(_, u)| u.name.as_str()));
+    let mut asks = Vec::new();
+    for (&(position, unit), id) in units.iter().zip(ids) {
         let source = unit.source(file.source);
         let presence = if unit.too_small() {
             Presence::TooSmall
@@ -36,7 +40,7 @@ pub(super) fn plan(
             .filter(|(request, _)| file.budget.fits(request));
         out.units.push(UnitPlan {
             rule: FUNCTION_SIMPLIFICATION,
-            id: id.clone(),
+            id,
             name: unit.name.clone(),
             presence,
             locations: vec![file.location(unit.line, unit.end_line, Some(&unit.name))],
@@ -50,98 +54,42 @@ pub(super) fn plan(
             recheck: recheck.map(Into::into),
         });
         if presence == Presence::Judged {
-            judged.push(Item {
-                index: out.units.len() - 1,
-                id,
-                nested: unit.deeply_nested(),
-                state: json!({"name": unit.name, "source": source}),
+            asks.push(FunctionAsk {
+                position,
+                name: unit.name.clone(),
+                source: source.to_string(),
+                ask: Ask::Split {
+                    unit: out.units.len() - 1,
+                    nested: unit.deeply_nested(),
+                },
             });
         }
     }
-    // Runs end after names, so a function added, removed or resized
-    // re-asks only its own run.
-    for group in pack_runs(
-        judged,
-        |item| item.state["name"].as_str().unwrap_or_default(),
-        |item| &item.state,
-    ) {
-        let (request, asked) = build(file, &group, None);
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-            continue;
-        }
-        // A pack that is too large is sent one function at a time.
-        for item in group {
-            let (request, asked) = build(file, std::slice::from_ref(&item), None);
-            if file.budget.fits(&request) {
-                requests.push(Planned {
-                    owner: file.owner,
-                    request,
-                    asked,
-                });
-            } else {
-                let unit = &mut out.units[item.index];
-                unit.presence = Presence::NeedsContext;
-                unit.recheck = None;
-                unit.detail = Detail::Function {
-                    blocks: Vec::new(),
-                    locate: None,
-                };
-            }
-        }
-    }
+    asks
 }
 
-#[derive(Clone)]
-struct Item {
-    index: usize,
-    id: String,
-    /// Deep nesting or a long branch chain: flattening is also asked.
-    nested: bool,
-    state: Value,
-}
-
-fn build(file: &FileContext<'_>, items: &[Item], callees: Option<Vec<Value>>) -> (Value, Asked) {
-    let pass = if callees.is_some() {
-        Pass::Recheck
-    } else {
-        Pass::First
-    };
-    let mut questions = Questions::default();
-    for (index, item) in items.iter().enumerate() {
-        let path = format!("functions[{index}].source");
-        let mut asked_here = vec![("split", questions::function_split(&path, callees.is_some()))];
-        if item.nested {
-            asked_here.push(("flatten", questions::function_flatten(&path)));
-        }
-        for (question, body) in asked_here {
-            questions.ask(
-                format!("f{index}_{question}"),
-                body,
-                &item.id,
-                FUNCTION_SIMPLIFICATION,
-                question,
-                pass,
-            );
-        }
+/// The split Score about `functions[index]` and, where its nesting is deep
+/// (`nested`), the flatten Score; a recheck's split question points at the
+/// callee signatures sent beside it.
+pub(super) fn ask(questions: &mut Questions, index: usize, id: &str, nested: bool, pass: Pass) {
+    let path = format!("functions[{index}].source");
+    let mut asked = vec![(
+        "split",
+        questions::function_split(&path, pass == Pass::Recheck),
+    )];
+    if nested {
+        asked.push(("flatten", questions::function_flatten(&path)));
     }
-    let mut state = json!({
-        "file": file.plain_state(),
-        "functions": items.iter().map(|item| item.state.clone()).collect::<Vec<_>>(),
-    });
-    if let Some(callees) = callees {
-        state["callees"] = json!(callees);
+    for (question, body) in asked {
+        questions.ask(
+            format!("f{index}_{question}"),
+            body,
+            id,
+            FUNCTION_SIMPLIFICATION,
+            question,
+            pass,
+        );
     }
-    let stage = if pass == Pass::Recheck {
-        "recheck"
-    } else {
-        "functions"
-    };
-    file.request(stage, state, questions)
 }
 
 /// The same questions about one function, with the signatures it calls.
@@ -151,13 +99,19 @@ fn recheck(
     id: &str,
     scope: &Scope<'_>,
 ) -> Option<(Value, Asked)> {
+    // Callees of one family: a Kotlin function's `map` is no Python `map`,
+    // and the other languages keep reading each other as before. The family
+    // is looked up only for a name the unit calls: the pairs of functions
+    // grow with the square of a scope's size.
+    let family = crate::analysis::generic::family(file.path);
     let mut callees = Vec::new();
-    for (_, _, callee) in scope.scope_units() {
+    for (path, _, callee) in scope.scope_units() {
         if callees.len() == CALLEES {
             break;
         }
         if unit.calls.contains(&callee.short_name)
             && callee.name != unit.name
+            && crate::analysis::generic::family(path) == family
             && !callees.iter().any(|c: &Value| c["name"] == callee.name)
         {
             callees.push(json!({"name": callee.name, "signature": callee.signature}));
@@ -166,13 +120,14 @@ fn recheck(
     if callees.is_empty() {
         return None;
     }
-    let item = Item {
-        index: 0,
-        id: id.to_string(),
-        nested: unit.deeply_nested(),
-        state: json!({"name": unit.name, "source": unit.source(file.source)}),
-    };
-    let (request, asked) = build(file, &[item], Some(callees));
+    let mut questions = Questions::default();
+    ask(&mut questions, 0, id, unit.deeply_nested(), Pass::Recheck);
+    let state = json!({
+        "file": file.plain_state(),
+        "functions": [{"name": unit.name, "source": unit.source(file.source)}],
+        "callees": callees,
+    });
+    let (request, asked) = file.request("recheck", state, questions);
     file.budget.fits(&request).then_some((request, asked))
 }
 

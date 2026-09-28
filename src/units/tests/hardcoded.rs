@@ -30,8 +30,9 @@ fn judged(
 fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
     let (project, options) = hardcoded_project();
     let (_, plan) = planned(&project, &options);
-    assert_eq!(stages(&plan), ["values", "constants"]);
-    let values = &plan.requests[0].request["state"]["functions"];
+    assert_eq!(stages(&plan), ["constants", "functions"]);
+    let functions = first_request(&plan, "functions");
+    let values = &functions["state"]["functions"];
     assert_eq!(
         values.as_array().unwrap().len(),
         1,
@@ -41,10 +42,10 @@ fn functions_with_literals_and_module_constants_are_hardcoded_value_units() {
         values[0]["values"],
         json!(["\"db.internal:5432\"", "30_000"])
     );
-    let questions = plan.requests[0].request["questions"].as_object().unwrap();
+    let questions = functions["questions"].as_object().unwrap();
     assert_eq!(questions.len(), 3);
     assert_eq!(
-        plan.requests[1].request["state"]["constants"][0]["value"],
+        first_request(&plan, "constants")["state"]["constants"][0]["value"],
         "\"eu-west-1\""
     );
 }
@@ -294,16 +295,36 @@ fn undecided_units_are_listed_with_the_questions_left_undecided() {
     let report = run(&project, &options, &mut scripted(3));
     let dimension = &report.files[0].dimensions["function_simplification"];
     assert_eq!(dimension.status, Status::Uncertain);
+    let [unit] = dimension.undecided.as_slice() else {
+        panic!("{:?}", dimension.undecided);
+    };
+    assert_eq!((unit.unit.as_str(), unit.line), ("borderline", 1));
+    assert_eq!(unit.questions, ["splitting"]);
+    assert_eq!(unit.locations[0].end_line, 8);
+    // The question as it was asked, the evidence it named, what each answer
+    // means and the answer that left it open.
+    let [open] = unit.open.as_slice() else {
+        panic!("{:?}", unit.open);
+    };
     assert_eq!(
-        dimension.undecided,
-        [crate::schema::Undecided {
-            unit: "borderline".into(),
-            line: 1,
-            questions: vec!["splitting".into()],
-            values: Vec::new(),
-        }]
+        (open.id.as_str(), open.pass),
+        ("split", crate::schema::Pass::First)
     );
+    assert!(open.text.contains("`functions[0].source`"), "{}", open.text);
+    assert_eq!(open.evidence, ["functions[0].source"]);
+    assert!(open.options["2"].starts_with("Yes."), "{:?}", open.options);
+    let asked = report.files[0]
+        .judgments
+        .iter()
+        .find(|j| j.question == "split")
+        .unwrap();
+    assert_eq!(open.answer, asked.answer);
     options.refresh = true;
+    let review = run(&project, &options, &mut scripted(2));
+    assert_eq!(
+        review.files[0].findings[0].fingerprint, unit.fingerprint,
+        "the fingerprint a finding of the unit has"
+    );
     let report = run(&project, &options, &mut scripted(0));
     assert!(
         report.files[0].dimensions["function_simplification"]
@@ -385,9 +406,9 @@ fn a_value_added_to_one_run_of_functions_leaves_the_other_runs_alone() {
         source
     };
     let rules = [catalog::HARDCODED_VALUES];
-    let (sizes, before) = packs(&[("lib.rs", &source(false))], &rules, "values");
+    let (sizes, before) = packs(&[("lib.rs", &source(false))], &rules, "functions");
     assert_eq!(sizes, [4, 5, 1]);
-    let (sizes, after) = packs(&[("lib.rs", &source(true))], &rules, "values");
+    let (sizes, after) = packs(&[("lib.rs", &source(true))], &rules, "functions");
     assert_eq!(sizes, [4, 6, 1]);
     only_changed(&before, &after, 1);
 }

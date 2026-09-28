@@ -1,5 +1,8 @@
 /target/
 /.jevgate/
+# What publishing the npm launcher leaves behind.
+/npm/*.tgz
+/npm/SHA256SUMS
 .env
 .env.*
 *.pem

@@ -5,7 +5,7 @@
 //! finding's level, `located` where a finding points, and `redundant` and
 //! `comments` report tests and comments together.
 use super::{
-    Access, Block, Detail, FilePlan, Presence, UnitPlan,
+    Access, Block, Detail, FilePlan, Planned, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, QUERIED, at_most_note, benefit, checks, choice, choice_mass, confirmable,
         document_split, errors_found, escape_found, logs_found, lowered, noul, open,
@@ -14,8 +14,8 @@ use super::{
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
-        doc_pair_wording, document_wording, function_wording, handler_wording, law_wording,
-        module_wording, outline_wording, pair_wording, part_wording, plan_wording,
+        custom_wording, doc_pair_wording, document_wording, function_wording, handler_wording,
+        law_wording, module_wording, outline_wording, pair_wording, part_wording, plan_wording,
         privilege_wording, question_label, section_wording, security_wording, stale_wording,
         test_pair_wording, test_wording, values_wording,
     },
@@ -34,6 +34,7 @@ mod caps;
 mod comments;
 mod due;
 mod located;
+mod open;
 mod redundant;
 use answers::*;
 use caps::*;
@@ -43,6 +44,7 @@ pub use due::{
     unlocated_units, unparted_units, unqueried_units, unsettled, untraced_units,
 };
 use located::*;
+use open::Quotes;
 use redundant::*;
 
 pub struct Composed {
@@ -51,14 +53,17 @@ pub struct Composed {
     pub status: Status,
 }
 
-pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
+/// Compose a file's judgments; `first` holds the requests its units were
+/// first asked in, which an undecided unit quotes its open questions from.
+pub fn compose(plan: &FilePlan, judgments: &[Judgment], first: &[&Planned]) -> Composed {
     let few = few_comment_lines(plan, judgments);
+    let quotes = Quotes { judgments, first };
     let mut tally = Tally::default();
     for (rule, omitted) in &plan.rules {
         tally.counts.entry(rule).or_default().omitted = *omitted;
     }
     for unit in &plan.units {
-        tally.add(plan, unit, judgments, &few);
+        tally.add(plan, unit, quotes, &few);
     }
     let Tally {
         mut counts,
@@ -90,7 +95,9 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
             let count = counts.remove(rule).unwrap_or_default();
             let concern = concern.get(rule).copied().unwrap_or(0.0);
             let undecided = undecided.remove(rule).unwrap_or_default();
-            (rule.to_string(), dimension(rule, count, concern, undecided))
+            let question = plan.questions.iter().find(|q| q.rule == *rule).copied();
+            let dimension = dimension((rule, question), count, concern, undecided);
+            (rule.to_string(), dimension)
         })
         .collect();
     // Strongest first, so a note never sits above a review or consider.
@@ -118,19 +125,22 @@ struct Tally<'p> {
 impl<'p> Tally<'p> {
     /// Counts one unit under its rule and keeps what it contributes: a
     /// finding, a comment to group, a redundant test pair or an undecided unit.
-    fn add(
-        &mut self,
-        plan: &FilePlan,
-        unit: &'p UnitPlan,
-        judgments: &[Judgment],
-        few: &BTreeSet<&str>,
-    ) {
+    fn add(&mut self, plan: &FilePlan, unit: &'p UnitPlan, quotes: Quotes, few: &BTreeSet<&str>) {
+        let judgments = quotes.judgments;
         let count = self.counts.entry(unit.rule).or_default();
         if !counted_as_judged(unit, judgments, count) {
             return;
         }
         let (outcome, answers) = resolved(unit, judgments);
         let outcome = capped(unit, judgments, few, outcome);
+        // Text written to steer the reviewer keeps the unit that sends it
+        // from clearing: its answers may be the text's, not the code's.
+        let steered = steered(plan, unit, judgments)
+            .filter(|_| matches!(outcome, Outcome::Clear | Outcome::Note(_)));
+        let outcome = match steered {
+            Some(_) => Outcome::Uncertain(outcome.concern()),
+            None => outcome,
+        };
         // Two tests that check one behavior with different inputs are a note
         // on their own; three or more linked by such pairs are grouped into a
         // consider below. Labeled by hand on just, express, gson and
@@ -164,10 +174,15 @@ impl<'p> Tally<'p> {
             None if outcome == Outcome::Clear => count.clear += 1,
             None => {
                 count.uncertain += 1;
-                self.undecided
-                    .entry(unit.rule)
-                    .or_default()
-                    .push(undecided_unit(unit, &answers));
+                let mut undecided = undecided_unit(plan, unit, &answers, quotes);
+                if let Some(line) = steered {
+                    // Undecided for the text, not for its questions: a verify
+                    // item names the text in their place.
+                    undecided.questions =
+                        vec![format!("text written to steer a reviewer (line {line})")];
+                    undecided.open.clear();
+                }
+                self.undecided.entry(unit.rule).or_default().push(undecided);
             }
         }
         if let (
@@ -186,6 +201,17 @@ impl<'p> Tally<'p> {
             });
         }
     }
+}
+
+/// The line of a text sent with `unit` that Jev read, at 0.80, as written
+/// to steer its reviewer: a comment or string telling it the code is safe or
+/// to ignore it.
+fn steered(plan: &FilePlan, unit: &UnitPlan, judgments: &[Judgment]) -> Option<usize> {
+    plan.steering
+        .iter()
+        .filter(|s| s.units.contains(&unit.id))
+        .find(|s| s.answer(judgments).is_some_and(super::outcome::at_least))
+        .map(|s| s.line)
 }
 
 /// Counts a unit that is too small, needs context or was left unasked under
@@ -300,40 +326,22 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
 /// so the entry names what the question was about without repeating the code.
 const SHOWN_VALUES: usize = 3;
 
-/// The unit and its undecided questions; with no answers, why.
-fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
-    let get = |q: &str| answers.get(q).copied();
-    let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
-        .then(|| value_signals(&get, &unit.detail, true))
-        .flatten();
-    // Instruction sections and section pairs settle some signals by others.
-    let settled_sections = match unit.rule {
-        catalog::AGENT_CONTEXT => super::outcome::section_signals(&get),
-        catalog::DOC_DUPLICATION => super::outcome::pair_signals(
-            &get,
-            matches!(
-                unit.detail,
-                Detail::DocPair {
-                    translated: true,
-                    ..
-                }
-            ),
-        ),
-        _ => None,
-    };
-    let mut questions: Vec<String> = match (settled_values, settled_sections) {
-        (Some(signals), _) => signals
-            .iter()
-            .filter(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
-            .map(|(q, ..)| question_label(q).to_string())
-            .collect(),
-        (None, Some(signals)) => signals
-            .iter()
-            .filter(|(_, o)| matches!(o, Outcome::Uncertain(_)))
-            .map(|(q, _)| question_label(q).to_string())
-            .collect(),
-        (None, None) => undecided_questions(unit.rule, answers),
-    };
+/// The unit, where it is and the questions it left undecided, each as it
+/// was asked; with no answers, why. A custom unit's is its question.
+fn undecided_unit(
+    plan: &FilePlan,
+    unit: &UnitPlan,
+    answers: &Answers<'_>,
+    quotes: Quotes,
+) -> Undecided {
+    let open = open_questions(unit, answers);
+    let mut questions: Vec<String> = open
+        .iter()
+        .map(|q| match &unit.detail {
+            Detail::Custom(question) => question.question.clone(),
+            _ => question_label(q).to_string(),
+        })
+        .collect();
     if answers.is_empty() {
         questions.push("no answer".into());
     }
@@ -355,11 +363,58 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
         values,
         line: unit.locations.first().map_or(1, |l| l.start_line),
         questions,
+        fingerprint: fingerprint(unit.rule, plan, &unit.identity),
+        locations: unit.locations.clone(),
+        open: quotes.open(unit, &open, answers),
+    }
+}
+
+/// The questions whose answers left a unit undecided: a custom unit is
+/// asked its one question.
+fn open_questions(unit: &UnitPlan, answers: &Answers<'_>) -> Vec<&'static str> {
+    if let Detail::Custom(_) = unit.detail {
+        return answers
+            .get(super::answers::CUSTOM)
+            .map(|_| super::answers::CUSTOM)
+            .into_iter()
+            .collect();
+    }
+    let get = |q: &str| answers.get(q).copied();
+    let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
+        .then(|| value_signals(&get, &unit.detail, true))
+        .flatten();
+    // Instruction sections and section pairs settle some signals by others.
+    let settled_sections = match unit.rule {
+        catalog::AGENT_CONTEXT => super::outcome::section_signals(&get),
+        catalog::DOC_DUPLICATION => super::outcome::pair_signals(
+            &get,
+            matches!(
+                unit.detail,
+                Detail::DocPair {
+                    translated: true,
+                    ..
+                }
+            ),
+        ),
+        _ => None,
+    };
+    match (settled_values, settled_sections) {
+        (Some(signals), _) => signals
+            .iter()
+            .filter(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
+            .map(|(q, ..)| *q)
+            .collect(),
+        (None, Some(signals)) => signals
+            .iter()
+            .filter(|(_, o)| matches!(o, Outcome::Uncertain(_)))
+            .map(|(q, _)| *q)
+            .collect(),
+        (None, None) => undecided_questions(unit.rule, answers),
     }
 }
 
 /// The deciding questions of a rule whose own answers stayed undecided.
-fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<String> {
+fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<&'static str> {
     deciding_questions(rule)
         .iter()
         .filter(|q| {
@@ -375,17 +430,27 @@ fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<String> {
                 matches!(outcome, Outcome::Uncertain(_))
             })
         })
-        .map(|q| question_label(q).to_string())
+        .copied()
         .collect()
 }
 
-/// A rule's status is its most severe unit outcome.
-fn dimension(rule: &str, count: UnitCounts, concern: f64, undecided: Vec<Undecided>) -> Dimension {
+/// A rule's status is its most severe unit outcome. A custom question
+/// names its units and gives its own version.
+fn dimension(
+    (rule, question): (&str, Option<&crate::custom::Question>),
+    count: UnitCounts,
+    concern: f64,
+    undecided: Vec<Undecided>,
+) -> Dimension {
+    let (noun, version) = match question {
+        Some(question) => (question.unit.noun(), question.version.clone()),
+        None => (noun(rule), catalog::rule_version(rule).into()),
+    };
     Dimension {
-        decision_basis: basis(rule, &count),
+        decision_basis: basis(noun, &count),
         status: counted_status(&count),
         concern_probability: concern,
-        rule_version: catalog::rule_version(rule).into(),
+        rule_version: version,
         units: count,
         undecided,
     }
@@ -434,8 +499,9 @@ pub(super) fn file_status(
     }
 }
 
-fn basis(rule: &str, count: &UnitCounts) -> String {
-    let noun = match rule {
+/// What a built-in rule's units are called.
+fn noun(rule: &str) -> &'static str {
+    match rule {
         catalog::FILE_ORGANIZATION => "outline",
         catalog::FUNCTION_SIMPLIFICATION => "function",
         catalog::SHARED_LOGIC => "candidate pair",
@@ -451,7 +517,11 @@ fn basis(rule: &str, count: &UnitCounts) -> String {
         catalog::DOC_STALENESS => "document check",
         catalog::DOC_DUPLICATION => "section pair",
         _ => "test pair",
-    };
+    }
+}
+
+/// How many units were judged and with what outcomes, and what was not.
+fn basis(noun: &str, count: &UnitCounts) -> String {
     let plural = |n: usize| if n == 1 { "" } else { "s" };
     let mut parts = Vec::new();
     if count.judged == 0 && count.needs_context == 0 {
@@ -544,7 +614,7 @@ fn finding(
             block = located_block(unit, blocks, judgments, "block")
                 .filter(|b| !most_of(&b.location, &unit.locations));
             let bend = crate::analysis::bend::file(&plan.path);
-            function_wording(name, strength, p, answers, (block, bend))
+            function_wording(name, strength, answers, (block, bend))
         }
         Detail::Outline {
             tests,
@@ -556,7 +626,7 @@ fn finding(
             if let Some(part) = deciding_part(answers, parts) {
                 symbol = part.names.first().cloned();
                 locations = part.locations.clone();
-                part_wording(part, strength, p)
+                part_wording(part, strength)
             } else {
                 let chosen = outline_groups(answers.get("module").copied(), groups, *members);
                 symbol = chosen.first().map(|group| group.id.clone());
@@ -565,7 +635,7 @@ fn finding(
                 }
                 let several =
                     several_kind(answers.get("split").copied(), answers.get("kind").copied());
-                outline_wording(&chosen, *tests, several, strength, p)
+                outline_wording(&chosen, *tests, several, strength)
             }
         }
         Detail::Pair {
@@ -578,10 +648,9 @@ fn finding(
             differences,
             (*within_test, *in_tests, *in_cases),
             strength,
-            p,
         ),
         Detail::Values { .. } | Detail::Constants { .. } => {
-            let (wording, constant) = values_finding(unit, strength, p, answers, judgments);
+            let (wording, constant) = values_finding(unit, strength, answers, judgments);
             if let Some(location) = constant {
                 symbol = location.symbol.clone();
                 locations = vec![location];
@@ -597,15 +666,15 @@ fn finding(
             category = Some(named);
             wording
         }
-        Detail::Section { .. } => section_wording(name, &unit.detail, strength, p, answers),
+        Detail::Section { .. } => section_wording(name, &unit.detail, strength, answers),
         Detail::Plan { facts } => {
             symbol = None;
             category = Some(super::grouping::FINISHED_PLAN.into());
-            plan_wording(name, facts, p)
+            plan_wording(name, facts)
         }
-        Detail::Stale { missing, .. } => stale_wording(name, missing, p),
+        Detail::Stale { missing, .. } => stale_wording(name, missing),
         Detail::DocPair { other, .. } => {
-            let (wording, conflict) = doc_pair_wording(name, other, answers, p);
+            let (wording, conflict) = doc_pair_wording(name, other, answers);
             if conflict {
                 category = Some("conflict".into());
             }
@@ -614,14 +683,14 @@ fn finding(
         Detail::Document { parts, .. } => {
             symbol = None;
             block = located_block(unit, parts, judgments, "part");
-            document_wording(name, strength, p, answers, block)
+            document_wording(name, strength, answers, block)
         }
         Detail::Handler { registered } => {
             category = Some("CWE-209 error details exposed".into());
-            handler_wording(name, registered, strength, p)
+            handler_wording(name, registered, strength)
         }
         Detail::Access(access @ (Access::Table | Access::View | Access::Reducer)) => {
-            let (wording, named) = module_wording(access, name, strength, p, answers);
+            let (wording, named) = module_wording(access, name, strength, answers);
             category = Some(named);
             wording
         }
@@ -631,24 +700,33 @@ fn finding(
                 Access::Definer => format!("SECURITY DEFINER function `{name}`"),
                 _ => format!("A grant on `{name}`"),
             };
-            let (wording, named) = privilege_wording(&subject, strength, p, answers);
+            let (wording, named) = privilege_wording(&subject, strength, answers);
             category = Some(named);
             wording
         }
         Detail::Job { expressions } => {
-            let (wording, named) = job_wording(name, expressions, strength, p, answers);
+            let (wording, named) = job_wording(name, expressions, strength, answers);
             category = Some(named);
             wording
         }
         Detail::Comment { .. } => {
             let reason = comment_reason(answers, documented(unit));
-            comment_wording(name, &[(&unit.locations[0], reason)], strength, p)
+            comment_wording(name, &[(&unit.locations[0], reason)], strength)
         }
-        Detail::Test { .. } => test_wording(name, strength, p, answers),
-        Detail::Law => law_wording(name, strength, p, answers),
+        Detail::Test { .. } => test_wording(name, strength, answers),
+        Detail::Custom(question) => {
+            if matches!(
+                question.unit,
+                crate::custom::Kind::File | crate::custom::Kind::Hunk
+            ) {
+                symbol = None;
+            }
+            custom_wording(question, name)
+        }
+        Detail::Law => law_wording(name, strength, answers),
         Detail::TestPair { .. } => {
             symbol = None;
-            test_pair_wording(name, strength == Strength::Review, p)
+            test_pair_wording(name, strength == Strength::Review)
         }
     };
     let lines = locations
@@ -667,7 +745,10 @@ fn finding(
         message,
         action: action.into(),
         symbol,
-        rule_version: catalog::rule_version(unit.rule).into(),
+        rule_version: match &unit.detail {
+            Detail::Custom(question) => question.version.clone(),
+            _ => catalog::rule_version(unit.rule).into(),
+        },
         concern_probability: p,
         locations,
         quote: unit.quote.clone(),
@@ -687,5 +768,8 @@ fn finding(
         rank: rank(p, lines),
         baselined: false,
         suppressed: None,
+        gate: None,
+        precision: None,
+        preview: None,
     }
 }

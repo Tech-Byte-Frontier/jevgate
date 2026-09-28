@@ -17,6 +17,31 @@ pub struct AskedQuestion {
     pub unit: String,
     pub question: &'static str,
     pub pass: Pass,
+    /// The wording version its judgment records: the built-in questions'
+    /// `VERSION`, or a custom question's own.
+    pub version: &'static str,
+}
+
+/// The name a custom question's judgments record: each custom unit is asked
+/// its one question.
+pub(super) const CUSTOM: &str = "custom";
+
+impl AskedQuestion {
+    /// `question`, asked of the custom unit `unit` under `key`.
+    pub(super) fn custom(
+        key: String,
+        unit: &str,
+        question: &'static crate::custom::Question,
+    ) -> Self {
+        Self {
+            key,
+            rule: &question.rule,
+            unit: unit.into(),
+            question: CUSTOM,
+            pass: Pass::First,
+            version: &question.version,
+        }
+    }
 }
 
 /// The questions of one request as they are built: the uploaded bodies and
@@ -44,7 +69,22 @@ impl Questions {
             unit: unit.into(),
             question,
             pass,
+            version: questions::VERSION,
         });
+    }
+
+    /// Ask custom question `question` of unit `unit` under `key`.
+    pub(super) fn ask_custom(
+        &mut self,
+        key: String,
+        body: Value,
+        unit: &str,
+        question: &'static crate::custom::Question,
+    ) {
+        self.bodies.insert(key.clone(), body);
+        self.asked
+            .questions
+            .push(AskedQuestion::custom(key, unit, question));
     }
 
     /// The questions as they read about a file in `language`.
@@ -75,9 +115,12 @@ pub fn record(file: &mut FileResult, asked: &Asked, body: &Value) -> Result<()> 
             rule: question.rule.into(),
             unit: question.unit.clone(),
             question: question.question.into(),
-            version: questions::VERSION.into(),
+            version: question.version.into(),
             pass: question.pass,
             answer,
+            request_id: body["request_ids"][&question.key]
+                .as_str()
+                .map(str::to_owned),
         });
     }
     Ok(())

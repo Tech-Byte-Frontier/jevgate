@@ -3,10 +3,12 @@
 mod documents;
 mod instructions;
 mod pairs;
+mod proposals;
 mod staleness;
 pub use documents::*;
 pub use instructions::*;
 pub use pairs::*;
+pub use proposals::*;
 pub use staleness::*;
 
 /// Instruction text is the evidence being judged; a section that addresses

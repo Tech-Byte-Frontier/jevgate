@@ -44,6 +44,8 @@ pub struct TestCase {
     /// Requests the test sends to a web route, such as MockMvc's `get("/owners")`.
     pub requests: Vec<super::routes::Route>,
     shingles: BTreeSet<u64>,
+    /// Its syntax holds an error, so it is left out (`units::LeftOut`).
+    holds_error: bool,
 }
 
 impl TestCase {
@@ -60,7 +62,23 @@ pub struct TestPair {
     pub similarity: f64,
 }
 
+/// A file's test cases, without those whose syntax holds an error: they are
+/// left out of every rule (`broken_cases`).
 pub fn cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
+    let mut found = every_case(path, source)?;
+    found.retain(|case| !case.holds_error);
+    Ok(found)
+}
+
+/// A file's test cases whose syntax holds an error, which the report names
+/// as left out.
+pub fn broken_cases(path: &Path, source: &str) -> Result<Vec<TestCase>> {
+    let mut found = every_case(path, source)?;
+    found.retain(|case| case.holds_error);
+    Ok(found)
+}
+
+fn every_case(path: &Path, source: &str) -> Result<Vec<TestCase>> {
     let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(Vec::new());
     };
@@ -613,6 +631,7 @@ fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Ve
         hook_calls: BTreeSet::new(),
         requests,
         shingles,
+        holds_error: node.has_error(),
     });
 }
 
@@ -763,6 +782,15 @@ mod tests {
             .into_iter()
             .map(|c| c.name)
             .collect()
+    }
+
+    #[test]
+    fn a_test_holding_a_syntax_error_is_left_out_and_named_apart() {
+        let script = "import { total } from './total';\ndescribe('total', () => {\n  it('adds', () => { expect(total([1, 2])).toBe(3); });\n  it('parses', () => { expect(total([1,, @])).toBe(1); });\n  it('keeps', () => { expect(total([1])).toBe(1); });\n});\n";
+        assert_eq!(names("total.test.ts", script), ["adds", "keeps"]);
+        let broken = broken_cases(Path::new("total.test.ts"), script).unwrap();
+        assert_eq!(named(&broken), [("parses", vec!["total"])]);
+        assert_eq!((broken[0].line, broken[0].end_line), (4, 4));
     }
 
     /// Each case's name and suite.

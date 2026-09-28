@@ -1,11 +1,13 @@
-//! Running each command: offline commands first, then the ones that read
-//! the repository's configuration; `check` runs in its own module.
+//! Running each command: offline commands and the agent hook first (the hook
+//! finds its repository from the event, and agent setup writes the agents'
+//! files), then the ones that read the repository's configuration; `check`
+//! runs in its own module.
 use crate::{
     auth, baseline, cancellation, catalog, config,
     config::ConfigContext,
-    init, manual, mcp,
+    hook, init, manual, mcp,
     options::{self, JevCommand},
-    output, revision, server,
+    output, revision, server, setup,
 };
 use anyhow::Result;
 
@@ -14,15 +16,29 @@ pub fn run(command: JevCommand) -> Result<u8> {
         JevCommand::Auth { command } => auth::run(command),
         JevCommand::Completions { shell } => manual::completions(shell).map(|()| 0),
         JevCommand::Man { command } => manual::man(command.as_deref()).map(|()| 0),
-        JevCommand::Init { force } => init(force),
+        JevCommand::Init { setup, .. } if !setup.agents.is_empty() => setup::run(&setup),
+        JevCommand::Init { force, .. } => init(force),
         JevCommand::Mcp => mcp::run().map(|()| 0),
+        JevCommand::Hook(args) => hook::run(&args),
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Add { names, force }),
+            ..
+        } => crate::custom::gallery::run(&repository()?, &names, force),
         command => configured(command),
     }
 }
 
-/// `init` runs before configuration is read, so an invalid file can be replaced.
+/// The repository around the working directory, for the commands that run
+/// before its configuration is read: `init`, so an invalid file can be
+/// replaced, and `rules add`, so a question file that no longer loads can.
+fn repository() -> Result<std::path::PathBuf> {
+    Ok(config::repository_root(
+        &std::env::current_dir()?.canonicalize()?,
+    ))
+}
+
 fn init(force: bool) -> Result<u8> {
-    let root = config::repository_root(&std::env::current_dir()?.canonicalize()?);
+    let root = repository()?;
     let (path, allow) = init::run(&root, force)?;
     say!("Wrote {}", path.display());
     if allow.is_empty() {
@@ -36,21 +52,30 @@ fn init(force: bool) -> Result<u8> {
 
 /// The commands that read the repository's configuration.
 fn configured(command: JevCommand) -> Result<u8> {
-    let file = match &command {
-        JevCommand::Check(args) => args.config.clone(),
-        _ => None,
+    let (file, questions) = match &command {
+        JevCommand::Check(args) => (args.config.clone(), args.question_directory.clone()),
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Test(args)),
+            ..
+        } => (args.config.clone(), args.question_directory.clone()),
+        _ => (None, None),
     };
-    let context = ConfigContext::discover(file.as_deref())?;
+    let context = ConfigContext::discover(file.as_deref(), questions.as_deref())?;
     match command {
         JevCommand::Auth { .. }
         | JevCommand::Init { .. }
         | JevCommand::Completions { .. }
         | JevCommand::Man { .. }
-        | JevCommand::Mcp => {
+        | JevCommand::Mcp
+        | JevCommand::Hook(_)
+        | JevCommand::Rules {
+            action: Some(options::RulesAction::Add { .. }),
+            ..
+        } => {
             unreachable!("handled before repository configuration")
         }
         JevCommand::Check(mut args) => {
-            context.configure(&mut args)?;
+            crate::check::configure(&mut args, &context)?;
             if let Some(base) = &args.base {
                 args.base = Some(revision::resolve(&context.root, base)?);
             }
@@ -65,12 +90,28 @@ fn configured(command: JevCommand) -> Result<u8> {
             reason,
             action: None,
         } => accept(&context, merge, reason),
-        JevCommand::Rules { format } => {
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Test(args)),
+            ..
+        } => crate::rules_test::run(&args, &context),
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Propose(args)),
+            ..
+        } => crate::custom::propose::run(&args, &context),
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Accept { ids }),
+            ..
+        } => crate::custom::propose::accept(&ids, &context),
+        JevCommand::Rules {
+            format,
+            action: None,
+        } => {
             match format {
-                options::RulesFormat::Json => {
-                    say!("{}", serde_json::to_string_pretty(&catalog::describe())?)
-                }
-                options::RulesFormat::Table => say!("{}", catalog::table()),
+                options::RulesFormat::Json => say!(
+                    "{}",
+                    serde_json::to_string_pretty(&catalog::describe(context.questions))?
+                ),
+                options::RulesFormat::Table => say!("{}", catalog::table(context.questions)),
             }
             Ok(0)
         }
@@ -113,9 +154,10 @@ fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> 
             targets,
             rules,
         } => {
+            let known = context.rules();
             let mut keys = Vec::new();
             for name in &rules {
-                keys.extend(catalog::select(name).ok_or_else(|| {
+                keys.extend(catalog::select_in(&known, name).ok_or_else(|| {
                     anyhow::anyhow!(
                         "Unknown rule or group: {name}; `jevgate rules` lists the rules"
                     )

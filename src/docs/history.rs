@@ -1,6 +1,6 @@
 //! What Git holds about a repository's paths: tracked files, release tags,
 //! and paths since deleted or renamed. Evidence for staleness candidates.
-use crate::revision::git;
+use crate::revision::{git, git_in};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -29,11 +29,8 @@ pub fn ignored(root: &Path, paths: &[PathBuf]) -> BTreeSet<PathBuf> {
     if input.is_empty() {
         return BTreeSet::new();
     }
-    let child = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let child = git_in(root)
         .args(["check-ignore", "--no-index", "--stdin", "-z"])
-        .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

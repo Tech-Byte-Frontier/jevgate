@@ -129,7 +129,7 @@ impl<'a> Shared<'a> {
         if shared.enabled(catalog::SHARED_LOGIC) {
             shared.pairs = duplicate_candidates(scope);
         }
-        for (path, source, unit) in scope.scope_units() {
+        for (path, source, unit) in scope.specific_units() {
             shared.add_subject(path, source, unit);
             if !unit.routes.is_empty() {
                 shared.add_routes(path, source, unit);
@@ -256,7 +256,7 @@ fn module_helpers(
     hashes: &BTreeMap<PathBuf, String>,
 ) -> BTreeMap<String, Vec<spacetimedb::Helper>> {
     let mut helpers = BTreeMap::<String, Vec<spacetimedb::Helper>>::new();
-    for (path, source, unit) in scope.scope_units() {
+    for (path, source, unit) in scope.specific_units() {
         let Some(source_hash) = hashes.get(path) else {
             continue;
         };

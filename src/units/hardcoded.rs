@@ -1,35 +1,41 @@
-//! Hardcoded values: packed function sources with the literal values each one
-//! uses, and one unit per file for its module-level constants. Per function,
-//! Scores on whether a value belongs in configuration or deserves a name, and
-//! a Noul on whether the function special-cases one identity. A unit left
-//! undecided is asked, alone, whether every value is of an acceptable kind.
+//! Hardcoded values: each function's literal values, asked about in the
+//! function packs every rule shares (`packs`), and one unit per file for its
+//! module-level constants. Per function, Scores on whether a value belongs in
+//! configuration or deserves a name, and a Noul on whether the function
+//! special-cases one identity. A unit left undecided is asked, alone,
+//! whether every value is of an acceptable kind.
 use super::{
     Asked, Detail, FileContext, FilePlan, FollowUp, Planned, Presence, Questions, UnitPlan,
-    compact, identity, pack_runs, questions, unique_ids,
+    compact, identity,
+    packs::{Ask, FunctionAsk},
+    questions, unique_ids,
 };
 use crate::{
     analysis::{literals::Constant, sites::clip, units::Unit},
     catalog::HARDCODED_VALUES,
     schema::Pass,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::path::Path;
 
+/// Plan a unit per function that holds literal values, each paired with its
+/// position among its file's parsed units, and one for the module constants;
+/// return what the first pass asks about the functions.
 pub(super) fn plan(
     file: &FileContext<'_>,
-    units: &[&Unit],
+    units: &[(usize, &Unit)],
     constants: &[Constant],
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
-) {
-    let units: Vec<&Unit> = units
+) -> Vec<FunctionAsk> {
+    let units: Vec<(usize, &Unit)> = units
         .iter()
         .copied()
-        .filter(|u| !u.literals.is_empty())
+        .filter(|(_, u)| !u.literals.is_empty())
         .collect();
-    let ids = unique_ids("values", units.iter().map(|u| u.name.as_str()));
-    let mut items = Vec::new();
-    for (unit, id) in units.iter().zip(ids) {
+    let ids = unique_ids("values", units.iter().map(|(_, u)| u.name.as_str()));
+    let mut asks = Vec::new();
+    for ((position, unit), id) in units.into_iter().zip(ids) {
         let source = unit.source(file.source);
         let values: Vec<&str> = unit.literals.iter().map(|l| l.text.as_str()).collect();
         let state = json!({"name": unit.name, "source": source, "values": values});
@@ -61,23 +67,22 @@ pub(super) fn plan(
                     locate: locate.map(Into::into),
                 }
             },
-            recheck: benign_request(file, &id, json!({"functions": [state.clone()]}), true)
-                .map(Into::into),
+            recheck: benign_request(file, &id, json!({"functions": [state]}), true).map(Into::into),
         });
-        items.push((out.units.len() - 1, id, state));
-    }
-    // Runs end after the names of the functions holding the values, so a
-    // value added or removed re-asks only its function's run.
-    for group in pack_runs(
-        items,
-        |(_, _, state)| state["name"].as_str().unwrap_or_default(),
-        |(_, _, state)| state,
-    ) {
-        send_or_split(file, group, out, requests);
+        asks.push(FunctionAsk {
+            position,
+            name: unit.name.clone(),
+            source: source.to_string(),
+            ask: Ask::Values {
+                unit: out.units.len() - 1,
+                evidence: Map::from_iter([("values".to_string(), json!(values))]),
+            },
+        });
     }
     if !constants.is_empty() {
         plan_constants(file, constants, out, requests);
     }
+    asks
 }
 
 /// Most distinct values a locate Choice offers; a unit with more is not located.
@@ -315,65 +320,28 @@ fn locate_request(
     file.request("locate", state, questions)
 }
 
-/// A pack that is too large is sent one function at a time.
-fn send_or_split(
-    file: &FileContext<'_>,
-    group: Vec<(usize, String, Value)>,
-    out: &mut FilePlan,
-    requests: &mut Vec<Planned>,
-) {
-    let (request, asked) = functions_request(file, &group);
-    if file.budget.fits(&request) {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-        return;
+/// The environment and magic Scores and the special Noul about the values
+/// of `functions[index]`.
+pub(super) fn ask(questions: &mut Questions, index: usize, id: &str) {
+    let values = format!("functions[{index}].values");
+    let code = format!("functions[{index}].source");
+    for (question, body) in [
+        (
+            "environment",
+            questions::hardcoded_environment(&values, &format!("`{code}`")),
+        ),
+        ("magic", questions::hardcoded_magic(&values, &code)),
+        ("special", questions::hardcoded_special(&code)),
+    ] {
+        questions.ask(
+            format!("f{index}_{question}"),
+            body,
+            id,
+            HARDCODED_VALUES,
+            question,
+            Pass::First,
+        );
     }
-    for item in group {
-        let (request, asked) = functions_request(file, std::slice::from_ref(&item));
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        } else {
-            out.units[item.0].presence = Presence::NeedsContext;
-            out.units[item.0].recheck = None;
-        }
-    }
-}
-
-fn functions_request(file: &FileContext<'_>, items: &[(usize, String, Value)]) -> (Value, Asked) {
-    let mut questions = Questions::default();
-    for (index, (_, id, _)) in items.iter().enumerate() {
-        let values = format!("functions[{index}].values");
-        let code = format!("functions[{index}].source");
-        for (question, body) in [
-            (
-                "environment",
-                questions::hardcoded_environment(&values, &format!("`{code}`")),
-            ),
-            ("magic", questions::hardcoded_magic(&values, &code)),
-            ("special", questions::hardcoded_special(&code)),
-        ] {
-            questions.ask(
-                format!("f{index}_{question}"),
-                body,
-                id,
-                HARDCODED_VALUES,
-                question,
-                Pass::First,
-            );
-        }
-    }
-    let state = json!({
-        "file": file.file_state(),
-        "functions": items.iter().map(|(_, _, state)| state.clone()).collect::<Vec<_>>(),
-    });
-    file.request("values", state, questions)
 }
 
 const CONSTANTS_ID: &str = "constants";

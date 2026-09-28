@@ -1,6 +1,8 @@
 # Supported languages and frameworks
 
-✅ judged · ➖ not applicable
+Each language is supported or in preview. The ten languages with analyzers of their own are supported. The nine the [generic tier](#generic-support) reads are in preview: one becomes supported when, on each of two projects JevGate was never tuned on, one of its rules and levels is right at least 80% of the time over at least 20 labeled findings. None does yet. A preview language's findings are reported like any other and never fail the default gate: each says how often its rule and level were right in that language, not in the supported ones, and the agent text lists its files with the rules that read them. An explicit level counts them as it says (`--fail-on review` fails on every review), and a [custom question](custom-questions.md)'s findings fail at the question's own level in every language. [Support levels](#support-levels) gives each language's level and how often its findings were right.
+
+✅ judged · ✗ not judged yet · ➖ not applicable
 
 | Language or file | Extensions | Maintainability | Tests | Security | Documentation |
 |---|---|:---:|:---:|:---:|:---:|
@@ -14,6 +16,7 @@
 | PHP | `.php` `.phtml` | ✅ | ✅ PHPUnit `…TestCase` classes, Pest `test`/`it` | ✅ | ✅ comments |
 | Java | `.java` | ✅ | ✅ JUnit 4 and 5, TestNG: `@Test`, `@ParameterizedTest`, `@Nested`, JUnit 3 `TestCase` | ✅ | ✅ comments |
 | Bend 2 ([bendlang/bend](https://github.com/bendlang/bend) 2.0.x) | `.bend` | ✅ | ✅ programs ending in the `#\|` lines their run must print, or defining `main` on a test path; laws (`tests/laws`) | ✅ defs that perform effects or build text | ✅ comments |
+| C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir, Lua ([generic support](#generic-support), preview) | `.c` `.h` · `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` · `.kt` `.kts` · `.swift` · `.sh` `.bash` · `.dart` · `.scala` · `.ex` `.exs` · `.lua` | ✅ function simplification, file organization, shared logic | ✗ test files are found by path and not judged yet | ✗ no sources or sinks known for these languages yet | ✅ comments |
 | Astro, Vue, Svelte | `.astro` `.vue` `.svelte` | ✅ scripts only | ➖ | ✅ scripts only | ✅ script comments |
 | Server templates: ERB, EJS, JSP, Handlebars, Mustache, Nunjucks, Twig, Jinja, Go | `.erb` `.ejs` `.jsp` `.hbs` `.mustache` `.njk` `.twig` `.jinja` `.j2` `.tmpl` `.gohtml`, and `.html` under `templates/`, `views/`, `layouts/`, `partials/` or `includes/` | ✅ inline scripts only | ➖ | ✅ inline scripts, as the page's code in the visitor's browser; and the code that reads the request, a cookie, the session or the signed-in user: tags that write it unescaped (`<%= raw … %>`, `.html_safe`, `<%== … %>`, `<%- … %>`, `{{{ … }}}`, `\|safe`, `\|raw`) and a JSP page's scriptlets | ✅ script comments |
 | SQL (PostgreSQL, Supabase) | `.sql` | ➖ | ➖ | ✅ access control | ➖ |
@@ -52,4 +55,64 @@
 | Bend 2 | Defs, types and laws are units, named with their dots (`List.map`), and a call through an import alias (`Sort.sort` with `import ./main.bend as Sort`) reaches the def it names. A law is a claim when it states an equality, asks for a witness or applies a def that computes a type, and the def of its name is its proof; proofs (including every def of a `PROOF.bend`, a `*_proof.bend` or a file under `proofs/`) are not asked to be split, proofs and type-level defs are not asked about hardcoded values, and only defs that perform effects (`IO`) or join text with `++` are asked the security questions, since the rest are pure. `LAWS.bend`, `PROOF.bend` and files of fewer than 300 member lines are not asked to be split, a split of a file is at most a consider and a note in a file laid out in titled sections, a benchmark's values are not asked about, a program on a test path that defines `main` is a test, a zero-argument def returning a number names it, a `base.bend` copied from Bend's Base library is vendored, and Jev is told Bend 2's notation beside each file. Bend 1 files, a different language with the same `.bend` extension, are skipped with that reason |
 | Migrations | Directories named `migrations`, Rails' `db/migrate` and timestamped scripts under `db/`, and Alembic's `alembic/versions` are skipped as migrations; SQL migrations are still read for access control |
 
-Other files, such as Kotlin, are listed as skipped with the reason and never fail the gate.
+Other files, such as Zig, are listed as skipped with the reason and never fail the gate.
+
+## Support levels
+
+| Language | Level | Unseen projects | Reviews right | Considers right |
+|---|---|---:|---:|---:|
+| Rust | supported | 7 | 69% (37 of 54) | 66% (124 of 188) |
+| Python | supported | 4 | 51% (18 of 35) | 54% (42 of 78) |
+| Go | supported | 3 | 8 of 10 | 58% (23 of 40) |
+| TypeScript | supported | 4 | 2 of 4 | 70% (14 of 20) |
+| PHP | supported | 2 | 1 of 6 | 10 of 16 |
+| Java | supported | 2 | 1 of 3 | 4 of 10 |
+| JavaScript | supported | 3 | 1 of 1 | 0 of 4 |
+| C#, Ruby, Bend 2 | supported | none | not measured | not measured |
+| C | preview | 4 | 64% (16 of 25) | 44% (15 of 34) |
+| C++ | preview | 6 | 58% (23 of 40) | 42% (22 of 52) |
+| Kotlin | preview | 3 | 8 of 9 | 9 of 11 |
+| Swift | preview | 5 | 82% (28 of 34) | 70% (44 of 63) |
+| Bash | preview | 8 | 45% (29 of 64) | 62% (56 of 90) |
+| Dart | preview | 3 | 8 of 12 | 13 of 16 |
+| Scala | preview | 4 | 3 of 5 | 43% (9 of 21) |
+| Elixir | preview | 5 | 5 of 6 | 10 of 13 |
+| Lua | preview | 4 | 90% (19 of 21) | 51% (19 of 37) |
+
+A finding is right when a person reading the code agrees with it; a debatable one counts as not right. A percentage is shown from 20 labels on. The counts are for the four rules every language gets: function simplification, file organization, shared logic and comments.
+
+- The supported languages' counts are 0.25.0's reviews and considers on the 25 projects JevGate was never tuned on (11 held out, 14 fresh), each labeled by hand from the code, with 0.28's shared-logic threshold applied, as [accuracy](accuracy.md) counts them. Those projects hold no C#, Ruby or Bend 2 finding of these rules, so those three rest on the projects used for tuning.
+- The preview languages' counts are 0.30's first run of the same four rules on 37 well-known projects chosen for them and never used for tuning, with all 598 of its findings labeled by hand. Shared-logic considers are counted as that threshold reports them too, fitted on the supported languages: of the 104 that run reported, it makes 40 notes, 31 of them not right, and the other 64 were right 26 times, where all 104 were right 35 times. A language's projects are the ones holding a labeled finding in its files: dio's Flutter runners count for C++ and Swift, and leveldb's C++ headers, which that run read as C, count for C.
+
+Maturity is judged per rule and level, which the pooled rows hide:
+
+| Preview language | Function simplification | Shared logic | Comments | File organization |
+|---|---|---|---|---|
+| C | 10 of 11 · 13 of 19 | 6 of 14 · 2 of 6 | – · 0 of 8 | – · 0 of 1 |
+| C++ | 11 of 11 · 19 of 37 | 12 of 29 · 1 of 6 | – · 1 of 6 | – · 1 of 3 |
+| Kotlin | 1 of 1 · 6 of 7 | 6 of 7 · 2 of 2 | – · 1 of 2 | 1 of 1 · – |
+| Swift | 10 of 10 · 22 of 30 | 17 of 23 · 16 of 27 | – · 4 of 4 | 1 of 1 · 2 of 2 |
+| Bash | 25 of 28 · 34 of 50 | 4 of 34 · 0 of 10 | – · 22 of 28 | 0 of 2 · 0 of 2 |
+| Dart | 5 of 5 · 9 of 10 | 3 of 7 · 1 of 1 | – · 2 of 4 | – · 1 of 1 |
+| Scala | 2 of 3 · 5 of 11 | 1 of 2 · 1 of 2 | – · 3 of 5 | – · 0 of 3 |
+| Elixir | – · 7 of 8 | 4 of 5 · 3 of 5 | – | 1 of 1 · – |
+| Lua | 11 of 12 · 18 of 22 | 8 of 9 · 0 of 5 | – · 1 of 10 | – |
+
+Each cell is reviews right, then considers right, and each finding in a preview language carries its own cell: a Kotlin function-simplification review says "Not yet measured in Kotlin.", a Swift function-simplification consider "Right 73% of the time in Swift (30 labels).". No preview language has two projects that meet the bar. The closest are Bash's function-simplification reviews, 25 of 28 over three projects (nvm 7 of 7, pi-hole 9 of 9, setup-ipsec-vpn 9 of 12) with none reaching 20 on its own; pi-hole's Bash comment considers (20 of 25) and Rectangle's Swift shared-logic reviews (17 of 21) meet the bar on one project each. Pooled over projects, Bash's function-simplification reviews and Lua's function-simplification considers (18 of 22) are above 80% over at least 20 labels.
+
+The measurement's labels led to fixes that change findings on some of these projects, which count as tuned for those rules from now on: Bash copies pair across scripts only through `source` (setup-ipsec-vpn, tmux-resurrect), Flutter's platform runners are generated code (dio), C++ headers named `.h` are read as C++ (leveldb), C and C++ tests are found by name (beanstalkd, json11) and Kotest's `…Spec` classes only in test directories (kotlinconf-app), a comment of Lua language server annotations is not prose (nvim-cmp, which-key), and C++ members behind pointers and references, operators, Swift computed properties and Kotlin `init` blocks and accessors are units. The counts above are the run before these fixes.
+
+## Generic support
+
+C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir and Lua are in preview. They are read through one tree-sitter tag query per language, written in the captures GitHub's code navigation uses (`@definition.function`, `@definition.class`, `@reference.call`): it finds functions, methods, types and the calls each makes, and a table per language names the nodes that hold statements, nest control flow and hold literals. The units include C++ members defined outside their class (`ns::Cart::add`), those returning a reference or pointer, and operators; Swift computed properties (a SwiftUI view's `body`) and subscripts; and Kotlin `init` blocks, secondary constructors and property accessors. These files get function simplification, file organization, shared logic and comments, and every request names the language. [Custom questions](custom-questions.md) read them as they read the other languages: a `function` or `comment` question asks about their functions and comments, and a `file` or `hunk` question about any of their files. What they do not get:
+
+- Hardcoded values and the security rules: those need a language's own sites, sources and sinks.
+- Test rules, and custom `test` questions: a test file is found by path and reported as not judged yet. Besides `test/`, `tests/`, `test_*` and `*_test.*`, that is a class named `…Test`, `…Tests` or `…IT` (Kotlin, Swift, Scala), a C or C++ file whose name starts with `test` or ends in `-test` (`test.c`, `testheap.c`, `linenoise-test.c`) and `*_unittest.cc`, a Kotlin source set such as `androidTest` or `commonTest`, a Swift test target such as `VaporTests`, busted's `spec/` and `*_spec.lua`, Dart's `integration_test/`, and `*.bats`. Kotest's and ScalaTest's `…Spec` and `…Suite` classes are found by their test directory: outside one, production code takes those names.
+- Callers from other files: no imports are resolved, so an outline shows the calls between its members but not which files use them, and a function's callees are found by name among the files of its own language.
+- Idioms left out of copies: Go's error checks and Java's field initializers do not count as copies, and no such idiom is known for these languages yet. Their copies pair only within one language, or between C and C++, and take only the places of a run's 64 that the other languages leave. A Bash script runs on its own, so its copies pair with another script's only when one reads the other in (`source`, `.`) or both read in the same script of the project.
+
+Copied dependencies (`Pods`, `Carthage`, `third_party`, `third-party`, `thirdparty`, `3rdparty`, `deps` and `external` directories) are skipped as vendored, and Flutter's platform runners (`windows/runner`, `linux/runner`, `macos/Runner`, `ios/Runner`) and Dart's generated files (`.g.dart`, `.freezed.dart`, `.gr.dart`, `.mocks.dart`, protoc's `.pb.dart`) as generated, as are files headed by build_runner's, SwiftGen's, flex's or Bison's generated-code marker. A library copied as one file beside the project's own, such as `uthash.h`, is still judged.
+
+`.sh` and `.bash` files are read as Bash; scripts of other shells (`.zsh`, `.fish`, `.ps1`, `.bat` and others) stay listed as operational scripts. A `.h` header is read as C++ when its code is only C++ (`std::`, or a line opening a namespace, a template, a class or an access section), and as C otherwise. Elixir's `@doc` and `@moduledoc` are strings, not comments, so the comments rule does not read them.
+
+The grammars miss some valid code, which is left out and listed as code the parser could not read, the rest of its file judged: Swift's `x as? T ?? fallback`; Kotlin 2's explicit backing fields, a Ktor `get("…") { }` right after a local `val`, and an assignment to a property named like a soft keyword (`inline = true`); Bash's base-prefixed arithmetic (`$((16#$hex))`), substring offsets (`${s:$i:1}`), a regex with groups after `=~`, and a lone `[` in a pattern expansion; Scala 3's `given … with` before an indented body; C's specifier and statement macros (`static JSON_INLINE int f`, `CHECK_AND_RETURN(p)` with no `;`) and a foreach macro before a block; and C++'s brace default arguments (`std::optional<T> x = {}`).

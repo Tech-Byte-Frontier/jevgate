@@ -1,7 +1,7 @@
 //! The report's structure: per-file results, findings and their locations,
 //! per-rule dimensions, stage metrics and the report itself, as `--format
 //! json` and `.jevgate/latest.json` write it.
-use super::{Judgment, Status};
+use super::{Answer, Judgment, Pass, Status};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,14 +22,63 @@ pub struct Dimension {
 }
 
 /// A judged unit that stayed undecided, and the questions left undecided.
+/// Reports written before 0.27 hold only its name, line, questions and values.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Undecided {
     pub unit: String,
     pub line: usize,
+    /// The labels of the questions left undecided, or `no answer`.
     pub questions: Vec<String>,
     /// The candidate values, for a hardcoded-value unit with only a few.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
+    /// The unit's fingerprint, made as a finding's is from its rule, path
+    /// and identity: a finding of the unit has it, except comments and tests
+    /// reported together, whose one finding covers several units.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub fingerprint: String,
+    /// Where the unit is, as a finding of it would point.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<Location>,
+    /// Each question left undecided, as it was asked, with the answer that
+    /// left it open: what a person or a coding agent needs to weigh it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open: Vec<OpenQuestion>,
+}
+
+/// An undecided question as it was asked.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpenQuestion {
+    /// The question's id, as the unit's judgments record it.
+    pub id: String,
+    /// The pass whose answer left it open: a recheck or a trace asked it
+    /// again with more evidence.
+    pub pass: Pass,
+    /// The question as it was asked.
+    pub text: String,
+    /// The paths of the request's state the question names, such as
+    /// `functions[0].source`: the evidence it judged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+    /// What each answer means, by the names `answer`'s probabilities use: a
+    /// Score's levels by position, a Noul's `true` and `false`, a Choice's
+    /// options (empty for an option the state defines, such as a block id).
+    #[serde(default)]
+    pub options: BTreeMap<String, String>,
+    pub answer: Answer,
+}
+
+/// A unit a syntax error left out of the judgment, or code outside every
+/// unit holding one; the rest of its file was judged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LeftOut {
+    /// A function, method, type, law or test by name, `outline` for the
+    /// file's outline, or empty for code outside every unit.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -101,6 +150,8 @@ pub struct Finding {
     pub action: String,
     pub symbol: Option<String>,
     pub rule_version: String,
+    /// The probability of the answer that set its level: how sure that
+    /// answer was, not how often such findings are right (`precision`).
     pub concern_probability: f64,
     pub locations: Vec<Location>,
     /// Whole statements from the first location, when the evidence is a quote.
@@ -122,6 +173,21 @@ pub struct Finding {
     /// finding is accepted as a baselined one is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suppressed: Option<String>,
+    /// How the gate counted it: none for notes and accepted findings, and
+    /// before the gate is applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<Gating>,
+    /// How often findings of its rule and level were right on projects
+    /// JevGate was never tuned on: labels, as `jevgate rules` counts them,
+    /// in a preview language that language's own. None for notes, which are
+    /// never labeled, and before the gate is applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<crate::maturity::Labels>,
+    /// The preview language of its file, for a finding of JevGate's own
+    /// rules there: its precision is that language's own, and the default
+    /// gate never fails on it. None elsewhere and for custom questions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 impl Finding {
@@ -129,6 +195,26 @@ impl Finding {
     pub fn accepted(&self) -> bool {
         self.baselined || self.suppressed.is_some()
     }
+
+    /// Whether the gate counted it as a failure.
+    pub fn fails_gate(&self) -> bool {
+        self.gate == Some(Gating::Fails)
+    }
+}
+
+/// How the gate counted a new finding, at the level in force for its rule
+/// and path. Set even when the run is incomplete and the gate not evaluated.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Gating {
+    /// It fails the gate.
+    Fails,
+    /// Reported without failing: the level is `mature`, and this rule and
+    /// level is still being measured, or its file's language is in preview.
+    Measuring,
+    /// Reported without failing: the level does not count it, as `review`
+    /// does not count a consider and `none` counts nothing.
+    Advisory,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +248,9 @@ pub struct FileResult {
     pub judgments: Vec<Judgment>,
     pub findings: Vec<Finding>,
     pub error: Option<String>,
+    /// Units syntax errors left out, while the rest of the file was judged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<LeftOut>,
     /// Base file classification used to choose what the gates judge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::file_kind::Classification>,
@@ -174,12 +263,19 @@ pub struct StageMetrics {
     pub elapsed_ms: u64,
     pub service_ms: u64,
     pub queue_wait_ms: u64,
-    /// Estimated input tokens of the planned requests the cache does not answer.
+    /// Estimated input tokens of what the planned requests send: the questions
+    /// the cache does not answer, with their state.
     #[serde(default)]
     pub planned_tokens: u64,
     /// Planned requests a dry run found answered in the cache; they cost nothing.
     #[serde(default)]
     pub planned_cached: u64,
+    /// The questions of the planned requests, and those the cache answers: a
+    /// request is sent with only the others.
+    #[serde(default)]
+    pub planned_questions: u64,
+    #[serde(default)]
+    pub planned_cached_questions: u64,
     pub successful_requests: u64,
     pub failed_attempts: u64,
     /// Extra sends after rate limits, overload or connection failures.
@@ -188,9 +284,28 @@ pub struct StageMetrics {
     pub cache_hits: u64,
     pub cached_judgments: u64,
     pub evaluated_judgments: u64,
+    /// The questions sent, and those the cache answered, in the requests
+    /// answered: a request sends only the questions the cache lacks.
+    #[serde(default)]
+    pub asked_questions: u64,
+    #[serde(default)]
+    pub cached_questions: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub evidence_bytes: u64,
+}
+
+/// What a check judged of its files.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Scope {
+    /// Every unit of each selected file.
+    #[default]
+    WholeFiles,
+    /// With a base revision, only what the change touched: units on changed
+    /// lines, copies where either copy changed, outlines the change added
+    /// members to, and documents naming a path it removed.
+    ChangedLines,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +316,14 @@ pub struct Report {
     pub base_revision: Option<String>,
     #[serde(default)]
     pub deleted_files: Vec<PathBuf>,
+    #[serde(default)]
+    pub scope: Scope,
+    /// What the change since the base does to the checks around the code
+    /// (suppressions, skipped or deleted tests, weaker assertions, edits to
+    /// jevgate.toml or the baseline), and text written to steer a reviewer.
+    /// Reported; never failing the gate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guards: Vec<crate::guards::Guard>,
     pub schema_version: u32,
     pub command: String,
     pub rubric_version: String,
@@ -218,6 +341,9 @@ pub struct Report {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub initial_requests: Vec<serde_json::Value>,
     pub requested_model: String,
+    /// Whose key the requests use: `typesafe`, `openrouter` or `vercel`.
+    #[serde(default)]
+    pub provider: String,
     pub decision_policy: BTreeMap<String, f64>,
     /// The configured gate policy; classification does not depend on it.
     #[serde(default)]
@@ -228,6 +354,11 @@ pub struct Report {
     /// Gate levels for the files `[[scope]]` paths match, in configuration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fail_on_paths: Vec<PathFailOn>,
+    /// What the `mature` level stands for: the levels of each selected rule
+    /// measured right at least 80% of the time on projects JevGate was never
+    /// tuned on, by rule ID, for the rules whose levels include `mature`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fail_on_mature: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<crate::gate::Gate>,
     pub api_requests: u32,
@@ -235,6 +366,18 @@ pub struct Report {
     pub concurrency: u32,
     pub paid_input_tokens: u64,
     pub paid_output_tokens: u64,
+    /// This invocation's paid input tokens by the model that answered them,
+    /// which for an alias is the version it pointed to.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub paid_models: BTreeMap<String, u64>,
+    /// Paid requests whose response reported no token usage; their tokens are
+    /// not in `paid_input_tokens`, and the cost is unknown.
+    #[serde(default)]
+    pub unmetered_requests: u32,
+    /// Estimated dollars for this invocation's paid requests, priced by the
+    /// model that answered each; null when unknown.
+    #[serde(default)]
+    pub estimated_usd: Option<f64>,
     #[serde(default)]
     pub stages: BTreeMap<String, StageMetrics>,
     pub settled: bool,

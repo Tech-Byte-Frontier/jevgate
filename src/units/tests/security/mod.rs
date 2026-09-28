@@ -424,6 +424,26 @@ fn an_undecided_caller_recheck_replaces_an_undecided_traced_lean() {
     );
 }
 
+#[test]
+fn a_check_left_undecided_by_its_callers_is_quoted_as_the_recheck_asked_it() {
+    let caller = format!(
+        "{QUERY}\nfn handler(conn: &Connection, request: &Request) -> Result<Row> {{\n    find(conn, &request.query[\"name\"])\n}}\n"
+    );
+    let (project, options) = security_project(&caller);
+    let report = run(&project, &options, &mut scripted(3));
+    let undecided = &report.files[0].dimensions[catalog::INJECTION].undecided;
+    let open = |unit: &str| {
+        let unit = undecided.iter().find(|u| u.unit == unit).unwrap();
+        unit.open.iter().find(|q| q.id == "origin").unwrap().clone()
+    };
+    // Asked again with its callers, `find`'s undecided origin replaced the
+    // traced one; `handler` has no callers, so its trace is quoted.
+    let (find, handler) = (open("find"), open("handler"));
+    use crate::schema::Pass;
+    assert_eq!((find.pass, handler.pass), (Pass::Recheck, Pass::Trace));
+    assert_eq!(find.evidence, ["function.source"]);
+}
+
 /// The status of `rule` and the number of settle requests, with `nouls`
 /// leaving one check undecided and `settle` answering its Choice.
 fn settled_status(
@@ -563,10 +583,14 @@ fn a_function_added_to_one_run_is_the_only_security_request_asked_again() {
     let (sizes, before) = packs(
         &[("lib.rs", &source(false))],
         &catalog::SECURITY,
-        "security",
+        "functions",
     );
     assert_eq!(sizes, [3, 2, 4, 5]);
-    let (sizes, after) = packs(&[("lib.rs", &source(true))], &catalog::SECURITY, "security");
+    let (sizes, after) = packs(
+        &[("lib.rs", &source(true))],
+        &catalog::SECURITY,
+        "functions",
+    );
     assert_eq!(sizes, [3, 3, 4, 5]);
     only_changed(&before, &after, 1);
 }

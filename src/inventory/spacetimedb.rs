@@ -4,11 +4,13 @@ use super::*;
 
 /// Access control reads application source only for SpacetimeDB modules:
 /// alone among the code rules, it keeps just the files of their packages.
+/// A custom question that reads source reads every file.
 pub(super) fn keep_module_packages(args: &CheckArgs, inputs: &mut Vec<Input>) {
-    let only_access = args.rules.iter().all(|rule| {
-        rule == crate::catalog::ACCESS_CONTROL
-            || !crate::catalog::find(rule).is_some_and(|r| args.code_rules_include(r.key))
-    });
+    let only_access = !args.custom_code()
+        && args.rules.iter().all(|rule| {
+            rule == crate::catalog::ACCESS_CONTROL
+                || !crate::catalog::find(rule).is_some_and(|r| args.code_rules_include(r.key))
+        });
     if !only_access {
         return;
     }

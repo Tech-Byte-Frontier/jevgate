@@ -1,6 +1,6 @@
 //! Planning one selected code file: every rule's units and requests, with
 //! the facts of the file and the scope each rule needs.
-use super::{Scope, Shared, plan_security};
+use super::{Scope, Shared, left_out, plan_security};
 use crate::{
     analysis::{
         imports::Links,
@@ -13,8 +13,8 @@ use crate::{
     options::CheckArgs,
     token_budget::Limits,
     units::{
-        FileContext, FilePlan, Planned, comments, duplicates, functions, hardcoded, laws, outline,
-        spacetimedb, test_units,
+        FileContext, FilePlan, Plan, Planned, comments, custom, duplicates, functions, guards,
+        hardcoded, laws, outline, packs, spacetimedb, test_units,
     },
 };
 use std::{
@@ -23,26 +23,37 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Every rule's units and requests for one selected file.
+/// Every rule's units and requests for one selected file, then its custom
+/// questions', which may ride in those requests.
 pub(super) fn plan_file(
     scope: &Scope<'_>,
     shared: &Shared<'_>,
     owner: usize,
     args: &CheckArgs,
     budget: Limits<'_>,
-    requests: &mut Vec<Planned>,
+    (requests, custom): (&mut Vec<Planned>, &mut custom::Planner),
 ) -> FilePlan {
+    let since = requests.len();
     let input = &scope.inputs[owner];
     let view = &scope.views[&owner];
     let context = file_context(input, owner, args, budget);
     let mut file = FilePlan {
         path: input.result.path.clone(),
+        left_out: left_out::entries(&scope.units[&owner], context.source, context.language),
         ..Default::default()
     };
     let lines = scope.test_lines(owner);
     let cases = shared.cases.get(context.path).cloned().unwrap_or_default();
+    // What function simplification, hardcoded values and security ask about
+    // each function, sent together once every rule has planned.
+    let mut asks = Vec::new();
+    // A file of the generic tier gets the rules its units serve: function
+    // simplification, file organization, shared logic and comments. Values
+    // and security need per-language knowledge its tag query does not give,
+    // and its test files are not judged (`file_kind::generic_prepared`).
+    let generic = scope.units[&owner].generic;
     if shared.enabled(catalog::FUNCTION_SIMPLIFICATION) {
-        plan_functions(scope, &context, view, &lines, &cases, &mut file, requests);
+        asks = plan_functions(scope, &context, view, &lines, &cases, &mut file);
     }
     if shared.enabled(catalog::FILE_ORGANIZATION) {
         plan_outline(scope, shared, &context, view, &lines, &mut file, requests);
@@ -55,18 +66,19 @@ pub(super) fn plan_file(
     let benchmark = crate::analysis::bend::file(context.path)
         && crate::analysis::clones::benchmark_code(context.path);
     if shared.enabled(catalog::HARDCODED_VALUES)
+        && !generic
         && view.application
         && !crate::analysis::clones::example_code(context.path)
         && !benchmark
     {
         let predicates = &shared.law_predicates;
-        plan_values(
+        asks.extend(plan_values(
             &scope.units[&owner],
             &context,
             (&lines, predicates),
             &mut file,
             requests,
-        );
+        ));
     }
     // Laravel's configuration files come from the framework and its
     // packages, with their documentation as comments: on two Laravel apps,
@@ -87,9 +99,12 @@ pub(super) fn plan_file(
         .into_iter()
         .filter(|rule| shared.enabled(rule))
         .collect();
-    if !rules.is_empty() && view.application {
-        plan_security(scope, shared, &context, &lines, &rules, &mut file, requests);
+    if !rules.is_empty() && !generic && view.application {
+        asks.extend(plan_security(
+            scope, shared, &context, &lines, &rules, &mut file, requests,
+        ));
     }
+    packs::send(&context, asks, &mut file, requests);
     if shared.enabled(catalog::SHARED_LOGIC) && (view.application || view.tests) {
         file.rules.insert(catalog::SHARED_LOGIC, 0);
         let pairs = &shared.pairs;
@@ -126,7 +141,94 @@ pub(super) fn plan_file(
     {
         plan_module(shared, &context, framework, &mut file, requests);
     }
+    let judged_tests = view.tests && args.include_tests;
+    let code = custom::Code {
+        parsed: &scope.units[&owner],
+        test_lines: &lines,
+        application: view.application,
+        tests: judged_tests.then(|| {
+            shared
+                .cases
+                .get(context.path)
+                .map_or(&[][..], Vec::as_slice)
+        }),
+    };
+    custom.code(&context, code, &mut file, (requests, since));
     file
+}
+
+/// Ask about the text addressed to a reviewer in one selected code file,
+/// once every rule has planned its requests and `--base` has kept those
+/// about what the change touched: only text a request sends can move an
+/// answer.
+pub(super) fn plan_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    args: &CheckArgs,
+    budget: Limits<'_>,
+    plan: &mut Plan,
+) {
+    let input = &scope.inputs[owner];
+    let source = input.source.as_deref().unwrap_or("");
+    let tests = scope.test_lines(owner);
+    // A string in test code is the test's data: JevGate's own tests of this
+    // check hold steering examples, all read as steering.
+    let texts: Vec<_> = crate::analysis::steering::texts(&input.result.path, source)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|text| !(text.string && tests.iter().any(|lines| lines.contains(&text.line))))
+        .collect();
+    ask_steering(scope, owner, texts, (args, budget), plan);
+}
+
+/// Ask about each of `texts` of `owner` that one of its requests sends.
+fn ask_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    texts: Vec<crate::analysis::steering::Addressed>,
+    (args, budget): (&CheckArgs, Limits<'_>),
+    plan: &mut Plan,
+) {
+    if let (false, Some(file)) = (texts.is_empty(), plan.files.get_mut(&owner)) {
+        let context = file_context(&scope.inputs[owner], owner, args, budget);
+        guards::plan_steering(&context, texts, file, &mut plan.requests);
+    }
+}
+
+/// Ask about each paragraph of a document, such as an instruction file,
+/// that addresses a reviewer and that a request of the document sends: a
+/// section asked beside it cannot clear on its answers, as a function
+/// asked beside a steering comment cannot.
+pub(super) fn plan_document_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    args: &CheckArgs,
+    budget: Limits<'_>,
+    plan: &mut Plan,
+) {
+    let source = scope.inputs[owner].source.as_deref().unwrap_or("");
+    let texts = crate::analysis::steering::paragraphs(
+        source,
+        crate::analysis::steering::Audience::Reviewers,
+    );
+    ask_steering(scope, owner, texts, (args, budget), plan);
+}
+
+/// Ask about each paragraph of a text file only custom questions read (a
+/// source file without a parser, Terraform, a shell script) that addresses
+/// a reviewer or a model and that a request of the file sends: a `file` or
+/// `hunk` unit asked beside it cannot clear on its answers.
+pub(super) fn plan_text_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    args: &CheckArgs,
+    budget: Limits<'_>,
+    plan: &mut Plan,
+) {
+    let source = scope.inputs[owner].source.as_deref().unwrap_or("");
+    let texts =
+        crate::analysis::steering::paragraphs(source, crate::analysis::steering::Audience::Anyone);
+    ask_steering(scope, owner, texts, (args, budget), plan);
 }
 
 /// One selected code file's facts, with the role a web framework gives it.
@@ -139,7 +241,10 @@ fn file_context<'a>(
     FileContext {
         owner,
         path: &input.result.path,
-        language: crate::file_kind::language(&input.result.path),
+        language: crate::file_kind::read_language(
+            &input.result.path,
+            input.source.as_deref().unwrap_or(""),
+        ),
         source: input.source.as_deref().unwrap_or(""),
         source_hash: &input.result.source_hash,
         model: args.model(),
@@ -165,10 +270,14 @@ fn file_context<'a>(
                 .or_else(|| crate::units::client_app::describe(input.package.as_ref()))
                 .map(str::to_string)
             }),
+        changed: input.changed.as_ref(),
     }
 }
 
-/// An application file's members outside tests, or a test file's cases.
+/// An application file's members outside tests, or a test file's cases;
+/// none when syntax errors leave too little of the file to describe it.
+/// With a change judged, the outline is asked only when the change adds a
+/// member: editing a body leaves the file's layout as it was.
 fn plan_outline(
     scope: &Scope<'_>,
     shared: &Shared<'_>,
@@ -182,30 +291,61 @@ fn plan_outline(
     if crate::analysis::bend::law_file(context.path) {
         return;
     }
+    let parsed = &scope.units[&owner];
+    let units = &parsed.units;
     if view.application {
-        let units = &scope.units[&owner].units;
         let members: Vec<usize> = (0..units.len())
             .filter(|&i| !lines.iter().any(|l| units[i].overlaps(l)))
             .collect();
         file.rules.insert(catalog::FILE_ORGANIZATION, 0);
-        if members.len() >= 2 {
+        let listed = members
+            .iter()
+            .map(|&i| (units[i].name.as_str(), units[i].line));
+        if members.len() >= 2
+            && context.adds(listed, unit_names)
+            && left_out::outline_covered(parsed, context.source, file)
+        {
             let callers = callers(scope, &shared.links, owner);
-            let parsed = &scope.units[&owner];
             outline::plan(context, parsed, &members, &callers, file, requests);
         }
     } else if view.classification.kind == crate::file_kind::TESTS {
         file.rules.insert(catalog::FILE_ORGANIZATION, 0);
         let mut cases = test_map::cases(context.path, context.source).unwrap_or_default();
+        let listed = cases
+            .iter()
+            .map(|c| (c.name.as_str(), c.line))
+            .chain(units.iter().map(|u| (u.name.as_str(), u.line)));
+        if !context.adds(listed, test_names)
+            || !left_out::outline_covered(parsed, context.source, file)
+        {
+            return;
+        }
         shared.link_routes(&mut cases);
         test_map::link(&mut cases, &shared.subjects.keys().cloned().collect());
         if java(context.path) {
             shared.qualify_subjects(&mut cases);
         }
-        outline::plan_tests(context, &scope.units[&owner], &cases, file, requests);
+        outline::plan_tests(context, parsed, &cases, file, requests);
     }
 }
 
-/// Callables and module constants outside tests.
+/// The names of the units of a file's base version.
+fn unit_names(path: &Path, source: &str) -> BTreeSet<String> {
+    crate::analysis::units::parse(path, source)
+        .map(|parsed| parsed.units.into_iter().map(|u| u.name).collect())
+        .unwrap_or_default()
+}
+
+/// The names of the units and test cases of a test file's base version.
+fn test_names(path: &Path, source: &str) -> BTreeSet<String> {
+    let mut names = unit_names(path, source);
+    let cases = test_map::cases(path, source).unwrap_or_default();
+    names.extend(cases.into_iter().map(|case| case.name));
+    names
+}
+
+/// Callables and module constants outside tests; returns what the first
+/// pass asks about the callables.
 /// A Bend 2 law's predicates and the defs only they call hold its samples,
 /// so their literals are not asked about.
 fn plan_values(
@@ -214,24 +354,26 @@ fn plan_values(
     (lines, predicates): (&[Range<usize>], &BTreeSet<String>),
     file: &mut FilePlan,
     requests: &mut Vec<Planned>,
-) {
+) -> Vec<packs::FunctionAsk> {
     file.rules.insert(catalog::HARDCODED_VALUES, 0);
     let outside_tests = |line: usize| !lines.iter().any(|l| l.contains(&line));
     // A Bend 2 proof's literals state its property (`1n+p`, `{Nat.add(x,
     // 0n) == x : Nat}`), and a type-level def's are part of a type.
-    let units: Vec<&Unit> = parsed
+    let units: Vec<(usize, &Unit)> = parsed
         .units
         .iter()
-        .filter(|u| u.callable() && u.role == Role::Code && outside_tests(u.line))
-        .filter(|u| !predicates.contains(&u.name))
+        .enumerate()
+        .filter(|(_, u)| u.callable() && u.role == Role::Code && outside_tests(u.line))
+        .filter(|(_, u)| !predicates.contains(&u.name))
         .collect();
+    // With a change judged, only the constants on its lines are asked.
     let constants: Vec<_> = parsed
         .constants
         .iter()
-        .filter(|c| outside_tests(c.line))
+        .filter(|c| outside_tests(c.line) && context.judges(c.line, c.end_line))
         .cloned()
         .collect();
-    hardcoded::plan(context, &units, &constants, file, requests);
+    hardcoded::plan(context, &units, &constants, file, requests)
 }
 
 /// The claims of a Bend 2 file outside tests, with the defs they name: the
@@ -272,7 +414,8 @@ fn plan_laws(
     laws::plan(context, &units, &shared.propositions, &defs, file, requests);
 }
 
-/// Comments outside tests.
+/// Comments outside tests and outside what syntax errors left out: a
+/// comment in a left-out function would read as top-level code's.
 /// `teaching` when the project writes its comments for learners.
 fn plan_comments(
     parsed: &FileUnits,
@@ -286,7 +429,7 @@ fn plan_comments(
         .unwrap_or_default();
     let found: Vec<_> = found
         .into_iter()
-        .filter(|c| !lines.iter().any(|l| l.contains(&c.line)))
+        .filter(|c| !lines.iter().any(|l| l.contains(&c.line)) && parsed.intact(&c.span))
         .collect();
     comments::plan(context, (&parsed.units, teaching), &found, file, requests);
 }
@@ -333,7 +476,8 @@ fn plan_module(
 /// support (not test cases) with the test view. A Bend 2 proof is left out:
 /// its steps follow the cases of what it proves, not jobs a reader could
 /// pull apart, and the 16 function-simplification findings on proofs across
-/// 41 Bend 2 projects were all wrong (2 more debatable).
+/// 41 Bend 2 projects were all wrong (2 more debatable). Returns what the
+/// first pass asks about them.
 fn plan_functions(
     scope: &Scope<'_>,
     context: &FileContext<'_>,
@@ -341,13 +485,13 @@ fn plan_functions(
     lines: &[Range<usize>],
     cases: &[TestCase],
     file: &mut FilePlan,
-    requests: &mut Vec<Planned>,
-) {
-    let judged: Vec<&Unit> = scope.units[&context.owner]
+) -> Vec<packs::FunctionAsk> {
+    let judged: Vec<(usize, &Unit)> = scope.units[&context.owner]
         .units
         .iter()
-        .filter(|u| u.callable() && u.role != Role::Proof)
-        .filter(|u| {
+        .enumerate()
+        .filter(|(_, u)| u.callable() && u.role != Role::Proof)
+        .filter(|(_, u)| {
             if lines.iter().any(|l| u.overlaps(l)) {
                 view.tests
                     && !cases
@@ -358,10 +502,11 @@ fn plan_functions(
             }
         })
         .collect();
-    if view.application || !judged.is_empty() {
-        file.rules.insert(catalog::FUNCTION_SIMPLIFICATION, 0);
-        functions::plan(context, &judged, scope, file, requests);
+    if !view.application && judged.is_empty() {
+        return Vec::new();
     }
+    file.rules.insert(catalog::FUNCTION_SIMPLIFICATION, 0);
+    functions::plan(context, &judged, scope, file)
 }
 
 pub(super) fn java(path: &Path) -> bool {

@@ -30,6 +30,9 @@ pub(super) const QUESTIONS: [&str; 4] = ["restates", "verbose", "history", "disa
 
 /// `teaching` when the project writes its comments for learners: comments
 /// that say what the code does are then at most a note, as documentation is.
+/// With a change judged, only the comments it touched are asked, and the cap
+/// counts only them; the others still end runs where they end for the whole
+/// file.
 pub(super) fn plan(
     file: &FileContext<'_>,
     (units, teaching): (&[Unit], bool),
@@ -37,79 +40,103 @@ pub(super) fn plan(
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
-    let omitted = comments.len().saturating_sub(MAX_COMMENTS);
-    *out.rules.entry(COMMENTS).or_default() += omitted;
+    let judged: Vec<bool> = comments
+        .iter()
+        .map(|c| file.judges(c.line, c.end_line))
+        .collect();
+    let listed = judged.iter().filter(|&&judged| judged).count();
+    *out.rules.entry(COMMENTS).or_default() += listed.saturating_sub(MAX_COMMENTS);
     let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    let mut asked = 0;
     // Comments are grouped by the definition they belong to, then packed
     // by runs of definitions, so a comment added or removed re-asks only
     // its own run.
-    let mut by_owner: Vec<(String, Vec<(usize, Entry)>)> = Vec::new();
-    for comment in comments.iter().take(MAX_COMMENTS) {
+    let mut by_owner: Vec<(String, Vec<Packed>)> = Vec::new();
+    for (comment, judged) in comments.iter().zip(judged) {
+        let asks = judged && asked < MAX_COMMENTS;
+        if !asks && file.changed.is_none() {
+            break;
+        }
+        asked += usize::from(asks);
         let unit = comment.unit.map(|i| &units[i]);
-        let owner = unit.map_or_else(
-            || comment.definition.as_deref().unwrap_or(TOP_LEVEL),
-            |u| u.name.as_str(),
-        );
+        let owner = owner(comment, unit);
         let count = seen.entry(owner.to_string()).or_default();
         *count += 1;
         let id = format!("comment:{owner}#{count}");
-        let state = comment_state(comment, unit);
-        let recheck = unit.and_then(|u| {
-            let source = u.source(file.source);
-            let mut state = state.clone();
-            state["function_source"] = json!(source);
-            let entry = Entry {
-                id: id.clone(),
-                state,
-                code_like: comment.code_like,
-                words: comment.words,
-            };
-            let (request, asked) = build(file, &[entry], Pass::Recheck);
-            file.budget.fits(&request).then_some((request, asked))
+        let entry = asks.then(|| {
+            let entry = push_comment(file, (unit, teaching), (comment, owner, id), out);
+            (out.units.len() - 1, entry)
         });
-        let kind = kind(file, &id, &state, unit);
-        out.units.push(UnitPlan {
-            rule: COMMENTS,
-            id: id.clone(),
-            name: owner.to_string(),
-            presence: Presence::Judged,
-            locations: vec![file.location(comment.line, comment.end_line, Some(owner))],
-            quote: Some(comment.text.clone()),
-            lines: comment.end_line + 1 - comment.line,
-            identity: identity(&[owner, &compact(&comment.text)]),
-            detail: Detail::Comment {
-                owner: owner.to_string(),
-                documentation: teaching
-                    || matches!(comment.placement, Placement::Declaration | Placement::File)
-                    || crate::analysis::comments::banner(&comment.text),
-                kind: kind.map(Into::into),
-            },
-            recheck: recheck.map(Into::into),
-        });
+        match by_owner.iter_mut().find(|(name, _)| name == owner) {
+            Some((_, items)) => items.push(entry),
+            None => by_owner.push((owner.to_string(), vec![entry])),
+        }
+    }
+    let items = by_owner
+        .into_iter()
+        .flat_map(|(owner, items)| items.into_iter().map(move |entry| (owner.clone(), entry)));
+    let packs = pack_runs(
+        items.collect(),
+        |(owner, _)| owner,
+        |(_, entry)| entry.as_ref().map_or(&Value::Null, |(_, e)| &e.state),
+        |(_, entry)| entry.is_some(),
+    );
+    for group in packs {
+        let group = group.into_iter().filter_map(|(_, entry)| entry);
+        send(file, group.collect(), out, requests);
+    }
+}
+
+/// A comment's unit index and packed entry when it is asked; none for a
+/// comment the change did not touch, which only ends runs.
+type Packed = Option<(usize, Entry)>;
+
+/// The unit of one comment of `owner`, with its recheck and kind
+/// follow-ups, and the entry that packs it.
+fn push_comment(
+    file: &FileContext<'_>,
+    (unit, teaching): (Option<&Unit>, bool),
+    (comment, owner, id): (&Comment, &str, String),
+    out: &mut FilePlan,
+) -> Entry {
+    let state = comment_state(comment, unit);
+    let recheck = unit.and_then(|u| {
+        let source = u.source(file.source);
+        let mut state = state.clone();
+        state["function_source"] = json!(source);
         let entry = Entry {
-            id,
+            id: id.clone(),
             state,
             code_like: comment.code_like,
             words: comment.words,
         };
-        match by_owner.iter_mut().find(|(name, _)| name == owner) {
-            Some((_, items)) => items.push((out.units.len() - 1, entry)),
-            None => by_owner.push((owner.to_string(), vec![(out.units.len() - 1, entry)])),
-        }
-    }
-    let items = by_owner.into_iter().flat_map(|(owner, items)| {
-        items
-            .into_iter()
-            .map(move |(index, entry)| (owner.clone(), index, entry))
+        let (request, asked) = build(file, &[entry], Pass::Recheck);
+        file.budget.fits(&request).then_some((request, asked))
     });
-    let packs = pack_runs(
-        items.collect(),
-        |(owner, _, _)| owner,
-        |(_, _, entry)| &entry.state,
-    );
-    for group in packs {
-        let group = group.into_iter().map(|(_, index, entry)| (index, entry));
-        send(file, group.collect(), out, requests);
+    let kind = kind(file, &id, &state, unit);
+    out.units.push(UnitPlan {
+        rule: COMMENTS,
+        id: id.clone(),
+        name: owner.to_string(),
+        presence: Presence::Judged,
+        locations: vec![file.location(comment.line, comment.end_line, Some(owner))],
+        quote: Some(comment.text.clone()),
+        lines: comment.end_line + 1 - comment.line,
+        identity: identity(&[owner, &compact(&comment.text)]),
+        detail: Detail::Comment {
+            owner: owner.to_string(),
+            documentation: teaching
+                || matches!(comment.placement, Placement::Declaration | Placement::File)
+                || crate::analysis::comments::banner(&comment.text),
+            kind: kind.map(Into::into),
+        },
+        recheck: recheck.map(Into::into),
+    });
+    Entry {
+        id,
+        state,
+        code_like: comment.code_like,
+        words: comment.words,
     }
 }
 
@@ -145,6 +172,15 @@ fn send(
             unit.recheck = None;
         }
     }
+}
+
+/// The name of the unit a comment belongs to: the definition it documents
+/// or sits in, else the one a docstring opens, else `top-level code`.
+pub(super) fn owner<'a>(comment: &'a Comment, unit: Option<&'a Unit>) -> &'a str {
+    unit.map_or_else(
+        || comment.definition.as_deref().unwrap_or(TOP_LEVEL),
+        |u| u.name.as_str(),
+    )
 }
 
 /// What kind of comment it is, alone, with the definition it sits in when
@@ -188,7 +224,7 @@ fn placement_text(placement: Placement) -> &'static str {
     }
 }
 
-fn comment_state(comment: &Comment, unit: Option<&Unit>) -> Value {
+pub(super) fn comment_state(comment: &Comment, unit: Option<&Unit>) -> Value {
     let mut state = json!({
         "text": comment.text,
         "placement": placement_text(comment.placement),

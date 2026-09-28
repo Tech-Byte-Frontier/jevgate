@@ -113,11 +113,13 @@ pub(super) fn plan(
             state,
         });
     }
-    for group in pack_runs(
+    let packs = pack_runs(
         items,
         |item| item.state["name"].as_str().unwrap_or_default(),
         |item| &item.state,
-    ) {
+        |item| file.judges_unit(&out.units[item.index]),
+    );
+    for group in packs {
         let (request, asked) = build(file, &group);
         if file.budget.fits(&request) {
             requests.push(Planned {

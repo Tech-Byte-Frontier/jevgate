@@ -47,27 +47,12 @@ impl Repository {
 
 pub fn scan(root: &Path) -> Result<Repository> {
     let found = discover::discover(root)?;
-    // A link's target is read even when its own name is no instruction
-    // file's (`load::files`).
-    let mut read = found.agent.clone();
-    read.extend(found.links.iter().filter_map(|(_, target)| target.clone()));
-    let sources = agent_sources(root, &read);
-    let generated_files: BTreeSet<PathBuf> = sources
-        .iter()
-        .filter(|(_, source)| generated(source))
-        .map(|(p, _)| p.clone())
-        .collect();
+    let (files, generated_files) = agent_files(root, &found);
     let history = history::history(root);
-    let files = load::files(sources, &found.links);
     let load = load::context_load(&files, &found.links, root);
-    let links: BTreeSet<&PathBuf> = found.links.iter().map(|(p, _)| p).collect();
     Ok(Repository {
         project: project::read(root, &found.directories),
-        readers: files
-            .into_iter()
-            .filter(|f| !links.contains(&f.path))
-            .map(|f| (f.path, f.readers))
-            .collect(),
+        readers: readers(files, &found),
         generated: generated_files,
         load,
         docs: project_docs(root, &found.project),
@@ -75,6 +60,59 @@ pub fn scan(root: &Path) -> Result<Repository> {
         history,
         root: root.to_path_buf(),
     })
+}
+
+/// The instruction files `jevgate rules propose` reads when no file is
+/// named.
+pub struct Instructions {
+    /// Those a documentation rule judges, with who reads each and when.
+    pub judged: BTreeMap<PathBuf, Vec<load::Reader>>,
+    /// Those found but not read, too large or not UTF-8, so a reader can say
+    /// why: a CLAUDE.md saved as UTF-16 would otherwise vanish unnoticed.
+    pub unread: BTreeSet<PathBuf>,
+}
+
+pub fn instructions(root: &Path) -> Result<Instructions> {
+    let found = discover::discover(root)?;
+    let (files, generated_files) = agent_files(root, &found);
+    let read: BTreeSet<&PathBuf> = files.iter().map(|f| &f.path).collect();
+    let unread = found
+        .agent
+        .iter()
+        .filter(|path| !read.contains(path))
+        .cloned()
+        .collect();
+    let mut judged = readers(files, &found);
+    judged.retain(|path, readers| !readers.is_empty() && !generated_files.contains(path));
+    Ok(Instructions { judged, unread })
+}
+
+/// The instruction files `found` names, parsed with who reads each, and
+/// those a generator wrote. A link's target is read even when its own name
+/// is no instruction file's (`load::files`).
+fn agent_files(root: &Path, found: &discover::Found) -> (Vec<load::File>, BTreeSet<PathBuf>) {
+    let mut read = found.agent.clone();
+    read.extend(found.links.iter().filter_map(|(_, target)| target.clone()));
+    let sources = agent_sources(root, &read);
+    let generated_files = sources
+        .iter()
+        .filter(|(_, source)| generated(source))
+        .map(|(p, _)| p.clone())
+        .collect();
+    (load::files(sources, &found.links), generated_files)
+}
+
+/// Who reads each file, links left out: their targets are read.
+fn readers(
+    files: Vec<load::File>,
+    found: &discover::Found,
+) -> BTreeMap<PathBuf, Vec<load::Reader>> {
+    let links: BTreeSet<&PathBuf> = found.links.iter().map(|(p, _)| p).collect();
+    files
+        .into_iter()
+        .filter(|f| !links.contains(&f.path))
+        .map(|f| (f.path, f.readers))
+        .collect()
 }
 
 /// The text of each instruction file small enough to read.

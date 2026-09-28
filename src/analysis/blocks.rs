@@ -24,11 +24,17 @@ const BODY_KINDS: [&str; 6] = [
 /// work) is read through: its inner statements become the candidates. Fewer
 /// than two blocks offer no choice.
 pub fn blocks(body: Node<'_>, source: &str) -> Vec<Range<usize>> {
-    if !BODY_KINDS.contains(&body.kind()) {
+    blocks_in(body, source, &BODY_KINDS)
+}
+
+/// `blocks` of a body whose statements sit in nodes of `kinds`, as a
+/// language of the generic tier names them (`analysis::generic`).
+pub fn blocks_in(body: Node<'_>, source: &str, kinds: &[&str]) -> Vec<Range<usize>> {
+    if !kinds.contains(&body.kind()) {
         return Vec::new();
     }
     let mut statements = statements(body);
-    while let Some((at, inner)) = wrapper(&statements, source) {
+    while let Some((at, inner)) = wrapper(&statements, source, kinds) {
         statements.splice(at..=at, self::statements(inner));
     }
     let mut blocks = group(&statements, source);
@@ -43,12 +49,16 @@ pub fn blocks(body: Node<'_>, source: &str) -> Vec<Range<usize>> {
 
 /// The statement with an inner body that spans more lines than every other
 /// statement together, and that inner body.
-fn wrapper<'a>(statements: &[(usize, Node<'a>)], source: &str) -> Option<(usize, Node<'a>)> {
+fn wrapper<'a>(
+    statements: &[(usize, Node<'a>)],
+    source: &str,
+    kinds: &[&str],
+) -> Option<(usize, Node<'a>)> {
     let lines =
         |node: Node<'_>| line_of(source, node.end_byte()) + 1 - line_of(source, node.start_byte());
     let total: usize = statements.iter().map(|(_, node)| lines(*node)).sum();
     statements.iter().enumerate().find_map(|(at, (_, node))| {
-        let inner = inner_body(*node)?;
+        let inner = inner_body(*node, kinds)?;
         (2 * lines(*node) > total && inner.named_child_count() > 0).then_some((at, inner))
     })
 }
@@ -73,7 +83,7 @@ fn statements(body: Node<'_>) -> Vec<(usize, Node<'_>)> {
     found
 }
 
-fn inner_body(statement: Node<'_>) -> Option<Node<'_>> {
+fn inner_body<'a>(statement: Node<'a>, kinds: &[&str]) -> Option<Node<'a>> {
     let node = if statement.kind() == "expression_statement" {
         statement.named_child(0)?
     } else {
@@ -82,7 +92,7 @@ fn inner_body(statement: Node<'_>) -> Option<Node<'_>> {
     // A Ruby call wraps its work in a block: `File.open(path) do |file| … end`.
     let node = node.child_by_field_name("block").unwrap_or(node);
     node.child_by_field_name("body")
-        .filter(|body| BODY_KINDS.contains(&body.kind()))
+        .filter(|body| kinds.contains(&body.kind()))
 }
 
 /// A block runs until a blank line or through the first long statement.

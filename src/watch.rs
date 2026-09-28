@@ -65,7 +65,7 @@ pub fn run(
             return stop_watcher(
                 session,
                 &mut report,
-                "Review configuration or root ignore rules changed; restart the watcher to apply the new upload boundary",
+                "Review configuration, custom questions or root ignore rules changed; restart the watcher to apply them",
                 anyhow::anyhow!("Review policy changed; watcher stopped"),
             );
         }
@@ -132,14 +132,63 @@ fn wait_for_poll(session: &Session<'_>, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
+/// A hash of what sets the review policy and the upload boundary:
+/// jevgate.toml, the root ignore rules, and each custom question file with
+/// its name, which is its id. The configuration is read once per process,
+/// so a watcher stops when any of them changes rather than judging with
+/// questions that are no longer the repository's.
 fn policy_fingerprint(root: &std::path::Path) -> String {
-    let values: Vec<_> = ["jevgate.toml", ".gitignore"]
+    let hashed = |path: &std::path::Path| {
+        std::fs::read(path)
+            .map(|b| super::schema::hash(&b))
+            .unwrap_or_else(|_| "absent".into())
+    };
+    let mut values: Vec<String> = ["jevgate.toml", ".gitignore"]
         .iter()
-        .map(|p| {
-            std::fs::read(root.join(p))
-                .map(|b| super::schema::hash(&b))
-                .unwrap_or_else(|_| "absent".into())
-        })
+        .map(|p| hashed(&root.join(p)))
         .collect();
+    let questions = crate::custom::question_files(&crate::custom::directory(root));
+    values.extend(questions.unwrap_or_default().iter().map(|path| {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        format!("{name}:{}", hashed(path))
+    }));
     super::schema::hash(&serde_json::to_vec(&values).expect("serializable policy"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::policy_fingerprint;
+
+    #[test]
+    fn a_question_file_added_edited_or_renamed_changes_the_policy() {
+        let project = crate::tests::Project::new();
+        project.write("jevgate.toml", "");
+        let before = policy_fingerprint(&project.0);
+        let question = "question = \"Does this function log a body?\"\nunit = \"function\"\n";
+        project.write(".jevgate/questions/body-logs.toml", question);
+        let added = policy_fingerprint(&project.0);
+        assert_ne!(added, before);
+        project.write(".jevgate/cache/answer.json", "{}");
+        assert_eq!(
+            policy_fingerprint(&project.0),
+            added,
+            "the cache is not policy"
+        );
+        project.write(
+            ".jevgate/questions/body-logs.toml",
+            &question.replace("body", "request body"),
+        );
+        let edited = policy_fingerprint(&project.0);
+        assert_ne!(edited, added);
+        std::fs::rename(
+            project.0.join(".jevgate/questions/body-logs.toml"),
+            project.0.join(".jevgate/questions/logs.toml"),
+        )
+        .unwrap();
+        assert_ne!(
+            policy_fingerprint(&project.0),
+            edited,
+            "a new name is a new id"
+        );
+    }
 }

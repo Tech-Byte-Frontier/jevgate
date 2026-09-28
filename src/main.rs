@@ -23,6 +23,7 @@ mod cancellation;
 mod catalog;
 mod changes;
 mod check;
+mod child;
 mod command;
 mod components;
 mod config;
@@ -30,6 +31,7 @@ mod config;
 mod config_schema;
 mod context;
 mod context_units;
+mod custom;
 mod discovery;
 mod docs;
 mod evaluate;
@@ -37,24 +39,32 @@ mod file_kind;
 mod gate;
 mod github;
 mod gitlab;
+mod guards;
+mod hook;
 mod html_report;
 mod init;
 mod inventory;
 mod line_ranges;
 mod locations;
 mod manual;
+mod maturity;
 mod mcp;
+mod model;
 mod options;
 mod output;
 mod packages;
 mod policy;
+mod provider;
 mod provider_error;
 mod requests;
 mod response;
+mod response_headers;
 mod revision;
+mod rules_test;
 mod sarif;
 mod schema;
 mod server;
+mod setup;
 mod storage;
 mod suppress;
 mod syntax;
@@ -62,6 +72,7 @@ mod test_locations;
 mod token_budget;
 mod transport;
 mod units;
+mod view;
 mod watch;
 
 use clap::Parser;
@@ -73,11 +84,15 @@ use options::JevCommand;
 /// function, a file outline, a pair of copies, a test, a documentation
 /// section. It asks TypeSafe Jev short, typed questions about each one, and
 /// code, not a chat model, composes the answers into findings. Each finding
-/// has a location, a probability and a next step, and undecided answers are
-/// reported as uncertain instead of hidden.
+/// has a location, how often findings like it were right and a next step,
+/// and undecided answers are reported as uncertain instead of hidden.
 ///
-/// Rule groups: maintainability (on by default), tests (with
-/// --include-tests), and the opt-in security and documentation groups.
+/// Rule groups: maintainability (on by default, except hardcoded values),
+/// tests (with --include-tests), the opt-in security and documentation
+/// groups, and custom: a team's own conventions, written as questions. By
+/// default only rules and levels measured right at least 80% of the time on
+/// projects JevGate was never tuned on fail the check, never in a preview
+/// language, and custom questions at their own level.
 #[derive(Parser)]
 #[command(version, after_long_help = options::OVERVIEW)]
 pub struct Cli {
@@ -86,7 +101,13 @@ pub struct Cli {
 }
 
 fn main() -> std::process::ExitCode {
-    let result = command::run(Cli::parse().command);
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        // An agent reads exit 2 as a block: the hook answers even this.
+        Err(error) if error.use_stderr() && hook::invoked() => return hook::usage_error(&error),
+        Err(error) => error.exit(),
+    };
+    let result = command::run(cli.command);
     let code = match result {
         Ok(code) => code,
         Err(error) => {

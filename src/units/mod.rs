@@ -6,6 +6,7 @@ mod answers;
 mod client_app;
 mod comments;
 pub mod compose;
+mod custom;
 mod documents;
 mod drift;
 mod duplicates;
@@ -14,6 +15,7 @@ mod follow_ups;
 mod functions;
 mod graphql;
 pub mod grouping;
+mod guards;
 mod handlers;
 mod hardcoded;
 mod instructions;
@@ -21,6 +23,7 @@ mod laws;
 mod nextjs;
 mod outcome;
 pub(crate) mod outline;
+mod packs;
 mod plan;
 pub mod questions;
 mod security;
@@ -32,8 +35,11 @@ mod workflows;
 
 use answers::Questions;
 pub use answers::{Asked, record};
-use evidence::{FileContext, compact, identity, pack, pack_runs, request, unique_ids};
+pub(crate) use custom::{KEY_PREFIX as CUSTOM_KEY_PREFIX, MAX_UNITS as MAX_CUSTOM_UNITS, examples};
+pub(crate) use evidence::pack_runs;
+use evidence::{FileContext, compact, identity, pack, request, unique_ids};
 pub use follow_ups::{doc_checks, kinds, locates, parts, rechecks, settles, traces, value_kinds};
+pub use guards::{Steering, weaker_answer, weaker_request};
 use plan::Scope;
 pub use plan::plan;
 pub use spacetimedb::spacetimedb_module;
@@ -157,6 +163,21 @@ pub struct Confirms {
     /// For sensitive data, when its log line runs, asked only after a finding
     /// its log checks raised.
     pub logging: Option<FollowUp>,
+}
+
+impl Confirms {
+    fn all(&self) -> impl Iterator<Item = &FollowUp> {
+        [
+            &self.values,
+            &self.checked,
+            &self.queried,
+            &self.rendered,
+            &self.readers,
+            &self.logging,
+        ]
+        .into_iter()
+        .flatten()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -293,6 +314,8 @@ pub enum Detail {
         /// first answer says it asserts internal details.
         confirm: Option<FollowUp>,
     },
+    /// A unit a custom question asks about.
+    Custom(&'static crate::custom::Question),
     TestPair {
         names: [String; 2],
         subject: String,
@@ -342,12 +365,87 @@ pub struct UnitPlan {
     pub recheck: Option<FollowUp>,
 }
 
+impl UnitPlan {
+    /// Every follow-up planned for the unit, asked or not: where an answer
+    /// given after the first pass was asked.
+    fn follow_ups(&self) -> impl Iterator<Item = &FollowUp> {
+        let planned: Vec<&FollowUp> = match &self.detail {
+            Detail::Function { locate, .. }
+            | Detail::Values { locate, .. }
+            | Detail::Constants { locate, .. } => locate.iter().collect(),
+            Detail::Outline { kind, parts, .. } => kind
+                .iter()
+                .chain(parts.iter().map(|part| &part.follow_up))
+                .collect(),
+            Detail::Comment { kind, .. } => kind.iter().collect(),
+            Detail::Security {
+                trace,
+                settles,
+                confirms,
+                ..
+            } => trace
+                .iter()
+                .chain(settles.iter().map(|settle| &settle.request))
+                .chain(confirms.all())
+                .collect(),
+            Detail::Document { locate, kind, .. } => locate.iter().chain(kind).collect(),
+            Detail::Stale { check, settle, .. } | Detail::DocPair { check, settle, .. } => {
+                check.iter().chain(settle).collect()
+            }
+            Detail::Test { confirm } | Detail::TestPair { confirm, .. } => confirm.iter().collect(),
+            Detail::Pair { .. }
+            | Detail::Plan { .. }
+            | Detail::Section { .. }
+            | Detail::Handler { .. }
+            | Detail::Access(_)
+            | Detail::Job { .. }
+            | Detail::Law
+            | Detail::Custom(_) => Vec::new(),
+        };
+        self.recheck.iter().chain(planned)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FilePlan {
     pub path: PathBuf,
     /// Rules that apply to this file, with the candidates omitted by caps.
     pub rules: BTreeMap<&'static str, usize>,
     pub units: Vec<UnitPlan>,
+    /// Comments and strings addressed to a reviewer that some request of
+    /// the file sends, each asked whether it is written to steer the reviewer.
+    pub steering: Vec<Steering>,
+    /// The custom questions among `rules`, which say what their units are.
+    pub questions: Vec<&'static crate::custom::Question>,
+    /// What syntax errors left out of this file's units, as the report names it.
+    pub left_out: Vec<crate::schema::LeftOut>,
+}
+
+impl UnitPlan {
+    /// Too large to send even alone: it needs context, and none of its
+    /// follow-ups is asked.
+    fn unsent(&mut self) {
+        self.presence = Presence::NeedsContext;
+        self.recheck = None;
+        match &mut self.detail {
+            Detail::Function { blocks, locate } => {
+                blocks.clear();
+                *locate = None;
+            }
+            Detail::Values { locate, .. } => *locate = None,
+            Detail::Security {
+                trace,
+                settles,
+                confirms,
+                ..
+            } => {
+                *trace = None;
+                settles.clear();
+                **confirms = Confirms::default();
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Default)]

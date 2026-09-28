@@ -18,6 +18,7 @@ use crate::{
         references::{self, Fate, Missing},
     },
     inventory::Input,
+    revision::FileChange,
     schema::Pass,
 };
 use serde_json::{Value, json};
@@ -150,6 +151,10 @@ impl<'a> Shared<'a> {
         }
     }
 
+    /// With a change judged, a stale section is asked where the change
+    /// edited it or where it names a path the change removed, and the
+    /// finished-plan question when the change edited the document or broke
+    /// one of its references.
     fn plan_staleness(
         &self,
         d: usize,
@@ -158,7 +163,11 @@ impl<'a> Shared<'a> {
         requests: &mut Vec<Planned>,
     ) {
         let doc = &self.docs[d];
-        if !doc.facts.is_empty() {
+        let broken: Vec<bool> = (0..doc.sections.len())
+            .map(|s| names_removed(doc, s, file.changed))
+            .collect();
+        let edited = file.judges(1, file.source.lines().count().max(1));
+        if !doc.facts.is_empty() && (edited || broken.contains(&true)) {
             plan_unit(doc, file, out, requests);
         }
         let stale: Vec<usize> = (0..doc.sections.len())
@@ -166,10 +175,14 @@ impl<'a> Shared<'a> {
             .collect();
         let ids = unique_ids("stale", stale.iter().map(|&s| heading(&doc.sections[s])));
         for (&s, id) in stale.iter().zip(ids) {
+            let section = &doc.sections[s];
+            if !(broken[s] || file.judges(section.start_line, section.end_line)) {
+                continue;
+            }
             out.units.push(stale_section(
                 file,
                 &doc.title,
-                &doc.sections[s],
+                section,
                 &doc.missing[s],
                 id,
             ));
@@ -280,6 +293,16 @@ impl<'a> Shared<'a> {
     }
 }
 
+/// Whether section `s` of `doc` names a path `change` removed.
+fn names_removed(doc: &Doc<'_>, s: usize, change: Option<&FileChange>) -> bool {
+    let base = doc.input.result.path.parent().unwrap_or(Path::new(""));
+    change.is_some_and(|change| {
+        doc.missing[s]
+            .iter()
+            .any(|m| references::names_one_of(base, &m.name, &change.removed))
+    })
+}
+
 /// The questions asked of a section pair: whether each section states
 /// everything the other states, whether they disagree, whether they are
 /// about one subject, and whether one translates the other.
@@ -308,10 +331,22 @@ fn pair_questions(id: &str) -> Questions {
 /// Project documents of separate packages are not paired: each package's
 /// README is read on its own, such as on a registry page, so repeating the
 /// setup it shares with its siblings is how it stays complete.
+///
+/// A document a change left alone, read for the paths it removed, is not
+/// paired: the pairs of the documents it edited stay those of a check of
+/// the files it changed.
 fn section_pairs(docs: &[Doc<'_>]) -> (Vec<SectionPair>, usize) {
     let mut keys = Vec::new();
     let mut texts = Vec::new();
     for (d, doc) in docs.iter().enumerate() {
+        if doc
+            .input
+            .changed
+            .as_ref()
+            .is_some_and(FileChange::left_alone)
+        {
+            continue;
+        }
         for (s, section) in doc.sections.iter().enumerate() {
             keys.push((d, s));
             texts.push(overlap::Text {

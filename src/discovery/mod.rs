@@ -54,6 +54,10 @@ impl Classifier {
             "script"
         } else if self.generated.is_match(path) || generated_name(&name) {
             "generated"
+        } else if crate::analysis::generic::of(path).is_some() && under(DEPENDENCY_DIRS) {
+            "vendored"
+        } else if crate::analysis::generic::of(path).is_some() && flutter_runner(&components) {
+            "generated"
         } else if name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts") {
             "declarations"
         } else if under(&["fixtures", "__fixtures__", "__snapshots__", "testdata"]) {
@@ -68,6 +72,7 @@ impl Classifier {
             || name.ends_with(".rb") && under(&["spec", "step_definitions"])
             || phpunit_name(path)
             || java_test_name(path)
+            || crate::analysis::generic::test_path(path)
         {
             "test"
         } else {
@@ -95,8 +100,10 @@ fn schema_change(components: &[String], name: &str) -> bool {
 }
 
 /// File names generators use, such as `api.generated.ts` or `bundle.min.js`,
-/// and the C# files that designers and source generators write
-/// (`Form1.Designer.cs`, `App.g.cs`).
+/// the C# files that designers and source generators write
+/// (`Form1.Designer.cs`, `App.g.cs`), and Dart's build_runner and protoc
+/// output (`user.g.dart`, `user.freezed.dart`, `order.pb.dart`), which
+/// flutter_hooks and shelf keep beside their sources.
 fn generated_name(name: &str) -> bool {
     name.contains(".generated.")
         || name.contains(".gen.")
@@ -105,7 +112,47 @@ fn generated_name(name: &str) -> bool {
         || name.ends_with(".designer.cs")
         || name.ends_with(".g.cs")
         || name.ends_with(".g.i.cs")
+        || DART_GENERATED.iter().any(|suffix| name.ends_with(suffix))
 }
+
+const DART_GENERATED: &[&str] = &[
+    ".g.dart",
+    ".freezed.dart",
+    ".gr.dart",
+    ".mocks.dart",
+    ".pb.dart",
+    ".pbenum.dart",
+    ".pbjson.dart",
+    ".pbgrpc.dart",
+    ".pbserver.dart",
+];
+
+/// A platform runner `flutter create` writes into each Flutter app
+/// (`windows/runner`, `linux/runner`, `macos/Runner`, `ios/Runner`): dio's
+/// two example apps hold one each, and the 12 findings pairing them were
+/// all labeled wrong.
+fn flutter_runner(components: &[String]) -> bool {
+    components.windows(2).any(|pair| {
+        matches!(pair[0].as_str(), "windows" | "linux" | "macos" | "ios") && pair[1] == "runner"
+    })
+}
+
+/// Directories a C, C++, Swift or other generic-tier project copies its
+/// dependencies into: CocoaPods' `Pods`, Carthage's checkouts, and the
+/// `third_party`, `deps` and `external` trees of C and C++ projects
+/// (ninja's `src/third_party/rapidhash`, fzy's `deps/greatest`), judged as
+/// the project's own code in 0.30's measurement. The other languages keep
+/// their own rules: linkace's PHP `external/` is its own code.
+const DEPENDENCY_DIRS: &[&str] = &[
+    "pods",
+    "carthage",
+    "third_party",
+    "third-party",
+    "thirdparty",
+    "3rdparty",
+    "deps",
+    "external",
+];
 
 /// A .NET test project directory, named by convention after the project it
 /// tests: `Shop.Tests`, `Shop.UnitTests`, `Shop.IntegrationTests`. Only its
@@ -167,10 +214,12 @@ fn file_extension(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+/// Scripts of shells no parser reads. Bash (`.sh`, `.bash`) is read by the
+/// generic tier (`analysis::generic`) and judged like other source.
 fn script_extension(path: &Path) -> bool {
     matches!(
         file_extension(path).as_str(),
-        "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd"
+        "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd"
     )
 }
 
@@ -178,8 +227,9 @@ pub fn source(path: &Path, extra: &[String]) -> bool {
     let extension = file_extension(path);
     [
         "rs", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "kt",
-        "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "phtml", "swift",
-        "dart", "lua", "ex", "exs", "zig", "sh", "vue", "svelte", "astro", "sql", "bend",
+        "kts", "scala", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "cs", "rb", "php",
+        "phtml", "swift", "dart", "lua", "ex", "exs", "zig", "sh", "bash", "bats", "vue", "svelte",
+        "astro", "sql", "bend",
     ]
     .contains(&extension.as_str())
         || extra.contains(&extension)
@@ -232,6 +282,60 @@ mod tests {
             classifier.role(Path::new("src/test/java/app/Fixtures.java")),
             "test"
         );
+    }
+
+    #[test]
+    fn tests_of_the_generic_tier_s_languages_are_tests_and_bash_is_source() {
+        let classifier = super::Classifier::new(&Default::default()).unwrap();
+        for path in [
+            "shared/src/commonMain/kotlin/OrdersTest.kt",
+            "shared/src/androidInstrumentedTest/kotlin/Login.kt",
+            "Sources/App/RouterTests.swift",
+            "lua/cart_spec.lua",
+            "bin/deploy.bats",
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), "test", "{path}");
+        }
+        for (path, role) in [
+            ("shared/src/commonMain/kotlin/Orders.kt", "source"),
+            ("scripts/deploy.sh", "source"),
+            ("scripts/deploy.zsh", "script"),
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), role, "{path}");
+        }
+    }
+
+    #[test]
+    fn copied_dependencies_and_generated_files_of_the_generic_tier_are_not_judged() {
+        let classifier = super::Classifier::new(&Default::default()).unwrap();
+        for (path, role) in [
+            ("Pods/Alamofire/Source/Session.swift", "vendored"),
+            ("Carthage/Checkouts/Moya/Sources/Moya.swift", "vendored"),
+            ("src/third_party/rapidhash/rapidhash.h", "vendored"),
+            ("deps/greatest/greatest.h", "vendored"),
+            ("lib/models.g.dart", "generated"),
+            ("lib/user.freezed.dart", "generated"),
+            ("example_app/windows/runner/utils.cpp", "generated"),
+            (
+                "example_app/macos/Runner/MainFlutterWindow.swift",
+                "generated",
+            ),
+            ("src/app.c", "source"),
+            // The other languages keep their own rules.
+            ("external/Client.php", "source"),
+        ] {
+            assert_eq!(classifier.role(Path::new(path)), role, "{path}");
+        }
+        for header in [
+            "/* A lexical scanner generated by flex */",
+            "/* A Bison parser, made by GNU Bison 3.8.2.  */",
+            "// GENERATED CODE - DO NOT MODIFY BY HAND",
+        ] {
+            let source = format!(
+                "#line 2 \"src/lexer.c\"\n\n#define YY_INT_ALIGNED short int\n\n{header}\n\nint yylex(void) {{ return 0; }}\n"
+            );
+            assert!(super::generated_source(&source), "{header}");
+        }
     }
 
     #[test]

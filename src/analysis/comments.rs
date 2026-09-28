@@ -53,15 +53,8 @@ pub fn comments(path: &Path, source: &str, units: &[Unit]) -> Result<Vec<Comment
     let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(Vec::new());
     };
-    let mut raw = Vec::new();
-    collect(tree.root_node(), source, &mut raw);
-    if super::bend::file(path) {
-        // A Bend 2 test's `#|` lines are the output its run must print.
-        raw.retain(|r| !super::bend::output_line(&source[r.span.clone()]));
-    }
-    raw.sort_by_key(|r: &Raw| r.span.start);
     let lines: Vec<&str> = source.split('\n').collect();
-    let blocks = merge(raw, source);
+    let blocks = blocks(path, tree.root_node(), source);
     // Lines where a comment on its own line starts: code shown below a
     // comment stops there.
     let starts: BTreeSet<usize> = blocks
@@ -96,6 +89,31 @@ pub fn comments(path: &Path, source: &str, units: &[Unit]) -> Result<Vec<Comment
         ));
     }
     Ok(found)
+}
+
+/// Every comment of a parsed file as a byte span, in order: consecutive
+/// line comments merged, with Python docstrings; none left out.
+pub fn spans(path: &Path, root: Node<'_>, source: &str) -> Vec<Range<usize>> {
+    blocks(path, root, source)
+        .into_iter()
+        .map(|block| block.span)
+        .collect()
+}
+
+/// The comment blocks under `root`, in order.
+fn blocks(path: &Path, root: Node<'_>, source: &str) -> Vec<Block> {
+    let mut raw = Vec::new();
+    collect(root, source, &mut raw);
+    if super::bend::file(path) {
+        // A Bend 2 test's `#|` lines are the output its run must print.
+        raw.retain(|r| !super::bend::output_line(&source[r.span.clone()]));
+    }
+    raw.sort_by_key(|r: &Raw| r.span.start);
+    // A directive line stays out of the comment above it in the generic
+    // tier's languages: pi-hole's `# shellcheck source=…` read as part of
+    // the prose above it, and the finding offered to delete both.
+    let generic = super::generic::of(path).is_some();
+    merge(raw, source, generic)
 }
 
 struct Raw {
@@ -174,13 +192,16 @@ struct Block {
 
 /// Consecutive line comments on their own lines, one directly below the
 /// other and written with the same marker, are one comment; block comments
-/// stand alone.
-fn merge(raw: Vec<Raw>, source: &str) -> Vec<Block> {
+/// stand alone, and with `apart`, so do tool directives.
+fn merge(raw: Vec<Raw>, source: &str, apart: bool) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
     for comment in raw {
         if let Some(last) = blocks.last_mut()
             && !last.docstring
             && !comment.docstring
+            && !(apart
+                && (directive(&source[last.span.clone()])
+                    || directive(&source[comment.span.clone()])))
             && own_line(source, last.span.start)
             && own_line(source, comment.span.start)
             && line_marker(&source[last.span.clone()]).is_some()
@@ -210,9 +231,10 @@ fn last_line(source: &str, span: &Range<usize>) -> usize {
             .count()
 }
 
-/// The marker of a line comment: `//`, `///`, `//!` or `#`; none for a block.
+/// The marker of a line comment: `//`, `///`, `//!`, `#` or Lua's `--`;
+/// none for a block.
 fn line_marker(text: &str) -> Option<&str> {
-    ["///", "//!", "//", "#"]
+    ["///", "//!", "//", "#", "--"]
         .into_iter()
         .find(|m| text.starts_with(m))
 }
@@ -255,12 +277,20 @@ pub fn banner(text: &str) -> bool {
     })
 }
 
-/// Words a reader reads: the text without comment markers.
+/// Words a reader reads: the text without comment markers. Lua marks each
+/// line of a comment with `--`; in another language's docstring or block,
+/// dashes are a rule such as NumPy's `----------` and stay a word.
 pub fn prose(text: &str) -> String {
+    let dashed = text.trim_start().starts_with("--");
     text.lines()
         .map(|line| {
-            line.trim()
-                .trim_start_matches(|c: char| "/*#!\"'=".contains(c))
+            let line = line.trim();
+            let line = if dashed {
+                super::without_dashes(line).trim()
+            } else {
+                line
+            };
+            line.trim_start_matches(|c: char| "/*#!\"'=".contains(c))
                 .trim_end_matches("*/")
                 .trim_end_matches(['"', '\''])
                 .trim()
@@ -348,7 +378,39 @@ const DIRECTIVES: &[&str] = &[
     "@generated",
     "rustfmt::",
     "clippy::",
+    // The linters, formatters and editors of the generic tier's languages;
+    // Xcode lists `// MARK:` comments in its jump bar, like `#region`.
+    "mark:",
+    "swiftlint:",
+    "swift-format-ignore",
+    "sourcery:",
+    "ktlint",
+    "detekt",
+    "noinspection",
+    "shellcheck ",
+    "luacheck:",
+    "credo:",
+    "ignore_for_file:",
+    "ignore:",
+    "coverage:ignore",
+    "swift-tools-version",
+    "clang-format ",
+    "clang-tidy",
 ];
+
+/// Whether a comment instructs a tool rather than a reader.
+fn directive(text: &str) -> bool {
+    let words = prose(text).to_lowercase();
+    DIRECTIVES.iter().any(|d| words.starts_with(d))
+}
+
+/// Lua language server annotations (`---@param`, `---@type`, `---@alias`,
+/// `---@diagnostic`): types and directives, which the Lua projects measured
+/// for 0.30 had read as prose to delete.
+fn annotations(text: &str) -> bool {
+    text.lines()
+        .all(|line| line.trim_start().starts_with("---@"))
+}
 
 /// Sphinx directives that record the release a behavior appeared or changed
 /// in, with their indented bodies: documentation tools expect them, and
@@ -396,7 +458,7 @@ fn eligible(text: &str, line: usize) -> bool {
     if !words.chars().any(char::is_alphabetic) {
         return false;
     }
-    if DIRECTIVES.iter().any(|d| words.starts_with(d)) {
+    if directive(text) || annotations(text) {
         return false;
     }
     let license = words.contains("copyright")
@@ -822,6 +884,72 @@ mod tests {
         assert!(!comments[0].text.contains("versionchanged"));
         assert!(!comments[0].text.contains("Added the"));
         assert!(comments[0].text.contains(":param name:"));
+    }
+
+    #[test]
+    fn generic_languages_comments_merge_by_their_markers_and_skip_their_tools() {
+        let lua = "-- Utilities for carts.\nlocal M = {}\n\n--- Adds two numbers,\n-- the larger first.\nfunction M.add(a, b)\n  -- luacheck: ignore\n  return a + b\nend\n\nreturn M\n";
+        let comments = found("util.lua", lua);
+        let texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "-- Utilities for carts.",
+                "--- Adds two numbers,\n-- the larger first."
+            ]
+        );
+        assert_eq!(comments[1].placement, Placement::Declaration);
+        assert_eq!(comments[1].words, 6);
+        let swift = "// MARK: - Routing\n// swiftlint:disable line_length\nfunc route() {\n    // Retry once: the first request after a deploy is often refused.\n    send()\n}\n";
+        let texts: Vec<String> = found("Router.swift", swift)
+            .into_iter()
+            .map(|c| c.text)
+            .collect();
+        assert_eq!(
+            texts,
+            ["// Retry once: the first request after a deploy is often refused."]
+        );
+    }
+
+    #[test]
+    fn tool_lines_of_the_generic_tier_s_languages_are_not_prose() {
+        let bash =
+            "# Build the image first.\n# shellcheck source=lib/common.sh\nsource lib/common.sh\n";
+        let texts: Vec<String> = found("deploy.sh", bash)
+            .into_iter()
+            .map(|c| c.text)
+            .collect();
+        assert_eq!(texts, ["# Build the image first."]);
+        for (path, source) in [
+            (
+                "cart.lua",
+                "---@param a number\n---@return number\nlocal function add(a, b)\n  return a + b\nend\n",
+            ),
+            (
+                "init.lua",
+                "---@diagnostic disable: undefined-global\nlocal x = vim.g.x\n",
+            ),
+            (
+                "main.dart",
+                "void main() {\n  // ignore: avoid_print\n  print(1);\n}\n",
+            ),
+            (
+                "Package.swift",
+                "// swift-tools-version:5.9\nimport PackageDescription\n",
+            ),
+        ] {
+            assert!(found(path, source).is_empty(), "{path}");
+        }
+    }
+
+    #[test]
+    fn dashes_are_lua_s_marker_and_a_rule_elsewhere() {
+        assert_eq!(
+            prose("--- Adds two numbers.\n-- Returns the sum."),
+            "Adds two numbers. Returns the sum."
+        );
+        let numpy = "\"\"\"Sum the values.\n\n    Parameters\n    ----------\n    values : list\n    \"\"\"";
+        assert!(prose(numpy).contains("----------"));
     }
 
     #[test]

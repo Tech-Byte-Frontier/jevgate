@@ -1,0 +1,11 @@
+# thin-handlers: a request handler that does business work instead of delegating it.
+# From JevGate's question gallery, which gives how often it was right on real code:
+# https://tech-byte-frontier.github.io/jevgate/question-gallery.html#thin-handlers
+question = "Does this request handler do business work itself, such as calculations, rules or several data changes, instead of reading the request, calling a service or model and building the response?"
+background = "Business rules inside a handler cannot be reused from jobs, scripts or other endpoints, and are tested only through HTTP. The convention: controllers stay thin and delegate to services, models or domain functions."
+guidance = "A handler is a controller action, route handler, view function or endpoint. Fine: reading and validating input, one or two calls to services, models or repositories, authorization checks, pagination, choosing a status, redirect or template, and building the response. Count: prices, limits, eligibility or state transitions computed in the handler; loops that change several records; queries built step by step; several services orchestrated with business decisions between them; more than a few lines of logic that another entry point would need too. A function that is not a request handler is not a violation."
+unit = "function"
+paths = ["**/controllers/**", "**/*Controller.*", "**/*_controller.*", "**/*.controller.*", "**/handlers/**", "**/routes/**", "**/views.py", "**/views/**/*.py"]
+threshold = 0.8
+level = "review"
+next_step = "Move the business logic into a service or model method the handler calls."

@@ -39,6 +39,35 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "comments"
         ]
     );
+    let rule = |key: &str| {
+        rules
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["key"] == key)
+            .unwrap()
+    };
+    assert_eq!(rule("hardcoded_values")["default_enabled"], false);
+    let simplification = &rule("function_simplification")["maturity"];
+    assert_eq!(simplification["review"]["mature"], true);
+    assert_eq!(simplification["consider"]["mature"], false);
+    assert_eq!(
+        simplification["review"]["unseen"],
+        serde_json::json!({"right": 20, "labeled": 23})
+    );
+    let shared = rule("shared_logic");
+    assert_eq!(
+        shared["thresholds_validated"], true,
+        "its consider threshold"
+    );
+    assert_eq!(
+        rule("function_simplification")["thresholds_validated"],
+        false
+    );
+    let dataset = shared["evaluation_dataset"].as_str().unwrap();
+    assert!(dataset.contains("never tuned on"), "{dataset}");
+    let laws = rule("laws")["evaluation_dataset"].as_str().unwrap();
+    assert!(laws.contains("Bend 2"), "{laws}");
     for arguments in [
         vec!["check", "--rule", "contracts", "--dry-run"],
         vec!["record"],
@@ -61,6 +90,39 @@ fn rules_table_names_rules_groups_and_opt_in_rules() {
         "{table}"
     );
     assert!(table.contains("security/injection") && table.contains("opt-in"));
+    let row = |id: &str| {
+        table
+            .lines()
+            .find(|line| line.starts_with(id))
+            .unwrap()
+            .split_whitespace()
+            .take(9)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(
+        row("maintainability/function-simplification"),
+        "maintainability/function-simplification yes review 87% of 23 67% of 126"
+    );
+    assert_eq!(
+        row("maintainability/hardcoded-values"),
+        "maintainability/hardcoded-values opt-in - 1 of 8 17% of 29",
+        "below 20 labels, the counts, as a finding says it is not yet measured"
+    );
+    assert!(table.contains("BLOCKS: the levels that fail the check by default"));
+    assert!(
+        table.contains(
+            "every finding in a preview language such as Kotlin, are reported without failing it"
+        ),
+        "{table}"
+    );
+    assert!(
+        table.ends_with(
+            "How the shares are measured: https://tech-byte-frontier.github.io/jevgate/accuracy.html; \
+             each rule's page, with findings it got wrong: https://tech-byte-frontier.github.io/jevgate/rules/RULE.html.\n"
+        ),
+        "{table}"
+    );
 }
 
 #[test]
@@ -71,11 +133,9 @@ fn security_runs_only_when_selected() {
         "fn load(conn: &Connection, table: &str) {\n    conn.execute(&format!(\"DELETE FROM {table}\"), []).unwrap();\n}\n",
     )
     .unwrap();
-    assert!(!stages(&dry_run(&project, &[])).contains(&"security".to_string()));
-    assert_eq!(
-        stages(&dry_run(&project, &["--rule", "security"])),
-        ["security"]
-    );
+    let injection = "f0_interpreted".to_string();
+    assert!(!asked(&project, &[]).contains(&injection));
+    assert!(asked(&project, &["--rule", "security"]).contains(&injection));
 }
 
 #[test]
@@ -107,7 +167,16 @@ fn skipped_rules_and_rule_levels_shape_the_run() {
         JUDGED_RS.replace("total * 2", "total * 86400"),
     )
     .unwrap();
-    assert!(stages(&dry_run(&project, &[])).contains(&"values".to_string()));
+    let environment = "f0_environment".to_string();
+    assert!(
+        !asked(&project, &[]).contains(&environment),
+        "hardcoded values is opt-in"
+    );
+    let opted_in = asked(
+        &project,
+        &["--rule", "default", "--rule", "hardcoded-values"],
+    );
+    assert!(opted_in.contains(&environment));
     let preview = dry_run(
         &project,
         &[
@@ -120,10 +189,15 @@ fn skipped_rules_and_rule_levels_shape_the_run() {
         ],
     );
     assert_eq!(stages(&preview), ["functions"]);
-    assert_eq!(preview["fail_on"], serde_json::json!(["review"]));
+    assert_eq!(preview["fail_on"], serde_json::json!(["mature"]));
     assert_eq!(
         preview["fail_on_rules"],
         serde_json::json!({"maintainability/shared-logic": ["consider"]})
+    );
+    assert_eq!(
+        preview["fail_on_mature"],
+        serde_json::json!({"maintainability/function-simplification": ["review"]}),
+        "what `mature` stands for among the selected rules"
     );
 }
 

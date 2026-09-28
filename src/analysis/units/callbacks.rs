@@ -110,45 +110,61 @@ pub(super) fn csharp_callbacks<'t>(statement: Node<'t>, source: &str) -> Vec<(St
         let function = current
             .child_by_field_name("function")
             .filter(|f| f.kind() == "member_access_expression");
-        let method = function
-            .and_then(|f| f.child_by_field_name("name"))
-            .and_then(|n| callee_name(n, source))
-            .unwrap_or_default();
-        let arguments: Vec<Node<'t>> = current
-            .child_by_field_name("arguments")
-            .map(|a| {
-                a.named_children(&mut a.walk())
-                    .filter_map(|argument| {
-                        argument.named_child(argument.named_child_count().saturating_sub(1) as u32)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let handler = arguments.iter().rev().find(|n| {
-            matches!(
-                n.kind(),
-                "lambda_expression" | "anonymous_method_expression"
-            )
-        });
-        if let Some(handler) = handler
-            && csharp_registration(&method)
-        {
-            let root = function
-                .map(|f| csharp_chain_root(f, source))
-                .unwrap_or_default();
-            let path = arguments
-                .first()
-                .filter(|a| a.kind().contains("string"))
-                .map(|a| text(*a, source))
-                .unwrap_or("…");
-            found.push((format!("{root}.{method}({path})"), *handler));
-        }
+        found.extend(csharp_registered(current, function, source));
         call = function
             .and_then(|f| f.child_by_field_name("expression"))
             .filter(|o| o.kind() == "invocation_expression");
     }
     found.reverse();
     found
+}
+
+/// The handler one call of a C# chain registers, named by its registration:
+/// the last lambda or anonymous method passed to a method that registers
+/// one, such as `app.MapPost("/orders", …)`, where `function` is the member
+/// the call invokes (`app.MapPost`).
+fn csharp_registered<'t>(
+    call: Node<'t>,
+    function: Option<Node<'t>>,
+    source: &str,
+) -> Option<(String, Node<'t>)> {
+    let method = function
+        .and_then(|f| f.child_by_field_name("name"))
+        .and_then(|n| callee_name(n, source))
+        .unwrap_or_default();
+    let arguments = csharp_arguments(call);
+    let handler = arguments.iter().rev().find(|n| {
+        matches!(
+            n.kind(),
+            "lambda_expression" | "anonymous_method_expression"
+        )
+    })?;
+    if !csharp_registration(&method) {
+        return None;
+    }
+    let root = function
+        .map(|f| csharp_chain_root(f, source))
+        .unwrap_or_default();
+    let path = arguments
+        .first()
+        .filter(|a| a.kind().contains("string"))
+        .map(|a| text(*a, source))
+        .unwrap_or("…");
+    Some((format!("{root}.{method}({path})"), *handler))
+}
+
+/// The expressions a C# call passes: each argument's last named child, past
+/// a `name:` label.
+fn csharp_arguments(call: Node<'_>) -> Vec<Node<'_>> {
+    call.child_by_field_name("arguments")
+        .map(|a| {
+            a.named_children(&mut a.walk())
+                .filter_map(|argument| {
+                    argument.named_child(argument.named_child_count().saturating_sub(1) as u32)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The leftmost name of a C# callee such as `app.MapGet` or `app.MapGroup("/x").MapGet`.

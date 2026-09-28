@@ -62,14 +62,58 @@ signatures, or one candidate pair.
    page once one reads the request. RailsGoat's `raw cookies[:font]` and
    JavaVulnerableLab's scriptlet queries were read by no rule. A template
    holding neither is not selected.
-   A file whose parse holds syntax errors is not judged, unless they are few
-   and small (at most three regions, an eighth of the source in all), since
-   grammars miss some valid code: tree-sitter-typescript reads a call
-   signature starting with `<T>` on the line after another as its
-   continuation, which left four of zustand's source files unjudged. The
-   definitions that hold an error are then left out. Generator templates
-   (under `templates/`, or holding ERB tags or `//#if` conditions) keep the
-   strict rule, since their placeholders are not the language's syntax.
+   A syntax error leaves out the unit it sits in, not its file, since grammars
+   miss some valid code: tree-sitter-typescript reads a call signature
+   starting with `<T>` on the line after another as its continuation,
+   tree-sitter-rust reads snapbox's `str![…]` as the type `str`, and
+   tree-sitter-bend2 lacks Bend 2's erased binders (`for ~a: T`). A definition
+   or test whose syntax holds an error is left out with the comments inside it
+   (a Bend 2 test is its whole program), and so are module constants and
+   top-level statements that hold one; errors outside every unit are left out
+   by their lines, and the report names all of it (`left_out`). The outline,
+   the one question about the whole file, is asked only when 90% or more of
+   the file's non-blank lines parsed: leaving out whole members of 55 clean
+   outlines, the first answer moved as little as with one small member missing
+   above 90% (its top level 0.03 on average, 46 of 48 keeping their finding or
+   its absence), twice as much from 70% to 90% (10 of 99 flipped) and 0.10 to
+   0.18 below. A file with no intact unit is skipped, as is one whose top
+   level the parser could not read, and one whose syntax nests more than 1,000
+   levels (the corpus's deepest nests 405), before any walk that could
+   overflow. What is left out is reported as code the parser could not read,
+   not as broken code: nearly every such error is a grammar gap. Generator
+   templates (under `templates/`, holding `//#if` conditions, or holding an
+   ERB tag in their code rather than in a string or comment, which a C format
+   such as `"<%d>"` is not) keep the strict rule, since their placeholders are
+   not the language's syntax. C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir
+   and Lua are read by a generic tier (`src/analysis/generic`), in preview
+   until measured on projects never used for tuning. One tag query per
+   language, in the captures GitHub's code navigation uses, finds functions,
+   methods, types and calls (C++ members defined outside their class or
+   returning a reference or pointer, and operators; Swift computed properties
+   and subscripts; Kotlin `init` blocks, constructors and accessors), and a
+   table names the nodes that hold statements, nest control flow and hold
+   literals. A `.h` header is read as C++ when its code is only C++ (`std::`,
+   a namespace, a template, a class), and as C otherwise. The grammars' own
+   `tags.scm` tag what names a definition (a C prototype's declarator, a Swift
+   method's whole class), so the queries are JevGate's, with the definition
+   itself as the captured node. These files get function simplification, file
+   organization, shared logic and comments; values and security need a
+   language's own sites and sources and are not asked. Their tests are found
+   by path (a `…Test` class, a C file named `test…` or `…-test`, a Kotlin
+   source set such as `androidTest`, a Swift test target such as `VaporTests`,
+   busted's `spec/`, `*.bats`) and not judged yet, with no file-purpose
+   request; copied dependencies (`Pods`, `third_party`, `deps`), Flutter's
+   platform runners and Dart's generated files are skipped. No imports are
+   resolved, so an outline has no `used_by` and a function's callees are found
+   by name within its language. Their units stay out of the other languages'
+   evidence (test subjects, security traces, error handlers), their copies
+   pair only within one family (C and C++), and they take only the places of
+   the run's 64 copies the other languages leave: ranked together, C
+   benchmarks took a place from a Bend copy. A Bash script runs on its own, so
+   its copies pair with another script's only when one reads the other in
+   (`source`) or both read in the same script of the project: 31 of the 45
+   Bash copies labeled on projects never used for tuning paired standalone
+   scripts, none of them right.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
    and control-flow nesting; callbacks registered through calls, including
    module-level route handlers named by their registration
@@ -132,10 +176,75 @@ signatures, or one candidate pair.
    a full pass but saved a half to two thirds as much per edit, and left
    whole files in one run (`clones.rs`, `literals.rs`); one in four
    overtakes it after 31 to 40 edits.
+   Every rule's questions about a function ride in its one pack
+   (`src/units/packs.rs`): the split and flatten questions, the
+   hardcoded-value questions with the function's literal values, and each
+   security rule's presence questions with its framework evidence, so its
+   source is sent once. Each rule packed its own functions before, and a
+   function all three judged was sent three times. With every rule, the
+   corpus's first pass plans 20% fewer requests and bills about 11% less
+   input (22% less on the function packs, measured on 28 projects); a rule
+   alone asks exactly what it asked. A function's answers moved as much as
+   when only its pack's companions change (0.018 on the split's top level,
+   both). On 28 labeled projects, function-simplification and security
+   findings were right as often or more often, and hardcoded-value considers
+   on tuned projects less often (9 of 17 right, from 9 of 14). Since a
+   function's pack holds the questions of every rule selected, selecting
+   hardcoded values or a security rule can move a function-simplification
+   finding across a threshold: with every rule, 11 of the 56 reviews that
+   split-only packs gave were not reviews and 10 other findings were. In a
+   file whose framework role is set, split questions are packed apart,
+   without the role.
+   With `--base`, only what the change touched is asked: units whose lines
+   it added or modified, or removed lines inside; copies where either copy
+   changed; a file's outline, or a large document's, only when the change
+   adds a member or heading its base version lacks; and a document it left
+   alone only in a section that names a path it deleted or renamed. The
+   touched functions of one run share a pack, in runs that end where they
+   end for the whole file, so no other pack is sent. A later push that
+   changes another function of the run adds it to that pack, which is asked
+   again whole: on 16 corpus projects whose last two commits edit the same
+   file, the second push re-asked 93 units the first had asked, in 45 of
+   its 575 new packs and 1% of the bytes it sent (judging whole files, 363
+   units in 129 of 759 packs, 3%). A unit asked beside other functions can
+   answer differently: of 11,693 first-pass answers about the same units on
+   the corpus's last commits, 88% were the same as with whole-file packs,
+   the others moved 0.03 on average, and 36 crossed 0.50 or 0.80 (13 up, 23
+   down), which made three function-simplification considers notes.
    Tests are sent one per request, because unrelated
    tests in the same state left more answers undecided. State uses literal paths
    such as `functions[2].source`; group IDs are Choice options. Stage and freshness
    hashes stay in local `jevgate` metadata that is not uploaded.
+   Each answer is cached by the state it is about, with the rubric and the
+   model, and by its question, in one file per state under
+   `.jevgate/cache/answers/`; a request sends only the questions that file
+   lacks, so a reworded or added question is asked alone, where a key on the
+   whole request asked every question beside it again. Jev answers the
+   questions of a request independently: sent whole and one question at a
+   time, five times each, 51 questions of nine requests (one per first-pass
+   stage) moved 0.005 on average, within their own spread across sends
+   (0.007). An earlier version's entry for a whole request still answers it
+   while it is unchanged, and its answers are copied into the state's file.
+   A function pack is one state with every enabled rule's questions about
+   its functions, cached question by question like any other: rewording one
+   rule's question asks only that question of each pack again, while enabling
+   or disabling a rule usually changes the pack's evidence, and so its state,
+   and asks the pack again. Two requests about the same state share their
+   answers to the questions both ask, such as a hardcoded-value question
+   asked alone and in a pack whose evidence is the same.
+   Custom questions (`custom/<id>`) are asked in the same dispatch. A unit
+   whose source a built-in first-pass request already sends (a function in
+   its pack, a test, a comment, an instruction section) is asked in that
+   request, found by the entry that holds its evidence, so the source goes
+   up once and, the state being the same, adding a question asks only that
+   question; the others go in requests of their own, packed as the built-in
+   stage packs the same units, a file or a changed hunk's parts apart. The
+   question names its unit by its literal state path, with its author's
+   background and guidance as labeled keys. Its answer is a finding at the
+   question's own threshold and level, and no follow-up is asked. `jevgate
+   rules test` asks a question's examples the same way, each as a file with
+   the example's path and text, and fails when a failing example is not a
+   finding or a passing one is.
 4. **Follow-ups.** One recheck per uncertain unit, with callee signatures, the
    enclosing functions or the file's application source; a decisive recheck
    replaces the first answer and both are kept. A hardcoded-value unit is asked
@@ -659,9 +768,11 @@ signatures, or one candidate pair.
    the Score's acceptable levels do and nothing is at review; public tables
    and views are at most a consider, reducers can be reviews. A
    hardcoded-value review or consider whose value the locate Choice could not
-   name is one level lower. Messages show the probability that set a finding's
-   level (a consider shows the middle-or-top mass, not the top level); notes
-   show none. Finished plans in one directory become one finding identified by
+   name is one level lower. A finding keeps the probability that set its
+   level as `concern_probability` (a consider's is the middle-or-top mass, not
+   the top level); its message does not show it, and the outputs show instead
+   how often findings of its rule and level were right on projects never used
+   for tuning. Finished plans in one directory become one finding identified by
    the directory, and the others become notes pointing at it. On its
    labeled set, no living document leaned past 0.50. Questions ask whether a change would help a reader ("would splitting
    it make it easier to understand?"), not how many tasks or purposes there are:
@@ -669,7 +780,16 @@ signatures, or one candidate pair.
    cases are one level lower, and copies in their fixtures, helpers and setup
    at most a consider. Copies of three lines or fewer are at most a
    consider: in Java such a copy was as often an idiom, a pooled builder
-   borrowed and released around one call, as a missing helper. A test that
+   borrowed and released around one call, as a missing helper. A consider
+   that rests on the same-steps Score's middle-or-top mass needs 0.90 there,
+   not 0.80: with a tenth to a fifth of the mass on "different work that only
+   looks alike", 25 of 54 such considers were right on the projects used for
+   tuning and 9 of 29 on projects never used for it, against 32 of 44 and 13
+   of 23 above, most of the wrong ones spans too small to share. A threshold
+   measured for one question like this is kept in `policy::CALIBRATED` only
+   when, fitted on the tuned projects, it removes at least as many wrong
+   findings as right ones on the unseen projects too; every other question
+   uses the shared ones. A test that
    checks several unrelated behaviors is at most a note: on labeled tests,
    tables of inputs and browser journeys rated as high as tests that really
    mix behaviors. A test said to assert internal details is asked, with the
@@ -692,8 +812,15 @@ signatures, or one candidate pair.
    rather than splitting it, so a consider left naming no group is a note
    and a review says to split the whole file.
 6. **Gate.** `--fail-on`, `[[scope]]` levels per path and the baseline act on
-   composed findings only. Baseline entries can carry a reason (`intended`,
-   `later`, `wrong`) that survives rewrites; `baseline stats` counts them.
+   composed findings only. The default level, `mature`, fails only on the
+   rules and levels whose findings were right at least 80% of the time on
+   projects never used for tuning, over at least 20 labels
+   (`maturity::TABLE`), and never on a preview language's, whose rules and
+   levels are measured in that language apart (`maturity::PREVIEW`); a
+   probability says how sure an answer is, not how often such findings are
+   right. Baseline entries can carry a reason
+   (`intended`, `later`, `wrong`) that survives rewrites; `baseline stats`
+   counts them.
 
 ## Constraints
 
@@ -703,6 +830,7 @@ signatures, or one candidate pair.
   uploaded state or questions.
 - Preserve raw answers, uncertainty and needs-context outcomes.
 - Version question wording (`units::questions::VERSION`) and composition
-  (`schema::COMPOSITION`); question changes invalidate the cache by content.
+  (`schema::COMPOSITION`); a changed question re-asks only itself, since the
+  cache keeps each question's answer apart.
 - Validate on small frozen sets through the CLI; keep results in ignored
   `.jevgate/evaluation/`.

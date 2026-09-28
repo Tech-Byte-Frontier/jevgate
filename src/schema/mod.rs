@@ -9,7 +9,7 @@ pub use report::*;
 pub const RUBRIC: &str = "jevgate-units-v1";
 /// Changes how saved answers become a status. Included in the report identity
 /// and not in the judgment cache, so unchanged questions are not sent again.
-pub const COMPOSITION: &str = "unit-composition-v12";
+pub const COMPOSITION: &str = "unit-composition-v13";
 pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -70,6 +70,9 @@ pub struct Judgment {
     pub version: String,
     pub pass: Pass,
     pub answer: Answer,
+    /// The provider's id for the request that answered, to quote to its support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 pub fn now() -> u64 {

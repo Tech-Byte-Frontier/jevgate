@@ -41,10 +41,11 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
         ("documentation/agent-context", 1)
     );
     assert!(
-        stack.message.starts_with("Section `Stack` restates what the repository's files show (1.00). Codex, GitHub Copilot, Cursor, Windsurf, Cline and Claude Code load it at the start of every session"),
+        stack.message.starts_with("Section `Stack` restates what the repository's files show. Codex, GitHub Copilot, Cursor, Windsurf, Cline and Claude Code load it at the start of every session"),
         "{}",
         stack.message
     );
+    assert_eq!(stack.concern_probability, 1.0);
     assert_eq!(file.findings[1].symbol.as_deref(), Some("Web"));
     assert!(
         file.findings[1]
@@ -73,23 +74,6 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
         .find(|f| f.symbol.as_deref() == Some("Release"))
         .unwrap();
     assert_eq!(release.strength, Strength::Note, "{}", release.message);
-}
-
-fn git(project: &Project, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args([
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .current_dir(&*project.0)
-        .output()
-        .unwrap();
-    assert!(status.status.success(), "{status:?}");
 }
 
 #[test]
@@ -139,18 +123,18 @@ fn stale_sections_and_repeated_sections_are_checked_after_the_first_pass() {
 fn a_finished_plan_covers_its_section_checks() {
     let project = Project::new();
     project.write("src/old.ts", "export {}\n");
-    git(&project, &["init", "-q"]);
-    git(&project, &["add", "."]);
-    git(&project, &["commit", "-q", "-m", "one"]);
-    git(&project, &["tag", "v0.2.0"]);
+    project.git(&["init", "-q"]);
+    project.git(&["add", "."]);
+    project.git(&["commit", "-q", "-m", "one"]);
+    project.git(&["tag", "v0.2.0"]);
     std::fs::remove_file(project.0.join("src/old.ts")).unwrap();
     project.write("src/new.ts", "export {}\n");
     project.write(
         "docs/plans/v0.2.0-plan.md",
         "# v0.2.0 plan\n## Task 1\nEdit `src/old.ts` to add the handler.\n",
     );
-    git(&project, &["add", "-A"]);
-    git(&project, &["commit", "-q", "-m", "two"]);
+    project.git(&["add", "-A"]);
+    project.git(&["commit", "-q", "-m", "two"]);
     let mut options = args();
     options.rules = vec![catalog::DOC_STALENESS.into()];
     let mut eval = scripted(2);
@@ -187,7 +171,7 @@ fn plan_file(path: &str) -> crate::schema::FileResult {
     let mut file = consider_file(path, "doc_staleness", "documentation/staleness");
     let finding = &mut file.findings[0];
     finding.category = Some(super::grouping::FINISHED_PLAN.into());
-    finding.message = format!("`{path}` is a plan whose work is finished: tag v1 (0.95).");
+    finding.message = format!("`{path}` is a plan whose work is finished: tag v1.");
     file
 }
 
@@ -234,7 +218,7 @@ fn repeat_file(path: &str, line: usize, other: (&str, usize)) -> crate::schema::
     let finding = &mut file.findings[0];
     finding.line = line;
     finding.message = format!(
-        "Section `Setup` states everything section `Setup` of `{}` states (0.98).",
+        "Section `Setup` states everything section `Setup` of `{}` states.",
         other.0
     );
     let at = |path: &str, line: usize| crate::schema::Location {
@@ -440,10 +424,11 @@ fn a_disagreement_that_leads_is_a_note_and_detail_is_no_disagreement() {
     assert!(
         findings[0]
             .message
-            .contains("may give different values or instructions for the same thing (0.60)"),
+            .contains("may give different values or instructions for the same thing."),
         "{}",
         findings[0].message
     );
+    assert_eq!(findings[0].concern_probability, 0.6);
     // Differing only in detail is acceptable, like agreeing.
     let (dimension, findings) = pair_answered(vec![("conflict", spread(0.2, 0.7, 0.1))]);
     assert_eq!(dimension.units.clear, 1, "{}", dimension.decision_basis);
@@ -586,10 +571,11 @@ fn an_undecided_instruction_section_settles_by_its_kind() {
     assert!(
         findings[0]
             .message
-            .contains("gives only advice that applies to any project (0.90)"),
+            .contains("gives only advice that applies to any project."),
         "{}",
         findings[0].message
     );
+    assert_eq!(findings[0].concern_probability, 0.9);
     // A decided signal is never moved by the kind.
     let (decided, _) = instruction_dimension(
         vec![("s0_describes", noul_at(0.95))],
@@ -660,10 +646,11 @@ fn an_undecided_large_document_is_asked_its_kind() {
     assert!(
         collection.findings[0]
             .message
-            .contains("holds several unrelated subjects (0.90)"),
+            .contains("holds several unrelated subjects."),
         "{}",
         collection.findings[0].message
     );
+    assert!((collection.findings[0].concern_probability - 0.9).abs() < 1e-9);
     // A split finding is asked its kind: a plan for one release clears it,
     // and a collection keeps it.
     let found = || spread(0.1, 0.25, 0.65);

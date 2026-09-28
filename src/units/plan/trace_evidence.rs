@@ -46,15 +46,22 @@ fn definitions(
     scope: &Scope<'_>,
     shown: impl Fn(&Unit, &str) -> Option<String>,
 ) -> BTreeMap<String, String> {
-    let selected = scope.owners.iter().map(|&owner| {
-        (
-            scope.inputs[owner].source.as_deref().unwrap_or(""),
-            &scope.units[&owner].units,
-        )
-    });
+    // The generic tier's types are no evidence for the security questions
+    // it does not ask.
+    let selected = scope
+        .owners
+        .iter()
+        .filter(|&owner| !scope.units[owner].generic)
+        .map(|&owner| {
+            (
+                scope.inputs[owner].source.as_deref().unwrap_or(""),
+                &scope.units[&owner].units,
+            )
+        });
     let context = scope
         .context
         .iter()
+        .filter(|(_, _, units)| !units.generic)
         .map(|(_, source, units)| (*source, &units.units));
     let mut found: BTreeMap<String, Option<String>> = BTreeMap::new();
     for (source, units) in selected.chain(context) {

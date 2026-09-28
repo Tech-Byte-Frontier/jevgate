@@ -60,6 +60,7 @@ pub(super) fn plan(
                 input.source.as_deref().unwrap_or(""),
                 input.package.as_ref(),
             ),
+            changed: input.changed.as_ref(),
         };
         if let Some(file) = result.files.get_mut(&handler.owner) {
             let django = scope.units[&handler.owner].django;
@@ -79,7 +80,7 @@ pub(super) fn plan(
 fn error_handlers(scope: &Scope<'_>, links: &Links) -> Vec<Handler> {
     let mut found: Vec<Handler> = Vec::new();
     for &owner in &scope.owners {
-        if !scope.views[&owner].application {
+        if !scope.views[&owner].application || scope.units[&owner].generic {
             continue;
         }
         let file = registered(scope, links, owner)
@@ -150,7 +151,7 @@ fn named_handler(
 ) -> Option<(usize, String, String, (usize, usize))> {
     let definitions: Vec<(usize, &Unit)> = std::iter::once(owner)
         .chain(scope.owners.iter().copied().filter(|&o| o != owner))
-        .filter(|o| scope.views[o].application)
+        .filter(|o| scope.views[o].application && !scope.units[o].generic)
         .flat_map(|o| {
             let lines = scope.test_lines(o);
             scope.units[&o]

@@ -60,7 +60,6 @@ pub(in crate::units) fn section_wording(
     name: &str,
     detail: &Detail,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
 ) -> Wording {
     let get = |q: &str| answers.get(q).copied();
@@ -102,11 +101,7 @@ pub(in crate::units) fn section_wording(
         _ => String::new(),
     };
     (
-        format!(
-            "{subject} {}{}.{load}",
-            reasons.join("; "),
-            shown(strength, p)
-        ),
+        format!("{subject} {}.{load}", reasons.join("; ")),
         match (strength, reached.first()) {
             (Strength::Note, Some(signal)) if signal.question == "scope" => signal.action,
             (Strength::Note, _) => "Optional: trim what agents learn from the code",
@@ -121,7 +116,6 @@ pub(in crate::units) fn section_wording(
 pub(in crate::units) fn document_wording(
     name: &str,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
     part: Option<&Block>,
 ) -> Wording {
@@ -150,7 +144,7 @@ pub(in crate::units) fn document_wording(
             )
         } else {
             (
-                format!("`{name}` holds several unrelated subjects ({p:.2}){part}."),
+                format!("`{name}` holds several unrelated subjects{part}."),
                 "Split the document by subject and link the parts",
             )
         };
@@ -161,19 +155,16 @@ pub(in crate::units) fn document_wording(
         "mainly records"
     };
     (
-        format!(
-            "`{name}` {records} past work, such as dated plans, completed tasks or logs{}.",
-            shown(strength, p)
-        ),
+        format!("`{name}` {records} past work, such as dated plans, completed tasks or logs."),
         "Remove finished plans and logs, or move them out of the living documentation",
     )
 }
 
 /// A plan whose work Git shows finished, with the facts that show it.
-pub(in crate::units) fn plan_wording(name: &str, facts: &[String], p: f64) -> Wording {
+pub(in crate::units) fn plan_wording(name: &str, facts: &[String]) -> Wording {
     (
         format!(
-            "`{name}` is a plan whose work is finished: {} ({p:.2}).",
+            "`{name}` is a plan whose work is finished: {}.",
             facts.join("; ")
         ),
         "Delete the finished plan, or move it out of the living documentation",
@@ -181,10 +172,10 @@ pub(in crate::units) fn plan_wording(name: &str, facts: &[String], p: f64) -> Wo
 }
 
 /// A section that tells the reader to use a path or script that is gone.
-pub(in crate::units) fn stale_wording(name: &str, missing: &[String], p: f64) -> Wording {
+pub(in crate::units) fn stale_wording(name: &str, missing: &[String]) -> Wording {
     (
         format!(
-            "Section `{name}` tells the reader to use {} ({p:.2}).",
+            "Section `{name}` tells the reader to use {}.",
             missing.join(", ")
         ),
         "Update the section to the current path or command, or remove it",
@@ -197,7 +188,6 @@ pub(in crate::units) fn doc_pair_wording(
     name: &str,
     other: &crate::schema::Location,
     answers: &Answers<'_>,
-    p: f64,
 ) -> (Wording, bool) {
     let conflict = answers.get("conflict").map(|a| disagreement(a));
     let there = format!(
@@ -225,7 +215,7 @@ pub(in crate::units) fn doc_pair_wording(
         return (
             (
                 format!(
-                    "Section `{name}` and {there} {verb} different values or instructions for the same thing ({p:.2})."
+                    "Section `{name}` and {there} {verb} different values or instructions for the same thing."
                 ),
                 "Reconcile the two sections and keep the fact in one place",
             ),
@@ -234,15 +224,15 @@ pub(in crate::units) fn doc_pair_wording(
     }
     let message = match (covers("a_covers"), covers("b_covers")) {
         (Some(Outcome::Review(_)), _) => {
-            format!("Section `{name}` states everything {there} states ({p:.2}).")
+            format!("Section `{name}` states everything {there} states.")
         }
         (_, Some(Outcome::Review(_))) => {
-            format!("{there} states everything section `{name}` states ({p:.2}).")
+            format!("{there} states everything section `{name}` states.")
         }
         (Some(Outcome::Note(_)), _) => {
-            format!("Section `{name}` states most or all of what {there} states ({p:.2}).")
+            format!("Section `{name}` states most or all of what {there} states.")
         }
-        _ => format!("{there} states most or all of what section `{name}` states ({p:.2})."),
+        _ => format!("{there} states most or all of what section `{name}` states."),
     };
     (
         (
@@ -340,7 +330,6 @@ pub(in crate::units) fn comment_wording(
     owner: &str,
     listed: &[(&crate::schema::Location, &'static str)],
     strength: Strength,
-    p: f64,
 ) -> Wording {
     let subject = if owner == crate::units::comments::TOP_LEVEL {
         "This file's top-level code".to_string()
@@ -372,11 +361,7 @@ pub(in crate::units) fn comment_wording(
     } else {
         "a comment".to_string()
     };
-    let message = format!(
-        "{subject} has {counted} to clean up{}: {}.",
-        shown(strength, p),
-        parts.join("; ")
-    );
+    let message = format!("{subject} has {counted} to clean up: {}.", parts.join("; "));
     let has = |reason: &str| reasons.contains(&reason);
     let shorten = has("verbose") || has("narration");
     let action = match (strength, many) {

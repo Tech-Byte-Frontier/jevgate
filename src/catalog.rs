@@ -16,8 +16,23 @@ pub struct Rule {
     pub inspection: &'static str,
     pub acceptable_example: &'static str,
     pub requires_tests: bool,
-    pub evaluation_dataset: &'static str,
-    pub thresholds_validated: bool,
+}
+
+/// The documentation site, published from `site/` with each release.
+pub const SITE: &str = "https://tech-byte-frontier.github.io/jevgate/";
+
+impl Rule {
+    /// The rule's page on the site, `site/src/rules/<ID>.md`: what it looks
+    /// at, how often it was right, and findings it got wrong. A custom
+    /// question, a team's own, has none: its page is the one on writing and
+    /// testing custom questions.
+    pub fn page(&self) -> String {
+        if self.group == CUSTOM_GROUP {
+            format!("{SITE}custom-questions.html")
+        } else {
+            format!("{SITE}rules/{}.html", self.id)
+        }
+    }
 }
 
 pub const FILE_ORGANIZATION: &str = "file_organization";
@@ -40,8 +55,6 @@ pub const DOC_STALENESS: &str = "doc_staleness";
 pub const DOC_DUPLICATION: &str = "doc_duplication";
 pub const DOCUMENTATION: [&str; 4] = [AGENT_CONTEXT, LARGE_DOCS, DOC_STALENESS, DOC_DUPLICATION];
 
-const DATASET: &str = "focused development set; not calibrated";
-
 pub fn rules() -> Vec<Rule> {
     vec![
         Rule {
@@ -55,8 +68,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Would moving some members into a separate module (or tests into a separate test file) make the file easier to navigate and maintain?",
             acceptable_example: "One algorithm, one type and its helpers, one feature, or the tests of one subject",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "maintainability/function-simplification",
@@ -69,8 +80,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Would splitting the function into named functions make it easier to understand? For control flow nested four deep or four-branch chains: would flattening it help?",
             acceptable_example: "One job whose steps belong together or already call named functions",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "maintainability/shared-logic",
@@ -83,13 +92,14 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Do the two sites perform the same steps for the same purpose, so one shared implementation would serve both?",
             acceptable_example: "Different work that only looks alike, or repetition the behavior requires",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "maintainability/hardcoded-values",
             group: "maintainability",
-            default_enabled: true,
+            // Opt-in: 6 of its 37 labeled reviews and considers were right on
+            // projects JevGate was never tuned on (16%), against 47 of 85 on
+            // the projects it was tuned on (55%).
+            default_enabled: false,
             key: HARDCODED_VALUES,
             version: rule_version(HARDCODED_VALUES),
             scope: "application functions and module constants that use literal values other than 0, 1, 2 or one-character strings",
@@ -97,8 +107,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a value fixed in code change between deployments, need a descriptive name, or special-case one identity?",
             acceptable_example: "Messages, formats, protocol names and values whose meaning the code around them makes clear",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/injection",
@@ -111,8 +119,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a variable that another party controls reach the text of a query, command, code, markup, file path, requested URL or redirect target, or a deserializer, without being bound, escaped or checked?",
             acceptable_example: "Bound query parameters, argument lists, escaping templates, and values the program fixes or checks",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/sensitive-data",
@@ -125,8 +131,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the function log a password, token, key or personal data, or send internal error details to a remote client? Does an error handler send clients more than the program's own messages and codes?",
             acceptable_example: "Logging record ids and messages; generic error responses with details kept in server logs",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/unsafe-settings",
@@ -139,8 +143,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the code turn off a security check or choose a weak setting: certificate verification, password hashing, random tokens, CORS, cookies, or secrets in environment variables the build puts into browser code?",
             acceptable_example: "MD5 for cache keys, non-cryptographic random for shuffling, secure defaults",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/access-control",
@@ -153,8 +155,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a policy let every user it applies to reach other users' rows, or trust a value users can change? Does a SECURITY DEFINER function leave search_path open or skip checking the caller? Does a grant open writes or private reads to every user? Does a public table hold users' own data, a view return other users' rows, or a reducer change rows its arguments choose, or admin-only settings, without checking the caller?",
             acceptable_example: "Policies tied to the user, account or membership; role checks; restrictive policies; public data; grants narrowed by row-level security; reducers that check the caller through `ctx.sender`, the module owner, an admin or a trusted service identity, or run only on a schedule",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "security/workflows",
@@ -167,8 +167,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Can a run script execute text that people outside the repository write? Does a job run pull request code while it has secrets or a write token?",
             acceptable_example: "Untrusted text passed through env variables; pull_request workflows; jobs that run only the base branch's code",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "tests/value",
@@ -181,8 +179,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the test check only its mocks, recompute the expected value with the code's own logic, assert internal details, or mix unrelated behaviors?",
             acceptable_example: "A test that checks a result or effect a caller can observe",
             requires_tests: true,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "tests/redundancy",
@@ -195,8 +191,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Do the two tests check the same behavior, with different or equivalent inputs?",
             acceptable_example: "Tests of different behaviors of one function",
             requires_tests: true,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "tests/laws",
@@ -209,8 +203,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does the comment above a law promise more than, or something other than, what the law states, so a definition could break the promise while every proof passes?",
             acceptable_example: "A comment that puts its law in words; laws that declare a signature or a primitive",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/agent-context",
@@ -223,8 +215,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a section restate what the repository's files show, give generic advice, repeat what linters check, or record past work?",
             acceptable_example: "Project-specific commands, constraints, decisions and workflows the code does not show",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/large-docs",
@@ -237,8 +227,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Would splitting the document make it easier to find and maintain, or does it mainly record past work?",
             acceptable_example: "One long guide, reference or concept, and living procedures",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/staleness",
@@ -251,8 +239,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Is the document a plan whose work is finished, or does a section tell the reader to use a path or script that no longer exists?",
             acceptable_example: "Outputs a command writes, local or ignored files, examples, and paths named as removed",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/duplication",
@@ -265,8 +251,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does one section state everything the other states, or do the two give different values or instructions for the same thing?",
             acceptable_example: "Sections on the same subject where each adds something",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
         Rule {
             id: "documentation/comments",
@@ -279,8 +263,6 @@ pub fn rules() -> Vec<Rule> {
             inspection: "Does a comment only repeat its code, hold sentences that add nothing, narrate an edit instead of the code as it is, or hold code turned off?",
             acceptable_example: "Reasons, constraints, caveats, references, and documentation of what a definition returns or guarantees beyond its signature",
             requires_tests: false,
-            evaluation_dataset: DATASET,
-            thresholds_validated: false,
         },
     ]
 }
@@ -289,7 +271,7 @@ pub fn rule_version(key: &str) -> &'static str {
     match key {
         FILE_ORGANIZATION => "23",
         FUNCTION_SIMPLIFICATION => "16",
-        SHARED_LOGIC => "22",
+        SHARED_LOGIC => "23",
         TEST_VALUE => "7",
         TEST_REDUNDANCY => "4",
         INJECTION => "13",
@@ -306,6 +288,7 @@ pub fn rule_version(key: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub fn keys() -> Vec<&'static str> {
     rules().into_iter().map(|r| r.key).collect()
 }
@@ -313,6 +296,8 @@ pub fn keys() -> Vec<&'static str> {
 /// Every rule selected when none are configured.
 pub const DEFAULT_GROUP: &str = "default";
 pub const ALL_GROUP: &str = "all";
+/// The group of every custom question, whose rule IDs are `custom/<id>`.
+pub const CUSTOM_GROUP: &str = "custom";
 
 pub fn groups() -> Vec<&'static str> {
     let mut groups: Vec<&str> = rules().into_iter().map(|r| r.group).collect();
@@ -322,21 +307,28 @@ pub fn groups() -> Vec<&'static str> {
 
 /// Whether `name` is the rule's ID (`maintainability/file-organization`),
 /// its name (`file-organization`, the ID after its group) or its key
-/// (`file_organization`).
+/// (`file_organization`). A custom question has no short name: its id
+/// could be a built-in rule's name, such as `comments`.
 pub fn names(rule: &Rule, name: &str) -> bool {
     name == rule.key
         || name == rule.id
-        || rule
-            .id
-            .rsplit_once('/')
-            .is_some_and(|(_, short)| short == name)
+        || rule.group != CUSTOM_GROUP
+            && rule
+                .id
+                .rsplit_once('/')
+                .is_some_and(|(_, short)| short == name)
 }
 
 /// The rule keys a rule ID, name, key or group names; `None` when it names
 /// nothing.
 pub fn select(name: &str) -> Option<Vec<&'static str>> {
-    let selected: Vec<&str> = rules()
-        .into_iter()
+    select_in(&rules(), name)
+}
+
+/// The keys of the rules among `rules` that `name` names, as [`select`].
+pub fn select_in(rules: &[Rule], name: &str) -> Option<Vec<&'static str>> {
+    let selected: Vec<&str> = rules
+        .iter()
         .filter(|r| match name {
             ALL_GROUP => true,
             DEFAULT_GROUP => r.default_enabled,
@@ -345,6 +337,20 @@ pub fn select(name: &str) -> Option<Vec<&'static str>> {
         .map(|r| r.key)
         .collect();
     (!selected.is_empty()).then_some(selected)
+}
+
+/// The built-in rules, then the custom questions in the order they are
+/// defined.
+pub fn with_custom(questions: &'static [crate::custom::Question]) -> Vec<Rule> {
+    let mut all = rules();
+    all.extend(questions.iter().map(crate::custom::Question::rule));
+    all
+}
+
+/// Whether a rule key or ID names a custom question: `custom/<id>`.
+pub fn custom(key: &str) -> bool {
+    key.strip_prefix(CUSTOM_GROUP)
+        .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// How specifically `name` addresses `rule`: 3 for the rule itself, 2 for its
@@ -366,13 +372,28 @@ pub fn find(name: &str) -> Option<Rule> {
     rules().into_iter().find(|r| names(r, name))
 }
 
-pub fn id(key: &str) -> &'static str {
-    find(key).map_or("unknown", |r| r.id)
+/// A rule's ID by its key; a custom question's key is its ID.
+pub fn id(key: &str) -> &str {
+    match find(key) {
+        Some(rule) => rule.id,
+        None if custom(key) => key,
+        None => "unknown",
+    }
 }
 
+/// The thresholds and floors findings are decided with, as the report and
+/// `jevgate rules --format json` record them; a threshold measured for one
+/// question is named by its rule, question and level.
 pub fn policy() -> BTreeMap<String, f64> {
     use crate::policy::REVIEW_PROBABILITY;
-    BTreeMap::from([
+    let calibrated = crate::policy::CALIBRATED.iter().map(|entry| {
+        let level = crate::output::label(&entry.level);
+        (
+            format!("{}_{}_{level}_probability", entry.rule, entry.question),
+            entry.threshold,
+        )
+    });
+    let mut policy = BTreeMap::from([
         ("review_probability".into(), REVIEW_PROBABILITY),
         ("clear_probability".into(), REVIEW_PROBABILITY),
         ("consider_probability".into(), REVIEW_PROBABILITY),
@@ -412,44 +433,179 @@ pub fn policy() -> BTreeMap<String, f64> {
             "long_branch_chain".into(),
             crate::analysis::nesting::LONG_CHAIN as f64,
         ),
-    ])
+    ]);
+    policy.extend(calibrated);
+    policy
 }
 
 /// One line per rule: ID, whether it runs by default, whether it needs
-/// `--include-tests`, and its question; groups and selection follow.
-pub fn table() -> String {
-    let rules = rules();
+/// `--include-tests`, the levels that fail the default gate, how often its
+/// reviews and considers were right on unseen projects, and its question,
+/// then the custom questions with what they are asked about; what the
+/// columns mean, groups, selection and the site's pages follow.
+pub fn table(questions: &'static [crate::custom::Question]) -> String {
+    let rules = with_custom(questions);
     let width = rules.iter().map(|r| r.id.len()).max().unwrap_or(0);
-    let mut lines = vec![format!("{:width$}  DEFAULT  QUESTION", "RULE")];
-    for rule in &rules {
-        let default = match (rule.default_enabled, rule.requires_tests) {
-            (false, _) => "opt-in",
-            (true, true) => "tests",
-            (true, false) => "yes",
-        };
-        lines.push(format!(
-            "{:width$}  {default:7}  {}",
-            rule.id, rule.inspection
-        ));
+    let mut lines = vec![format!(
+        "{:width$}  DEFAULT  BLOCKS    REVIEWS RIGHT  CONSIDERS RIGHT  QUESTION",
+        "RULE"
+    )];
+    lines.extend(rules.iter().map(|rule| {
+        let question = questions.iter().find(|q| q.rule == rule.id);
+        table_row(rule, width, question)
+    }));
+    let mut groups = groups();
+    if !questions.is_empty() {
+        groups.push(CUSTOM_GROUP);
     }
     lines.push(String::new());
     lines.push(format!(
-        "Groups: {}, {DEFAULT_GROUP} (every rule marked yes or tests), {ALL_GROUP}.",
-        groups().join(", ")
+        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected, and a custom question fails it at its own level. The rest, and every finding in a preview language such as Kotlin, are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
+        crate::maturity::MIN_PERCENT_RIGHT,
+        crate::maturity::MIN_LABELS,
+        crate::maturity::MIN_LABELS
     ));
-    lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests.".into());
+    lines.push(format!(
+        "Groups: {}, {DEFAULT_GROUP} (every rule marked yes or tests), {ALL_GROUP}.",
+        groups.join(", ")
+    ));
+    lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests. --fail-on and [rules] levels replace the default gate.".into());
+    lines.push(format!(
+        "Custom questions come from [[question]] in jevgate.toml and {}/*.toml; `jevgate rules add` copies measured ones from the gallery.",
+        crate::custom::DIRECTORY
+    ));
+    lines.push(format!(
+        "How the shares are measured: {SITE}accuracy.html; each rule's page, with findings it got wrong: {SITE}rules/RULE.html."
+    ));
     lines.join("\n")
 }
 
-pub fn describe() -> Value {
+/// A rule's row; a custom question fails the default gate at its own level
+/// and shows what it is asked about after its question.
+fn table_row(rule: &Rule, width: usize, question: Option<&crate::custom::Question>) -> String {
+    use crate::{maturity, schema::Strength};
+    let default = match (rule.default_enabled, rule.requires_tests) {
+        (false, _) => "opt-in",
+        (true, true) => "tests",
+        (true, false) => "yes",
+    };
+    let levels = question.map_or_else(|| maturity::mature_levels(rule.key), |q| q.blocks());
+    let blocks = if levels.is_empty() {
+        "-".to_string()
+    } else {
+        let names: Vec<String> = levels.iter().map(crate::output::label).collect();
+        names.join(", ")
+    };
+    let right = |level| {
+        maturity::measure(rule.key, level)
+            .and_then(|m| m.unseen.summary())
+            .unwrap_or_else(|| "-".into())
+    };
+    let asked = question.map_or(String::new(), |q| format!(" [{}]", q.summary()));
+    format!(
+        "{:width$}  {default:7}  {blocks:8}  {:13}  {:15}  {}{asked}",
+        rule.id,
+        right(Strength::Review),
+        right(Strength::Consider),
+        rule.inspection
+    )
+}
+
+/// Every rule for `jevgate rules --format json`: its catalog entry, its
+/// labels per level (`maturity`) and where they come from
+/// (`evaluation_dataset`; for a custom question, the file that defines it),
+/// whether a threshold was measured for one of its questions
+/// (`thresholds_validated`), and the decision policy; a custom question also
+/// carries its definition (`custom`).
+pub fn describe(questions: &'static [crate::custom::Question]) -> Value {
     Value::Array(
-        rules()
+        with_custom(questions)
             .into_iter()
             .map(|r| {
+                let key = r.key;
+                let question = questions.iter().find(|q| q.rule == r.id);
                 let mut value = serde_json::to_value(r).unwrap();
+                value["maturity"] = crate::maturity::describe(key);
+                value["evaluation_dataset"] = question
+                    .map_or_else(|| crate::maturity::dataset(key), |q| q.provenance().into())
+                    .into();
+                value["thresholds_validated"] = crate::policy::calibrated(key).into();
                 value["decision_policy"] = serde_json::json!(policy());
+                if let Some(question) = question {
+                    value["custom"] = question.describe();
+                }
                 value
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn site() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("site/src")
+    }
+
+    /// SARIF links each rule to its page, so every rule needs one: the page
+    /// shows the facts `site/generate.py` writes under the rule's anchor, and
+    /// the site's table of contents lists it.
+    #[test]
+    fn every_rule_has_a_page_on_the_site() {
+        let summary = std::fs::read_to_string(site().join("SUMMARY.md")).unwrap();
+        for rule in rules() {
+            let page = std::fs::read_to_string(site().join(format!("rules/{}.md", rule.id)))
+                .unwrap_or_else(|_| panic!("site/src/rules/{}.md is missing", rule.id));
+            let facts = format!("_rules.md:{}}}}}", rule.id.replace('/', "-"));
+            assert!(
+                page.contains(&facts),
+                "{} does not include {facts}",
+                rule.id
+            );
+            assert!(
+                summary.contains(&format!("(rules/{}.md)", rule.id)),
+                "{}",
+                rule.id
+            );
+        }
+        assert_eq!(
+            find("shared-logic").unwrap().page(),
+            "https://tech-byte-frontier.github.io/jevgate/rules/maintainability/shared-logic.html"
+        );
+    }
+
+    /// Every Markdown file under `dir`, at any depth; other files, such as
+    /// the `.DS_Store` a file browser leaves, are not pages.
+    fn markdown(dir: &Path) -> Vec<PathBuf> {
+        let entries = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path());
+        entries
+            .flat_map(|path| {
+                if path.is_dir() {
+                    markdown(&path)
+                } else {
+                    vec![path]
+                }
+            })
+            .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
+            .collect()
+    }
+
+    #[test]
+    fn every_rule_page_names_a_rule() {
+        let root = site().join("rules");
+        for page in markdown(&root) {
+            let relative = page.strip_prefix(&root).unwrap().with_extension("");
+            let parts: Vec<_> = relative.iter().map(|part| part.to_string_lossy()).collect();
+            let id = parts.join("/");
+            assert!(
+                rules().iter().any(|rule| rule.id == id),
+                "{} names no rule",
+                page.display()
+            );
+        }
+    }
 }

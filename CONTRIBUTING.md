@@ -24,6 +24,7 @@ The tests run offline and need no API key. `jevgate check --dry-run --show-reque
 ## Code conventions
 
 - Unused code is deleted, not silenced, and long parameter lists are grouped into a type. `tests/lint_policy.rs` rejects `allow` or `expect` for `dead_code`, `unused`, `too_many_arguments` and `complexity`. Any other exception uses `#[expect(lint, reason = "…")]`.
+- Tests run Git through `tests/support/git.rs`, which drops the variables that point Git at a repository (`GIT_DIR`, `GIT_INDEX_FILE` and the others Git exports to hooks and `git rebase --exec`), so `cargo test` run there leaves that repository alone. `tests/lint_policy.rs` rejects starting Git anywhere but there and `src/revision.rs`.
 - Commit subjects say what changed, in the imperative ("Report overlapping tests by groups").
 - Messages and findings are plain sentences that name the code and say what to do next.
 
@@ -40,7 +41,7 @@ JevGate asks the model small questions and decides findings in code. When you ch
 
 ## Documentation site
 
-The site at <https://tech-byte-frontier.github.io/jevgate/> is built from `site/` with [mdBook](https://rust-lang.github.io/mdBook/): `site/build.sh` generates the rules, configuration and command-line reference pages from a release build, then builds the book into `site/book`. It is published with each release, so it describes the released binary. Guide pages are in `site/src`; the reference pages are generated, so change the rule catalog, the configuration types or the `--help` text instead.
+The site at <https://tech-byte-frontier.github.io/jevgate/> is built from `site/` with [mdBook](https://rust-lang.github.io/mdBook/): `site/build.sh` generates the rules, configuration and command-line reference pages from a release build, then builds the book into `site/book`. It is published with each release, so it describes the released binary. Guide pages are in `site/src`; the reference pages are generated, so change the rule catalog, the configuration types or the `--help` text instead. Each rule has a hand-written page, `site/src/rules/<rule ID>.md`, that includes its generated facts and shows findings it got wrong; a new rule needs one, and a test checks it.
 
 ## Pull requests
 

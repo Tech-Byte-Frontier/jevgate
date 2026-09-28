@@ -1,11 +1,14 @@
-//! The fallback is confined to an owner-only directory and never writes a repository .env.
-use super::secret::{MAX_KEY_BYTES, Secret};
+//! The fallback is confined to an owner-only directory and never writes a
+//! repository .env. Beside it, a plain file names the saved key's provider.
+use super::secret::MAX_STORED_BYTES;
+use crate::provider::Provider;
 use anyhow::{Context, Result, ensure};
 use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
 };
+use zeroize::Zeroizing;
 
 pub fn credential_path() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("JEVGATE_CONFIG_DIR") {
@@ -76,14 +79,15 @@ fn private_metadata(_path: &Path, _directory: bool) -> Result<fs::Metadata> {
     )
 }
 
-pub fn load(path: &Path) -> Result<Option<Secret>> {
+/// The saved credential's text, as `store` wrote it.
+pub fn load(path: &Path) -> Result<Option<Zeroizing<String>>> {
     if !path.try_exists()? && !path.is_symlink() {
         return Ok(None);
     }
     private_metadata(path.parent().context("Missing credential directory")?, true)?;
     let metadata = private_metadata(path, false)?;
     ensure!(
-        metadata.len() <= MAX_KEY_BYTES as u64,
+        metadata.len() <= MAX_STORED_BYTES as u64,
         "Saved credential file is too large"
     );
     let mut options = fs::OpenOptions::new();
@@ -93,23 +97,26 @@ pub fn load(path: &Path) -> Result<Option<Secret>> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW);
     }
-    let mut value = zeroize::Zeroizing::new(String::new());
+    let mut value = Zeroizing::new(String::new());
     options
         .open(path)?
-        .take((MAX_KEY_BYTES + 1) as u64)
+        .take((MAX_STORED_BYTES + 1) as u64)
         .read_to_string(&mut value)
         .map_err(|_| anyhow::anyhow!("Cannot read saved credential; run jevgate auth login"))?;
     ensure!(
-        value.len() <= MAX_KEY_BYTES,
+        value.len() <= MAX_STORED_BYTES,
         "Saved credential file is too large"
     );
-    Secret::parse(std::mem::take(&mut *value)).map(Some)
+    Ok(Some(value))
 }
 
-pub fn save(path: &Path, secret: &Secret) -> Result<()> {
+/// Write the saved credential's text, as `store` made it, to the owner-only
+/// file at `path`, replacing it whole. It holds an API key, which is sent to
+/// its provider as written, so it is kept as is: a hash could not be sent.
+pub fn save(path: &Path, text: &str) -> Result<()> {
     #[cfg(not(unix))]
     {
-        let _ = (path, secret);
+        let _ = (path, text);
         anyhow::bail!(
             "Protected-file storage is unavailable; use the system credential store or TYPESAFE_API_KEY"
         );
@@ -117,13 +124,9 @@ pub fn save(path: &Path, secret: &Secret) -> Result<()> {
     #[cfg(unix)]
     {
         use std::io::Write;
-        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        use std::os::unix::fs::OpenOptionsExt;
         let parent = path.parent().context("Missing credential directory")?;
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(parent)?;
-        private_metadata(parent, true)?;
+        private_directory(parent)?;
         if path.exists() || path.is_symlink() {
             private_metadata(path, false)?;
         }
@@ -137,7 +140,7 @@ pub fn save(path: &Path, secret: &Secret) -> Result<()> {
             .mode(0o600)
             .open(&temporary)?;
         let result = (|| -> Result<()> {
-            file.write_all(secret.expose().as_bytes())?;
+            file.write_all(text.as_bytes())?;
             file.sync_all()?;
             fs::rename(&temporary, path)?;
             Ok(())
@@ -157,4 +160,62 @@ pub fn remove(path: &Path) -> Result<bool> {
     private_metadata(path, false)?;
     fs::remove_file(path)?;
     Ok(true)
+}
+
+/// The directory of saved credentials, created owner-only.
+fn private_directory(directory: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(directory)?;
+        private_metadata(directory, true)?;
+    }
+    #[cfg(not(unix))]
+    fs::create_dir_all(directory)?;
+    Ok(())
+}
+
+/// The file beside the saved credential that names its provider, so a check
+/// can choose its model before it reads the credential itself.
+fn provider_path(credential: &Path) -> PathBuf {
+    credential.with_file_name("provider")
+}
+
+/// The most of that file read: a provider's name is a short word.
+const MAX_PROVIDER_RECORD_BYTES: u64 = 64;
+
+/// The provider recorded beside the saved credential; none when no key was
+/// saved with one, as before 0.26.
+pub fn recorded_provider(credential: &Path) -> Option<Provider> {
+    let path = provider_path(credential);
+    if path.is_symlink() {
+        return None;
+    }
+    let mut name = String::new();
+    fs::File::open(path)
+        .ok()?
+        .take(MAX_PROVIDER_RECORD_BYTES)
+        .read_to_string(&mut name)
+        .ok()?;
+    Provider::named(name.trim())
+}
+
+pub fn record_provider(credential: &Path, provider: Provider) -> Result<()> {
+    let path = provider_path(credential);
+    private_directory(path.parent().context("Missing credential directory")?)?;
+    ensure!(
+        !path.is_symlink(),
+        "The saved key's provider record must be a regular file"
+    );
+    fs::write(&path, provider.name()).context("Could not record the saved key's provider")
+}
+
+pub fn forget_provider(credential: &Path) -> Result<()> {
+    match fs::remove_file(provider_path(credential)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
+        _ => Ok(()),
+    }
 }

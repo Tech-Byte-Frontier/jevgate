@@ -240,6 +240,9 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
 /// The outcome of a unit's answers under its rule's policy.
 fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
     let get = |q: &str| answers.get(q).copied();
+    if let Detail::Custom(question) = &unit.detail {
+        return get(super::answers::CUSTOM).map(|answer| custom_outcome(question, answer));
+    }
     match unit.rule {
         catalog::FUNCTION_SIMPLIFICATION => {
             function_outcome(get("split"), get("flatten"), unit.lines)
@@ -312,19 +315,41 @@ fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
     }
 }
 
+/// A custom question's answer: a finding at its level once yes reaches its
+/// threshold, clear once no does, and undecided between.
+pub(super) fn custom_outcome(question: &crate::custom::Question, answer: &Answer) -> Outcome {
+    let Answer::Noul { noul } = answer else {
+        return Outcome::Missing;
+    };
+    if probability_at_least(*noul, question.threshold) {
+        match question.level {
+            crate::schema::Strength::Review => Outcome::Review(*noul),
+            crate::schema::Strength::Consider => Outcome::Consider(*noul),
+            crate::schema::Strength::Note => Outcome::Note(*noul),
+        }
+    } else if probability_at_least(1.0 - noul, question.threshold) {
+        Outcome::Clear
+    } else {
+        Outcome::Uncertain(*noul)
+    }
+}
+
 /// Example code is written to be read in one piece, and its settings to be
 /// copied and changed: debug-toolbar's example project keeps a literal
 /// SECRET_KEY, sqlmodel's tutorials run each step in one function, and
 /// express's examples keep session cookies simple. Its findings are at most
 /// notes; a place it passes outside input to a query or command is still a
 /// consider, since examples are copied, and so is a Bend 2 law that states
-/// less than its comment: a demo's laws show how to state one.
+/// less than its comment: a demo's laws show how to state one. A custom
+/// question's `paths` already say where it applies, so its findings keep
+/// their level.
 fn in_examples(unit: &UnitPlan, outcome: Outcome) -> Outcome {
     let example = unit
         .locations
         .iter()
         .all(|l| crate::analysis::clones::example_code(&l.path))
-        && !unit.locations.is_empty();
+        && !unit.locations.is_empty()
+        && !matches!(unit.detail, Detail::Custom(_));
     match outcome {
         Outcome::Review(p) | Outcome::Consider(p)
             if example

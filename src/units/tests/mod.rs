@@ -1,15 +1,19 @@
 //! Unit planning and composition tests, by rule family; shared helpers here.
 mod access;
+mod changed;
 mod comments;
+mod custom;
 mod django;
 mod documentation;
 mod duplicates;
+mod examples;
 mod functions;
 mod handlers;
 mod hardcoded;
 mod laws;
 mod nextjs;
 mod organization;
+mod partial;
 mod pipeline;
 mod security;
 mod test_rules;
@@ -142,6 +146,10 @@ fn is_recheck(request: &Value) -> bool {
         || request["state"]["file"]["source"].is_string()
 }
 
+/// The scripted level that spreads every answer's probability, so each unit
+/// stays undecided (see `crate::tests::answer`).
+const UNDECIDED: usize = 3;
+
 fn scripted(level: usize) -> Scripted {
     Scripted {
         level,
@@ -156,7 +164,7 @@ fn scripted(level: usize) -> Scripted {
 fn run_rechecked(project: &Project, rule: &str, level: usize) -> (CheckArgs, Report) {
     let mut options = args();
     only(&mut options, rule);
-    let mut eval = scripted(3);
+    let mut eval = scripted(UNDECIDED);
     eval.recheck_level = Some(level);
     let report = run(project, &options, &mut eval);
     (options, report)
@@ -318,7 +326,7 @@ fn hardcoded_project() -> (Project, CheckArgs) {
 fn hardcoded_finding(path: &str, strength: &str, values: &[&str]) -> Value {
     json!({
         "rule": "maintainability/hardcoded-values", "strength": strength, "line": 3,
-        "message": "`f` special-cases one specific identity (0.90).", "action": "Move it",
+        "message": "`f` special-cases one specific identity.", "action": "Move it",
         "symbol": "f", "rule_version": "1", "concern_probability": 0.9,
         "locations": [{"path": path, "start_line": 3, "end_line": 5, "symbol": "f"}],
         "values": values, "fingerprint": path, "rank": 1.0

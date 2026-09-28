@@ -158,7 +158,7 @@ fn block_starts(lines: &[&str], first: usize, last: usize) -> Vec<usize> {
 }
 
 /// A list item marker at the start of a line: `-`, `*`, `+` or `1.`.
-fn list_item(line: &str) -> bool {
+pub(crate) fn list_item(line: &str) -> bool {
     let digits = line.chars().take_while(char::is_ascii_digit).count();
     ["- ", "* ", "+ "].iter().any(|m| line.starts_with(m))
         || (digits > 0 && line[digits..].starts_with(". "))
@@ -216,18 +216,45 @@ fn unquote(value: &str) -> &str {
     value.trim().trim_matches(['"', '\''])
 }
 
+/// The byte ranges of the HTML comments in `source`; an unclosed one runs
+/// to the end.
+fn comments(source: &str) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut at = 0;
+    while let Some(start) = source[at..].find("<!--").map(|found| at + found) {
+        let end = source[start..]
+            .find("-->")
+            .map_or(source.len(), |found| start + found + 3);
+        ranges.push(start..end);
+        at = end;
+    }
+    ranges
+}
+
 /// The text without HTML comments, which Claude Code drops before loading.
 pub fn strip_comments(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
-    let mut rest = source;
-    while let Some(start) = rest.find("<!--") {
-        out.push_str(&rest[..start]);
-        match rest[start..].find("-->") {
-            Some(end) => rest = &rest[start + end + 3..],
-            None => return out,
-        }
+    let mut at = 0;
+    for range in comments(source) {
+        out.push_str(&source[at..range.start]);
+        at = range.end;
     }
-    out.push_str(rest);
+    out.push_str(&source[at..]);
+    out
+}
+
+/// The text with each HTML comment blanked to spaces but its line breaks
+/// kept, so a line number still points at the file.
+pub fn blank_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut at = 0;
+    for range in comments(source) {
+        out.push_str(&source[at..range.start]);
+        let comment = &source[range.clone()];
+        out.extend(comment.chars().map(|c| if c == '\n' { c } else { ' ' }));
+        at = range.end;
+    }
+    out.push_str(&source[at..]);
     out
 }
 
@@ -351,6 +378,13 @@ mod tests {
     #[test]
     fn an_unclosed_comment_drops_the_rest() {
         assert_eq!(strip_comments("a<!-- b -->c<!-- d"), "ac");
+    }
+
+    #[test]
+    fn blanked_comments_keep_their_lines() {
+        let blanked = blank_comments("a<!-- b\nc -->d\n<!-- é");
+        assert_eq!(blanked, "a      \n     d\n      ");
+        assert_eq!(blanked.lines().count(), 3);
     }
 
     #[test]

@@ -15,7 +15,7 @@ fn gate_fails_only_on_the_configured_results() {
     ];
     for (level, status, default, stricter, stricter_code) in cases {
         options.refresh = true;
-        options.fail_on = vec![options::FailOn::Review];
+        options.fail_on = vec![options::FailOn::Mature];
         let mut mock = Mock {
             level,
             ..Default::default()
@@ -60,6 +60,18 @@ fn a_rule_level_fails_the_gate_only_for_that_rule() {
     }
 }
 
+/// A `[[scope]]` that sets `levels` for every rule in the files `glob` matches.
+fn every_rule_in(glob: &str, levels: Vec<options::FailOn>) -> options::PathLevels {
+    options::PathLevels {
+        paths: vec![glob.into()],
+        matcher: crate::boundary::globs(&[glob.into()]).unwrap(),
+        rules: crate::catalog::keys()
+            .into_iter()
+            .map(|key| (key.to_string(), levels.clone()))
+            .collect(),
+    }
+}
+
 #[test]
 fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
     let project = Project::new();
@@ -71,14 +83,7 @@ fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
         level: 4,
         ..Default::default()
     };
-    let scripts = |levels: Vec<options::FailOn>| options::PathLevels {
-        paths: vec!["scripts/**".into()],
-        matcher: crate::boundary::globs(&["scripts/**".into()]).unwrap(),
-        rules: crate::catalog::keys()
-            .into_iter()
-            .map(|key| (key.to_string(), levels.clone()))
-            .collect(),
-    };
+    let scripts = |levels| every_rule_in("scripts/**", levels);
     options.path_fail_on = vec![scripts(vec![options::FailOn::None])];
     let report = run(&project, &options, &mut mock);
     let gate = report.gate.as_ref().unwrap();
@@ -164,6 +169,36 @@ fn a_merged_baseline_keeps_accepted_findings_for_files_the_check_did_not_cover()
 }
 
 #[test]
+fn a_merged_baseline_after_a_check_of_changed_lines_keeps_the_rest_of_its_files() {
+    let project = Project::new();
+    let source = format!("{}{}", function("a"), function("b"));
+    project.write("lib.rs", &source);
+    let mut options = args();
+    let mut review = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    publish(&project, &run(&project, &options, &mut review));
+    assert_eq!(
+        baseline::write(&project.0, false, None).unwrap().accepted,
+        2
+    );
+    project.commit_all();
+    // The change touches `a` alone: `b`'s accepted finding was not judged.
+    project.write("lib.rs", &source.replacen("doubled + 1", "doubled + 2", 1));
+    options.base = Some("HEAD".into());
+    let report = run(&project, &options, &mut review);
+    assert_eq!(report.scope, schema::Scope::ChangedLines);
+    publish(&project, &report);
+    let merged = baseline::write(&project.0, true, None).unwrap();
+    assert_eq!((merged.accepted, merged.kept), (1, 2));
+    options.base = None;
+    let report = run(&project, &options, &mut review);
+    assert!(report.files[0].findings.iter().all(|f| f.baselined));
+    assert_eq!(gate::exit_code(&report), 0);
+}
+
+#[test]
 fn baseline_reasons_are_marked_counted_and_kept_across_rewrites() {
     use options::Disposition::{Later, Wrong};
     let project = two_files();
@@ -240,4 +275,269 @@ fn an_allow_comment_accepts_a_finding_only_with_a_reason() {
             "{comment}"
         );
     }
+}
+
+const SIMPLIFICATION: &str = "maintainability/function-simplification";
+const SHARED_LOGIC: &str = "maintainability/shared-logic";
+
+/// How the gate counted each finding of a report, in order.
+fn gates(report: &schema::Report) -> Vec<Option<schema::Gating>> {
+    report.files[0].findings.iter().map(|f| f.gate).collect()
+}
+
+#[test]
+fn the_default_gate_fails_only_on_mature_rule_levels() {
+    use schema::{Gating::*, Strength::*};
+    let accepted = schema::Finding {
+        baselined: true,
+        ..finding_of(SIMPLIFICATION, Review)
+    };
+    let findings = vec![
+        finding_of(SIMPLIFICATION, Review),
+        finding_of(SIMPLIFICATION, Consider),
+        finding_of(SHARED_LOGIC, Review),
+        finding_of(SIMPLIFICATION, Note),
+        accepted,
+    ];
+    let report = gated(findings.clone(), &args());
+    assert_eq!(
+        gates(&report),
+        [Some(Fails), Some(Measuring), Some(Measuring), None, None]
+    );
+    assert_eq!(
+        report.gate.as_ref().unwrap().reasons,
+        ["1 new review finding"]
+    );
+    assert_eq!(gate::exit_code(&report), 1);
+    let measured = gated(findings[1..].to_vec(), &args());
+    let gate = measured.gate.as_ref().unwrap();
+    assert!(gate.passed, "reviews still being measured are reported");
+    assert_eq!((gate.new_findings, gate.baselined_findings), (2, 1));
+    assert_eq!(gate::exit_code(&measured), 0);
+}
+
+#[test]
+fn every_finding_but_a_note_carries_its_rule_and_levels_precision() {
+    use crate::maturity::Labels;
+    use schema::Strength::*;
+    let labels = |right, labeled| Some(Labels { right, labeled });
+    let accepted = schema::Finding {
+        baselined: true,
+        ..finding_of(SIMPLIFICATION, Review)
+    };
+    let report = gated(
+        vec![
+            finding_of(SIMPLIFICATION, Review),
+            finding_of(SHARED_LOGIC, Consider),
+            finding_of("tests/laws", Review),
+            finding_of(SIMPLIFICATION, Note),
+            accepted,
+        ],
+        &args(),
+    );
+    let precision: Vec<_> = report.files[0]
+        .findings
+        .iter()
+        .map(|f| f.precision)
+        .collect();
+    assert_eq!(
+        precision,
+        [
+            labels(20, 23),
+            labels(76, 129),
+            labels(0, 0),
+            None,
+            labels(20, 23)
+        ]
+    );
+    let json = serde_json::to_value(&report.files[0].findings).unwrap();
+    assert_eq!(json[0]["precision"], json!({"right": 20, "labeled": 23}));
+    assert!(
+        json[3].get("precision").is_none(),
+        "a note is never labeled"
+    );
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, true, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains(
+            "(fails the gate) Copies: 50% alike,\nsee `b` Right 87% of the time (23 labels).\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("[tests/laws] Copies: 50% alike,\nsee `b` Not yet measured: labeled only on Bend 2 projects, which the maturity table leaves out.\n"),
+        "{text}"
+    );
+    assert!(!text.contains("0.9"), "no probability: {text}");
+}
+
+#[test]
+fn an_explicit_level_replaces_the_default_exactly_as_it_says() {
+    use schema::{Gating::*, Strength::*};
+    let findings = vec![
+        finding_of(SIMPLIFICATION, Review),
+        finding_of(SHARED_LOGIC, Review),
+        finding_of(SHARED_LOGIC, Consider),
+    ];
+    let mut options = args();
+    options.fail_on = vec![options::FailOn::Review];
+    let report = gated(findings.clone(), &options);
+    assert_eq!(gates(&report), [Some(Fails), Some(Fails), Some(Advisory)]);
+    assert_eq!(report.gate.unwrap().reasons, ["2 new review findings"]);
+    // A level for one rule leaves the others at the default.
+    let mut options = args();
+    options.rule_fail_on = std::collections::BTreeMap::from([(
+        crate::catalog::SHARED_LOGIC.to_string(),
+        vec![options::FailOn::None],
+    )]);
+    let report = gated(findings.clone(), &options);
+    assert_eq!(
+        gates(&report),
+        [Some(Fails), Some(Advisory), Some(Advisory)]
+    );
+    // A scope's report level covers the mature rule too.
+    let mut options = args();
+    options.path_fail_on = vec![every_rule_in("src/**", vec![options::FailOn::None])];
+    let report = gated(findings, &options);
+    assert_eq!(gates(&report), [Some(Advisory); 3]);
+    assert_eq!(gate::exit_code(&report), 0);
+}
+
+#[test]
+fn agent_text_marks_what_fails_and_says_why_the_rest_did_not() {
+    use schema::Strength::*;
+    let report = gated(
+        vec![
+            finding_of(SIMPLIFICATION, Review),
+            finding_of(SHARED_LOGIC, Review),
+            finding_of(SHARED_LOGIC, Consider),
+        ],
+        &args(),
+    );
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("[maintainability/function-simplification] (fails the gate) Copies"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[maintainability/shared-logic] Copies"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n1 review and 1 consider did not fail the gate: by default only rules and levels right at least 80% of the time on projects JevGate was never tuned on fail it, and theirs are still being measured."),
+        "{text}"
+    );
+    let considers_only = gated(vec![finding_of(SHARED_LOGIC, Consider)], &args());
+    assert!(
+        output::measuring(&considers_only).is_none(),
+        "considers never failed by default"
+    );
+}
+
+#[test]
+fn a_preview_language_s_findings_never_fail_the_default_gate() {
+    use crate::maturity::Labels;
+    use schema::{Gating::*, Strength::*};
+    let findings = vec![
+        finding_of(SIMPLIFICATION, Review),
+        finding_of(SHARED_LOGIC, Consider),
+    ];
+    let report = gated_at(KOTLIN_FILE, findings.clone(), &args());
+    assert_eq!(
+        gates(&report),
+        [Some(Measuring), Some(Measuring)],
+        "a mature rule and level too"
+    );
+    assert!(report.gate.as_ref().unwrap().passed);
+    // Kotlin's own labels, not the ten supported languages' 20 of 23.
+    let precision: Vec<_> = report.files[0]
+        .findings
+        .iter()
+        .map(|f| f.precision)
+        .collect();
+    let labels = |right, labeled| Some(Labels { right, labeled });
+    assert_eq!(precision, [labels(1, 1), labels(2, 2)]);
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("[maintainability/function-simplification] Copies: 50% alike,\nsee `b` Not yet measured in Kotlin.\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n1 review and 1 consider in Kotlin files did not fail the gate: Kotlin is in preview, and by default JevGate's own rules never fail it there. `--fail-on review` makes every review fail the gate.\n"),
+        "{text}"
+    );
+    assert!(!text.contains("theirs are still being measured"), "{text}");
+    // An explicit level replaces the default exactly as it says.
+    let mut options = args();
+    options.fail_on = vec![options::FailOn::Review];
+    let report = gated_at(KOTLIN_FILE, findings, &options);
+    assert_eq!(gates(&report), [Some(Fails), Some(Advisory)]);
+    // A language's own labels, from 20 on, give a share: Swift's
+    // function-simplification considers were right 22 times in 30.
+    let swift = gated_at(
+        ("Sources/View.swift", "func id() -> Int { 1 }\n"),
+        vec![finding_of(SIMPLIFICATION, Consider)],
+        &args(),
+    );
+    let mut out = Vec::new();
+    output::agent(&mut out, &swift, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("see `b` Right 73% of the time in Swift (30 labels).\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn sarif_says_a_preview_language_s_findings_are_measured_in_it() {
+    use schema::Strength::*;
+    let report = gated_at(
+        KOTLIN_FILE,
+        vec![finding_of(SIMPLIFICATION, Review)],
+        &args(),
+    );
+    let mut out = Vec::new();
+    crate::sarif::emit(&mut out, &report, &[]).unwrap();
+    let log: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let result = &log["runs"][0]["results"][0];
+    assert_eq!(result["level"], "warning");
+    assert_eq!(result["properties"]["gate"], "measuring");
+    assert_eq!(
+        result["properties"]["precision"],
+        json!({"right": 1, "labeled": 1})
+    );
+    assert_eq!(result["properties"]["preview"], "Kotlin");
+    let message = result["message"]["text"].as_str().unwrap();
+    assert!(
+        message.contains("Not yet measured in Kotlin.")
+            && message.ends_with("Does not fail the gate: Kotlin is in preview, and by default JevGate's own rules never fail it there."),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_capped_list_shows_the_findings_that_fail_the_gate_first() {
+    use schema::Strength::*;
+    let failing = schema::Finding {
+        rank: 0.1,
+        ..finding_of("documentation/agent-context", Consider)
+    };
+    let mut findings = vec![finding_of(SHARED_LOGIC, Consider); 11];
+    findings.push(failing);
+    let report = gated(findings, &args());
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    let section = text.split("Consider (").nth(1).unwrap();
+    assert!(
+        section.starts_with(
+            "12, top 10, those that fail the gate first; --verbose shows all):\n  src/lib.rs:12 [documentation/agent-context] (fails the gate)"
+        ),
+        "{text}"
+    );
 }

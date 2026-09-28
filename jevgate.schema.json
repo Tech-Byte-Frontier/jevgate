@@ -6,6 +6,7 @@
           "enum": [
             "review",
             "consider",
+            "mature",
             "uncertain",
             "report",
             "none",
@@ -18,6 +19,7 @@
             "enum": [
               "review",
               "consider",
+              "mature",
               "uncertain",
               "report",
               "none",
@@ -29,64 +31,224 @@
         }
       ]
     },
+    "Question": {
+      "additionalProperties": false,
+      "description": "A question as a configuration writes it.",
+      "properties": {
+        "background": {
+          "description": "Why the rule exists; sent with the question.",
+          "maxLength": 2000,
+          "type": "string"
+        },
+        "failing": {
+          "description": "Examples of code that breaks the rule: `jevgate rules test` fails when the answer about one stays below the threshold.",
+          "items": {
+            "$ref": "#/$defs/QuestionExample"
+          },
+          "type": "array"
+        },
+        "guidance": {
+          "description": "How to decide: what counts as a violation and what does not; sent with the question.",
+          "maxLength": 2000,
+          "type": "string"
+        },
+        "id": {
+          "description": "Names the rule: `custom/` and the id, of lowercase letters, digits and single hyphens, starting with a letter. Required in jevgate.toml; a question file's name gives it.",
+          "maxLength": 48,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/QuestionLevel",
+          "description": "The level of its findings, and the level at which it fails the gate unless `fail_on` or `--fail-on` says otherwise. Default: review."
+        },
+        "next_step": {
+          "description": "The next step a finding shows. Default: fix it; a person can accept it with a `jevgate: allow` comment and a reason.",
+          "maxLength": 300,
+          "type": "string"
+        },
+        "passing": {
+          "description": "Examples of code that keeps the rule: `jevgate rules test` fails when the answer about one reaches the threshold.",
+          "items": {
+            "$ref": "#/$defs/QuestionExample"
+          },
+          "type": "array"
+        },
+        "paths": {
+          "description": "Globs of the files it applies to. Default: every file its unit applies to. For `file` and `hunk`, they can also name text files in languages JevGate does not parse.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "question": {
+          "description": "One yes/no question about each unit, ending in `?`; yes is a violation.",
+          "maxLength": 300,
+          "pattern": "\\?\\s*$",
+          "type": "string"
+        },
+        "threshold": {
+          "description": "The probability of yes at or above which a unit breaks the rule (0.5 to 0.99); at or below one minus it, the unit is clear. Default: 0.8.",
+          "maximum": 0.99,
+          "minimum": 0.5,
+          "type": "number"
+        },
+        "unit": {
+          "$ref": "#/$defs/QuestionUnit",
+          "description": "What the question is asked about."
+        }
+      },
+      "required": [
+        "question",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "QuestionExample": {
+      "additionalProperties": false,
+      "dependentRequired": {
+        "code": [
+          "path"
+        ]
+      },
+      "description": "An example of a custom question: a file's text that breaks or keeps its rule, written inline or read from a file.",
+      "oneOf": [
+        {
+          "required": [
+            "code"
+          ]
+        },
+        {
+          "required": [
+            "file"
+          ]
+        }
+      ],
+      "properties": {
+        "code": {
+          "description": "The example's text: a file's content, or for a `hunk` question the lines of a diff (`+` added, `-` removed, a space unchanged). Use `code` or `file`.",
+          "type": "string"
+        },
+        "file": {
+          "description": "A file holding the example, relative to the repository root. It is uploaded as a checked file is: inside the repository, not hidden (except under .jevgate/questions/), and within upload_allow and upload_deny. Use `code` or `file`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The file the example stands for, relative to the repository root: its language, and the path Jev reads. It must match the question's `paths`. Required with `code`; default: `file`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "QuestionLevel": {
+      "description": "The level of a custom question's findings.",
+      "enum": [
+        "review",
+        "consider",
+        "note"
+      ],
+      "type": "string"
+    },
+    "QuestionUnit": {
+      "description": "What a custom question is asked about.",
+      "oneOf": [
+        {
+          "const": "function",
+          "description": "A function or method of application code, outside tests.",
+          "type": "string"
+        },
+        {
+          "const": "file",
+          "description": "A whole file.",
+          "type": "string"
+        },
+        {
+          "const": "test",
+          "description": "A test case; needs include_tests, as the test rules do.",
+          "type": "string"
+        },
+        {
+          "const": "section",
+          "description": "A heading section of an agent instruction file or project documentation.",
+          "type": "string"
+        },
+        {
+          "const": "comment",
+          "description": "A comment or docstring of application code, with the code it is about.",
+          "type": "string"
+        },
+        {
+          "const": "hunk",
+          "description": "A changed hunk since --base, with three lines of context.",
+          "type": "string"
+        }
+      ]
+    },
     "Rules": {
       "anyOf": [
         {
           "items": {
-            "enum": [
-              "maintainability/file-organization",
-              "file-organization",
-              "file_organization",
-              "maintainability/function-simplification",
-              "function-simplification",
-              "function_simplification",
-              "maintainability/shared-logic",
-              "shared-logic",
-              "shared_logic",
-              "maintainability/hardcoded-values",
-              "hardcoded-values",
-              "hardcoded_values",
-              "security/injection",
-              "injection",
-              "security/sensitive-data",
-              "sensitive-data",
-              "sensitive_data",
-              "security/unsafe-settings",
-              "unsafe-settings",
-              "unsafe_settings",
-              "security/access-control",
-              "access-control",
-              "access_control",
-              "security/workflows",
-              "workflows",
-              "tests/value",
-              "value",
-              "test_value",
-              "tests/redundancy",
-              "redundancy",
-              "test_redundancy",
-              "tests/laws",
-              "laws",
-              "documentation/agent-context",
-              "agent-context",
-              "agent_context",
-              "documentation/large-docs",
-              "large-docs",
-              "large_docs",
-              "documentation/staleness",
-              "staleness",
-              "doc_staleness",
-              "documentation/duplication",
-              "duplication",
-              "doc_duplication",
-              "documentation/comments",
-              "comments",
-              "maintainability",
-              "security",
-              "tests",
-              "documentation",
-              "default",
-              "all"
+            "anyOf": [
+              {
+                "enum": [
+                  "maintainability/file-organization",
+                  "file-organization",
+                  "file_organization",
+                  "maintainability/function-simplification",
+                  "function-simplification",
+                  "function_simplification",
+                  "maintainability/shared-logic",
+                  "shared-logic",
+                  "shared_logic",
+                  "maintainability/hardcoded-values",
+                  "hardcoded-values",
+                  "hardcoded_values",
+                  "security/injection",
+                  "injection",
+                  "security/sensitive-data",
+                  "sensitive-data",
+                  "sensitive_data",
+                  "security/unsafe-settings",
+                  "unsafe-settings",
+                  "unsafe_settings",
+                  "security/access-control",
+                  "access-control",
+                  "access_control",
+                  "security/workflows",
+                  "workflows",
+                  "tests/value",
+                  "value",
+                  "test_value",
+                  "tests/redundancy",
+                  "redundancy",
+                  "test_redundancy",
+                  "tests/laws",
+                  "laws",
+                  "documentation/agent-context",
+                  "agent-context",
+                  "agent_context",
+                  "documentation/large-docs",
+                  "large-docs",
+                  "large_docs",
+                  "documentation/staleness",
+                  "staleness",
+                  "doc_staleness",
+                  "documentation/duplication",
+                  "duplication",
+                  "doc_duplication",
+                  "documentation/comments",
+                  "comments",
+                  "maintainability",
+                  "security",
+                  "tests",
+                  "documentation",
+                  "default",
+                  "all"
+                ]
+              },
+              {
+                "pattern": "^custom(/[a-z][a-z0-9]*(-[a-z0-9]+)*)?$"
+              }
             ],
             "type": "string"
           },
@@ -97,60 +259,67 @@
             "$ref": "#/$defs/Level"
           },
           "propertyNames": {
-            "enum": [
-              "maintainability/file-organization",
-              "file-organization",
-              "file_organization",
-              "maintainability/function-simplification",
-              "function-simplification",
-              "function_simplification",
-              "maintainability/shared-logic",
-              "shared-logic",
-              "shared_logic",
-              "maintainability/hardcoded-values",
-              "hardcoded-values",
-              "hardcoded_values",
-              "security/injection",
-              "injection",
-              "security/sensitive-data",
-              "sensitive-data",
-              "sensitive_data",
-              "security/unsafe-settings",
-              "unsafe-settings",
-              "unsafe_settings",
-              "security/access-control",
-              "access-control",
-              "access_control",
-              "security/workflows",
-              "workflows",
-              "tests/value",
-              "value",
-              "test_value",
-              "tests/redundancy",
-              "redundancy",
-              "test_redundancy",
-              "tests/laws",
-              "laws",
-              "documentation/agent-context",
-              "agent-context",
-              "agent_context",
-              "documentation/large-docs",
-              "large-docs",
-              "large_docs",
-              "documentation/staleness",
-              "staleness",
-              "doc_staleness",
-              "documentation/duplication",
-              "duplication",
-              "doc_duplication",
-              "documentation/comments",
-              "comments",
-              "maintainability",
-              "security",
-              "tests",
-              "documentation",
-              "default",
-              "all"
+            "anyOf": [
+              {
+                "enum": [
+                  "maintainability/file-organization",
+                  "file-organization",
+                  "file_organization",
+                  "maintainability/function-simplification",
+                  "function-simplification",
+                  "function_simplification",
+                  "maintainability/shared-logic",
+                  "shared-logic",
+                  "shared_logic",
+                  "maintainability/hardcoded-values",
+                  "hardcoded-values",
+                  "hardcoded_values",
+                  "security/injection",
+                  "injection",
+                  "security/sensitive-data",
+                  "sensitive-data",
+                  "sensitive_data",
+                  "security/unsafe-settings",
+                  "unsafe-settings",
+                  "unsafe_settings",
+                  "security/access-control",
+                  "access-control",
+                  "access_control",
+                  "security/workflows",
+                  "workflows",
+                  "tests/value",
+                  "value",
+                  "test_value",
+                  "tests/redundancy",
+                  "redundancy",
+                  "test_redundancy",
+                  "tests/laws",
+                  "laws",
+                  "documentation/agent-context",
+                  "agent-context",
+                  "agent_context",
+                  "documentation/large-docs",
+                  "large-docs",
+                  "large_docs",
+                  "documentation/staleness",
+                  "staleness",
+                  "doc_staleness",
+                  "documentation/duplication",
+                  "duplication",
+                  "doc_duplication",
+                  "documentation/comments",
+                  "comments",
+                  "maintainability",
+                  "security",
+                  "tests",
+                  "documentation",
+                  "default",
+                  "all"
+                ]
+              },
+              {
+                "pattern": "^custom(/[a-z][a-z0-9]*(-[a-z0-9]+)*)?$"
+              }
             ]
           },
           "type": "object"
@@ -168,6 +337,7 @@
             "enum": [
               "review",
               "consider",
+              "mature",
               "uncertain",
               "report",
               "none"
@@ -189,60 +359,67 @@
           },
           "description": "Levels of single rules or groups in these files; `off` is not accepted (use `upload_deny`).",
           "propertyNames": {
-            "enum": [
-              "maintainability/file-organization",
-              "file-organization",
-              "file_organization",
-              "maintainability/function-simplification",
-              "function-simplification",
-              "function_simplification",
-              "maintainability/shared-logic",
-              "shared-logic",
-              "shared_logic",
-              "maintainability/hardcoded-values",
-              "hardcoded-values",
-              "hardcoded_values",
-              "security/injection",
-              "injection",
-              "security/sensitive-data",
-              "sensitive-data",
-              "sensitive_data",
-              "security/unsafe-settings",
-              "unsafe-settings",
-              "unsafe_settings",
-              "security/access-control",
-              "access-control",
-              "access_control",
-              "security/workflows",
-              "workflows",
-              "tests/value",
-              "value",
-              "test_value",
-              "tests/redundancy",
-              "redundancy",
-              "test_redundancy",
-              "tests/laws",
-              "laws",
-              "documentation/agent-context",
-              "agent-context",
-              "agent_context",
-              "documentation/large-docs",
-              "large-docs",
-              "large_docs",
-              "documentation/staleness",
-              "staleness",
-              "doc_staleness",
-              "documentation/duplication",
-              "duplication",
-              "doc_duplication",
-              "documentation/comments",
-              "comments",
-              "maintainability",
-              "security",
-              "tests",
-              "documentation",
-              "default",
-              "all"
+            "anyOf": [
+              {
+                "enum": [
+                  "maintainability/file-organization",
+                  "file-organization",
+                  "file_organization",
+                  "maintainability/function-simplification",
+                  "function-simplification",
+                  "function_simplification",
+                  "maintainability/shared-logic",
+                  "shared-logic",
+                  "shared_logic",
+                  "maintainability/hardcoded-values",
+                  "hardcoded-values",
+                  "hardcoded_values",
+                  "security/injection",
+                  "injection",
+                  "security/sensitive-data",
+                  "sensitive-data",
+                  "sensitive_data",
+                  "security/unsafe-settings",
+                  "unsafe-settings",
+                  "unsafe_settings",
+                  "security/access-control",
+                  "access-control",
+                  "access_control",
+                  "security/workflows",
+                  "workflows",
+                  "tests/value",
+                  "value",
+                  "test_value",
+                  "tests/redundancy",
+                  "redundancy",
+                  "test_redundancy",
+                  "tests/laws",
+                  "laws",
+                  "documentation/agent-context",
+                  "agent-context",
+                  "agent_context",
+                  "documentation/large-docs",
+                  "large-docs",
+                  "large_docs",
+                  "documentation/staleness",
+                  "staleness",
+                  "doc_staleness",
+                  "documentation/duplication",
+                  "duplication",
+                  "doc_duplication",
+                  "documentation/comments",
+                  "comments",
+                  "maintainability",
+                  "security",
+                  "tests",
+                  "documentation",
+                  "default",
+                  "all"
+                ]
+              },
+              {
+                "pattern": "^custom(/[a-z][a-z0-9]*(-[a-z0-9]+)*)?$"
+              }
             ]
           },
           "type": "object"
@@ -260,13 +437,13 @@
   "description": "JevGate configuration. The command line wins over the file, except that upload patterns and budgets in the file are ceilings that flags can only narrow. Unknown keys are errors.",
   "properties": {
     "cache_ttl_secs": {
-      "description": "Cache lifetime in seconds for the `jev-latest` and `jev-preview` aliases; pinned versions never expire. Default: 3600.",
+      "description": "Cache lifetime in seconds for an alias, a model name without an x.y.z version such as `jev-latest`; pinned versions never expire. Default: 3600.",
       "minimum": 0,
       "type": "integer"
     },
     "concurrency": {
-      "description": "Ceiling on simultaneous requests (1-8). Default: 6.",
-      "maximum": 8,
+      "description": "Most simultaneous requests; flags can only lower it. JevGate sends at most 6 at once, so a higher value means 6. Default: 6 with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key.",
+      "maximum": 6,
       "minimum": 1,
       "type": "integer"
     },
@@ -278,11 +455,12 @@
       "type": "array"
     },
     "fail_on": {
-      "description": "The level for rules without their own, like `--fail-on`. Default: [\"review\"].",
+      "description": "The level for rules without their own, like `--fail-on`. Default: [\"mature\"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on, never in a preview language, and on a custom question's own level; `jevgate rules` shows them.",
       "items": {
         "enum": [
           "review",
           "consider",
+          "mature",
           "uncertain",
           "report",
           "none"
@@ -318,8 +496,15 @@
       "type": "integer"
     },
     "model": {
-      "description": "TypeSafe model; a pinned version keeps results repeatable. `--model` overrides it.",
+      "description": "Model, as the key's provider names it; a pinned version keeps results repeatable. `--model` overrides it. Default: `jev-1.13.0` with a TypeSafe key, `typesafe/jev-1.13` with an OpenRouter key, `typesafe-ai/jev` with a Vercel AI Gateway key.",
       "type": "string"
+    },
+    "question": {
+      "description": "Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/` holds one per file, named by its id.",
+      "items": {
+        "$ref": "#/$defs/Question"
+      },
+      "type": "array"
     },
     "rules": {
       "$ref": "#/$defs/Rules",

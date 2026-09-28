@@ -1,20 +1,23 @@
 mod django;
 mod documents;
 mod spacetimedb;
+mod texts;
 
 use super::{
     options::CheckArgs,
     schema::{FileResult, Status, hash},
 };
-use crate::{boundary::Boundary, config::ConfigContext, discovery};
+use crate::{boundary::Boundary, config::ConfigContext, discovery, revision::Changes};
 use anyhow::{Context, Result, ensure};
 use django::{select_settings, unescaped_templates};
-use documents::{add_documents, load_document};
+use documents::{add_documents, load_document, sections};
 use spacetimedb::{keep_module_packages, spacetimedb_package};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    sync::Arc,
 };
+use texts::add_texts;
 
 #[derive(Clone)]
 pub struct Input {
@@ -35,6 +38,10 @@ pub struct Input {
     /// For a Python file, with injection judged: the Django templates it
     /// names that write values without escaping them.
     pub templates: Vec<crate::analysis::django::Template>,
+    /// With `--base` judging what the change touched, what it did to this
+    /// file; none when the file is judged whole: without a base, with
+    /// `--whole-files`, or for a file the change added.
+    pub changed: Option<crate::revision::FileChange>,
 }
 
 /// A SpacetimeDB module's package: the directory of the `package.json` that
@@ -79,11 +86,12 @@ pub(crate) fn walker(root: &std::path::Path) -> ignore::Walk {
 }
 
 pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> Result<Vec<Input>> {
-    let changes = args
-        .base
+    let changes = load_changes(args, context)?;
+    // The paths a change removed, when only what it touched is judged.
+    let removed = changes
         .as_ref()
-        .map(|b| crate::revision::Changes::load(&context.root, b))
-        .transpose()?;
+        .filter(|_| args.changed_lines())
+        .map(|c| Arc::new(c.removed(&context.root)));
     let extra = super::context::collect(args, context)?;
     let boundary = Boundary::new(&context.config)?;
     let in_scope = |relative: &Path| {
@@ -112,9 +120,21 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
     if args.enabled(crate::catalog::INJECTION) {
         unescaped_templates(context, &boundary, &mut inputs);
     }
-    if args.documentation() {
-        add_documents(args, context, &boundary, &selected, &mut inputs)?;
+    if args.documentation() || sections(args) {
+        // A document the change left alone is judged for the paths it removed.
+        let broken = removed
+            .as_ref()
+            .filter(|r| !r.is_empty() && args.enabled(crate::catalog::DOC_STALENESS))
+            .map(|r| (&in_scope as &dyn Fn(&Path) -> bool, r));
+        add_documents(args, context, &boundary, (&selected, broken), &mut inputs)?;
     }
+    add_texts(
+        args,
+        context,
+        (&boundary, &selected),
+        changes.as_ref(),
+        &mut inputs,
+    )?;
     // SQL is also a source extension, so the code rules' walk may have listed
     // the file already; the configuration rule's role replaces that entry.
     for (relative, role) in configuration_files(args, context, &in_scope, &changed)? {
@@ -124,7 +144,37 @@ pub fn collect(args: &CheckArgs, context: &ConfigContext, scope: &[PathBuf]) -> 
             None => inputs.push(input),
         }
     }
+    if let (Some(changes), Some(removed)) = (changes, &removed) {
+        mark_changes(&mut inputs, changes, &context.root, removed)?;
+    }
     Ok(inputs)
+}
+
+/// With `--base`, what changed since the fork point with it; in the agent
+/// hook's checks, what changed between the turn's two snapshots.
+fn load_changes(args: &CheckArgs, context: &ConfigContext) -> Result<Option<Changes>> {
+    Changes::of_check(&context.root, args).transpose()
+}
+
+/// Record on each input what the change did to it, so only the units it
+/// touched are judged. The lines are read only for the files read to be
+/// judged, once they are known. A file the change added stays whole, and a
+/// document it left alone keeps the mark it was selected with.
+fn mark_changes(
+    inputs: &mut [Input],
+    changes: Changes,
+    root: &Path,
+    removed: &Arc<BTreeSet<PathBuf>>,
+) -> Result<()> {
+    let judged = inputs
+        .iter()
+        .filter(|i| i.changed.is_none() && i.source.is_some())
+        .map(|i| i.result.path.as_path());
+    let changes = changes.with_lines(root, judged)?;
+    for input in inputs.iter_mut().filter(|i| i.changed.is_none()) {
+        input.changed = changes.file(root, &input.result.path, removed);
+    }
+    Ok(())
 }
 
 /// Application source and tests in scope, with their roles.
@@ -233,6 +283,9 @@ pub const SQL_CONTEXT: &str = "sql-context";
 pub const WORKFLOW: &str = "workflow";
 /// The role of project documentation such as a README or a docs page.
 pub const DOCS: &str = "docs";
+/// The role of a text file a custom `file` or `hunk` question's paths name,
+/// which no built-in rule reads.
+pub const TEXT: &str = "text";
 
 fn load(
     (path, role): (PathBuf, String),
@@ -248,23 +301,46 @@ fn load(
     if role == "source" && discovery::vendored(&path, None) {
         return Ok(recast(result, "vendored", relative));
     }
+    let copied = |source: &str| copied_now((&path, relative), &role, source, args, context);
     if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
         // A copied library or build output is excluded whatever its size.
         let copied = read_source(&path, LOCAL_PARSE_MAX)
             .ok()
-            .and_then(|source| not_written_here(&path, &role, &source));
+            .and_then(|source| copied(&source));
         return Ok(match copied {
             Some(kind) => recast(result, kind, relative),
             None => over_read_cap(result, relative, &path, args.max_file_bytes)?,
         });
     }
     match read_source(&path, args.max_file_bytes) {
-        Ok(source) => Ok(match not_written_here(&path, &role, &source) {
+        Ok(source) => Ok(match copied(&source) {
             Some(kind) => recast(result, kind, relative),
             None => source_input(result, source, (&path, relative), args, context, extra),
         }),
         Err(error) => Ok(unread(result, error)),
     }
+}
+
+/// [`not_written_here`] for `source`, the file at `path` (`relative` to the
+/// root), unless it was code people wrote when an agent's turn began: within
+/// a turn, a generated-code marker the turn added does not exempt the file,
+/// just as the turn's edits to jevgate.toml and the baseline count only
+/// from the next turn.
+fn copied_now(
+    (path, relative): (&Path, &Path),
+    role: &str,
+    source: &str,
+    args: &CheckArgs,
+    context: &ConfigContext,
+) -> Option<&'static str> {
+    let kind = not_written_here(path, role, source)?;
+    let written_then = args.turn_start().is_some_and(|start| {
+        crate::revision::blobs(&context.root, start, &[relative], args.max_file_bytes)
+            .ok()
+            .and_then(|mut texts| texts.remove(relative))
+            .is_some_and(|then| not_written_here(path, role, &then).is_none())
+    });
+    (!written_then).then_some(kind)
 }
 
 /// A file that could not be read. Binary and non-UTF-8 files are reported and
@@ -312,6 +388,7 @@ fn source_input(
         package: crate::packages::package(&context.root, relative),
         settings_selected_by: Vec::new(),
         templates: Vec::new(),
+        changed: None,
     }
 }
 
@@ -363,13 +440,19 @@ fn pending_result(
         judgments: Vec::new(),
         findings: Vec::new(),
         error: None,
+        left_out: Vec::new(),
         classification: None,
     }
 }
 
 /// Build output, or a library copied into the repository, found from a
 /// file's content: the role it takes instead of the one its path gave.
-fn not_written_here(path: &std::path::Path, role: &str, source: &str) -> Option<&'static str> {
+/// `path` is on disk, for a minified sibling.
+pub(crate) fn not_written_here(
+    path: &std::path::Path,
+    role: &str,
+    source: &str,
+) -> Option<&'static str> {
     if discovery::generated_source(source) {
         Some("generated")
     } else if role == "source" && discovery::vendored(path, Some(source)) {
@@ -409,6 +492,7 @@ fn bare_input(result: FileResult) -> Input {
         package: None,
         settings_selected_by: Vec::new(),
         templates: Vec::new(),
+        changed: None,
     }
 }
 
@@ -497,6 +581,7 @@ pub fn fingerprint(inputs: &[Input]) -> String {
                 &i.result.context_complete,
                 &i.result.context_limitations,
                 &i.result.error,
+                i.changed.as_ref().map(|c| &c.lines),
             )
         })
         .collect();

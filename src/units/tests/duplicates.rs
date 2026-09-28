@@ -1,7 +1,7 @@
 //! Shared logic: candidate pairs across files and inside tests.
 use super::*;
 
-const LOAD: &str = "fn load_user(path: &str) -> Result<User> {\n    let text = std::fs::read_to_string(path)?;\n    let value: Value = serde_json::from_str(&text)?;\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    Ok(User { name })\n}\n";
+pub(super) const LOAD: &str = "fn load_user(path: &str) -> Result<User> {\n    let text = std::fs::read_to_string(path)?;\n    let value: Value = serde_json::from_str(&text)?;\n    let name = value[\"name\"].as_str().unwrap_or(\"anonymous\").trim().to_string();\n    Ok(User { name })\n}\n";
 
 #[test]
 fn copies_inside_one_test_raise_at_most_a_consider() {
@@ -126,6 +126,65 @@ fn short_copies_are_at_most_a_consider() {
     assert_eq!(short, Strength::Consider);
     assert!(message.contains("a person should decide"), "{message}");
     assert_eq!(strength(longer).0, Strength::Review);
+}
+
+#[test]
+fn a_consider_from_the_same_steps_answer_needs_its_measured_threshold() {
+    let short_copy = "\t\tStringBuilder builder = StringUtil.borrowBuilder();\n\t\thtml(QuietAppendable.wrap(builder), new Document.OutputSettings());\n\t\treturn StringUtil.releaseBuilder(builder);\n";
+    let mut options = args();
+    only(&mut options, catalog::SHARED_LOGIC);
+    let finding = |files: &[(String, String)], same: Value| {
+        let project = Project::new();
+        for (path, text) in files {
+            project.write(path, text);
+        }
+        let mut answers = scripted(2);
+        answers
+            .overrides
+            .push(("required", json!({"type":"noul","noul":0.05})));
+        answers.overrides.push(("same", same));
+        let report = run(&project, &options, &mut answers);
+        report
+            .files
+            .iter()
+            .flat_map(|f| &f.findings)
+            .next()
+            .cloned()
+    };
+    let strength =
+        |files: &[(String, String)], same: Value| finding(files, same).map(|f| f.strength);
+    let copies = [
+        ("a.rs".to_string(), LOAD.to_string()),
+        (
+            "b.rs".to_string(),
+            LOAD.replace("load_user", "load_team")
+                .replace("\"name\"", "\"title\""),
+        ),
+    ];
+    // 0.15 on "different work that only looks alike": a note, which does
+    // not call application code test cases.
+    let note = finding(&copies, spread(0.15, 0.35, 0.5)).unwrap();
+    assert_eq!(note.strength, Strength::Note);
+    assert!(
+        note.message.contains("repeat related steps") && !note.message.contains("test"),
+        "{}",
+        note.message
+    );
+    assert_eq!(
+        strength(&copies, spread(0.1, 0.4, 0.5)),
+        Some(Strength::Consider)
+    );
+    // A short copy's review lowered to a consider: the top level set it.
+    let java = ["Attribute", "Attributes"].map(|class| {
+        (
+            format!("src/main/java/app/{class}.java"),
+            format!("package app;\n\nclass {class} {{\n\tString html() {{\n{short_copy}\t}}\n}}\n"),
+        )
+    });
+    assert_eq!(
+        strength(&java, spread(0.15, 0.0, 0.85)),
+        Some(Strength::Consider)
+    );
 }
 
 #[test]

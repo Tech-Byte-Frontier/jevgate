@@ -3,8 +3,8 @@
 use anyhow::{Result, bail, ensure};
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
-    ops::ControlFlow,
+    collections::BTreeMap,
+    ops::{ControlFlow, Range},
     path::Path,
     time::{Duration, Instant},
 };
@@ -19,17 +19,29 @@ const CACHE_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 /// parentheses, which it parses in no time once it knows the file is Bend 1.
 const PARSE_TIME: Duration = Duration::from_secs(10);
 
+/// Syntax nested deeper than this is not read: the analyses walk trees
+/// recursively, and a C function of 8,000 nested `if` blocks (142 KB, under
+/// the default file limit) overflowed the stack and aborted the whole run,
+/// as a JavaScript expression of 20,000 terms did before. The deepest trees
+/// of the corpus's 23,700 code files nest 405 levels (a Bend 2 game's
+/// server) and 100 outside Bend 2.
+const MAX_DEPTH: usize = 1_000;
+
 /// Why a file of a supported language was not judged, as its skip reason.
-pub(crate) const SYNTAX_ERRORS: &str = "Syntax errors; this file was not judged.";
+/// Most syntax errors are grammar gaps in valid code (`error_regions`), so
+/// the reason names what the parser could not do, not what the code is.
+pub(crate) const SYNTAX_ERRORS: &str =
+    "The parser could not read enough of this file; it was not judged.";
 pub(crate) const BEND1: &str = "Bend 1 syntax: JevGate reads Bend 2 (bendlang/bend 2.0.x), a different language that shares the .bend extension; this file was not judged.";
 pub(crate) const SLOW_PARSE: &str =
     "The parser did not finish within 10 seconds; this file was not judged.";
+pub(crate) const TOO_DEEP: &str = "Its syntax nests more than 1,000 levels deep, past what JevGate reads, so the run cannot judge it: mark it generated or deny its upload in jevgate.toml, or nest it less.";
 
 /// The skip reason of a parse error: its message when it is one of the
 /// reasons above, and syntax errors otherwise.
 pub(crate) fn skip_reason(error: &anyhow::Error) -> &'static str {
     let message = error.to_string();
-    [BEND1, SLOW_PARSE]
+    [BEND1, SLOW_PARSE, TOO_DEEP]
         .into_iter()
         .find(|reason| message == *reason)
         .unwrap_or(SYNTAX_ERRORS)
@@ -46,8 +58,9 @@ struct ParseCache {
     entries: BTreeMap<(String, String), Parsed>,
     bytes: usize,
     clock: u64,
-    /// Sources whose parse was stopped, so later callers skip them at once.
-    stopped: BTreeSet<(String, String)>,
+    /// Sources whose parse was stopped or whose tree is too deep to walk,
+    /// with the reason, so later callers skip them at once.
+    refused: BTreeMap<(String, String), &'static str>,
 }
 
 impl ParseCache {
@@ -118,7 +131,7 @@ fn grammar(path: &Path) -> Option<tree_sitter::Language> {
         "php" | "phtml" => tree_sitter_php::LANGUAGE_PHP,
         "java" => tree_sitter_java::LANGUAGE,
         "bend" => tree_sitter_bend2::LANGUAGE,
-        _ => return None,
+        _ => return crate::analysis::generic::of(path).map(|generic| generic.grammar()),
     };
     Some(language.into())
 }
@@ -146,7 +159,10 @@ fn parsed_text(path: &Path, source: &str) -> Option<(tree_sitter::Language, Opti
         let (scripts, language) = crate::components::scripts("html", source);
         Some((language, Some(without_tags(&scripts, true))))
     } else {
-        let language = grammar(path)?;
+        let language = match crate::analysis::generic::read(path, source) {
+            Some(generic) => generic.grammar(),
+            None => grammar(path)?,
+        };
         Some((
             language,
             project_template(path).then(|| without_jinja(source)),
@@ -154,6 +170,12 @@ fn parsed_text(path: &Path, source: &str) -> Option<(tree_sitter::Language, Opti
     }
 }
 
+/// The tree of a file in a supported language, none for other files. Its
+/// syntax errors leave out the units that hold them (`error_regions`); the
+/// file fails only when the parser could not read its top level, when it is
+/// a generator template holding any error, when it is Bend 1 code, or when
+/// its parse takes longer than `PARSE_TIME` or nests deeper than
+/// `MAX_DEPTH`.
 pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     let extension = extension(path);
     let server_template = crate::components::server_template(path);
@@ -171,33 +193,74 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         bail!(BEND1);
     }
     let key = (kind, crate::schema::hash(source.as_bytes()));
-    if PARSES.with(|cache| cache.borrow().stopped.contains(&key)) {
-        bail!(SLOW_PARSE);
-    }
-    let tree = match PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
-        Some(tree) => tree,
-        None => {
-            let mut parser = Parser::new();
-            parser.set_language(&language)?;
-            let Some(tree) = parse_in_time(&mut parser, scripts.as_deref().unwrap_or(source))
-            else {
-                PARSES.with(|cache| cache.borrow_mut().stopped.insert(key));
-                bail!(SLOW_PARSE);
-            };
-            PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
-            tree
-        }
-    };
+    let tree = cached_tree(key, &language, scripts.as_deref().unwrap_or(source), source)?;
     // Whether errors are tolerable depends on the path, not only the source.
+    let root = tree.root_node();
     ensure!(
-        if template(path, source) && !server_template {
-            !tree.root_node().has_error()
-        } else {
-            tolerable(tree.root_node(), source.len())
-        },
+        !root.is_error() && !(root.has_error() && !server_template && template(path, source, root)),
         "Syntax errors: semantic evaluation was not attempted"
     );
     Ok(Some(tree))
+}
+
+/// The tree of `text`, the code `source` holds, from the cache under `key`,
+/// or parsed with `language`. A parse that runs past `PARSE_TIME` or nests
+/// deeper than `MAX_DEPTH` is refused, and the refusal is cached too, so
+/// the same source is refused again without parsing it.
+fn cached_tree(
+    key: (String, String),
+    language: &tree_sitter::Language,
+    text: &str,
+    source: &str,
+) -> Result<Tree> {
+    if let Some(reason) = PARSES.with(|cache| cache.borrow().refused.get(&key).copied()) {
+        bail!(reason);
+    }
+    if let Some(tree) = PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
+        return Ok(tree);
+    }
+    let mut parser = Parser::new();
+    parser.set_language(language)?;
+    let tree = parse_in_time(&mut parser, text)
+        .ok_or(SLOW_PARSE)
+        .and_then(|tree| {
+            if deeper_than(&tree, MAX_DEPTH) {
+                Err(TOO_DEEP)
+            } else {
+                Ok(tree)
+            }
+        });
+    match tree {
+        Ok(tree) => {
+            PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
+            Ok(tree)
+        }
+        Err(reason) => {
+            PARSES.with(|cache| cache.borrow_mut().refused.insert(key, reason));
+            bail!(reason);
+        }
+    }
+}
+
+/// Whether a tree nests more than `limit` levels, found without recursion.
+fn deeper_than(tree: &Tree, limit: usize) -> bool {
+    let mut cursor = tree.walk();
+    let mut depth = 0;
+    loop {
+        if cursor.goto_first_child() {
+            depth += 1;
+            if depth > limit {
+                return true;
+            }
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return false;
+            }
+            depth -= 1;
+        }
+    }
 }
 
 /// The tree of `text`, or none when parsing takes longer than `PARSE_TIME`.
@@ -216,19 +279,31 @@ fn parse_in_time(parser: &mut Parser, text: &str) -> Option<Tree> {
     parser.parse_with_options(&mut read, None, Some(options))
 }
 
-/// Error regions a file may hold and still be judged, and the part of its
-/// source they may cover in all: one byte in eight.
-const ERROR_REGIONS: usize = 3;
-const ERROR_SHARE: usize = 8;
-
 /// A generator template, whose placeholders are no syntax of its language:
-/// a file under a `templates` directory, or one holding ERB tags (`<%=`)
-/// or `dotnet new` conditions (`//#if`). Its parse errors keep it unjudged.
-fn template(path: &Path, source: &str) -> bool {
+/// a file under a `templates` directory, one holding `dotnet new`
+/// conditions (`//#if`), or one holding an ERB tag (`<%`) in its code
+/// rather than in a string or comment. A C format such as `"<%d>"` is no
+/// tag: suckless st's `x.c`, 70 intact functions and one macro the C grammar
+/// cannot read, was skipped whole for one. Its parse errors keep it unjudged.
+fn template(path: &Path, source: &str, root: Node<'_>) -> bool {
     path.iter()
         .any(|part| matches!(part.to_str(), Some("templates" | "template")))
-        || source.contains("<%")
         || source.contains("//#if")
+        || source
+            .match_indices("<%")
+            .any(|(at, tag)| !in_text(root, at..at + tag.len()))
+}
+
+/// Whether `bytes` lie in a string, a heredoc or a comment.
+fn in_text(root: Node<'_>, bytes: Range<usize>) -> bool {
+    std::iter::successors(
+        root.descendant_for_byte_range(bytes.start, bytes.end),
+        Node::parent,
+    )
+    .any(|node| {
+        let kind = node.kind();
+        crate::analysis::is_comment(node) || kind.contains("string") || kind.contains("heredoc")
+    })
 }
 
 /// A file of a project template such as a cookiecutter's, under a directory
@@ -292,28 +367,24 @@ fn without_tags(source: &str, server: bool) -> String {
     String::from_utf8(out).unwrap_or_else(|_| source.to_string())
 }
 
-/// Whether a tree's syntax errors are few and small enough to judge the
-/// rest of the file. Grammars miss some valid code: tree-sitter-typescript
-/// reads a call signature that starts with `<T>` on the line after another
-/// as its continuation, which left four of zustand's source files
-/// unjudged, and tree-sitter-go flags a `const (…)` group closed on a raw
-/// string's line. At most three error regions, an eighth of the source in
-/// all; units holding an error are left out (`analysis::units`).
-fn tolerable(root: Node<'_>, len: usize) -> bool {
-    if !root.has_error() {
-        return true;
-    }
-    if root.is_error() {
-        return false;
-    }
+/// The smallest nodes that hold a syntax error, as byte ranges in source
+/// order: what the parser could not read, and the tokens it assumed missing
+/// (empty ranges). A unit holding one is left out and the rest of its file
+/// is judged (`analysis::units::LeftOut`), since most errors are grammar
+/// gaps rather than broken code: tree-sitter-typescript reads a call
+/// signature that starts with `<T>` on the line after another as its
+/// continuation, tree-sitter-rust reads snapbox's `str![…]` as the type
+/// `str` (one error in each of 12 mdbook test files), and tree-sitter-bend2
+/// lacks Bend 2's erased binders (`for ~a: T`) and typed lets.
+pub(crate) fn error_regions(node: Node<'_>) -> Vec<Range<usize>> {
     let mut regions = Vec::new();
-    error_regions(root, &mut regions);
-    let bytes: usize = regions.iter().map(|r| r.len()).sum();
-    regions.len() <= ERROR_REGIONS && bytes * ERROR_SHARE <= len
+    if node.has_error() {
+        holding_errors(node, &mut regions);
+    }
+    regions
 }
 
-/// The smallest nodes that hold a syntax error.
-fn error_regions(node: Node<'_>, out: &mut Vec<std::ops::Range<usize>>) {
+fn holding_errors(node: Node<'_>, out: &mut Vec<Range<usize>>) {
     let mut cursor = node.walk();
     let holding: Vec<Node<'_>> = node
         .children(&mut cursor)
@@ -324,7 +395,7 @@ fn error_regions(node: Node<'_>, out: &mut Vec<std::ops::Range<usize>>) {
         return;
     }
     for child in holding {
-        error_regions(child, out);
+        holding_errors(child, out);
     }
 }
 
@@ -350,9 +421,43 @@ mod tests {
         .unwrap();
         assert!(!tree.root_node().has_error());
         assert!(
-            parse(Path::new("app/tasks.py"), source).is_err(),
+            parse(Path::new("app/tasks.py"), source)
+                .unwrap()
+                .unwrap()
+                .root_node()
+                .has_error(),
             "outside a template its tags are syntax errors"
         );
+    }
+
+    #[test]
+    fn an_erb_tag_is_one_in_code_and_not_in_a_string_or_a_comment() {
+        // A function, and a `main` whose argument macros the C grammar
+        // cannot read (suckless st's `ARGBEGIN`); `"<%d>"` is a format.
+        let c = "int twice(int x) {\n    return x * 2;\n}\n\nint main(int argc, char *argv[]) {\n    ARGBEGIN {\n    default:\n        usage();\n    } ARGEND;\n    printf(\"<%d>\\n\", twice(argc));\n    return 0;\n}\n";
+        let path = Path::new("x.c");
+        assert!(parse(path, c).unwrap().unwrap().root_node().has_error());
+        assert!(parse(path, &format!("/* <%= banner %> */\n{c}")).is_ok());
+        // In code, a tag is a generator template's placeholder.
+        assert!(parse(path, &format!("int <%= name %>(void);\n{c}")).is_err());
+    }
+
+    #[test]
+    fn syntax_nested_deeper_than_code_is_written_is_refused_before_any_walk() {
+        let nested = |depth: usize| {
+            format!(
+                "int f(int x) {{\n{}{}}}\n",
+                "if (x) {\n".repeat(depth),
+                "}\n".repeat(depth)
+            )
+        };
+        let path = Path::new("deep.c");
+        assert!(parse(path, &nested(100)).unwrap().is_some());
+        // Each `if` nests two levels: 1,200 in all.
+        for _ in 0..2 {
+            let error = parse(path, &nested(600)).unwrap_err();
+            assert_eq!(skip_reason(&error), TOO_DEEP);
+        }
     }
 
     #[test]
@@ -378,7 +483,13 @@ mod tests {
             collect(path, changed, Path::new(".")).unwrap().1,
             vec![("after".into(), 2)]
         );
-        assert!(parse(path, "function before( {").is_err());
+        assert!(
+            parse(path, "function before( {")
+                .unwrap()
+                .unwrap()
+                .root_node()
+                .has_error()
+        );
         assert_eq!(
             collect(path, source, Path::new(".")).unwrap().1,
             vec![("before".into(), 1)]
@@ -450,7 +561,8 @@ mod tests {
     fn the_extension_selects_the_grammar() {
         let jsx = "const view = <div/>;";
         assert!(parse(Path::new("view.tsx"), jsx).unwrap().is_some());
-        assert!(parse(Path::new("view.ts"), jsx).is_err());
+        let ts = parse(Path::new("view.ts"), jsx).unwrap().unwrap();
+        assert!(ts.root_node().has_error());
         assert!(parse(Path::new("view.txt"), jsx).unwrap().is_none());
         assert!(
             parse(Path::new("page.php"), "<?php echo $x; ?>\n<p>hi</p>\n")

@@ -1,0 +1,9 @@
+{
+  "session_id": "5b9e2c1a-7d4f-4e8b-9a3c-2f1e0d6c8b7a",
+  "prompt_id": "c7f3a9d2-4b1e-4f6a-8e2d-9b5c3a1f7e40",
+  "transcript_path": "~/.claude/projects/-home-dev-shop/5b9e2c1a-7d4f-4e8b-9a3c-2f1e0d6c8b7a.jsonl",
+  "cwd": "$PROJECT",
+  "permission_mode": "acceptEdits",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Add receiptLines(order, code) to src/receipt.ts: a line per item, the subtotal, the discount for the code, the region's tax and the total."
+}

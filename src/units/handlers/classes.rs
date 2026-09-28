@@ -18,7 +18,7 @@ pub(super) fn error_classes(scope: &Scope<'_>, hashes: &BTreeMap<PathBuf, String
     let selected = scope
         .owners
         .iter()
-        .filter(|o| scope.views[o].application)
+        .filter(|o| scope.views[o].application && !scope.units[o].generic)
         .map(|&o| {
             let input = &scope.inputs[o];
             (
@@ -29,6 +29,7 @@ pub(super) fn error_classes(scope: &Scope<'_>, hashes: &BTreeMap<PathBuf, String
     let context = scope
         .context
         .iter()
+        .filter(|(_, _, units)| !units.generic)
         .map(|(path, source, _)| (path.as_path(), *source));
     let mut all: Vec<_> = selected.chain(context).collect();
     all.sort_by_key(|(path, _)| *path);

@@ -119,6 +119,25 @@ fn a_bend_test_is_its_whole_file_and_its_output_is_no_comment() {
 }
 
 #[test]
+fn a_bend_test_holding_a_syntax_error_is_left_out_whole_with_its_first_error() {
+    // tree-sitter-bend2 lacks typed lets in a def's body.
+    let test = "import Base\n\ndef helper(n: U32) -> U32:\n  +x : U32 = n\n  x\n\ndef main() -> U32:\n  helper(1)\n\n#|1\n";
+    let path = Path::new("tests/run/typed_let.bend");
+    let mut file = parse(path, test).unwrap();
+    let kept: Vec<&str> = file.units.iter().map(|u| u.name.as_str()).collect();
+    assert_eq!(kept, ["main"]);
+    let broken = crate::analysis::test_map::broken_cases(path, test).unwrap();
+    file.leave_out_tests(broken, test);
+    assert!(file.units.is_empty(), "its defs sit in the test");
+    let left_out: Vec<(&str, usize, usize, usize)> = file
+        .left_out
+        .iter()
+        .map(|l| (l.name.as_str(), l.line, l.end_line, l.error_line))
+        .collect();
+    assert_eq!(left_out, [("typed_let", 1, 10, 4)]);
+}
+
+#[test]
 fn bend_1_is_skipped_with_its_own_reason_and_bend_2_imports_link_files() {
     let bend1 = "type MyTree(t):\n  Node { val: t }\n\ndef main() -> u24:\n  return MyTree/Node { val: 1 }\n";
     let error = crate::syntax::parse(Path::new("examples/tree.bend"), bend1).unwrap_err();

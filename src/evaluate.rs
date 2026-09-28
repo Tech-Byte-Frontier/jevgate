@@ -17,11 +17,13 @@ pub struct Session<'a> {
     pub store: &'a Store,
     pub evaluator: &'a mut dyn Evaluator,
     pub requests: u32,
-    pub paid_input_tokens: u64,
-    pub paid_output_tokens: u64,
+    /// What this invocation's requests were billed.
+    pub paid: crate::requests::Usage,
     pub budget: TokenBudget,
     /// Uploaded bytes and billed input tokens of fresh requests, for calibration.
     pub observed: (u64, u64),
+    /// The questions this invocation answered, by state.
+    pub answered: crate::requests::Answered,
 }
 
 pub struct SnapshotContext<'a> {
@@ -62,14 +64,13 @@ pub fn snapshot(
             .map(|r| r.load.clone())
             .or_else(|| crate::docs::scan(current.root).ok().map(|r| r.load));
     }
-    if let Some(base) = &args.base {
-        match crate::revision::Changes::load(current.root, base) {
-            Ok(changes) => {
-                report.base_revision = Some(changes.revision);
-                report.deleted_files = changes.deleted;
-            }
-            Err(error) => report.errors.push(error.to_string()),
+    match crate::revision::Changes::of_check(current.root, args) {
+        Some(Ok(changes)) => {
+            report.base_revision = Some(changes.revision);
+            report.deleted_files = changes.deleted;
         }
+        Some(Err(error)) => report.errors.push(error.to_string()),
+        None => {}
     }
     report.update_status();
     if args.dry_run {
@@ -85,6 +86,12 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         quick: args.quick,
         base_revision: args.base.clone(),
         deleted_files: Vec::new(),
+        scope: if args.changed_lines() {
+            schema::Scope::ChangedLines
+        } else {
+            schema::Scope::WholeFiles
+        },
+        guards: Vec::new(),
         schema_version: schema::SCHEMA_VERSION,
         command: "check".into(),
         rubric_version: schema::RUBRIC.into(),
@@ -100,10 +107,14 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         dry_run: args.dry_run,
         initial_requests: Vec::new(),
         requested_model: args.model().to_owned(),
+        provider: args.provider.name().into(),
         api_requests: current.requests,
-        concurrency: args.concurrency,
+        concurrency: args.concurrency(),
         paid_input_tokens: 0,
         paid_output_tokens: 0,
+        paid_models: BTreeMap::new(),
+        unmetered_requests: 0,
+        estimated_usd: Some(0.0),
         stages: BTreeMap::new(),
         settled: false,
         files,
@@ -112,8 +123,9 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         fail_on: args.fail_on_names(),
         fail_on_rules: args.rule_fail_on_names(),
         fail_on_paths: args.path_fail_on_names(),
+        fail_on_mature: args.mature_level_names(),
         gate: None,
-        rules: crate::catalog::rules()
+        rules: crate::catalog::with_custom(args.questions)
             .into_iter()
             .filter(|r| args.enabled(r.key))
             .map(|r| r.id.to_string())
@@ -123,15 +135,14 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
 }
 
 /// Planned first-pass requests, without credentials, network or writes; the
-/// cache is read so answered requests are not counted as cost. A file whose
+/// cache is read so answered questions are not counted as cost. A file whose
 /// purpose the cache answers is planned as a run plans it; requests that
 /// depend on new answers (an unanswered file purpose, rechecks, locating
 /// blocks) are not known yet.
 fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &mut Report) {
     let budget = &TokenBudget::load(root);
-    let answered =
-        |request: &serde_json::Value| crate::requests::answered(root, args, request).is_some();
-    let limits = Limits::new(budget, &answered);
+    let unanswered = |request: &serde_json::Value| crate::requests::unanswered(root, args, request);
+    let limits = Limits::new(budget, &unanswered);
     let mut planned = Vec::new();
     let mut views = BTreeMap::new();
     for (owner, input) in inputs.iter().enumerate() {
@@ -157,28 +168,98 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
         }
     }
     let plan = crate::units::plan(inputs, &views, args, budget, root);
-    for (owner, reason) in &plan.skipped {
-        skip(&mut report.files[*owner], reason);
-    }
+    record_plan(&plan, report);
     planned.extend(plan.requests.into_iter().map(|p| p.request));
+    count_planned(report, args, root, budget, planned);
+}
+
+/// Count `planned` requests in their stages, as priced by `budget`, and
+/// keep them for `--show-requests`.
+fn count_planned(
+    report: &mut Report,
+    args: &CheckArgs,
+    root: &std::path::Path,
+    budget: &TokenBudget,
+    planned: impl IntoIterator<Item = serde_json::Value>,
+) {
     for request in planned {
         let stage = report
             .stages
             .entry(crate::requests::stage(&request).into())
             .or_default();
-        stage.planned_requests += 1;
-        stage.planned_evidence_bytes += crate::requests::evidence_bytes(&request);
-        if crate::requests::answered(root, args, &request).is_some() {
-            stage.planned_cached += 1;
-        } else {
-            stage.planned_tokens += budget.request_tokens(&request) as u64;
-        }
+        count_request(
+            stage,
+            &request,
+            crate::requests::unanswered(root, args, &request),
+            budget,
+        );
         if args.show_requests {
             report
                 .initial_requests
                 .push(crate::requests::provider_request(&request).into_owned());
         }
     }
+}
+
+/// Count one planned request in its stage: its questions, those the cache
+/// answers, and the estimated tokens of `sent`, what a run would send of it
+/// (none when the cache answers every question).
+fn count_request(
+    stage: &mut crate::schema::StageMetrics,
+    request: &serde_json::Value,
+    sent: Option<serde_json::Value>,
+    budget: &TokenBudget,
+) {
+    let questions = crate::requests::question_count(request);
+    stage.planned_requests += 1;
+    stage.planned_evidence_bytes += crate::requests::evidence_bytes(request);
+    stage.planned_questions += questions;
+    match sent {
+        None => {
+            stage.planned_cached += 1;
+            stage.planned_cached_questions += questions;
+        }
+        Some(sent) => {
+            stage.planned_cached_questions += questions - crate::requests::question_count(&sent);
+            stage.planned_tokens += budget.request_tokens(&sent) as u64;
+        }
+    }
+}
+
+/// A dry run's guards: what code finds in the change within `scope`, and
+/// the questions about rewritten tests a run would ask, counted like the
+/// first pass.
+pub fn preview_guards(
+    report: &mut Report,
+    args: &CheckArgs,
+    context: &ConfigContext,
+    scope: &[PathBuf],
+) {
+    let scan = crate::guards::scan(&context.root, args, &context.config, scope);
+    let budget = TokenBudget::load(&context.root);
+    let requests = weaker_requests(&scan.changed_tests, args, &budget);
+    count_planned(
+        report,
+        args,
+        &context.root,
+        &budget,
+        requests.into_iter().map(|r| r.1),
+    );
+    report.guards = scan.guards;
+}
+
+/// The question whether each of `tests` checks less than before, for those
+/// the budget can send.
+fn weaker_requests<'t>(
+    tests: &'t [crate::guards::ChangedTest],
+    args: &CheckArgs,
+    budget: &TokenBudget,
+) -> Vec<(&'t crate::guards::ChangedTest, serde_json::Value)> {
+    tests
+        .iter()
+        .map(|test| (test, crate::units::weaker_request(args.model(), test)))
+        .filter(|(_, request)| budget.fits(request))
+        .collect()
 }
 
 /// A file's view as a run decides it after its purpose request, when the
@@ -190,7 +271,7 @@ fn cached_purpose(
     request: &serde_json::Value,
     file: &mut FileResult,
 ) -> Result<Option<crate::file_kind::View>> {
-    let Some(body) = crate::requests::answered(root, args, request) else {
+    let Some(body) = crate::requests::cached(root, args, request) else {
         return Ok(None);
     };
     crate::file_kind::record_purpose(file, request, &body)?;
@@ -207,9 +288,7 @@ impl Session<'_> {
         }
         let mut plan =
             crate::units::plan(inputs, &views, self.args, &self.budget, &self.context.root);
-        for (owner, reason) in &plan.skipped {
-            skip(&mut report.files[*owner], reason);
-        }
+        record_plan(&plan, report);
         for &owner in plan.files.keys() {
             report.files[owner].cached = true;
         }
@@ -247,11 +326,69 @@ impl Session<'_> {
             }
         }
         compose_files(&plan, report);
+        self.guard(&plan, report);
+        self.calibrate()?;
+        self.progress(report)
+    }
+
+    /// Keep the bytes per token of this session's fresh requests, so later
+    /// runs estimate what fits the provider limit from real usage.
+    pub fn calibrate(&mut self) -> Result<()> {
         if self.observed.1 > 0 {
             self.budget.observe(self.observed.0, self.observed.1);
             self.budget.save(self.store)?;
         }
-        self.progress(report)
+        Ok(())
+    }
+
+    /// What the change does to the checks around the code (`guards`): what
+    /// code finds, the tests whose rewritten assertions Jev reads as checking
+    /// less, and the text it reads as written to steer a reviewer.
+    fn guard(&mut self, plan: &crate::units::Plan, report: &mut Report) {
+        let scope = crate::inventory::scope(self.args, self.context).unwrap_or_default();
+        let scan = crate::guards::scan(&self.context.root, self.args, &self.context.config, &scope);
+        let mut guards = scan.guards;
+        guards.extend(self.weaker_tests(&scan.changed_tests, report));
+        guards.extend(crate::guards::steering(plan, &report.files));
+        crate::guards::sort(&mut guards);
+        report.guards = guards;
+    }
+
+    /// Ask whether each test whose assertions the change rewrote now checks
+    /// less; at 0.80 it is a guard. A question left unanswered leaves the
+    /// run incomplete, as any other does, but for one refused as beyond the
+    /// model's context, which is not asked, as a unit too large to send.
+    fn weaker_tests(
+        &mut self,
+        tests: &[crate::guards::ChangedTest],
+        report: &mut Report,
+    ) -> Vec<crate::guards::Guard> {
+        let asked = weaker_requests(tests, self.args, &self.budget);
+        if asked.is_empty() {
+            return Vec::new();
+        }
+        let receipts = self.queries(&asked.iter().map(|(_, r)| r).collect::<Vec<_>>());
+        let mut guards = Vec::new();
+        for ((test, request), receipt) in asked.iter().zip(receipts) {
+            let stage = crate::requests::stage(request);
+            add_metrics(
+                report.stages.entry(stage.into()).or_default(),
+                &receipt.metrics,
+            );
+            match receipt.result {
+                Ok((body, ..)) => guards.extend(
+                    crate::units::weaker_answer(&body)
+                        .and_then(|p| crate::guards::Guard::weaker(test, p)),
+                ),
+                Err(error) if beyond_context(&error) => {}
+                Err(error) => report.errors.push(format!(
+                    "Cannot ask whether test `{}` in {} checks less than before: {error:#}",
+                    test.name,
+                    test.path.display()
+                )),
+            }
+        }
+        guards
     }
 
     /// Classify every pending file: ready with a gate view, waiting on a
@@ -267,10 +404,9 @@ impl Session<'_> {
         let mut purpose = Vec::new();
         let mut views = BTreeMap::new();
         let root = &self.context.root;
-        let answered = |request: &serde_json::Value| {
-            crate::requests::answered(root, self.args, request).is_some()
-        };
-        let limits = Limits::new(&self.budget, &answered);
+        let unanswered =
+            |request: &serde_json::Value| crate::requests::unanswered(root, self.args, request);
+        let limits = Limits::new(&self.budget, &unanswered);
         for (owner, file) in report.files.iter_mut().enumerate() {
             if file.status != Status::Pending {
                 continue;
@@ -386,8 +522,11 @@ impl Session<'_> {
 
     fn progress(&self, report: &mut Report) -> Result<()> {
         report.api_requests = self.requests;
-        report.paid_input_tokens = self.paid_input_tokens;
-        report.paid_output_tokens = self.paid_output_tokens;
+        report.paid_input_tokens = self.paid.input_tokens;
+        report.paid_output_tokens = self.paid.output_tokens;
+        report.paid_models = self.paid.models.clone();
+        report.unmetered_requests = self.paid.unmetered;
+        report.estimated_usd = self.paid.usd();
         self.verify_current(report);
         report.update_status();
         self.publish(report)
@@ -530,19 +669,27 @@ fn add_metrics(stage: &mut crate::schema::StageMetrics, m: &crate::schema::Stage
     stage.cache_hits += m.cache_hits;
     stage.cached_judgments += m.cached_judgments;
     stage.evaluated_judgments += m.evaluated_judgments;
+    stage.asked_questions += m.asked_questions;
+    stage.cached_questions += m.cached_questions;
     stage.input_tokens += m.input_tokens;
     stage.output_tokens += m.output_tokens;
     stage.evidence_bytes += m.evidence_bytes;
 }
 
-/// Compose each planned file's recorded judgments into dimensions and findings.
+/// Compose each planned file's recorded judgments into dimensions and
+/// findings, with the requests its units were first asked in.
 fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
+    let mut first = BTreeMap::<usize, Vec<&crate::units::Planned>>::new();
+    for planned in &plan.requests {
+        first.entry(planned.owner).or_default().push(planned);
+    }
     for (&owner, file_plan) in &plan.files {
         let file = &mut report.files[owner];
         if file.status == Status::Error {
             continue;
         }
-        let composed = crate::units::compose::compose(file_plan, &file.judgments);
+        let asked = first.get(&owner).map_or(&[][..], Vec::as_slice);
+        let composed = crate::units::compose::compose(file_plan, &file.judgments, asked);
         file.syntax_checked = true;
         file.dimensions = composed.dimensions;
         file.findings = composed.findings;
@@ -569,7 +716,7 @@ fn schedule(
         Ok(plan) => plan,
         Err(error) => {
             // Invalid syntax cannot be located; it is reported, not judged.
-            skip(file, crate::syntax::skip_reason(&error));
+            unread(file, crate::syntax::skip_reason(&error));
             return Ok(Scheduled::None);
         }
     };
@@ -619,6 +766,30 @@ fn fail(file: &mut FileResult, error: anyhow::Error) {
     file.status = Status::Error;
     file.cached = false;
     file.error = Some(error.to_string());
+}
+
+/// Skip the files planning skipped, and record what syntax errors left out
+/// of the others.
+fn record_plan(plan: &crate::units::Plan, report: &mut Report) {
+    for (owner, reason) in &plan.skipped {
+        unread(&mut report.files[*owner], reason);
+    }
+    for (&owner, file) in &plan.files {
+        report.files[owner].left_out.clone_from(&file.left_out);
+    }
+}
+
+/// A file planning could not read, for `reason`: skipped, but for syntax
+/// nested too deep to read, which fails the run. That file's code is read
+/// by no rule, so a pull request could hide a long function beside one
+/// literal of 1,001 parentheses and pass, where before the limit the run
+/// crashed; the corpus's deepest file nests 405 levels.
+fn unread(file: &mut FileResult, reason: &str) {
+    if reason == crate::syntax::TOO_DEEP {
+        fail(file, anyhow::anyhow!(reason.to_string()));
+    } else {
+        skip(file, reason);
+    }
 }
 
 /// Unsupported or unparseable files are reported with a reason and never make a run incomplete.

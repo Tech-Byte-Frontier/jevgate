@@ -13,12 +13,12 @@ fn dimension(rule: &str, d: &Dimension) -> Value {
 }
 
 fn batch_cost(report: &Report) -> Option<Value> {
-    crate::output::estimated_usd(report).map(|usd| {
+    report.estimated_usd.map(|usd| {
         json!({
             "estimated_usd": usd,
-            "input_per_million": crate::output::INPUT_USD_PER_MILLION,
+            "input_per_million": crate::model::INPUT_USD_PER_MILLION,
             "output_per_million": 0.0,
-            "checked_at": crate::output::PRICE_CHECKED
+            "checked_at": crate::model::PRICE_CHECKED
         })
     })
 }
@@ -33,9 +33,13 @@ pub fn render(report: &Report) -> Result<String> {
                 .iter()
                 .map(|(rule, d)| dimension(rule, d))
                 .collect();
+            // A preview language's findings say so, in their `preview`:
+            // their precision is that language's own, and JevGate's own
+            // rules never fail the default gate there.
+            let findings: Vec<Value> = file.findings.iter().map(|finding| json!(finding)).collect();
             json!({"path":file.path,"status":file.status,"cached":file.cached,"checks":checks,
-            "findings":file.findings,"limitations":file.context_limitations,
-            "error":file.error,
+            "findings":findings,"limitations":file.context_limitations,
+            "error":file.error,"left_out":file.left_out,
             "classification":file.classification.as_ref().and_then(|class| {
                 (class.reason.as_str() != file.error.as_deref().unwrap_or("")).then_some(class.reason.clone())
             })})
@@ -43,7 +47,11 @@ pub fn render(report: &Report) -> Result<String> {
         .collect();
     let rules: Vec<_> = crate::catalog::rules()
         .into_iter()
-        .map(|r| json!({"key":r.key,"id":r.id,"description":r.inspection}))
+        .map(|r| {
+            json!({"key":r.key,"id":r.id,"description":r.inspection,
+                "maturity":crate::maturity::describe(r.key),
+                "unmeasured":crate::maturity::unmeasured(r.key)})
+        })
         .collect();
     // A run that leaves out default rules lists fewer files; say so.
     let partial = crate::catalog::rules()
@@ -53,8 +61,12 @@ pub fn render(report: &Report) -> Result<String> {
         "status":report.status,"complete":report.complete,"settled":report.settled,
         "refresh":report.watcher_pid.is_some(),"model":report.requested_model,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
-        "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
-        "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules,
+        "cost":batch_cost(report),"unmetered":report.unmetered_requests,
+        "gate":report.gate,"fail_on":report.fail_on,
+        "fail_on_mature":report.fail_on_mature,
+        "bar":{"right_percent":crate::maturity::MIN_PERCENT_RIGHT,"labels":crate::maturity::MIN_LABELS},
+        "errors":report.errors,"deleted":report.deleted_files,"base":report.base_revision,
+        "scope":report.scope,"files":files,"rules":rules,
         "selected":report.rules,"partial":partial});
     // Even a filename or analyzer message may contain </script>. Never let data
     // terminate the JSON element, and insert all displayed strings with textContent.
@@ -126,6 +138,12 @@ mod tests {
         );
         report.files[0].status = crate::schema::Status::Uncertain;
         report.files[0].error = Some("</script><script>alert('x')</script>&".into());
+        report.files[0].left_out = vec![crate::schema::LeftOut {
+            unit: "</script>".into(),
+            start_line: 1,
+            end_line: 2,
+            reason: "The Rust parser could not read line 2.".into(),
+        }];
         let html = render(&report).unwrap();
         assert!(!html.contains("<script>alert"));
         let data = html
@@ -137,6 +155,7 @@ mod tests {
             .unwrap();
         let decoded: Value = serde_json::from_str(data).unwrap();
         assert_eq!(decoded["files"][0]["status"], "uncertain");
+        assert_eq!(decoded["files"][0]["left_out"][0]["unit"], "</script>");
         assert_eq!(
             decoded["files"][0]["error"],
             report.files[0].error.as_deref().unwrap()
@@ -148,16 +167,56 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(decoded["fail_on"], serde_json::json!(["review"]));
+        assert_eq!(decoded["fail_on"], serde_json::json!(["mature"]));
+        assert_eq!(
+            decoded["fail_on_mature"],
+            serde_json::json!({"maintainability/function-simplification": ["review"], "documentation/agent-context": ["consider"]})
+        );
+        assert_eq!(
+            decoded["rules"][1]["maturity"]["review"]["unseen"],
+            serde_json::json!({"right": 20, "labeled": 23})
+        );
+        assert_eq!(decoded["scope"], "whole-files");
+        assert_eq!(decoded["unmetered"], 0);
+        assert_eq!(
+            decoded["bar"],
+            serde_json::json!({"right_percent": 80, "labels": 20}),
+            "the page says \"not yet measured\" below the same count"
+        );
         assert!(!html.contains("id=\"root\""));
-        report.paid_input_tokens = 1_000_000;
-        report.paid_output_tokens = 12_345;
-        let cost = batch_cost(&report).unwrap();
-        assert!((cost["estimated_usd"].as_f64().unwrap() - 0.042).abs() < 1e-12);
-        report.paid_input_tokens = 0;
         assert_eq!(batch_cost(&report).unwrap()["estimated_usd"], 0.0);
-        report.requested_model = "unknown-model".into();
+        report.estimated_usd = Some(0.042);
+        let cost = batch_cost(&report).unwrap();
+        assert_eq!(cost["estimated_usd"], 0.042);
+        assert_eq!(cost["checked_at"], crate::model::PRICE_CHECKED);
+        report.estimated_usd = None;
         assert!(batch_cost(&report).is_none());
         assert!(!html.contains("def value()"));
+    }
+
+    /// The page's data, as its script reads it.
+    fn data(html: &str) -> Value {
+        let data = html
+            .split("<script id=\"data\" type=\"application/json\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</script>").next())
+            .unwrap();
+        serde_json::from_str(data).unwrap()
+    }
+
+    #[test]
+    fn a_preview_language_s_finding_names_its_language() {
+        use crate::schema::Strength::Review;
+        let finding =
+            || crate::tests::finding_of("maintainability/function-simplification", Review);
+        let options = crate::tests::args();
+        let kotlin = crate::tests::gated_at(crate::tests::KOTLIN_FILE, vec![finding()], &options);
+        let decoded = data(&render(&kotlin).unwrap());
+        let shown = &decoded["files"][0]["findings"][0];
+        assert_eq!(shown["preview"], "Kotlin");
+        assert_eq!(shown["gate"], "measuring");
+        let rust = crate::tests::gated(vec![finding()], &options);
+        let decoded = data(&render(&rust).unwrap());
+        assert!(decoded["files"][0]["findings"][0].get("preview").is_none());
     }
 }

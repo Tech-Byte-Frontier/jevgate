@@ -17,6 +17,7 @@
 <div class="stats" id="stats"></div>
 <p class="small" id="cost-basis"></p>
 <p class="small" id="selection"></p>
+<p class="small" id="gate-policy"></p>
 <div id="errors" class="warning" role="status"></div>
 <div class="toolbar"><label>Find a file<input id="search" type="search" placeholder="Filter by path…"></label><label>Classification<select id="filter"><option value="all">All files</option><option value="review">Needs review</option><option value="consider">Consider</option><option value="note">Note</option><option value="uncertain">Uncertain</option><option value="needs-context">Needs context</option><option value="clear">Clear</option><option value="not-applicable">Not applicable</option><option value="error">Error</option><option value="pending">Pending</option><option value="skipped">Skipped</option></select></label><button id="reload" type="button">Reload</button></div>
 <nav class="pagination" aria-label="File pages"><p id="shown" role="status" aria-live="polite"></p><label>Files per page<select id="page-size"><option>20</option><option>50</option><option>100</option></select></label><button id="previous" type="button">Previous</button><span id="page-number"></span><button id="next" type="button">Next</button></nav><section id="files" aria-label="Reviewed files"></section><p id="empty" hidden>No files match this filter.</p>
@@ -49,6 +50,7 @@ function p(parent,text,cls){if(text)parent.append(el('p',text,cls))}
 p($('meta'),new Date(data.generated_at*1000).toLocaleString());
 p($('meta'),'Generation '+data.generation+' / '+data.model);
 p($('meta'),data.refresh?'Auto-refresh every 4 seconds':'Saved snapshot');
+if(data.base)p($('meta'),(data.scope==='changed-lines'?'Changed lines':'Whole files changed')+' since '+data.base.slice(0,7));
 // Alert only on failure: a settled run that is incomplete, or a failed gate.
 // Run errors are listed separately.
 const failures=[];if(data.settled&&!data.complete)failures.push('Review execution incomplete.');if(data.gate&&!data.gate.passed)failures.push('Gate failed: '+data.gate.reasons.join('; ')+' (fail on '+data.fail_on.join(', ')+').');
@@ -57,8 +59,11 @@ const findings=data.files.flatMap(f=>f.findings),strength=s=>findings.filter(f=>
 const statItems=[['files',data.files.length],['review findings',strength('review')],['consider findings',strength('consider')],['notes',strength('note')],['unresolved',data.files.filter(f=>['uncertain','needs-context'].includes(f.status)).length],['API requests',data.requests],['input tokens',data.tokens]];
 for(const [label,value] of statItems){const item=el('div');item.append(el('strong',value.toLocaleString()),el('span',label));$('stats').append(item)}
 const cost=el('div');cost.append(el('strong',data.cost?.estimated_usd!==undefined?'$'+data.cost.estimated_usd.toFixed(4):'Unavailable'),el('span','estimated batch cost'));$('stats').append(cost);
-$('cost-basis').textContent=data.cost?'USD estimate for this invocation: $'+data.cost.input_per_million+' per million input tokens; output tokens free. Cached results incur no new inference cost. Pricing checked '+data.cost.checked_at+'.':'No published rate configured for this model.';
+$('cost-basis').textContent=data.cost?'USD estimate for this invocation: $'+data.cost.input_per_million+' per million input tokens; output tokens free. Cached results incur no new inference cost. Pricing checked '+data.cost.checked_at+'.':data.unmetered?'Cost unknown: '+data.unmetered+(data.unmetered===1?' response':' responses')+' reported no token usage.':'Cost unknown: no published rate for the model that answered.';
 if(data.selected.length)$('selection').textContent='Rules checked: '+data.selected.map(name).join(', ')+'.'+(data.partial?' Only these rules were selected (--rule, --skip-rule or [rules]), so files that only other rules judge are not listed.':'');
+const mature=Object.entries(data.fail_on_mature||{}),measuring=findings.filter(f=>f.gate==='measuring'&&!f.preview).length,previewed=findings.filter(f=>f.gate==='measuring'&&f.preview).length;
+const own=mature.filter(([rule])=>rule.startsWith('custom/')),measured=mature.filter(([rule])=>!rule.startsWith('custom/')),levelsOf=list=>list.map(([rule,levels])=>name(rule)+' '+levels.map(l=>l+'s').join(' and ')).join(', ');
+if(data.fail_on.includes('mature')||mature.length)$('gate-policy').textContent='Gate: by default only rules and levels right at least 80% of the time on projects JevGate was never tuned on fail it'+(measured.length?' ('+levelsOf(measured)+')':'')+(findings.some(f=>f.preview)?' outside preview languages':'')+(own.length?', and the repository\'s custom questions at their own level ('+levelsOf(own)+')':'')+'.'+(measuring?' '+measuring+(measuring===1?' finding':' findings')+' of rules still being measured '+(measuring===1?'is':'are')+' reported without failing it.':'')+(previewed?' '+previewed+(previewed===1?' finding':' findings')+' in preview languages '+(previewed===1?'is':'are')+' reported without failing it.':'')+(measuring||previewed?' --fail-on review makes every review fail it.':'');
 for(const error of data.errors)p($('errors'),error);
 if(data.deleted.length)p($('errors'),'Deleted files (no current code reviewed): '+data.deleted.join(', '),'small');
 let saved={};try{saved=JSON.parse(sessionStorage.getItem('jevgate:'+data.root)||'{}')}catch{}
@@ -70,12 +75,19 @@ const openPaths=new Set(Array.isArray(saved.open)?saved.open:[]);
 function save(){try{sessionStorage.setItem('jevgate:'+data.root,JSON.stringify({query:$('search').value,filter:$('filter').value,open:[...openPaths],page,pageSize:Number($('page-size').value),scroll:window.scrollY}))}catch{}}
 const order=['review','consider','note','error','needs-context','uncertain','pending','clear','not-applicable','skipped'];
 const files=[...data.files].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status)||a.path.localeCompare(b.path));
+function stillMeasured(finding){return finding.preview?'Does not fail the gate: '+finding.preview+' is in preview, and by default JevGate\'s own rules never fail it there.':'Does not fail the gate: by default only rules and levels right at least '+data.bar.right_percent+'% of the time over at least '+data.bar.labels+' labels on projects JevGate was never tuned on fail it.'}
+// How often findings of its rule and level were right on unseen projects, as the agent text says it, with where; in a preview language, its own; a note carries none.
+function precisionText(finding){const labels=finding.precision,where=' on projects JevGate was never tuned on',language=finding.preview?' in '+finding.preview:'';if(!labels)return '';if(!labels.labeled)return 'Not yet measured'+language+': '+(finding.preview?'none labeled yet'+where:rules.get(finding.rule)?.unmeasured||'none labeled yet'+where)+'.';return labels.labeled>=data.bar.labels?'Right '+Math.round(100*labels.right/labels.labeled)+'% of the time'+language+where+' ('+labels.labeled+' labels).':'Not yet measured'+language+': fewer than '+data.bar.labels+' labels'+where+'.'}
 function findingRow(finding){
  const row=el('details',null,'row finding-row'),summary=el('summary'),main=el('span',null,'main');
  main.append(el('span','Line '+finding.line+(finding.baselined?' · baselined':finding.suppressed?' · allowed: '+finding.suppressed:''),'path'),el('span',finding.message,'lead'));
- summary.append(main,el('span',name(finding.rule),'count'),badge(finding.strength));row.append(summary);
+ if(finding.precision)main.append(el('span',precisionText(finding),'small'));
+ summary.append(main,el('span',name(finding.rule),'count'));
+ if(finding.gate==='fails')summary.append(el('span','fails the gate','badge review'));
+ summary.append(badge(finding.strength));row.append(summary);
  const body=el('div',null,'detail');row.append(body);
  p(body,finding.action);
+ if(finding.gate==='measuring')p(body,stillMeasured(finding),'small');
  p(body,finding.category,'small');
  if(finding.locations&&finding.locations.length>1)p(body,'Locations: '+finding.locations.map(l=>l.path+':'+l.start_line+'–'+l.end_line).join(', '),'small');
  p(body,'Concern '+pct(finding.concern_probability),'small');
@@ -92,6 +104,7 @@ function fileCard(f){
  if(f.classification)p(body,f.classification,'small');
  if(f.findings.length){body.append(el('h2','Findings'));for(const finding of f.findings)body.append(findingRow(finding))}
  if(undecided.length){body.append(el('h2','Undecided'));p(body,'Answers stayed split for these units, so no finding was raised.','small');const list=el('ul',null,'undecided');for(const u of undecided){const item=el('li');item.append(el('span',u.unit,'unit'),document.createTextNode(' · line '+u.line+' · '+name(u.rule)+': '+u.questions.join(', ')+(u.values&&u.values.length?' ('+u.values.join(', ')+')':'')));list.append(item)}body.append(list)}
+ if(f.left_out&&f.left_out.length){body.append(el('h2','Left out'));p(body,'The parser could not read these units; the rest of the file was judged.','small');const list=el('ul',null,'undecided');for(const u of f.left_out){const item=el('li');item.append(el('span',u.unit||'code outside every unit','unit'),document.createTextNode(' · lines '+u.start_line+'–'+u.end_line+' · '+u.reason));list.append(item)}body.append(list)}
  if(f.limitations.length){body.append(el('h2','Evidence gaps'));for(const limit of f.limitations)p(body,limit,'small')}
  if(f.checks.length){body.append(el('h2','Classifications'));const inactive=el('details');inactive.append(el('summary',f.checks.filter(c=>c.status==='not-applicable').length+' checks not applicable in this scope'));for(const c of [...f.checks].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status))){
   const row=el('div',null,'check'),title=el('div'),info=el('div');title.append(el('strong',name(c.rule)));p(title,c.scope,'small');row.append(title,badge(c.status),info);

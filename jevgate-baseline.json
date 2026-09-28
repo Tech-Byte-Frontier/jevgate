@@ -1,5 +1,24 @@
 {
   "version": 1,
-  "created_at": 1790514454,
-  "findings": []
+  "created_at": 1790633987,
+  "findings": [
+    {
+      "fingerprint": "deb9de5dfe24d73e82b3e26115ff16eaf9c982aa964adf7ffd0edda5aec4000d",
+      "rule": "maintainability/function-simplification",
+      "path": "src/hook/tests/mod.rs",
+      "line": 158,
+      "strength": "consider",
+      "message": "`long_kotlin_function` likely mixes separate jobs; splitting it may make it easier to understand.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "62ce38c353079b7b9773080b905d226e8d8e473ef040d8b1b828e25cca8fc4f1",
+      "rule": "maintainability/hardcoded-values",
+      "path": "src/units/tests/mod.rs",
+      "line": 312,
+      "strength": "review",
+      "message": "One of this file's constants fixes a value that differs between deployments (0.98). The constant is `HARDCODED`.",
+      "reason": "wrong"
+    }
+  ]
 }

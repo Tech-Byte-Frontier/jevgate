@@ -4,7 +4,10 @@
 //! and the reason is required: without one the comment is ignored and the
 //! finding says so.
 use crate::{catalog, schema::Report};
-use std::path::Path;
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 const MARKER: &str = "jevgate:";
 
@@ -15,17 +18,24 @@ struct Allow {
     reason: String,
 }
 
-/// Mark the findings an allow comment names. Files that cannot be read keep
-/// their findings.
-pub fn apply(root: &Path, report: &mut Report) {
+/// Mark the findings an allow comment names, but for comments on the
+/// `ignored` lines (a file and a 1-based line), which accept nothing. Files
+/// that cannot be read keep their findings.
+pub fn apply(root: &Path, report: &mut Report, ignored: &BTreeSet<(PathBuf, usize)>) {
     for file in report.files.iter_mut().filter(|f| !f.findings.is_empty()) {
         let Ok(text) = std::fs::read_to_string(root.join(&file.path)) else {
             continue;
         };
         let lines: Vec<&str> = text.lines().collect();
+        let skipped: BTreeSet<usize> = ignored
+            .iter()
+            .filter(|(path, _)| *path == file.path)
+            .map(|(_, line)| *line)
+            .collect();
+        let skipped = |line: usize| skipped.contains(&line);
         for finding in &mut file.findings {
             finding.suppressed = None;
-            let Some(allow) = allow_for(&lines, finding.line, &finding.rule) else {
+            let Some(allow) = allow_for(&lines, finding.line, &finding.rule, skipped) else {
                 continue;
             };
             if allow.reason.is_empty() {
@@ -39,33 +49,66 @@ pub fn apply(root: &Path, report: &mut Report) {
     }
 }
 
+/// Whether `line` holds an allow comment that accepts findings, as `apply`
+/// reads it: one naming a rule, a custom question (`custom/<id>`) or the
+/// `custom` group, and giving a reason.
+pub fn accepts(line: &str) -> bool {
+    parse(line).is_some_and(|allow| {
+        !allow.reason.is_empty()
+            && allow.rules.iter().any(|name| {
+                catalog::select(name).is_some()
+                    || name == catalog::CUSTOM_GROUP
+                    || catalog::custom(name)
+            })
+    })
+}
+
 /// The allow comment naming `rule` on 1-based `line`, or in the block of
-/// comment and attribute lines directly above it.
-fn allow_for(lines: &[&str], line: usize, rule: &str) -> Option<Allow> {
+/// comment and attribute lines directly above it, but on no `skipped` line.
+fn allow_for(
+    lines: &[&str],
+    line: usize,
+    rule: &str,
+    skipped: impl Fn(usize) -> bool,
+) -> Option<Allow> {
     let at = line.checked_sub(1)?;
     let above = lines[..at.min(lines.len())]
         .iter()
+        .enumerate()
         .rev()
-        .take_while(|l| annotation(l));
+        .take_while(|(_, l)| annotation(l));
     lines
         .get(at)
+        .map(|l| (at, l))
         .into_iter()
         .chain(above)
-        .filter_map(|l| parse(l))
+        .filter(|(index, _)| !skipped(index + 1))
+        .filter_map(|(_, l)| parse(l))
         .find(|allow| allow.rules.iter().any(|name| names(name, rule)))
 }
 
 /// A comment, attribute or decorator line, which may sit between an allow
 /// comment and the code it is about.
-fn annotation(line: &str) -> bool {
+pub(crate) fn annotation(line: &str) -> bool {
     let line = line.trim_start();
     ["//", "#", "/*", "*", "--", "<!--", "@", "["]
         .iter()
         .any(|start| line.starts_with(start))
 }
 
-/// Whether `name` (an ID, name, key or group) selects the rule with ID `rule`.
+/// Whether `name` (an ID, name, key or group) selects the rule with ID
+/// `rule`. A custom question is named by its ID, its group, `default` or
+/// `all`, never by the id alone.
 fn names(name: &str, rule: &str) -> bool {
+    if catalog::custom(rule) {
+        return name == rule
+            || [
+                catalog::CUSTOM_GROUP,
+                catalog::DEFAULT_GROUP,
+                catalog::ALL_GROUP,
+            ]
+            .contains(&name);
+    }
     let key = catalog::find(rule).map(|r| r.key);
     catalog::select(name).is_some_and(|keys| key.is_some_and(|key| keys.contains(&key)))
 }
@@ -129,6 +172,21 @@ mod tests {
         }
         assert_eq!(parse("// jevgate: allow shared_logic"), None);
         assert_eq!(parse("let jevgate = 1;"), None);
+        assert!(accepts(
+            "# jevgate: allow(injection) the query is a constant"
+        ));
+        assert!(!accepts("// jevgate: allow(injection)"), "no reason");
+        for custom in ["custom/no-loops", "custom"] {
+            assert!(
+                accepts(&format!(
+                    "// jevgate: allow({custom}) the loops are needed here"
+                )),
+                "{custom}"
+            );
+        }
+        assert!(!accepts(
+            "/// a line that holds a `jevgate: allow(…)` comment"
+        ));
     }
 
     #[test]
@@ -143,19 +201,24 @@ mod tests {
             "fn other() {} // jevgate: allow(shared_logic) mirrors load",
         ];
         let rule = "maintainability/shared-logic";
+        let none = |_| false;
         assert!(
-            allow_for(&source, 5, rule).is_some(),
+            allow_for(&source, 5, rule, none).is_some(),
             "through a doc comment and attribute"
         );
         assert!(
-            allow_for(&source, 7, rule).is_some(),
+            allow_for(&source, 7, rule, none).is_some(),
             "at the end of the line"
         );
-        assert!(allow_for(&source, 7, "security/injection").is_none());
-        assert!(allow_for(&source, 1, rule).is_none());
+        assert!(allow_for(&source, 7, "security/injection", none).is_none());
+        assert!(allow_for(&source, 1, rule, none).is_none());
+        assert!(
+            allow_for(&source, 5, rule, |line| line == 2).is_none(),
+            "a skipped comment accepts nothing"
+        );
         let apart = ["// jevgate: allow(shared_logic) old", "", "fn load() {}"];
         assert!(
-            allow_for(&apart, 3, rule).is_none(),
+            allow_for(&apart, 3, rule, none).is_none(),
             "a blank line ends the block"
         );
     }

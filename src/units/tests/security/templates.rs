@@ -111,3 +111,23 @@ fn a_template_writing_client_data_unescaped_is_judged_as_template_code() {
     assert_eq!(code["source"], "<%= raw cookies[:font] %>");
     assert_eq!(plan.files[&0].units[0].locations[0].start_line, 2);
 }
+
+#[test]
+fn template_code_is_not_asked_without_a_rule_that_judges_it() {
+    let project = Project::new();
+    project.write(
+        "app/views/layouts/application.html.erb",
+        "<html>\n<style>body { font-size: <%= raw cookies[:font] %>; }</style>\n</html>\n",
+    );
+    let mut options = args();
+    options.rules = vec![
+        catalog::SENSITIVE_DATA.into(),
+        catalog::UNSAFE_SETTINGS.into(),
+    ];
+    let (_, plan) = planned(&project, &options);
+    assert!(
+        plan.requests.is_empty(),
+        "only injection judges an ERB page's template code, so nothing is asked"
+    );
+    assert!(plan.files.values().all(|f| f.units.is_empty()));
+}

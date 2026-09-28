@@ -1,15 +1,33 @@
 //! The test harness (projects, scripted answers, runs) and whole-run tests;
-//! the gate and baseline tests are in `gating`, and what a run judges
-//! (unsupported or oversized input, roles, context) in `scope`.
+//! the gate and baseline tests are in `gating`, what a run judges
+//! (unsupported or oversized input, roles, context) in `scope`, and the
+//! answer cache in `cache`.
 use super::*;
 use crate::{config::ConfigContext, options::CheckArgs};
-use clap::Parser;
 use serde_json::{Value, json};
 use std::path::PathBuf;
+mod cache;
 mod gating;
+#[path = "../../tests/support/git.rs"]
+pub(super) mod git;
+#[path = "../../tests/support/mock_provider.rs"]
+pub(super) mod mock_provider;
+pub(super) use mock_provider::answer;
+mod guards;
 mod scope;
 #[path = "../../tests/support/temp_dir.rs"]
 mod temp_dir;
+
+/// Whether the crate is built from its published package, which holds the
+/// source and tests but not the repository's other files (`plugin/`,
+/// `npm/`, `site/`, `jevgate.schema.json`): tests that hold those files to
+/// the code have nothing to read there. Cargo adds `.cargo_vcs_info.json`
+/// only to a package.
+pub(super) fn packaged() -> bool {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".cargo_vcs_info.json")
+        .exists()
+}
 
 pub(super) struct Project(pub(super) temp_dir::TempDir);
 impl Project {
@@ -25,23 +43,42 @@ impl Project {
             invocation_dir: self.0.to_path_buf(),
             root: self.0.to_path_buf(),
             config: Default::default(),
+            questions: &[],
         }
+    }
+    /// Run Git in the project, with a fixed identity and no signing, apart
+    /// from the repository running the tests, and return what it printed.
+    pub(super) fn git(&self, args: &[&str]) -> String {
+        git::run(&self.0, args)
+    }
+    /// A Git repository holding the project's files as its first commit.
+    pub(super) fn commit_all(&self) {
+        self.git(&["init", "-q"]);
+        self.git(&["add", "-A"]);
+        self.git(&["commit", "-qm", "base"]);
+    }
+    /// The answer cache's files: one per state asked about, then whole
+    /// requests' entries, which only versions before 0.28 wrote.
+    pub(super) fn cache_files(&self) -> (usize, usize) {
+        let files = |directory: &std::path::Path| {
+            std::fs::read_dir(directory).map_or(0, |entries| {
+                entries
+                    .filter(|entry| entry.as_ref().is_ok_and(|e| e.path().is_file()))
+                    .count()
+            })
+        };
+        let cache = self.0.join(".jevgate/cache");
+        (files(&cache.join("answers")), files(&cache))
     }
 }
 
-#[derive(Parser)]
-struct TestCli {
-    #[command(flatten)]
-    args: CheckArgs,
-}
 pub(super) fn args() -> CheckArgs {
-    let mut a = TestCli::parse_from(["test"]).args;
+    let mut a = CheckArgs::defaults();
     a.rules = crate::catalog::keys().into_iter().map(Into::into).collect();
-    a.fail_on = vec![options::FailOn::Review];
+    a.fail_on = vec![options::FailOn::Mature];
     a
 }
 
-/// A function large enough to judge (five body lines).
 /// A shared-logic finding at `src/a,b.rs:12`, with text the output formats escape.
 pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Finding {
     crate::schema::Finding {
@@ -66,9 +103,63 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
         rank: 1.0,
         baselined: false,
         suppressed: None,
+        gate: None,
+        precision: None,
+        preview: None,
     }
 }
 
+/// [`finding`] as the gate leaves it: counted as `gate`, carrying its rule
+/// and level's precision.
+pub(super) fn counted(
+    strength: crate::schema::Strength,
+    gate: crate::schema::Gating,
+) -> crate::schema::Finding {
+    let finding = finding(strength);
+    crate::schema::Finding {
+        gate: Some(gate),
+        precision: crate::maturity::precision(&finding.rule, strength),
+        ..finding
+    }
+}
+
+/// A finding of `rule` (an ID) at `strength`, otherwise as [`finding`].
+pub(super) fn finding_of(rule: &str, strength: crate::schema::Strength) -> crate::schema::Finding {
+    crate::schema::Finding {
+        rule: rule.into(),
+        ..finding(strength)
+    }
+}
+
+/// A Kotlin file, `src/Shop.kt`: a preview language's, whose findings never
+/// fail the default gate.
+pub(super) const KOTLIN_FILE: (&str, &str) = (
+    "src/Shop.kt",
+    "fun total(values: List<Int>): Int {\n    var sum = 0\n    for (value in values) {\n        sum += value\n    }\n    return sum * 2 + 1\n}\n",
+);
+
+/// A complete report of one judged file, `src/lib.rs`, holding `findings`,
+/// with the gate applied as `options` set it.
+pub(super) fn gated(findings: Vec<crate::schema::Finding>, options: &CheckArgs) -> schema::Report {
+    gated_at(("src/lib.rs", &function("f")), findings, options)
+}
+
+/// [`gated`] for the file at `path` holding `source`.
+pub(super) fn gated_at(
+    (path, source): (&str, &str),
+    findings: Vec<crate::schema::Finding>,
+    options: &CheckArgs,
+) -> schema::Report {
+    let project = Project::new();
+    project.write(path, source);
+    let (_, mut report) = snapshot(&project, options);
+    report.files[0].findings = findings;
+    report.complete = true;
+    gate::evaluate(&mut report, options);
+    report
+}
+
+/// A function large enough to judge (five body lines).
 pub(super) fn function(name: &str) -> String {
     format!(
         "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let doubled = total * 2;\n    doubled + 1\n}}\n"
@@ -80,55 +171,6 @@ pub(super) fn long_function(name: &str) -> String {
     format!(
         "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let mut largest = i32::MIN;\n    for value in values {{\n        if *value > largest {{\n            largest = *value;\n        }}\n    }}\n    let mut smallest = i32::MAX;\n    for value in values {{\n        if *value < smallest {{\n            smallest = *value;\n        }}\n    }}\n    let spread = largest - smallest;\n    let doubled = total * 2;\n    doubled + spread + 1\n}}\n"
     )
-}
-
-/// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider,
-/// or a note where the middle says the code is fine), 2 the top (review),
-/// 3 spreads probability (uncertain), 4 leans to the top without reaching review.
-pub(super) fn answer(request: &Value, level: usize) -> Value {
-    let answers = request["questions"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(name, q)| (name.clone(), typed_answer(q, level)))
-        .collect::<serde_json::Map<_, _>>();
-    json!({"model":request["model"],"answers":answers,"usage":{"input_tokens":10,"output_tokens":0}})
-}
-
-/// A valid answer of the question's type at `level` (see [`answer`]).
-fn typed_answer(question: &Value, level: usize) -> Value {
-    match question["type"].as_str().unwrap() {
-        "noul" => {
-            let noul = [0.05, 0.5, 0.95, 0.5, 0.5][level];
-            json!({"type":"noul","noul":noul})
-        }
-        "score" => {
-            let p = [
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.4, 0.2, 0.4],
-                [0.1, 0.3, 0.6],
-            ][level];
-            json!({"type":"score","score":p[1] + 2.0 * p[2],"confidence":1.0,
-                "probabilities":{"0":p[0],"1":p[1],"2":p[2]}})
-        }
-        _ => choice_answer(question["criteria"].as_object().unwrap()),
-    }
-}
-
-/// A certain Choice of `none` when offered, else the first option.
-fn choice_answer(options: &serde_json::Map<String, Value>) -> Value {
-    let chosen = if options.contains_key("none") {
-        "none"
-    } else {
-        options.keys().next().unwrap()
-    };
-    let probabilities: serde_json::Map<_, _> = options
-        .keys()
-        .map(|k| (k.clone(), json!(if k == chosen { 1.0 } else { 0.0 })))
-        .collect();
-    json!({"type":"choice","choice":chosen,"confidence":1.0,"probabilities":probabilities})
 }
 
 #[derive(Default)]
@@ -166,10 +208,10 @@ pub(super) fn session<'a>(
         store,
         evaluator,
         requests: 0,
-        paid_input_tokens: 0,
-        paid_output_tokens: 0,
+        paid: Default::default(),
         budget: token_budget::TokenBudget::default(),
         observed: (0, 0),
+        answered: Default::default(),
     }
 }
 
@@ -194,6 +236,14 @@ pub(super) fn snapshot(
     (inputs, report)
 }
 
+/// The first snapshot of a project holding one short function, `a`, at
+/// `path`, with every rule selected: a report to shape in a test.
+pub(super) fn one_function(path: &str) -> schema::Report {
+    let project = Project::new();
+    project.write(path, &function("a"));
+    snapshot(&project, &args()).1
+}
+
 pub(super) fn run(
     project: &Project,
     options: &CheckArgs,
@@ -207,6 +257,32 @@ pub(super) fn run(
         .unwrap();
     gate::settle(&project.0, &mut report, options).unwrap();
     report
+}
+
+#[test]
+fn a_file_nested_past_what_jevgate_reads_fails_the_run() {
+    let project = Project::new();
+    // A function to judge, beside one literal no rule can read.
+    let settle: String = (0..40)
+        .map(|n| format!("  total += items[{n}].price * rate;\n"))
+        .collect();
+    let deep = format!(
+        "export function settle(items, rate) {{\n  let total = 0;\n{settle}  return total;\n}}\n\nexport const ROUNDING = {}1{};\n",
+        "(".repeat(1_001),
+        ")".repeat(1_001)
+    );
+    project.write("src/billing.js", &deep);
+    project.write("src/other.js", "function other(x) {\n  return x + 1;\n}\n");
+    let report = run(&project, &args(), &mut Mock::default());
+    let billing = report
+        .files
+        .iter()
+        .find(|f| f.path == std::path::Path::new("src/billing.js"))
+        .unwrap();
+    assert_eq!(billing.status, schema::Status::Error, "{:?}", billing.error);
+    assert_eq!(billing.error.as_deref(), Some(crate::syntax::TOO_DEEP));
+    assert!(!report.complete, "it never passes unread");
+    assert_eq!(crate::gate::exit_code(&report), 2);
 }
 
 #[test]
@@ -276,6 +352,57 @@ fn model_and_refresh_invalidate_cache() {
     options.refresh = true;
     run(&project, &options, &mut mock);
     assert_eq!(mock.calls, 3);
+}
+
+/// Answers as a provider that names `model` and reports usage only when `metered`.
+struct Answering {
+    model: &'static str,
+    metered: bool,
+}
+impl transport::Evaluator for Answering {
+    fn evaluate(&mut self, request: &Value) -> anyhow::Result<Value> {
+        let mut body = answer(request, 0);
+        body["model"] = json!(self.model);
+        if !self.metered {
+            body.as_object_mut().unwrap().remove("usage");
+        }
+        Ok(body)
+    }
+}
+
+#[test]
+fn cost_is_priced_by_the_answering_model_and_unknown_without_usage() {
+    let project = Project::new();
+    project.write("lib.rs", &function("f"));
+    let mut options = args();
+    options.model = Some("jev-latest".into());
+    let metered = Answering {
+        model: "jev-1.13.0",
+        metered: true,
+    };
+    let report = run(&project, &options, &mut { metered });
+    assert_eq!(report.paid_models, [("jev-1.13.0".to_string(), 10)].into());
+    assert!((report.estimated_usd.unwrap() - 10.0 * 0.042 / 1e6).abs() < 1e-15);
+    assert!(output::headline(&report).ends_with("· 10 input tokens · ~$0.0000"));
+    options.model = Some("typesafe-ai/jev".into());
+    let unmetered = Answering {
+        model: "typesafe-ai/jev",
+        metered: false,
+    };
+    let report = run(&project, &options, &mut { unmetered });
+    assert!(report.complete);
+    assert_eq!((report.api_requests, report.unmetered_requests), (1, 1));
+    assert_eq!((report.paid_input_tokens, report.estimated_usd), (0, None));
+    assert!(output::headline(&report).ends_with("· 0 input tokens · cost unknown"));
+    let replay = run(&project, &options, &mut Mock::default());
+    assert_eq!(replay.api_requests, 0);
+    assert!(
+        replay
+            .estimated_usd
+            .is_some_and(|usd| usd.is_sign_positive() && usd == 0.0)
+    );
+    assert!(output::headline(&replay).ends_with("· 0 input tokens · ~$0.0000"));
+    assert!(replay.files.iter().all(|file| file.cached));
 }
 
 #[test]

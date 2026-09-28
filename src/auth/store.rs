@@ -1,7 +1,9 @@
 use super::{file, secret::Secret};
+use crate::provider::Provider;
 use anyhow::{Context, Result, bail, ensure};
 use clap::ValueEnum;
 use std::{io::IsTerminal, path::PathBuf};
+use zeroize::Zeroizing;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum StorageMode {
@@ -23,9 +25,10 @@ impl StorageMode {
     }
 }
 
+/// Where the saved credential's text lives: the OS store, or a fake in tests.
 pub trait Backend {
-    fn get(&self) -> Result<Option<Secret>>;
-    fn set(&self, secret: &Secret) -> Result<()>;
+    fn get(&self) -> Result<Option<Zeroizing<String>>>;
+    fn set(&self, text: &str) -> Result<()>;
     fn delete(&self) -> Result<bool>;
 }
 
@@ -43,7 +46,7 @@ impl NativeBackend {
     }
 }
 impl Backend for NativeBackend {
-    fn get(&self) -> Result<Option<Secret>> {
+    fn get(&self) -> Result<Option<Zeroizing<String>>> {
         #[cfg(all(
             unix,
             not(any(target_os = "macos", target_os = "ios", target_os = "android"))
@@ -54,20 +57,19 @@ impl Backend for NativeBackend {
             not(any(target_os = "macos", target_os = "ios", target_os = "android"))
         )))]
         match self.entry()?.get_password() {
-            Ok(value) => Secret::parse(value).map(Some),
+            Ok(value) => Ok(Some(Zeroizing::new(value))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(_) => bail!(
                 "Cannot read the system credential store; unlock it or run jevgate auth login"
             ),
         }
     }
-    fn set(&self, secret: &Secret) -> Result<()> {
+    fn set(&self, text: &str) -> Result<()> {
         self.entry()?
-            .set_password(secret.expose())
+            .set_password(text)
             .map_err(|_| anyhow::anyhow!("Cannot save to the system credential store"))?;
         ensure!(
-            self.get()?
-                .is_some_and(|saved| saved.expose() == secret.expose()),
+            self.get()?.is_some_and(|saved| *saved == text),
             "System credential store did not retain the credential"
         );
         Ok(())
@@ -90,6 +92,35 @@ impl Backend for NativeBackend {
             ),
         }
     }
+}
+
+/// The text a saved key is stored as: the bare key for TypeSafe, as before
+/// 0.26, else the provider's name, a space and the key. Versions before 0.26
+/// refuse a value with a space as an invalid key instead of sending a
+/// gateway's key to TypeSafe.
+fn stored_text(provider: Provider, key: &Secret) -> Zeroizing<String> {
+    Zeroizing::new(match provider {
+        Provider::Typesafe => key.expose().to_owned(),
+        gateway => format!("{} {}", gateway.name(), key.expose()),
+    })
+}
+
+/// A saved key and its provider, from the text `stored_text` wrote.
+pub(super) fn saved_key(text: &str) -> Result<(Provider, Secret)> {
+    let text = text.trim();
+    let Some((name, key)) = text.split_once(' ') else {
+        return Ok((Provider::Typesafe, Secret::parse(text.to_owned())?));
+    };
+    let provider = Provider::named(name)
+        .context("The saved credential names an unknown provider; run jevgate auth login")?;
+    Ok((provider, Secret::parse(key.to_owned())?))
+}
+
+/// A key saved by `jevgate auth login`, and where it was found.
+pub struct SavedKey {
+    pub provider: Provider,
+    pub key: Secret,
+    pub description: String,
 }
 
 pub struct SavedCredentials<B> {
@@ -115,28 +146,53 @@ impl SavedCredentials<NativeBackend> {
         })
     }
 }
+
+/// The provider recorded beside the saved key, read without the key itself;
+/// none when no key was saved with one, as before 0.26.
+pub fn recorded_provider() -> Option<Provider> {
+    file::credential_path()
+        .ok()
+        .and_then(|path| file::recorded_provider(&path))
+}
+
 impl<B: Backend> SavedCredentials<B> {
-    pub fn get(&self) -> Result<Option<(Secret, String)>> {
+    pub fn get(&self) -> Result<Option<SavedKey>> {
         // A fallback written during a keyring outage must not later expose an older keyring key.
         if self.mode != StorageMode::Keyring
-            && let Some(key) = file::load(&self.path)?
+            && let Some(text) = file::load(&self.path)?
         {
-            return Ok(Some((
+            let (provider, key) = saved_key(&text)?;
+            let description = format!("protected file: {}", self.path.display());
+            return Ok(Some(SavedKey {
+                provider,
                 key,
-                format!("protected file: {}", self.path.display()),
-            )));
+                description,
+            }));
         }
         if self.mode == StorageMode::File {
             return Ok(None);
         }
-        Ok(self
-            .backend
-            .get()?
-            .map(|key| (key, "system credential store".into())))
+        let Some(text) = self.backend.get()? else {
+            return Ok(None);
+        };
+        let (provider, key) = saved_key(&text)?;
+        Ok(Some(SavedKey {
+            provider,
+            key,
+            description: "system credential store".into(),
+        }))
     }
-    pub fn save(&self, secret: &Secret) -> Result<SavedLocation> {
+
+    /// Save the key with its provider, then record the provider beside it.
+    pub fn save(&self, provider: Provider, secret: &Secret) -> Result<SavedLocation> {
+        let location = self.save_text(&stored_text(provider, secret))?;
+        file::record_provider(&self.path, provider)?;
+        Ok(location)
+    }
+
+    fn save_text(&self, text: &str) -> Result<SavedLocation> {
         if self.mode != StorageMode::File {
-            match self.backend.set(secret) {
+            match self.backend.set(text) {
                 Ok(()) => {
                     file::remove(&self.path).context("Key saved in system credential store, but an older fallback file could not be removed")?;
                     return Ok(SavedLocation {
@@ -148,12 +204,13 @@ impl<B: Backend> SavedCredentials<B> {
                 Err(_) => (),
             }
         }
-        file::save(&self.path, secret)?;
+        file::save(&self.path, text)?;
         Ok(SavedLocation {
             description: format!("protected file: {}", self.path.display()),
             fallback: self.mode == StorageMode::Auto,
         })
     }
+
     pub fn remove(&self) -> Result<Removal> {
         let native = if self.mode == StorageMode::File {
             Ok(false)
@@ -161,6 +218,7 @@ impl<B: Backend> SavedCredentials<B> {
             self.backend.delete()
         };
         let removed_file = file::remove(&self.path)?;
+        file::forget_provider(&self.path)?;
         Ok(Removal {
             file: removed_file,
             keyring: native.as_ref().copied().unwrap_or(false),

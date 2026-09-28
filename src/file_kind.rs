@@ -131,10 +131,19 @@ pub fn unsent(path: &Path, named_source: &str, detail: &str) -> Classification {
     class
 }
 
+/// The language a file is read as: by its path, and for a `.h` header of
+/// the generic tier by its code (`analysis::generic::read`).
+pub fn read_language(path: &Path, source: &str) -> &'static str {
+    crate::analysis::generic::read(path, source).map_or_else(|| language(path), |g| g.name)
+}
+
 pub fn language(path: &Path) -> &'static str {
     if crate::components::server_template(path) {
         // Only its inline scripts are parsed and judged.
         return "JavaScript";
+    }
+    if let Some(generic) = crate::analysis::generic::of(path) {
+        return generic.name;
     }
     match extension(path).as_str() {
         "rs" => "Rust",
@@ -144,23 +153,15 @@ pub fn language(path: &Path) -> &'static str {
         "go" => "Go",
         "java" => "Java",
         "bend" => crate::analysis::bend::LANGUAGE,
-        "kt" | "kts" => "Kotlin",
-        "scala" => "Scala",
-        "c" | "h" => "C",
-        "cpp" | "cc" | "cxx" | "hpp" => "C++",
         "cs" => "C#",
         "rb" => "Ruby",
         "php" | "phtml" => "PHP",
-        "swift" => "Swift",
-        "dart" => "Dart",
-        "lua" => "Lua",
-        "ex" | "exs" => "Elixir",
         "zig" => "Zig",
         "vue" => "Vue",
         "svelte" => "Svelte",
         "astro" => "Astro",
         "sql" => "SQL",
-        "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd" => "shell",
+        "zsh" | "fish" | "ksh" | "csh" | "ps1" | "bat" | "cmd" => "shell",
         _ => "unknown",
     }
 }
@@ -180,6 +181,20 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Resul
             "Project documentation. Documentation rules judge its sections.",
             format,
         )));
+    }
+    if input.result.role == crate::inventory::TEXT {
+        return Ok(Plan::Ready(View {
+            classification: classification(
+                TEXT,
+                "deterministic",
+                "custom",
+                "A file a custom question's paths name. Only file and hunk questions judge it.",
+                language(&input.result.path),
+            ),
+            application: false,
+            tests: false,
+            test_lines: Vec::new(),
+        }));
     }
     let configuration = match input.result.role.as_str() {
         crate::inventory::SQL => Some((
@@ -210,7 +225,11 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Resul
             test_lines: Vec::new(),
         }));
     }
-    let prepared = prepare(input, args)?;
+    let source = input.source.as_deref().unwrap_or_default();
+    let prepared = match crate::analysis::generic::read(&input.result.path, source) {
+        Some(language) => generic_prepared(language, input.result.role == "test"),
+        None => prepare(input, args)?,
+    };
     match prepared.action {
         Action::Skip => Ok(Plan::Skip(prepared.classification)),
         Action::Purpose => {
@@ -244,6 +263,8 @@ fn document(kind: &str, reason: &str, language: &str) -> View {
 pub(crate) const INSTRUCTIONS: &str = "instructions";
 pub(crate) const DOCS: &str = "docs";
 pub(crate) const TESTS: &str = "tests";
+/// The classification kind of a file only custom questions read.
+pub(crate) const TEXT: &str = "text";
 
 fn view(input: &Input, args: &CheckArgs, classification: Classification) -> View {
     if classification.kind == TESTS {
@@ -451,6 +472,41 @@ fn tests_prepared(path: &Path, args: &CheckArgs) -> Prepared {
         } else {
             Action::Judge
         },
+    }
+}
+
+/// A file of a language the generic tier reads (`analysis::generic`): no
+/// test case is located in its code, so a test file, found by its path, is
+/// not judged, and any other file is application code. The reason says
+/// when the language is in preview, whose findings never fail the default
+/// gate.
+fn generic_prepared(language: &crate::analysis::generic::Language, test: bool) -> Prepared {
+    let name = language.name;
+    let (kind, gate, reason, action) = if test {
+        (
+            TESTS,
+            "excluded",
+            format!("Test file. JevGate does not judge {name} tests yet."),
+            Action::Skip,
+        )
+    } else {
+        let level = if language.preview {
+            " and in preview, so JevGate's own rules' findings in it never fail the default gate"
+        } else {
+            ""
+        };
+        (
+            "application",
+            "application",
+            format!(
+                "{name} support is generic{level}: function simplification, file organization, shared logic and comments judge this file; the hardcoded-value, security and test rules do not read {name} yet."
+            ),
+            Action::Judge,
+        )
+    };
+    Prepared {
+        classification: classification(kind, "deterministic", gate, &reason, name),
+        action,
     }
 }
 
@@ -664,14 +720,15 @@ mod tests {
     }
 
     #[test]
-    fn scripts_and_declarations_are_reported_and_not_judged() {
+    fn scripts_of_shells_without_a_parser_and_declarations_are_reported_and_not_judged() {
         let project = Project::new();
+        project.write("deploy.zsh", "echo ready\n");
+        project.write("tool.fish", "echo ready\n");
         project.write("deploy.sh", "echo ready\n");
-        project.write("tool.bash", "echo ready\n");
         project.write("types.d.ts", "export type Id = string;\n");
         project.write("src/lib.rs", "pub fn live() -> i32 { 1 }\n");
         let mut options = args();
-        options.source_extension = vec!["bash".into()];
+        options.source_extension = vec!["zsh".into(), "fish".into()];
         let inputs = crate::inventory::collect(&options, &project.context(), &[]).unwrap();
         let file = |suffix: &str| {
             inputs
@@ -679,7 +736,7 @@ mod tests {
                 .find(|input| input.result.path.ends_with(suffix))
                 .unwrap()
         };
-        let script = file("deploy.sh");
+        let script = file("deploy.zsh");
         assert_eq!(script.result.role, "script");
         assert_eq!(script.result.status, Status::Skipped);
         assert!(script.source.is_none());
@@ -691,9 +748,13 @@ mod tests {
                 .unwrap()
                 .contains("Operational script")
         );
-        assert_eq!(file("tool.bash").result.status, Status::Skipped);
+        assert_eq!(file("tool.fish").result.status, Status::Skipped);
         assert_eq!(file("types.d.ts").result.status, Status::Skipped);
         assert!(file("lib.rs").result.status == Status::Pending);
+        // Bash is read by the generic tier, as source.
+        let bash = &file("deploy.sh").result;
+        assert_eq!(bash.role, "source");
+        assert!(bash.status == Status::Pending);
     }
 
     #[test]

@@ -103,8 +103,9 @@ fn repeated_code_in_one_function_is_one_consider_and_documentation_a_note() {
     assert_eq!(consider.symbol.as_deref(), Some("total"));
     assert_eq!(
         consider.message,
-        "`total` has 3 comments to clean up (1.00): at lines 4, 6 and 8 they repeat the code."
+        "`total` has 3 comments to clean up: at lines 4, 6 and 8 they repeat the code."
     );
+    assert_eq!(consider.concern_probability, 1.0);
     assert_eq!(consider.action, "Delete these comments");
 }
 
@@ -144,7 +145,7 @@ fn a_single_short_comment_is_a_note_and_a_narrated_edit_is_rewritten() {
 fn an_undecided_comment_is_rechecked_then_settled_by_its_kind() {
     let source = "fn total(values: &[i32]) -> i32 {\n    let mut sum = 0;\n    // Walk the values\n    // one by one.\n    for value in values {\n        sum += value;\n    }\n    sum\n}\n";
     let (project, options) = rule_project(source, catalog::COMMENTS);
-    let mut eval = scripted(3);
+    let mut eval = scripted(UNDECIDED);
     let report = run(&project, &options, &mut eval);
     assert_eq!(eval.stages, ["first", "recheck", "first"], "then the kind");
     // The scripted kind picks the first option, a kind that tells the

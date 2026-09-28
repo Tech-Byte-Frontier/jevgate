@@ -53,7 +53,6 @@ const PRIVILEGE: [(&str, &str, &str, &str); 7] = [
 pub(in crate::units) fn privilege_wording(
     subject: &str,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
 ) -> (Wording, String) {
     let reached = |q: &str| matches!(answers.get(q).map(|a| noul(a)), Some(Outcome::Review(_)));
@@ -63,8 +62,8 @@ pub(in crate::units) fn privilege_wording(
         .copied()
         .unwrap_or(PRIVILEGE[0]);
     let message = match strength {
-        Strength::Review => format!("{subject} {what} ({p:.2})."),
-        _ => format!("{subject} likely {what} ({p:.2})."),
+        Strength::Review => format!("{subject} {what}."),
+        _ => format!("{subject} likely {what}."),
     };
     ((message, action), category.to_string())
 }
@@ -316,7 +315,7 @@ pub(in crate::units) fn security_wording(
     };
     let kinds = found_checks(rule, answers);
     match rule {
-        catalog::INJECTION => injection_wording(&subject, &kinds, strength, p, answers),
+        catalog::INJECTION => injection_wording(&subject, &kinds, strength, answers),
         catalog::SENSITIVE_DATA => {
             let (what, category, action) = exposure_kind(answers);
             exposure_wording(&subject, (what, category, action), strength, p, answers)
@@ -363,7 +362,6 @@ fn injection_wording(
     subject: &str,
     kinds: &[&str],
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
 ) -> (Wording, String) {
     let (noun, (_, _, category, action)) = kind_rows(&INJECTIONS, kinds);
@@ -373,7 +371,7 @@ fn injection_wording(
     );
     let get = |q: &str| answers.get(q).copied();
     let special = if subject == SCRIPT_SUBJECT && !outside && strength != Strength::Review {
-        Some(script_wording(subject, &noun, strength, p, action))
+        Some(script_wording(subject, &noun, strength, action))
     } else if strength == Strength::Note {
         crate::units::outcome::harmless(&get)
             .and_then(|kind| confirmed_wording(kind, subject, &noun))
@@ -385,13 +383,13 @@ fn injection_wording(
     }
     let message = match (strength, outside) {
         (Strength::Review, _) => format!(
-            "{subject} places values from another party into {noun} without binding, escaping or checking them ({p:.2})."
+            "{subject} places values from another party into {noun} without binding, escaping or checking them."
         ),
         (Strength::Consider, true) => format!(
-            "{subject} places values from another party into {noun}; they may not be bound, escaped or checked ({p:.2})."
+            "{subject} places values from another party into {noun}; they may not be bound, escaped or checked."
         ),
         (Strength::Consider, false) => format!(
-            "{subject} places its parameters into {noun} without binding, escaping or checking them; a caller passing outside input would make it exploitable ({p:.2})."
+            "{subject} places its parameters into {noun} without binding, escaping or checking them; a caller passing outside input would make it exploitable."
         ),
         (Strength::Note, true) => format!(
             "{subject} places values from another party into {noun}, but no check found one placed unhandled."
@@ -411,17 +409,11 @@ fn injection_wording(
 /// A page script's finding: it has no parameters, so what it does not show
 /// the origin of is set by the files it includes or returned by the helpers
 /// it calls.
-fn script_wording(
-    subject: &str,
-    noun: &str,
-    strength: Strength,
-    p: f64,
-    action: &'static str,
-) -> Wording {
+fn script_wording(subject: &str, noun: &str, strength: Strength, action: &'static str) -> Wording {
     if strength == Strength::Consider {
         (
             format!(
-                "{subject} places values whose origin it does not show, such as those an included file sets or a helper returns, into {noun} without binding, escaping or checking them; outside input reaching them would make it exploitable ({p:.2})."
+                "{subject} places values whose origin it does not show, such as those an included file sets or a helper returns, into {noun} without binding, escaping or checking them; outside input reaching them would make it exploitable."
             ),
             action,
         )
@@ -602,10 +594,10 @@ fn exposure_wording(
             base_form(what)
         ),
         Strength::Consider if foreign => format!(
-            "{subject} puts the text of a library or database error into an error message ({p:.2}), which likely reaches a remote client.{where_}"
+            "{subject} puts the text of a library or database error into an error message, which likely reaches a remote client.{where_}"
         ),
-        Strength::Consider => format!("{subject} likely {what} ({p:.2}).{where_}"),
-        Strength::Review => format!("{subject} {what} ({p:.2}).{where_}"),
+        Strength::Consider => format!("{subject} likely {what}.{where_}"),
+        Strength::Review => format!("{subject} {what}.{where_}"),
     };
     ((message, action), category.to_string())
 }
@@ -616,7 +608,6 @@ pub(in crate::units) fn module_wording(
     access: &crate::units::Access,
     name: &str,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
 ) -> (Wording, String) {
     let reached = |q: &str| matches!(answers.get(q).map(|a| noul(a)), Some(Outcome::Review(_)));
@@ -658,10 +649,7 @@ pub(in crate::units) fn module_wording(
         " likely"
     };
     (
-        (
-            format!("{subject}{likely} {what}{}.", shown(strength, p)),
-            action,
-        ),
+        (format!("{subject}{likely} {what}."), action),
         category.to_string(),
     )
 }
@@ -671,7 +659,6 @@ pub(in crate::units) fn handler_wording(
     name: &str,
     registered: &str,
     strength: Strength,
-    p: f64,
 ) -> Wording {
     let likely = if strength == Strength::Review {
         ""
@@ -680,8 +667,7 @@ pub(in crate::units) fn handler_wording(
     };
     (
         format!(
-            "`{name}`, the error handler registered by {registered},{likely} sends clients more than the program's own error messages and codes, such as another error's text, its cause or its stack{}.",
-            shown(strength, p)
+            "`{name}`, the error handler registered by {registered},{likely} sends clients more than the program's own error messages and codes, such as another error's text, its cause or its stack."
         ),
         "Send only the program's own messages and codes, and a fixed message for any other error; keep details in server logs",
     )

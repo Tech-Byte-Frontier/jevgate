@@ -24,7 +24,8 @@ const EXCEPTION_HANDLER_REGISTRATION: &str = ".UseExceptionHandler(";
 const HANDLER_DECORATORS: [&str; 2] = [".exception_handler(", ".errorhandler("];
 
 /// Handlers one file passes to a registration call: a function named there,
-/// or the function written inside the call.
+/// or the function written inside the call. A call in code that syntax
+/// errors left out registers nothing to judge.
 pub(super) fn registered(scope: &Scope<'_>, links: &Links, owner: usize) -> Vec<Handler> {
     let input = &scope.inputs[owner];
     let source = input.source.as_deref().unwrap_or("");
@@ -43,6 +44,7 @@ pub(super) fn registered(scope: &Scope<'_>, links: &Links, owner: usize) -> Vec<
             let line = crate::analysis::line_of(source, at);
             if tree.as_ref().is_some_and(|tree| in_text(tree, at))
                 || lines.iter().any(|l| l.contains(&line))
+                || !scope.units[&owner].intact(&(at..at + needle.len()))
             {
                 continue;
             }

@@ -21,10 +21,16 @@ pub(crate) const LARGE_DOC_LINES: usize = 300;
 const OUTLINE_HEADINGS: usize = 400;
 const UNIT: &str = "document";
 
+/// With a change judged, a document is asked only when the change adds a
+/// heading: editing a section's text leaves its outline as it was.
 pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Vec<Planned>) {
     out.rules.insert(LARGE_DOCS, 0);
     let lines = file.source.lines().count().max(1);
     let headings = markdown::headings(file.source);
+    let listed = headings.iter().map(|h| (h.text.as_str(), h.line));
+    if !file.adds(listed, heading_texts) {
+        return;
+    }
     let name = file.path.display().to_string();
     let texts: Vec<&str> = headings.iter().map(|h| h.text.as_str()).collect();
     let mut unit = UnitPlan {
@@ -71,6 +77,15 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
         request,
         asked,
     });
+}
+
+/// The headings of a document's base version, read as its format reads.
+fn heading_texts(path: &std::path::Path, source: &str) -> std::collections::BTreeSet<String> {
+    let view = crate::docs::format::view(path, source);
+    markdown::headings(&view)
+        .into_iter()
+        .map(|h| h.text)
+        .collect()
 }
 
 /// A document's outline for another rule's question.

@@ -1,27 +1,34 @@
 //! The writer's state under `.jevgate/`: the session lock, cached answers and
-//! published reports. Reading reports without the lock is in `reports`.
+//! published reports. Reading reports without the lock is in `reports`, and
+//! the answer cache's files in `cache`.
+mod cache;
 mod reports;
 
+pub use cache::{CacheReader, CachedAnswer};
 pub use reports::{history, read_latest, writer_active};
 
-use super::schema::{Report, now};
+use super::schema::Report;
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
 };
 
-/// A cached answer larger than this is ignored and asked again.
-const CACHE_ENTRY_BYTES: u64 = 1_048_576;
-
 /// Reports kept in `.jevgate/history/`, by generation; older ones are removed.
 const HISTORY: u64 = 64;
 
+/// `.jevgate/.gitignore`: the local state stays out of Git, and the custom
+/// question files beside it are committed.
+pub(crate) const IGNORE: &str = "# JevGate's local state. Custom questions in questions/ are committed.\n*\n!questions/\n!questions/**\n";
+/// What `.jevgate/.gitignore` held before custom questions: found as it was,
+/// it is rewritten, since it would keep `questions/` out of Git.
+const IGNORE_BEFORE: &str = "*\n";
+
 pub struct Store {
     pub directory: PathBuf,
+    /// The cache files Git tracks as the store opens, which are never read.
+    tracked: std::sync::Arc<std::collections::BTreeSet<PathBuf>>,
     _lock: fs::File,
 }
 
@@ -33,21 +40,48 @@ impl Drop for Store {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct Cache {
-    request_hash: String,
-    created_at: u64,
-    response: Value,
+/// Whether a write waits until its bytes are on disk.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Durability {
+    /// Answers paid for, and reports.
+    Synced,
+    /// A copy of answers another cache file still holds, made again if a
+    /// crash loses it.
+    Unsynced,
 }
 
 /// Create `path` as a directory, or accept an existing real (non-symlink) one.
-fn real_directory(path: &Path, message: &'static str) -> Result<()> {
+pub(crate) fn real_directory(path: &Path, message: &'static str) -> Result<()> {
     if path.exists() || path.is_symlink() {
         ensure!(!path.is_symlink() && path.is_dir(), message);
     } else {
         fs::create_dir(path)?;
     }
     Ok(())
+}
+
+/// Write `.jevgate/.gitignore`, or rewrite the one JevGate wrote before
+/// custom questions; one a person edited is left as it is.
+fn ignore_state(directory: &Path) -> Result<()> {
+    let path = directory.join(".gitignore");
+    if !path.exists() {
+        let created = OpenOptions::new().write(true).create_new(true).open(&path);
+        match created {
+            Ok(mut file) => file.write_all(IGNORE.as_bytes())?,
+            // Another JevGate process wrote it first.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    } else if written_before_questions(&path) {
+        atomic(&path, IGNORE.as_bytes(), Durability::Synced)?;
+    }
+    Ok(())
+}
+
+/// Whether the `.gitignore` at `path` is the one JevGate wrote before
+/// custom questions, which the next check that writes its state rewrites.
+pub(crate) fn written_before_questions(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|text| text == IGNORE_BEFORE)
 }
 
 /// Hold the session lock for the life of the store, recording this process.
@@ -66,59 +100,49 @@ fn lock_session(path: &Path) -> Result<fs::File> {
     Ok(file)
 }
 
+/// `.jevgate/` under `root`, created with a `.gitignore` that ignores the
+/// local state and keeps custom questions tracked (`ignore_state`). Taking
+/// no lock, it is where writers other than the session keep state.
+pub fn state_directory(root: &Path) -> Result<PathBuf> {
+    let directory = root.join(".jevgate");
+    real_directory(&directory, "Jev storage must be a real directory")?;
+    ignore_state(&directory)?;
+    Ok(directory)
+}
+
 impl Store {
     pub fn open(root: &Path) -> Result<Self> {
-        let directory = root.join(".jevgate");
-        real_directory(&directory, "Jev storage must be a real directory")?;
+        let directory = state_directory(root)?;
         real_directory(
             &directory.join("cache"),
             "Jev storage must be a real directory",
         )?;
-        let ignore = directory.join(".gitignore");
-        if !ignore.exists() {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(ignore)?;
-            file.write_all(b"*\n")?;
-        }
+        real_directory(
+            &cache::answers_directory(&directory),
+            "Jev storage must be a real directory",
+        )?;
         let lock = lock_session(&directory.join("session.lock"))?;
         real_directory(
             &directory.join("history"),
             "History must be a real directory",
         )?;
         Ok(Self {
+            tracked: std::sync::Arc::new(cache::tracked(&directory)),
             directory,
             _lock: lock,
         })
     }
 
-    /// `ttl` is `None` for answers that never expire (a pinned model version).
-    pub fn load(&self, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
-        load_entry(&self.directory, hash, ttl)
-    }
-
-    pub fn save(&self, hash: &str, response: &Value, created_at: u64) -> Result<()> {
-        let entry = Cache {
-            request_hash: hash.into(),
-            response: response.clone(),
-            created_at,
-        };
-        atomic(
-            &self.directory.join("cache").join(format!("{hash}.json")),
-            &serde_json::to_vec(&entry)?,
-        )
-    }
-
     /// Atomically replace a small state file directly under `.jevgate/`.
     pub fn write(&self, name: &str, bytes: &[u8]) -> Result<()> {
-        atomic(&self.directory.join(name), bytes)
+        atomic(&self.directory.join(name), bytes, Durability::Synced)
     }
 
     pub fn publish_html(&self, report: &Report) -> Result<()> {
         atomic(
             &self.directory.join("report.html"),
             crate::html_report::render(report)?.as_bytes(),
+            Durability::Synced,
         )
     }
 
@@ -132,8 +156,13 @@ impl Store {
                 .join("history")
                 .join(format!("{}.json", report.generation)),
             &bytes,
+            Durability::Synced,
         )?;
-        atomic(&self.directory.join("latest.json"), &bytes)?;
+        atomic(
+            &self.directory.join("latest.json"),
+            &bytes,
+            Durability::Synced,
+        )?;
         if report.generation > HISTORY {
             let old = self
                 .directory
@@ -147,30 +176,9 @@ impl Store {
     }
 }
 
-fn load_entry(directory: &Path, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
-    let path = directory.join("cache").join(format!("{hash}.json"));
-    if path.is_symlink() {
-        return None;
-    }
-    let entry: Cache =
-        serde_json::from_str(&crate::inventory::read_source(&path, CACHE_ENTRY_BYTES).ok()?)
-            .ok()?;
-    let age = now().checked_sub(entry.created_at)?;
-    (entry.request_hash == hash && ttl.is_none_or(|ttl| age < ttl))
-        .then_some((entry.response, entry.created_at))
-}
-
-/// A cached answer read without opening the store: no lock is taken and no
-/// directory is created, so a dry run stays free of saved state.
-pub fn peek(root: &Path, hash: &str, ttl: Option<u64>) -> Option<(Value, u64)> {
-    let directory = root.join(".jevgate");
-    if directory.is_symlink() || !directory.is_dir() {
-        return None;
-    }
-    load_entry(&directory, hash, ttl)
-}
-
-fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Replace `path` with `bytes` through a temporary file, so a reader sees
+/// the old file or the new one, never part of either.
+pub(crate) fn atomic(path: &Path, bytes: &[u8], durability: Durability) -> Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -182,7 +190,9 @@ fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = options.open(&temporary)?;
     let result = (|| {
         file.write_all(bytes)?;
-        file.sync_all()?;
+        if durability == Durability::Synced {
+            file.sync_all()?;
+        }
         fs::rename(&temporary, path)
     })();
     if result.is_err() {
@@ -194,6 +204,21 @@ fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_state_is_ignored_and_custom_questions_stay_tracked() {
+        let project = crate::tests::Project::new();
+        let ignore = project.0.join(".jevgate/.gitignore");
+        let read = || fs::read_to_string(&ignore).unwrap();
+        drop(Store::open(&project.0).unwrap());
+        assert_eq!(read(), IGNORE);
+        fs::write(&ignore, IGNORE_BEFORE).unwrap();
+        drop(Store::open(&project.0).unwrap());
+        assert_eq!(read(), IGNORE, "the old generated file is rewritten");
+        fs::write(&ignore, "*\n!notes.md\n").unwrap();
+        drop(Store::open(&project.0).unwrap());
+        assert_eq!(read(), "*\n!notes.md\n", "an edited one is kept");
+    }
 
     #[test]
     fn large_published_reports_remain_readable_in_latest_and_history() {

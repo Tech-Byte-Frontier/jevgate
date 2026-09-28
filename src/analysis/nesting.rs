@@ -1,5 +1,6 @@
 //! How deeply a function body nests control flow, and its longest branch chain.
 
+use super::generic::Language;
 use tree_sitter::Node;
 
 /// Control flow nested this deep, or a branch chain this long, is a flattening candidate.
@@ -153,4 +154,95 @@ pub(super) fn control(node: Node<'_>) -> (usize, usize) {
     let mut result = (0, 0);
     walk(node, 0, &mut result);
     result
+}
+
+/// Maximum control-flow depth and longest branch chain under the body of a
+/// language of the generic tier, from its table's kinds: a conditional in
+/// another's `else` continues that chain rather than nesting, and each
+/// `elif`, `elseif` or `else` it lists adds a branch.
+pub(super) fn generic(body: Node<'_>, language: &Language) -> (usize, usize) {
+    fn walk(node: Node<'_>, depth: usize, language: &Language, result: &mut (usize, usize)) {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            let nests = language.control.contains(&child.kind()) && !continues(child, language);
+            if nests && language.conditionals.contains(&child.kind()) {
+                result.1 = result.1.max(chain(child, language));
+            }
+            let depth = depth + usize::from(nests);
+            result.0 = result.0.max(depth);
+            walk(child, depth, language, result);
+        }
+    }
+    let mut result = (0, 0);
+    walk(body, 0, language, &mut result);
+    result
+}
+
+/// A conditional in the `else` of another: right after an `else` of its
+/// parent conditional (Kotlin, Swift, Scala, Dart), or alone in an `else`
+/// clause (C).
+fn continues(node: Node<'_>, language: &Language) -> bool {
+    language.conditionals.contains(&node.kind())
+        && node.parent().is_some_and(|parent| {
+            language.conditionals.contains(&parent.kind()) && after_else(node)
+                || language.clauses.contains(&parent.kind()) && parent.named_child_count() == 1
+        })
+}
+
+/// Right after an `else`, or after the `{` that opens Swift's `else` block.
+fn after_else(node: Node<'_>) -> bool {
+    std::iter::successors(node.prev_sibling(), Node::prev_sibling)
+        .find(|previous| previous.kind() != "{")
+        .is_some_and(|previous| previous.kind() == "else")
+}
+
+/// The branches of a chain of conditionals: the first, each one continuing
+/// it, each other clause they list and each final `else` block.
+fn chain(node: Node<'_>, language: &Language) -> usize {
+    let mut length = 1;
+    let mut current = Some(node);
+    while let Some(conditional) = current.take() {
+        let mut cursor = conditional.walk();
+        for child in conditional.children(&mut cursor) {
+            match branch(child, language) {
+                Branch::Continues(next) => {
+                    length += 1;
+                    current = Some(next);
+                }
+                Branch::Adds => length += 1,
+                Branch::Other => {}
+            }
+        }
+    }
+    length
+}
+
+/// What one child of a conditional is to its chain.
+enum Branch<'t> {
+    /// The next conditional of the chain: `else if`.
+    Continues(Node<'t>),
+    /// Another branch: an `elif`, `elseif` or final `else`.
+    Adds,
+    Other,
+}
+
+fn branch<'t>(child: Node<'t>, language: &Language) -> Branch<'t> {
+    if continues(child, language) {
+        return Branch::Continues(child);
+    }
+    if language.clauses.contains(&child.kind()) {
+        // C's `else` clause holds the next `if` alone; `elif` holds a body.
+        return match child
+            .named_child(0)
+            .filter(|inner| continues(*inner, language))
+        {
+            Some(next) => Branch::Continues(next),
+            None => Branch::Adds,
+        };
+    }
+    if child.is_named() && after_else(child) {
+        Branch::Adds
+    } else {
+        Branch::Other
+    }
 }

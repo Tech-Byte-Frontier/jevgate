@@ -143,6 +143,17 @@ fn translation_dir(dirs: &[String]) -> bool {
     })
 }
 
+/// Whether `directory`, relative to the root, is one language's copy of the
+/// docs or lies inside one. OmniRoute keeps its CLAUDE.md and GEMINI.md in
+/// 66 languages under `docs/i18n/`: each rule once more per language.
+pub fn translation(directory: &Path) -> bool {
+    let dirs: Vec<String> = directory
+        .iter()
+        .map(|part| part.to_string_lossy().to_ascii_lowercase())
+        .collect();
+    translation_dir(&dirs)
+}
+
 /// A language code, optionally with a script or region, such as `ja`,
 /// `zh-hans` or `pt_br`.
 fn locale_code(dir: &str) -> bool {

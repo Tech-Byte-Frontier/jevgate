@@ -88,7 +88,7 @@ fn django_views_are_asked_the_django_checks_and_other_python_the_common_ones() {
         plan.requests
             .iter()
             .find(|p| {
-                p.request["jevgate"]["stage"] == "security"
+                p.request["questions"]["f0_interpreted"].is_object()
                     && p.request["state"]["file"]["path"] == file
             })
             .unwrap()

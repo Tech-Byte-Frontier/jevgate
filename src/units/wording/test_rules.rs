@@ -5,7 +5,6 @@ use super::*;
 pub(in crate::units) fn test_wording(
     name: &str,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
 ) -> Wording {
     let reasons: Vec<&str> = [
@@ -28,7 +27,7 @@ pub(in crate::units) fn test_wording(
     .map(|(_, text)| text)
     .collect();
     (
-        format!("`{name}` {}{}.", reasons.join("; "), shown(strength, p)),
+        format!("`{name}` {}.", reasons.join("; ")),
         if strength == Strength::Review {
             "Assert on the behavior of the code under test with an independent expected value"
         } else {
@@ -37,17 +36,15 @@ pub(in crate::units) fn test_wording(
     )
 }
 
-pub(in crate::units) fn test_pair_wording(name: &str, review: bool, p: f64) -> Wording {
+pub(in crate::units) fn test_pair_wording(name: &str, review: bool) -> Wording {
     if review {
         (
-            format!(
-                "{name} check the same behavior with equivalent inputs; one adds nothing ({p:.2})."
-            ),
+            format!("{name} check the same behavior with equivalent inputs; one adds nothing."),
             "Remove one of the tests",
         )
     } else {
         (
-            format!("{name} check the same behavior with different inputs ({p:.2})."),
+            format!("{name} check the same behavior with different inputs."),
             "Combine them into one parameterized test",
         )
     }
@@ -58,7 +55,6 @@ pub(in crate::units) fn test_pair_wording(name: &str, review: bool, p: f64) -> W
 pub(in crate::units) fn law_wording(
     name: &str,
     strength: Strength,
-    p: f64,
     answers: &Answers<'_>,
 ) -> Wording {
     if strength == Strength::Note {
@@ -79,8 +75,7 @@ pub(in crate::units) fn law_wording(
     };
     (
         format!(
-            "The comment above law `{name}` promises more than the law states{}{adds}. A definition could break that promise while every proof passes.",
-            shown(strength, p)
+            "The comment above law `{name}` promises more than the law states{adds}. A definition could break that promise while every proof passes."
         ),
         "State the comment's promise in the law, or narrow the comment to what the law states",
     )

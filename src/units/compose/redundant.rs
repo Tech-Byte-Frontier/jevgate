@@ -124,7 +124,7 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         strength: Strength::Consider,
         line: locations.first().map_or(1, |l| l.start_line),
         message: format!(
-            "{} tests of `{subject}` overlap: {} ({p:.2}).",
+            "{} tests of `{subject}` overlap: {}.",
             tests.len(),
             names.join(", ")
         ),
@@ -144,5 +144,8 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         rank: rank(p, lines),
         baselined: false,
         suppressed: None,
+        gate: None,
+        precision: None,
+        preview: None,
     }
 }
