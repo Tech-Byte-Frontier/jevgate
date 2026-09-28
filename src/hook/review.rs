@@ -289,7 +289,7 @@ fn finished(
 /// breaks it, count from the next turn; else the one there now.
 fn context(place: &Place, scope: &Scope) -> Result<ConfigContext> {
     let Some((start, _)) = &scope.trees else {
-        return ConfigContext::discover_in(&place.cwd, None);
+        return ConfigContext::discover_in(&place.cwd, None, None);
     };
     let config = configuration_at(&place.root, start)?;
     let questions = crate::custom::load(

@@ -79,6 +79,42 @@ fn a_dry_run_plans_custom_questions_and_a_reviewed_config_leaves_the_directory_o
     );
     let output = project
         .command()
+        .args(["check", "--dry-run", "--config", "policy.toml"])
+        .output()
+        .unwrap();
+    let note = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        note.contains(
+            "--config leaves the question files of .jevgate/questions/ unread (custom/body-logs)"
+        ),
+        "{note}"
+    );
+    let copy = project.0.join("reviewed-questions");
+    std::fs::create_dir(&copy).unwrap();
+    std::fs::write(copy.join("body-logs.toml"), BODY_LOGS).unwrap();
+    let pinned = dry_run(
+        &project,
+        &[
+            "--config",
+            "policy.toml",
+            "--questions",
+            "reviewed-questions",
+        ],
+    );
+    assert!(
+        pinned["rules"].to_string().contains("custom/body-logs"),
+        "--questions reads a reviewed copy: {}",
+        pinned["rules"]
+    );
+    let output = project
+        .command()
+        .args(["check", "--dry-run", "--questions", "missing"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("No questions directory missing"));
+    let output = project
+        .command()
         .args([
             "check",
             "--dry-run",

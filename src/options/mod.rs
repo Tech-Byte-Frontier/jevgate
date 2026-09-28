@@ -155,9 +155,18 @@ pub struct CheckArgs {
     ///
     /// The repository root is still found from the working directory. Use it
     /// in CI to apply a reviewed policy that the change under review cannot
-    /// edit.
+    /// edit. The custom question files of .jevgate/questions/ are then not
+    /// read, since the change could edit them too; --questions reads a
+    /// reviewed copy.
     #[arg(long, value_name = "FILE", help_heading = SCOPE)]
     pub config: Option<PathBuf>,
+    /// Read custom question files from this directory instead of .jevgate/questions/
+    ///
+    /// With --config, give a reviewed copy of the questions directory, such as
+    /// the base revision's, so the change under review cannot edit a question
+    /// to pass.
+    #[arg(long = "questions", value_name = "DIR", help_heading = SCOPE)]
+    pub question_directory: Option<PathBuf>,
     /// Select a rule ID, name, key or group (repeatable) [default: the `default` group]
     ///
     /// Groups: maintainability, tests, security, documentation, default (every

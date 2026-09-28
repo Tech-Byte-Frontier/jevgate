@@ -105,9 +105,13 @@ pub struct RulesTestArgs {
     pub env_file: Option<PathBuf>,
     /// Read this configuration instead of <repository root>/jevgate.toml
     ///
-    /// As for `check`, the question files of .jevgate/questions/ are then not read.
+    /// As for `check`, the question files of .jevgate/questions/ are then not
+    /// read; --questions reads a reviewed copy.
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,
+    /// Read custom question files from this directory instead of .jevgate/questions/
+    #[arg(long = "questions", value_name = "DIR")]
+    pub question_directory: Option<PathBuf>,
 }
 
 const RULES_TEST_EXAMPLES: &str = "\

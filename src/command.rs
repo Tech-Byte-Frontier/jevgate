@@ -52,15 +52,15 @@ fn init(force: bool) -> Result<u8> {
 
 /// The commands that read the repository's configuration.
 fn configured(command: JevCommand) -> Result<u8> {
-    let file = match &command {
-        JevCommand::Check(args) => args.config.clone(),
+    let (file, questions) = match &command {
+        JevCommand::Check(args) => (args.config.clone(), args.question_directory.clone()),
         JevCommand::Rules {
             action: Some(options::RulesAction::Test(args)),
             ..
-        } => args.config.clone(),
-        _ => None,
+        } => (args.config.clone(), args.question_directory.clone()),
+        _ => (None, None),
     };
-    let context = ConfigContext::discover(file.as_deref())?;
+    let context = ConfigContext::discover(file.as_deref(), questions.as_deref())?;
     match command {
         JevCommand::Auth { .. }
         | JevCommand::Init { .. }

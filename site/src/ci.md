@@ -35,7 +35,15 @@ The action installs a checked release binary, keeps `.jevgate/cache` in the Acti
   jevgate check --config "$RUNNER_TEMP/jevgate.toml" --base "$BASE_SHA" --format github
   ```
 
-  With `--config`, the [custom questions](custom-questions.md) in `.jevgate/questions/` are not read, since the change could edit them too: keep the questions that must gate as `[[question]]` tables in the reviewed file.
+  With `--config`, the [custom questions](custom-questions.md) in `.jevgate/questions/` are not read, since the change could edit them too, and the check says which it left out. Give the base branch's copy of them with `--questions`:
+
+  ```sh
+  mkdir -p "$RUNNER_TEMP/questions"
+  if git cat-file -e "$BASE_SHA:.jevgate/questions" 2>/dev/null; then
+    git archive "$BASE_SHA" .jevgate/questions | tar -x -C "$RUNNER_TEMP/questions" --strip-components=2
+  fi
+  jevgate check --config "$RUNNER_TEMP/jevgate.toml" --questions "$RUNNER_TEMP/questions" --base "$BASE_SHA" --format github
+  ```
 
 - **Custom questions' examples:** `jevgate rules test` asks each [custom question](custom-questions.md#examples-and-jevgate-rules-test) about its failing and passing examples and exits 1 when one gets an example wrong, so a new model or a reworded question that stops separating them fails the job. Run it after the action, which puts `jevgate` on the path and restores the cache; its answers are saved with the check's, so it costs nothing until a question, an example or the model changes:
 

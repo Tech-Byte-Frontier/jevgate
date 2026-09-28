@@ -145,17 +145,22 @@ pub struct ConfigContext {
 
 impl ConfigContext {
     /// The repository around the working directory and its configuration:
-    /// `file` when given (it must exist), else the root's jevgate.toml if any.
-    /// Question files are read only with the repository's own configuration,
-    /// so a change under review cannot edit a question to pass a policy that
-    /// `--config` applies.
-    pub fn discover(file: Option<&Path>) -> Result<Self> {
-        Self::discover_in(&std::env::current_dir()?.canonicalize()?, file)
+    /// `file` when given (it must exist), else the root's jevgate.toml if any;
+    /// and the question files of `questions` when given, else of the
+    /// repository's questions directory, which is read only with the
+    /// repository's own configuration, so a change under review cannot edit
+    /// a question to pass a policy that `--config` applies.
+    pub fn discover(file: Option<&Path>, questions: Option<&Path>) -> Result<Self> {
+        Self::discover_in(&std::env::current_dir()?.canonicalize()?, file, questions)
     }
 
     /// [`Self::discover`] from `invocation_dir`, an absolute canonical
     /// directory, such as the working directory an agent hook reports.
-    pub fn discover_in(invocation_dir: &Path, file: Option<&Path>) -> Result<Self> {
+    pub fn discover_in(
+        invocation_dir: &Path,
+        file: Option<&Path>,
+        questions: Option<&Path>,
+    ) -> Result<Self> {
         let invocation_dir = invocation_dir.to_path_buf();
         let root = repository_root(&invocation_dir);
         let (file, required) = match file {
@@ -163,7 +168,7 @@ impl ConfigContext {
             None => (root.join(crate::init::CONFIG_FILE), false),
         };
         let config = Config::read(&file, required)?;
-        let directory = (!required).then(|| crate::custom::directory(&root));
+        let directory = question_directory(&root, &invocation_dir, (questions, required))?;
         let questions =
             crate::custom::load(&root, (&file, &config.question), directory.as_deref())?;
         let filed = questions
@@ -531,6 +536,45 @@ pub fn repository_root(invocation_dir: &Path) -> PathBuf {
         })
         .unwrap_or(invocation_dir)
         .to_path_buf()
+}
+
+/// The directory question files are read from: `given` (`--questions`),
+/// which must exist; else the repository's own, unless a configuration file
+/// was `given` (`--config`). A change under review can edit the repository's
+/// question files, so they are then left unread, and a note names them: a
+/// workflow that applies a reviewed policy gives a reviewed copy of them too.
+fn question_directory(
+    root: &Path,
+    invocation_dir: &Path,
+    (given, configured): (Option<&Path>, bool),
+) -> Result<Option<PathBuf>> {
+    if let Some(given) = given {
+        let directory = invocation_dir.join(given);
+        ensure!(
+            directory.is_dir(),
+            "No questions directory {}",
+            given.display()
+        );
+        return Ok(Some(directory));
+    }
+    let own = crate::custom::directory(root);
+    if !configured {
+        return Ok(Some(own));
+    }
+    let unread: Vec<String> = crate::custom::question_files(&own)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|path| path.file_stem())
+        .map(|id| format!("{}/{}", catalog::CUSTOM_GROUP, id.to_string_lossy()))
+        .collect();
+    if !unread.is_empty() {
+        note!(
+            "jevgate: --config leaves the question files of {}/ unread ({}), since the change under review could edit them: give a reviewed copy with --questions, or define them in that configuration",
+            crate::custom::DIRECTORY,
+            unread.join(", ")
+        );
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
