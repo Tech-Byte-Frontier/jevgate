@@ -212,17 +212,7 @@ pub(super) fn check(
     let worker = std::thread::Builder::new()
         .stack_size(WORKER_STACK)
         .spawn(move || {
-            // Within a turn, the configuration is the turn start's: when it
-            // does not load, no later check from that start can run.
-            let within_turn = scope.trees.is_some();
-            let configured = context(&place, &scope)
-                .and_then(|context| arguments(&context, scope).map(|args| (context, args)));
-            let checked = match configured {
-                Ok((context, args)) => run(context, args, (&asking, &watching), lock_until)
-                    .map_err(|e| (format!("{e:#}"), false)),
-                Err(e) => Err((format!("{e:#}"), within_turn)),
-            };
-            let _ = sender.send(checked);
+            let _ = sender.send(work(&place, scope, (&asking, &watching), lock_until));
         });
     if let Err(error) = worker {
         return Err(Unfinished::new(format!(
@@ -230,7 +220,43 @@ pub(super) fn check(
         )));
     }
     let waited = (deadline.saturating_duration_since(started).as_millis() + 500) / 1000;
-    match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+    let received = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+    finished(received, &watch, waited)
+}
+
+/// What the worker ran: the check, or why it failed and whether it failed
+/// on the configuration of the turn's start. Within a turn the check reads
+/// that configuration, so when it does not load no later check from that
+/// start can run.
+fn work(
+    place: &Place,
+    scope: Scope,
+    (asking, watch): (&Asking, &Watch),
+    lock_until: Instant,
+) -> std::result::Result<Checked, (String, bool)> {
+    let within_turn = scope.trees.is_some();
+    let configured = context(place, &scope)
+        .and_then(|context| arguments(&context, scope).map(|args| (context, args)));
+    match configured {
+        Ok((context, args)) => {
+            run(context, args, (asking, watch), lock_until).map_err(|e| (format!("{e:#}"), false))
+        }
+        Err(e) => Err((format!("{e:#}"), within_turn)),
+    }
+}
+
+/// The check's result as the hook reports it: what the worker sent, or why
+/// it sent nothing within `waited` seconds, from what `watch` saw of the
+/// provider.
+fn finished(
+    received: std::result::Result<
+        std::result::Result<Checked, (String, bool)>,
+        mpsc::RecvTimeoutError,
+    >,
+    watch: &Watch,
+    waited: u128,
+) -> std::result::Result<Checked, Unfinished> {
+    match received {
         Ok(Ok(checked)) => Ok(checked),
         Ok(Err((reason, start_unreadable))) => Err(Unfinished {
             reason,

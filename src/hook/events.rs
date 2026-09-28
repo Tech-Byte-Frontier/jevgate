@@ -251,28 +251,13 @@ impl<'a> Hook<'a> {
     /// the person at the end of the turn.
     fn after_edit(&self) -> Reply {
         let mut turn = self.load();
-        let (nested, files): (Vec<PathBuf>, Vec<PathBuf>) = self
-            .edited()
-            .into_iter()
-            .partition(|file| self.nested(file));
-        let nested = relative(&self.root, &nested);
-        if let Some(turn) = turn.as_mut().filter(|_| !nested.is_empty()) {
-            let paths = nested.iter().map(|path| path.display().to_string());
-            if turn.remember_unseen(paths) {
-                let _ = turn::save(&self.root, turn);
-            }
-        }
+        let (files, unseen) = self.seen(turn.as_mut());
         if files.is_empty() {
-            let unreviewed: Vec<Unreviewed> = nested.into_iter().map(Unreviewed::unseen).collect();
-            let unreviewed: Vec<&Unreviewed> = unreviewed.iter().collect();
-            let context = text::after_edit(&[], (&[], &[]), &[], &[], &unreviewed);
-            return match turn {
-                Some(turn) => self.context(turn, context),
-                None => Reply {
-                    agent: context,
-                    ..Reply::default()
-                },
+            let checked = Checked {
+                unreviewed: unseen,
+                ..Checked::default()
             };
+            return self.told(turn, &[], checked);
         }
         let shown = relative(&self.root, &files);
         let named = text::named(&shown);
@@ -290,16 +275,38 @@ impl<'a> Hook<'a> {
             Ok(checked) => checked,
             Err(unfinished) => return failed(self.event, &named, &unfinished.reason),
         };
-        checked
-            .unreviewed
-            .extend(nested.into_iter().map(Unreviewed::unseen));
+        checked.unreviewed.extend(unseen);
+        self.told(turn, &shown, checked)
+    }
+
+    /// The edited files the turn's snapshots see, and as not reviewed those
+    /// inside a repository of their own, which `turn` remembers for the
+    /// person.
+    fn seen(&self, turn: Option<&mut Turn>) -> (Vec<PathBuf>, Vec<Unreviewed>) {
+        let (nested, files): (Vec<PathBuf>, Vec<PathBuf>) = self
+            .edited()
+            .into_iter()
+            .partition(|file| self.nested(file));
+        let nested = relative(&self.root, &nested);
+        if let Some(turn) = turn.filter(|_| !nested.is_empty()) {
+            let paths = nested.iter().map(|path| path.display().to_string());
+            if turn.remember_unseen(paths) {
+                let _ = turn::save(&self.root, turn);
+            }
+        }
+        (files, nested.into_iter().map(Unreviewed::unseen).collect())
+    }
+
+    /// The context telling the agent what `checked` found in the files
+    /// `shown`, less what `turn` already told it, which it remembers.
+    fn told(&self, turn: Option<Turn>, shown: &[PathBuf], checked: Checked) -> Reply {
         let Some(mut turn) = turn else {
             let undecided: Vec<_> = checked.undecided.iter().collect();
             let guards: Vec<_> = checked.guards.iter().collect();
             let unreviewed: Vec<_> = checked.unreviewed.iter().collect();
             return Reply {
                 agent: text::after_edit(
-                    &shown,
+                    shown,
                     (&checked.flagged, &[]),
                     &undecided,
                     &guards,
@@ -327,7 +334,7 @@ impl<'a> Hook<'a> {
             .iter()
             .filter(|u| !turn.reported.contains(&u.id()))
             .collect();
-        let context = text::after_edit(&shown, (&new, &known), &undecided, &guards, &unreviewed);
+        let context = text::after_edit(shown, (&new, &known), &undecided, &guards, &unreviewed);
         let ids: Vec<String> = new
             .iter()
             .map(|f| f.finding.fingerprint.clone())
