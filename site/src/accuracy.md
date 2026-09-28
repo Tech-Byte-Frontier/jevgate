@@ -23,7 +23,8 @@ Each release changed questions and composition until wrong findings on the tuned
 ## Limits
 
 - **Precision only.** The labels say how often a reported finding is right, not what JevGate misses.
-- **A snapshot.** The table is measured on one release's findings, joined with labels made on earlier ones. Each release's changelog says what moved.
+- **A snapshot.** The table is measured on one release's findings, joined with labels made on earlier ones: 0.25.0's findings with every rule and tests, replayed from the answer cache, with the shared-logic threshold of 0.28 applied. Each release's changelog says what moved.
+- **Other rules beside it.** 0.25.0 asked each rule about a function in a request of its own, as a run of this release does when function simplification is the only rule that judges functions, the default. With hardcoded values or a security rule selected, a function's questions share one request, and a function-simplification finding near a threshold can differ: on 28 labeled projects, its reviews were right 50 times in 55 that way and 49 in 56 apart.
 - **Not entirely unseen.** A few changes before 0.22 came from findings on these projects: in 0.20.0, flysystem's copies in deprecated code (8 wrong shared-logic findings); in 0.21.0, Online Boutique's Go modules (9 of 10 copies found between them were wrong) and its connections without TLS (7 reviews), the React Native template's i18next escaping, and the follow-ups for hardcoded-value and injection considers, which the fresh projects' first labels pointed to. Since then, changes are fitted on the tuned projects and only checked on these.
 - **Whose projects.** 9 of the 25 unseen projects are the maintainer's own applications, and 23 of the 24 unseen labels of agent-context considers come from them.
 

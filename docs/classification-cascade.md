@@ -142,8 +142,15 @@ signatures, or one candidate pair.
    input (22% less on the function packs, measured on 28 projects); a rule
    alone asks exactly what it asked. A function's answers moved as much as
    when only its pack's companions change (0.018 on the split's top level,
-   both), and no rule's labeled findings got worse. In a file whose framework
-   role is set, split questions are packed apart, without the role.
+   both). On 28 labeled projects, function-simplification and security
+   findings were right as often or more often, and hardcoded-value considers
+   on tuned projects less often (9 of 17 right, from 9 of 14). Since a
+   function's pack holds the questions of every rule selected, selecting
+   hardcoded values or a security rule can move a function-simplification
+   finding across a threshold: with every rule, 11 of the 56 reviews that
+   split-only packs gave were not reviews and 10 other findings were. In a
+   file whose framework role is set, split questions are packed apart,
+   without the role.
    With `--base`, only what the change touched is asked: units whose lines
    it added or modified, or removed lines inside; copies where either copy
    changed; a file's outline, or a large document's, only when the change

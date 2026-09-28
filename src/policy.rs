@@ -26,8 +26,9 @@ pub(crate) struct Calibrated {
 /// was never tuned on, against 32 in 44 and 13 in 23 at 0.90 or more: most
 /// of the wrong ones were spans too small to share or copies whose
 /// differences were the point. A consider that is a review lowered by a cap
-/// keeps its level, since the top level set it, and those were right about
-/// as often at any probability.
+/// keeps its level, since the top level set it: on the tuned projects those
+/// were right about as often at any probability (on the unseen ones, 36% of
+/// the time below 0.85 and 69% at 0.98 or more, over 105 labels).
 const SHARED_CONSIDER: Calibrated = Calibrated {
     rule: catalog::SHARED_LOGIC,
     question: "same",
