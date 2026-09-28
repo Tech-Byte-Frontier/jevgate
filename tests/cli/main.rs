@@ -12,6 +12,7 @@ mod mcp;
 mod mock_provider;
 mod preview;
 mod rules;
+mod setup;
 #[path = "../support/temp_dir.rs"]
 mod temp_dir;
 #[cfg(unix)]

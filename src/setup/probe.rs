@@ -1,0 +1,124 @@
+//! The `jevgate` a hook's command starts: the first one on `PATH`, asked to
+//! answer an event it ignores. A missing one, a JevGate older than the hook
+//! (it exits 2 on `hook`, which Claude Code reads as "erase the prompt") or
+//! another program named `jevgate` is told to the person when the hooks are
+//! written, since the agent would only show a failed hook later.
+use std::{
+    ffi::OsStr,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Child, Command, Output, Stdio},
+    time::{Duration, Instant},
+};
+
+/// An event every agent adapter ignores: the hook answers `{}` without
+/// opening a repository.
+const EVENT: &str = r#"{"hook_event_name":"JevGateSetupCheck"}"#;
+/// A hook answers an ignored event at once; a program this slow is not one.
+const WAIT: Duration = Duration::from_secs(10);
+const POLL: Duration = Duration::from_millis(20);
+const INSTALL: &str = "https://tech-byte-frontier.github.io/jevgate/install.html";
+
+/// What is wrong with the `jevgate` that `path` (a `PATH` value) leads the
+/// agents to, if anything.
+pub(super) fn problem(path: Option<&OsStr>) -> Option<String> {
+    let Some(found) = path.and_then(|path| find(path, "jevgate")) else {
+        return Some(format!(
+            "no jevgate is on your PATH, and the hooks run `jevgate hook` by name: install JevGate where the agent finds it ({INSTALL}; with npm, `npm install -g @tech-byte-frontier/jevgate`)"
+        ));
+    };
+    answer(&found).err().map(|why| {
+        format!(
+            "the jevgate on your PATH ({}) cannot answer the hooks: {why}. The agent runs that one: upgrade it, or put a JevGate 0.27 or later first on your PATH",
+            found.display()
+        )
+    })
+}
+
+/// The first program `name` in `path`, as a shell would find it: with
+/// Windows' executable extensions, or with an executable bit elsewhere.
+pub(super) fn find(path: &OsStr, name: &str) -> Option<PathBuf> {
+    let names: Vec<String> = if cfg!(windows) {
+        let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+        extensions
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .map(|extension| format!("{name}{}", extension.to_ascii_lowercase()))
+            .collect()
+    } else {
+        vec![name.to_string()]
+    };
+    std::env::split_paths(path)
+        .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+        .find(|candidate| executable(candidate))
+}
+
+#[cfg(unix)]
+fn executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn executable(path: &Path) -> bool {
+    path.is_file()
+}
+
+/// Run `program hook` on an event it ignores: it must exit 0 and print `{}`.
+pub(super) fn answer(program: &Path) -> Result<(), String> {
+    let mut child = Command::new(program)
+        .arg("hook")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("it did not start ({error})"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // A program that exits without reading stdin is judged by its answer.
+        let _ = stdin.write_all(EVENT.as_bytes());
+    }
+    let output = finish(child)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() && stdout.trim() == "{}" {
+        return Ok(());
+    }
+    Err(match output.status.code() {
+        Some(0) => format!("it answered {:?}, not {{}}", first_line(&stdout)),
+        code => format!(
+            "`jevgate hook` exited {} ({})",
+            code.map_or_else(|| "on a signal".to_string(), |code| code.to_string()),
+            first_line(&String::from_utf8_lossy(&output.stderr))
+        ),
+    })
+}
+
+/// What `child` printed once it exits, or why it did not within [`WAIT`].
+fn finish(mut child: Child) -> Result<Output, String> {
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < WAIT => std::thread::sleep(POLL),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("it did not answer within {} s", WAIT.as_secs()));
+            }
+            Err(error) => return Err(format!("it could not be waited for ({error})")),
+        }
+    }
+    child
+        .wait_with_output()
+        .map_err(|error| format!("its answer could not be read ({error})"))
+}
+
+/// The first line of a program's output, cut for a sentence.
+fn first_line(text: &str) -> String {
+    text.trim()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(160)
+        .collect()
+}

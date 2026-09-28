@@ -88,15 +88,31 @@ pub enum JevCommand {
         #[arg(long, value_enum, default_value_t = RulesFormat::Table)]
         format: RulesFormat,
     },
-    /// Write a commented jevgate.toml for this repository (offline)
+    /// Write a commented jevgate.toml, or set up a coding agent's hooks (offline)
     ///
-    /// Limits uploads to the detected source and test directories and to agent
-    /// instruction files, denies credential files, and lists every rule group
-    /// with its gate level. Review the file before the first paid check.
+    /// Without --agent: limits uploads to the detected source and test
+    /// directories and to agent instruction files, denies credential files,
+    /// and lists every rule group with its gate level. Review the file before
+    /// the first paid check.
+    ///
+    /// With --agent: writes the agent's hooks, which run `jevgate hook` when a
+    /// turn starts, after each edit and when the turn ends, and a short text
+    /// telling the agent how JevGate's findings work (a block between
+    /// `<!-- jevgate:begin -->` and `<!-- jevgate:end -->` in AGENTS.md or
+    /// GEMINI.md, or a rules file of its own). It merges into the files already
+    /// there and changes nothing else, so running it again changes nothing, and
+    /// --remove takes out only what it wrote. Every file is read before the
+    /// first is written: a settings file that is not plain JSON (comments
+    /// included) stops it with nothing written. It then runs the `jevgate` on
+    /// your PATH, which the agent will run, and warns when that one cannot
+    /// answer the hooks.
+    #[command(after_long_help = INIT_EXAMPLES)]
     Init {
         /// Replace an existing jevgate.toml
-        #[arg(long)]
+        #[arg(long, conflicts_with = "agents")]
         force: bool,
+        #[command(flatten)]
+        setup: crate::setup::AgentSetup,
     },
     /// Print a shell completion script (offline)
     #[command(after_long_help = COMPLETIONS_EXAMPLES)]
@@ -212,6 +228,7 @@ Workflow:
   jevgate baseline mark wrong PATH[:LINE]   Record why a finding was accepted; `baseline stats` counts them
 
 For agents and CI:
+  jevgate init --agent claude                        Hooks for Claude Code (also codex, cursor, gemini, opencode)
   jevgate check --base origin/main                   Only what changed since a revision
   jevgate check --base origin/main --format json     The full report, raw probabilities included
   jevgate check --base origin/main --format github   Annotations and a job summary on GitHub
@@ -304,6 +321,22 @@ Examples (the command each agent's hook configuration runs):
 Events: a session or turn start records the working tree (SessionStart, UserPromptSubmit,
 BeforeAgent, beforeSubmitPrompt); an edit is checked (PostToolUse, AfterTool, postToolUse);
 the end of a turn is checked and can be blocked (Stop, AfterAgent, stop). Others get {}.";
+
+const INIT_EXAMPLES: &str = "\
+Examples:
+  jevgate init                                  jevgate.toml for this repository
+  jevgate init --agent claude                   Claude Code's hooks, for every repository you open
+  jevgate init --agent codex,gemini --project   This repository's Codex and Gemini CLI hooks
+  jevgate init --agent cursor --dry-run         What would change, without writing
+  jevgate init --agent claude --remove          Take out what JevGate wrote
+
+Files, for your user and with --project:
+  claude     ~/.claude/settings.json, rules/jevgate.md       .claude/settings.json, .claude/rules/jevgate.md
+  codex      ~/.codex/hooks.json, AGENTS.md                  .codex/hooks.json, AGENTS.md
+  cursor     ~/.cursor/hooks.json                            .cursor/hooks.json, .cursor/rules/jevgate.mdc
+  gemini     ~/.gemini/settings.json, GEMINI.md              .gemini/settings.json, GEMINI.md
+  opencode   ~/.config/opencode/plugins/jevgate.js, AGENTS.md   .opencode/plugins/jevgate.js, AGENTS.md
+CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME move the user files as they move the agents'.";
 
 const MAN_EXAMPLES: &str = "\
 Examples:

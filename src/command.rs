@@ -1,12 +1,13 @@
 //! Running each command: offline commands and the agent hook first (the hook
-//! finds its repository from the event), then the ones that read the
-//! repository's configuration; `check` runs in its own module.
+//! finds its repository from the event, and agent setup writes the agents'
+//! files), then the ones that read the repository's configuration; `check`
+//! runs in its own module.
 use crate::{
     auth, baseline, cancellation, catalog, config,
     config::ConfigContext,
     hook, init, manual, mcp,
     options::{self, JevCommand},
-    output, revision, server,
+    output, revision, server, setup,
 };
 use anyhow::Result;
 
@@ -15,7 +16,8 @@ pub fn run(command: JevCommand) -> Result<u8> {
         JevCommand::Auth { command } => auth::run(command),
         JevCommand::Completions { shell } => manual::completions(shell).map(|()| 0),
         JevCommand::Man { command } => manual::man(command.as_deref()).map(|()| 0),
-        JevCommand::Init { force } => init(force),
+        JevCommand::Init { setup, .. } if !setup.agents.is_empty() => setup::run(&setup),
+        JevCommand::Init { force, .. } => init(force),
         JevCommand::Mcp => mcp::run().map(|()| 0),
         JevCommand::Hook(args) => hook::run(&args),
         command => configured(command),

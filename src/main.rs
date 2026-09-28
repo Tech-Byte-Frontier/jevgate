@@ -60,6 +60,7 @@ mod revision;
 mod sarif;
 mod schema;
 mod server;
+mod setup;
 mod storage;
 mod suppress;
 mod syntax;
