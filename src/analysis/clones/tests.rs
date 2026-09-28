@@ -674,3 +674,40 @@ fn copies_pair_within_a_generic_language_s_family_only() {
     assert_eq!(pairs_between(("a/sum.c", &c), ("a/sum.cpp", &c)), 1);
     assert_eq!(pairs_between(("a/sum.c", &c), ("a/Sum.java", &java)), 0);
 }
+
+#[test]
+fn copies_of_the_generic_tier_take_only_the_places_the_other_languages_leave() {
+    let pair = |path: String, size: usize| {
+        let site = Site {
+            file: 0,
+            path: PathBuf::from(path),
+            span: 0..1,
+            start_line: 1,
+            end_line: 1,
+            function: None,
+            function_source: None,
+            quote: String::new(),
+        };
+        Pair {
+            a: site.clone(),
+            b: site,
+            differences: Vec::new(),
+            size,
+            occurrences: 2,
+            copies: Vec::new(),
+            normalized: String::new(),
+        }
+    };
+    // The largest copy is in C; the Rust copies fill the run's places.
+    let ranked: Vec<Pair> = std::iter::once(pair("native/big.c".into(), 10_000))
+        .chain((0..RUN_CAP).map(|i| pair(format!("src/m{i}.rs"), 1_000 - i)))
+        .collect();
+    let kept = capped(ranked);
+    assert_eq!(kept.pairs.len(), RUN_CAP);
+    assert!(
+        kept.pairs
+            .iter()
+            .all(|p| p.a.path.extension().unwrap() == "rs")
+    );
+    assert_eq!(kept.omitted[Path::new("native/big.c")], 1);
+}

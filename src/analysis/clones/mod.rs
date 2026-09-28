@@ -460,11 +460,18 @@ fn drop_nested(pairs: &mut Vec<Pair>) {
 }
 
 /// Keep ranked groups within the per-run and per-file caps; count the rest.
+/// Copies in a language of the generic tier (`analysis::generic`) take only
+/// the places the languages with analyzers of their own leave: ranked
+/// together, C copies of b2-bend-collections' native benchmarks took a
+/// place from a Bend copy, changing findings that labels measured.
 fn capped(pairs: Vec<Pair>) -> Candidates {
     let mut omitted = BTreeMap::<PathBuf, usize>::new();
     let mut per_file = BTreeMap::<PathBuf, usize>::new();
     let mut kept = Vec::new();
-    for pair in pairs {
+    let (specific, generic): (Vec<Pair>, Vec<Pair>) = pairs
+        .into_iter()
+        .partition(|pair| generic::family(&pair.a.path).is_none());
+    for pair in specific.into_iter().chain(generic) {
         let count = per_file.entry(pair.a.path.clone()).or_default();
         if kept.len() < RUN_CAP && *count < FILE_CAP {
             *count += 1;
