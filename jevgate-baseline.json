@@ -1,5 +1,15 @@
 {
   "version": 1,
-  "created_at": 1790514454,
-  "findings": []
+  "created_at": 1790587702,
+  "findings": [
+    {
+      "fingerprint": "62ce38c353079b7b9773080b905d226e8d8e473ef040d8b1b828e25cca8fc4f1",
+      "rule": "maintainability/hardcoded-values",
+      "path": "src/units/tests/mod.rs",
+      "line": 312,
+      "strength": "review",
+      "message": "One of this file's constants fixes a value that differs between deployments (0.98). The constant is `HARDCODED`.",
+      "reason": "wrong"
+    }
+  ]
 }
