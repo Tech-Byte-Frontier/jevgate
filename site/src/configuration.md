@@ -34,7 +34,7 @@ rules = { security = "consider" }        # except these
 | `model` | the key's provider's | The model, as the key's provider names it: `jev-1.13.0` for TypeSafe, `typesafe/jev-1.13` for OpenRouter, `typesafe-ai/jev` for Vercel AI Gateway. A pinned version keeps results repeatable; a repository that sets it for one provider needs `--model` with another provider's key |
 | `cache_ttl_secs` | `3600` | Cache lifetime for an alias: a model name without an `x.y.z` version, such as `jev-latest` or `jev-1.13`. Pinned versions such as `jev-1.13.0` never expire |
 | `max_requests` | unlimited | Ceiling on API attempts per invocation |
-| `concurrency` | `6` | Ceiling on simultaneous requests; `--concurrency` can only lower it. JevGate sends at most 6 at once, so a higher value, which releases before 0.26 accepted up to 8, has no effect, and `--concurrency` above 6 is lowered to 6 with a notice. Requests also start at least 50 ms apart, TypeSafe's limit of 1,200 a minute |
+| `concurrency` | `6`, or `3` with a gateway's key | Most simultaneous requests; `--concurrency` can only lower it. JevGate sends at most 6 at once, so a higher value, which releases before 0.26 accepted up to 8, means 6, and `--concurrency` above 6 is lowered to 6 with a notice. Requests also start at least 50 ms apart, TypeSafe's limit of 1,200 a minute for an account. With an OpenRouter or Vercel AI Gateway key the default is 3: the gateway's account on TypeSafe is shared by its other customers |
 | `max_file_bytes` | `262144` | Files larger than this are reported as needs-context, never truncated; generated and vendored files are skipped instead |
 | `max_context_bytes` | `32768` | Ceiling on context bytes per request |
 

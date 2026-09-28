@@ -295,7 +295,7 @@ fn rejected_review_keeps_cached_judgments_and_recovers_only_unfinished_work() {
     let mut options = args();
     options.quick = true;
     options.rules = vec!["function_simplification".into()];
-    options.concurrency = 1;
+    options.concurrency = Some(1);
     options.paths = vec!["a.py".into()];
     let mut provider = Provider {
         access: fast(),

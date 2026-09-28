@@ -93,6 +93,7 @@ fn a_check_with_an_openrouter_key_asks_openrouter_for_its_model() {
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["provider"], "openrouter");
+    assert_eq!(report["concurrency"], 3, "a gateway's default");
     assert_eq!(report["requested_model"], "typesafe/jev-1.13");
     assert_eq!(
         report["paid_models"]["typesafe/jev-1.13"],
@@ -259,6 +260,37 @@ fn auth_status_names_the_provider_and_the_keys_set_but_not_used() {
         "{text}"
     );
     assert_eq!(provider.received()[0].path, "/api/v1/models");
+}
+
+#[test]
+fn a_gateway_key_sends_three_requests_at_once_unless_told_otherwise() {
+    let project = Project::new();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+    // The `concurrency` a dry run reports with `key` in its variable.
+    let concurrency = |(variable, key): (&str, &str), args: &[&str]| {
+        let output = project
+            .command()
+            .args(["check", "--dry-run", "--format", "json"])
+            .args(args)
+            .env(variable, key)
+            .output()
+            .unwrap();
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{errors}");
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["concurrency"].clone()
+    };
+    let (typesafe, openrouter, vercel) = (
+        ("TYPESAFE_API_KEY", "tsk-test"),
+        ("OPENROUTER_API_KEY", "sk-or-v1-test"),
+        ("AI_GATEWAY_API_KEY", "vck_test"),
+    );
+    assert_eq!(concurrency(typesafe, &[]), 6);
+    assert_eq!(concurrency(openrouter, &[]), 3);
+    assert_eq!(concurrency(vercel, &[]), 3);
+    assert_eq!(concurrency(openrouter, &["--concurrency", "6"]), 6);
+    std::fs::write(project.0.join("jevgate.toml"), "concurrency = 4\n").unwrap();
+    assert_eq!(concurrency(vercel, &[]), 4);
+    assert_eq!(concurrency(typesafe, &[]), 4);
 }
 
 #[test]

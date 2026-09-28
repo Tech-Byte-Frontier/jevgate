@@ -175,7 +175,7 @@ impl Session<'_> {
         let observed = &mut self.observed;
         self.evaluator.evaluate_queue(
             &batch,
-            self.args.concurrency as usize,
+            self.args.concurrency() as usize,
             &before,
             &mut |index, outcome| {
                 let (i, request) = pending[index];

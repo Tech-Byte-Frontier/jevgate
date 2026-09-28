@@ -268,7 +268,7 @@
       "type": "integer"
     },
     "concurrency": {
-      "description": "Ceiling on simultaneous requests; flags can only lower it. JevGate sends at most 6 at once, so a higher value has no effect. Default: 6.",
+      "description": "Most simultaneous requests; flags can only lower it. JevGate sends at most 6 at once, so a higher value means 6. Default: 6 with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key.",
       "maximum": 6,
       "minimum": 1,
       "type": "integer"

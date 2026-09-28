@@ -234,9 +234,13 @@ pub struct CheckArgs {
     /// ceiling this flag can only lower.
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000), help_heading = BUDGETS)]
     pub max_requests: Option<u32>,
-    /// Maximum simultaneous requests, at most 6; a higher value is lowered to 6
-    #[arg(long, value_name = "N", default_value_t = MAX_CONCURRENCY, value_parser = concurrency, help_heading = BUDGETS)]
-    pub concurrency: u32,
+    /// Maximum simultaneous requests, at most 6; a higher value is lowered to 6 [default: 6, or 3 with a gateway's key]
+    ///
+    /// The default follows the key: 6 with a TypeSafe key, 3 with an
+    /// OpenRouter or Vercel AI Gateway key. Also set by `concurrency` in
+    /// jevgate.toml, which this flag can only lower.
+    #[arg(long, value_name = "N", value_parser = concurrency, help_heading = BUDGETS)]
+    pub concurrency: Option<u32>,
     /// Per-file read limit; a larger file is reported as needs-context, never truncated
     #[arg(long, value_name = "BYTES", default_value_t = DEFAULT_MAX_FILE_BYTES, value_parser = clap::value_parser!(u64).range(1..=1048576), help_heading = BUDGETS)]
     pub max_file_bytes: u64,
@@ -290,12 +294,12 @@ pub struct PathLevels {
     pub rules: BTreeMap<String, Vec<FailOn>>,
 }
 
-/// Upper bound on simultaneous requests, and the default: six workers made 18
-/// to 20 requests a second on the corpus's largest runs (0.3 s a request),
-/// just under TypeSafe's limit of 1,200 a minute; eight would make about 27.
-/// Rate-limit retries share one cooldown. A higher `--concurrency` is
-/// lowered to it with a notice, since 0.25 accepted up to 8; `concurrency` in
-/// jevgate.toml is a ceiling on the flag, so a higher one has no effect.
+/// Upper bound on simultaneous requests, and the default with a TypeSafe
+/// key: six workers made 18 to 20 requests a second on the corpus's largest
+/// runs (0.3 s a request), just under TypeSafe's limit of 1,200 a minute;
+/// eight would make about 27. Rate-limit retries share one cooldown. A
+/// higher `--concurrency` is lowered to it with a notice, since 0.25
+/// accepted up to 8; a higher `concurrency` in jevgate.toml means it.
 pub const MAX_CONCURRENCY: u32 = 6;
 
 /// Default read limit per file. Units are sent separately, so this bounds
@@ -440,6 +444,13 @@ impl CheckArgs {
 
     pub fn cache_ttl_secs(&self) -> u64 {
         self.cache_ttl_secs.unwrap_or(DEFAULT_CACHE_TTL_SECS)
+    }
+
+    /// The most requests sent at once: `--concurrency` or `concurrency` in
+    /// jevgate.toml, else the default of the key's provider.
+    pub fn concurrency(&self) -> u32 {
+        self.concurrency
+            .unwrap_or(self.provider.service().default_concurrency)
     }
 
     pub fn output_format(&self) -> Format {

@@ -65,6 +65,9 @@ pub struct Service {
     pub api_root: &'static str,
     /// The model asked when neither `--model` nor `model` names one.
     pub default_model: &'static str,
+    /// The most requests sent at once when neither `--concurrency` nor
+    /// `concurrency` sets it.
+    pub default_concurrency: u32,
     /// A free request that succeeds only with a valid key and sends no source.
     pub key_check: KeyCheck,
     /// Where to create a key.
@@ -101,6 +104,7 @@ pub const TYPESAFE: Service = Service {
     variable: "TYPESAFE_API_KEY",
     api_root: "https://api.typesafe.ai",
     default_model: crate::options::DEFAULT_MODEL,
+    default_concurrency: crate::options::MAX_CONCURRENCY,
     key_check: KeyCheck {
         url: "https://api.typesafe.ai/v1/models",
         answer: KeyAnswer::Models,
@@ -109,6 +113,16 @@ pub const TYPESAFE: Service = Service {
     credits: "add credits or turn on auto-refill at https://console.typesafe.ai",
     key_prefix: None,
 };
+
+/// Requests sent at once by default with a gateway's key, half of TypeSafe's
+/// 6. Six workers at JevGate's pacing make up to 1,200 requests a minute,
+/// TypeSafe's limit for an account; through a gateway the account is the
+/// gateway's, shared with its other customers. A precaution rather than a
+/// measured fix: on 2026-09-28 OpenRouter answered 503 to about as many
+/// attempts (63%) as TypeSafe's own endpoint did at the time (65%), and its
+/// rounds of a few requests at once fared only a little better (50%, within
+/// noise).
+pub const GATEWAY_CONCURRENCY: u32 = 3;
 
 /// OpenRouter serves TypeSafe's API at `/api/v1/systemone`. `typesafe/jev-1.13`
 /// is its name for the Jev 1.13 line, the nearest to the `jev-1.13.0` whose
@@ -120,6 +134,7 @@ pub const OPENROUTER: Service = Service {
     variable: "OPENROUTER_API_KEY",
     api_root: "https://openrouter.ai/api",
     default_model: "typesafe/jev-1.13",
+    default_concurrency: GATEWAY_CONCURRENCY,
     key_check: KeyCheck {
         url: "https://openrouter.ai/api/v1/key",
         answer: KeyAnswer::Key,
@@ -137,6 +152,7 @@ pub const VERCEL: Service = Service {
     variable: "AI_GATEWAY_API_KEY",
     api_root: "https://ai-gateway.vercel.sh/typesafe",
     default_model: "typesafe-ai/jev",
+    default_concurrency: GATEWAY_CONCURRENCY,
     key_check: KeyCheck {
         url: "https://ai-gateway.vercel.sh/v1/credits",
         answer: KeyAnswer::Credits,

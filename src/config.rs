@@ -27,7 +27,7 @@ pub struct Config {
     pub rules: Rules,
     /// Ceiling on API attempts per invocation; flags can only lower it. Default: unlimited.
     pub max_requests: Option<u32>,
-    /// Ceiling on simultaneous requests; flags can only lower it. JevGate sends at most 6 at once, so a higher value has no effect. Default: 6.
+    /// Most simultaneous requests; flags can only lower it. JevGate sends at most 6 at once, so a higher value means 6. Default: 6 with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key.
     pub concurrency: Option<u32>,
     /// Files larger than this are reported as needs-context, never truncated. Default: 262144.
     pub max_file_bytes: Option<u64>,
@@ -281,7 +281,8 @@ impl ConfigContext {
         }
         if let Some(n) = self.config.concurrency {
             ensure!(n > 0, "Concurrency must be at least 1");
-            args.concurrency = args.concurrency.min(n);
+            let most = crate::options::MAX_CONCURRENCY;
+            args.concurrency = Some(args.concurrency.map_or(n.min(most), |flag| flag.min(n)));
         }
         cap_concurrency(args);
         if let Some(n) = self.config.max_file_bytes {
@@ -298,20 +299,19 @@ impl ConfigContext {
     }
 }
 
-/// Lower a concurrency above [`MAX_CONCURRENCY`] to it, saying so on stderr:
-/// 0.25 accepted `--concurrency` up to 8, and a script valid then keeps
-/// working. Only the flag can be higher: `concurrency` in jevgate.toml is a
-/// ceiling on it, so a higher one there changes nothing and says nothing.
+/// Lower a `--concurrency` above [`MAX_CONCURRENCY`] to it, saying so on
+/// stderr: 0.25 accepted it up to 8, and a script valid then keeps working.
+/// A higher `concurrency` in jevgate.toml, which 0.25 accepted too, is
+/// lowered without a word when the file is read.
 ///
 /// [`MAX_CONCURRENCY`]: crate::options::MAX_CONCURRENCY
 fn cap_concurrency(args: &mut CheckArgs) {
     let most = crate::options::MAX_CONCURRENCY;
-    if args.concurrency > most {
+    if let Some(asked) = args.concurrency.filter(|n| *n > most) {
         note!(
-            "jevgate: concurrency {} lowered to {most}, the most requests JevGate sends at once",
-            args.concurrency
+            "jevgate: concurrency {asked} lowered to {most}, the most requests JevGate sends at once"
         );
-        args.concurrency = most;
+        args.concurrency = Some(most);
     }
 }
 
@@ -413,16 +413,21 @@ mod tests {
     use super::*;
     use crate::options::FailOnSpec;
 
+    /// The configuration `toml_text` holds, in the working directory.
+    fn context(toml_text: &str) -> Result<ConfigContext> {
+        Ok(ConfigContext {
+            invocation_dir: PathBuf::from("."),
+            root: PathBuf::from("."),
+            config: toml::from_str(toml_text)?,
+        })
+    }
+
     fn configured(
         toml_text: &str,
         rules: &[&str],
         specs: &[(Option<&str>, FailOn)],
     ) -> Result<CheckArgs> {
-        let context = ConfigContext {
-            invocation_dir: PathBuf::from("."),
-            root: PathBuf::from("."),
-            config: toml::from_str(toml_text)?,
-        };
+        let context = context(toml_text)?;
         let mut args = crate::tests::args();
         args.rules = rules.iter().map(|r| r.to_string()).collect();
         args.fail_on.clear();
@@ -610,15 +615,10 @@ mod tests {
             (args.model(), args.cache_ttl_secs(), args.include_tests),
             ("jev-latest", 60, true)
         );
-        let context = ConfigContext {
-            invocation_dir: PathBuf::from("."),
-            root: PathBuf::from("."),
-            config: toml::from_str(file).unwrap(),
-        };
         let mut args = crate::tests::args();
         args.model = Some("jev-preview".into());
         args.cache_ttl_secs = Some(5);
-        context.configure(&mut args).unwrap();
+        context(file).unwrap().configure(&mut args).unwrap();
         assert_eq!((args.model(), args.cache_ttl_secs()), ("jev-preview", 5));
         let defaults = configured("", &[], &[]).unwrap();
         assert_eq!(defaults.model(), crate::options::DEFAULT_MODEL);
@@ -639,25 +639,35 @@ mod tests {
     }
 
     #[test]
-    fn concurrency_is_at_most_six_and_the_file_can_only_lower_it() {
-        assert_eq!(configured("", &[], &[]).unwrap().concurrency, 6);
-        assert_eq!(
-            configured("concurrency = 2", &[], &[]).unwrap().concurrency,
-            2
-        );
-        for valid_in_0_25 in ["concurrency = 7", "concurrency = 8"] {
-            let args = configured(valid_in_0_25, &[], &[]).unwrap();
-            assert_eq!(args.concurrency, 6, "{valid_in_0_25} leaves the default");
-        }
-        assert!(configured("concurrency = 0", &[], &[]).is_err());
-        let context = ConfigContext {
-            invocation_dir: PathBuf::from("."),
-            root: PathBuf::from("."),
-            config: toml::from_str("concurrency = 8").unwrap(),
+    fn concurrency_follows_the_key_unless_set_and_is_at_most_six() {
+        use crate::provider::Provider;
+        // As a check runs: the configuration first, then the key's provider.
+        let concurrency = |file: &str, flag: Option<u32>, provider| -> Result<u32> {
+            let mut args = crate::tests::args();
+            args.concurrency = flag;
+            context(file)?.configure(&mut args)?;
+            args.provider = provider;
+            Ok(args.concurrency())
         };
-        let mut flagged = crate::tests::args();
-        flagged.concurrency = 8;
-        context.configure(&mut flagged).unwrap();
-        assert_eq!(flagged.concurrency, 6, "--concurrency 8 is lowered to 6");
+        for (provider, default) in [
+            (Provider::Typesafe, 6),
+            (Provider::Openrouter, 3),
+            (Provider::Vercel, 3),
+        ] {
+            let set = |file, flag| concurrency(file, flag, provider).unwrap();
+            assert_eq!(set("", None), default, "{provider:?}");
+            assert_eq!(set("concurrency = 5", None), 5, "the file sets it");
+            assert_eq!(set("", Some(4)), 4, "the flag sets it");
+            assert_eq!(set("concurrency = 2", Some(5)), 2, "the file caps the flag");
+            for valid_in_0_25 in ["concurrency = 7", "concurrency = 8"] {
+                assert_eq!(set(valid_in_0_25, None), 6, "{valid_in_0_25} means 6");
+            }
+            assert_eq!(
+                set("concurrency = 8", Some(8)),
+                6,
+                "--concurrency 8 is lowered"
+            );
+        }
+        assert!(concurrency("concurrency = 0", None, Provider::Typesafe).is_err());
     }
 }

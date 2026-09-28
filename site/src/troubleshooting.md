@@ -36,7 +36,7 @@ A provider error ends with the provider's request id when it sent one (`; reques
 **`Another JevGate session owns latest.json`**
 : Another `check` or `--watch` is running in the same repository. Stop it first.
 
-Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts before the run gives up, waiting as long as the provider asks (`retry-after-ms`, or `Retry-After` in seconds or as a date, at most 30 seconds). An attempt that has not answered within 20 seconds, or whose connection drops, is retried once. Requests start at least 50 ms apart, within TypeSafe's limit of 1,200 a minute.
+Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–524, 529) are retried up to four attempts before the run gives up, waiting as long as the provider asks (`retry-after-ms`, or `Retry-After` in seconds or as a date, at most 30 seconds). An attempt that has not answered within 20 seconds, or whose connection drops, is retried once. Requests start at least 50 ms apart, within TypeSafe's limit of 1,200 a minute, and at most 6 are sent at once with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key (`--concurrency` or `concurrency` sets it).
 
 ## Many files are uncertain
 
