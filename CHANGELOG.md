@@ -4,7 +4,7 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
-- Releases publish the npm package, `@tech-byte-frontier/jevgate`, from the release workflow through npm's trusted publishing: no token, and npm shows the package's provenance. 0.30.0's was published by hand.
+- Releases stage the npm package, `@tech-byte-frontier/jevgate`, from the release workflow through npm's trusted publishing, with no token and with provenance; each version goes live when the maintainer approves it on npmjs.com. 0.30.0's was published by hand.
 
 ## [0.30.0] - 2026-09-28
 
