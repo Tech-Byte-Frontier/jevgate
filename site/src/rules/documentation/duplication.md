@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says one section states everything another states, or that two sections give different values or instructions for the same thing. It is right when two documents disagree about a command or a version, or when a copy will drift from the page it repeats. It is wrong when the repetition is what the reader needs where they are: an index entry summarizing the page it links, a pointer to the canonical page, or the template every API reference page follows. Of the 34 findings labeled wrong or debatable so far, 15 were READMEs that repeat the documentation's home page.
+A finding says one section states everything another states, or that two sections give different values or instructions for the same thing. It is right when two documents disagree about a command or a version, or when a copy will drift from the page it repeats. It is wrong when the repetition is what the reader needs where they are: an index entry summarizing the page it links, a pointer to the canonical page, or the template every API reference page follows. Nearly half of the findings labeled wrong or debatable were READMEs that repeat the documentation's home page.
 
 A translation is not a duplicate: two documents in different languages are asked only whether they disagree.
 

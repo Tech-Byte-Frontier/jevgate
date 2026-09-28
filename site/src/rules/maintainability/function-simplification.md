@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a function mixes separate jobs in long blocks, or that its branching hides its main path, and it names the block that would be most useful as a function of its own. It is right when a reader would understand the function faster with that block named: a handler that parses, queries, formats and notifies in one body, or a loop nested four deep around the one line that matters. It is wrong when the length is one job done step by step, or when the nesting follows the shape of the data the code walks. Of the 122 findings labeled wrong or debatable so far outside Bend 2 code, 51 were linear code that a split would only scatter.
+A finding says a function mixes separate jobs in long blocks, or that its branching hides its main path, and it names the block that would be most useful as a function of its own. It is right when a reader would understand the function faster with that block named: a handler that parses, queries, formats and notifies in one body, or a loop nested four deep around the one line that matters. It is wrong when the length is one job done step by step, or when the nesting follows the shape of the data the code walks. More than a third of the findings labeled wrong or debatable outside Bend 2 code were linear code that a split would only scatter.
 
 Splitting a function of 20 lines or fewer is at most a note. In Bend 2, proofs are not asked to be split, and flattening proposes nested patterns instead of guard clauses.
 

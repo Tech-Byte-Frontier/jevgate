@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A law is the part of a Bend 2 specification the compiler checks, and its comment the part a person reads. A finding says the comment above a law promises more than, or something other than, what the law states, so a definition could break the promise while every proof passes. It is right when the comment names a property, a case or a condition the law leaves out: bend-json's `remove_sound` checks a one-entry object under "remove deletes key from object". It is wrong when the law states the comment in other words, or when a sibling law states the rest. Of the 27 findings labeled wrong or debatable so far, 15 were laws stating their comment in other words.
+A law is the part of a Bend 2 specification the compiler checks, and its comment the part a person reads. A finding says the comment above a law promises more than, or something other than, what the law states, so a definition could break the promise while every proof passes. It is right when the comment names a property, a case or a condition the law leaves out: bend-json's `remove_sound` checks a one-entry object under "remove deletes key from object". It is wrong when the law states the comment in other words, or when a sibling law states the rest. More than half of the findings labeled wrong or debatable were laws stating their comment in other words.
 
 The accuracy table leaves Bend 2 projects out, so the rule shows as not measured there. When it shipped in 0.22.0, law findings were right 15 times in 23 on Bend 2 projects never used for tuning.
 

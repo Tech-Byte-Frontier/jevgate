@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a section of an instruction file, which coding agents load at the start of every session, restates what the repository's files show, gives generic advice, repeats what a configured linter checks, or records past work. It is right when an agent would learn the same from the code: the stack, the manifest's commands, a tour of the directories, a changelog kept in `CLAUDE.md`. It is wrong when the section tells agents something the files do not show, or when it is a pointer to a detailed document that costs a few tokens. Of the 15 findings labeled wrong or debatable so far, 9 were sections so short they cost almost nothing.
+A finding says a section of an instruction file, which coding agents load at the start of every session, restates what the repository's files show, gives generic advice, repeats what a configured linter checks, or records past work. It is right when an agent would learn the same from the code: the stack, the manifest's commands, a tour of the directories, a changelog kept in `CLAUDE.md`. It is wrong when the section tells agents something the files do not show, or when it is a pointer to a detailed document that costs a few tokens. Most of the findings labeled wrong or debatable were sections so short they cost almost nothing.
 
 A section of fewer than 15 tokens is a note. Agent-context considers are the one documentation level that fails the check by default once these rules run; 23 of their 24 labels on unseen projects come from the maintainer's own repositories.
 

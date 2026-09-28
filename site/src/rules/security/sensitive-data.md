@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a function writes a password, token, key or personal data to a log, or sends internal error details to a remote client. It is right when a secret reaches a log, or when the text of a database or library error reaches someone outside the service, such as an API that returns an exception's message to its users. It is wrong when only the operator or the person running the program reads the output, when the error text is a message the program wrote itself, or when the caller is the project's own service. Of the 126 findings labeled wrong or debatable so far outside Bend 2 code, 23 were read only by a local user, 20 were messages the program wrote and 16 went to the project's own services.
+A finding says a function writes a password, token, key or personal data to a log, or sends internal error details to a remote client. It is right when a secret reaches a log, or when the text of a database or library error reaches someone outside the service, such as an API that returns an exception's message to its users. It is wrong when only the operator or the person running the program reads the output, when the error text is a message the program wrote itself, or when the caller is the project's own service. The commonest causes of findings labeled wrong or debatable were output only a local user reads, messages the program wrote itself, and callers that are the project's own services.
 
 An error-detail finding is asked who reads the error text, with the opening of the root README, and a log line that runs only when an operator turns on a setting meant for logging those values is a note.
 

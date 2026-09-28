@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says two or more tests check the same behavior, with equivalent inputs (one of them adds nothing) or with different ones (one parameterized test could hold them). It is right when the tests run the same code with inputs that make no difference to it. It is wrong when each test checks something the other does not: another code path, such as the synchronous and asynchronous clients, a different public function, or another variant of a protocol. Of the 31 findings labeled wrong or debatable so far outside Bend 2 code, 8 covered distinct behavior and 7 different public functions.
+A finding says two or more tests check the same behavior, with equivalent inputs (one of them adds nothing) or with different ones (one parameterized test could hold them). It is right when the tests run the same code with inputs that make no difference to it. It is wrong when each test checks something the other does not: another code path, such as the synchronous and asynchronous clients, a different public function, or another variant of a protocol. About half of the findings labeled wrong or debatable covered distinct behaviors or different public functions.
 
 A pair that would be a review is first asked whether each test checks something the other does not. A pair on its own is at most a note; three or more tests linked by such pairs are one consider.
 

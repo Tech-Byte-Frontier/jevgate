@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a value another party controls reaches the text of a query, command, code, markup, file path, requested URL or redirect target, or a deserializer, without being bound, escaped or checked. It is right when a request, a cookie or another user's record can reach that text: SQL built from a form field, a shell command from a query parameter, a template writing a cookie unescaped. It is wrong when the value is the program's own, such as a fixed clause or an id its type parses, or when the person sending it may run that text anyway. Of the 86 findings labeled wrong or debatable so far outside Bend 2 code, 34 were values the server controls.
+A finding says a value another party controls reaches the text of a query, command, code, markup, file path, requested URL or redirect target, or a deserializer, without being bound, escaped or checked. It is right when a request, a cookie or another user's record can reach that text: SQL built from a form field, a shell command from a query parameter, a template writing a cookie unescaped. It is wrong when the value is the program's own, such as a fixed clause or an id its type parses, or when the person sending it may run that text anyway. About two in five of the findings labeled wrong or debatable were values the server controls.
 
 Query, command, code, markup and path findings are asked, after the first pass, what their values can hold where they enter the text: values the program fixes, parses or escaped before make them notes.
 

@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a value written in the code changes between deployments, needs a descriptive name, or special-cases one identity. It is right for a production host, a customer id or a price written where configuration belongs, or for a number whose meaning a reader must guess. It is wrong when the code around the value already says what it is: the argument it fills, the function or variable it is assigned to, or a comment beside it. Of the 331 findings labeled wrong or debatable so far outside Bend 2 code, 111 were values whose meaning was clear from their context.
+A finding says a value written in the code changes between deployments, needs a descriptive name, or special-cases one identity. It is right for a production host, a customer id or a price written where configuration belongs, or for a number whose meaning a reader must guess. It is wrong when the code around the value already says what it is: the argument it fills, the function or variable it is assigned to, or a comment beside it. A third of the findings labeled wrong or debatable outside Bend 2 code were values whose meaning was clear from their context.
 
 The rule is opt-in since 0.26: on projects JevGate was never tuned on, 6 of its 37 labeled findings were right. A value that only needs a name is at most a consider, and a note when its file writes it once. A value said to change between deployments is asked where it would differ, and one that is the same wherever the program runs is a note.
 

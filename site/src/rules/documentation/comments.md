@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a comment only repeats its code, holds sentences that add nothing, narrates an edit instead of describing the code as it is, or is code turned off. It is right for `# Create skill directory` above `skill_dir.mkdir(…)`, or a docstring saying a module was split out to stay under a line budget. It is wrong when the comment heads a step of a long function, gives a reason, or, in a teaching project, is the lesson itself. Of the 101 findings labeled wrong or debatable so far outside Bend 2 code, 33 were step headings.
+A finding says a comment only repeats its code, holds sentences that add nothing, narrates an edit instead of describing the code as it is, or is code turned off. It is right for `# Create skill directory` above `skill_dir.mkdir(…)`, or a docstring saying a module was split out to stay under a line budget. It is wrong when the comment heads a step of a long function, gives a reason, or, in a teaching project, is the lesson itself. A third of the findings labeled wrong or debatable outside Bend 2 code were step headings.
 
 A comment still undecided once its kind is asked leans on the kind, and the comments of one definition that span fewer than three lines in all are a note.
 

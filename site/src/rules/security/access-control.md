@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a SQL policy, SECURITY DEFINER function or grant lets users reach other users' rows, or that a SpacetimeDB table, view or reducer exposes or changes other users' data without checking the caller. It is right for a policy that trusts `user_metadata`, a SECURITY DEFINER function every role may call that deletes any stored file, or a grant that opens writes to every user. It is wrong when the rows are ones their owners chose to share, or when the function answers only what every user may read already. Of the 18 findings labeled wrong or debatable so far, 12 were policies showing rows their owners marked shared.
+A finding says a SQL policy, SECURITY DEFINER function or grant lets users reach other users' rows, or that a SpacetimeDB table, view or reducer exposes or changes other users' data without checking the caller. It is right for a policy that trusts `user_metadata`, a SECURITY DEFINER function every role may call that deletes any stored file, or a grant that opens writes to every user. It is wrong when the rows are ones their owners chose to share, or when the function answers only what every user may read already. Two thirds of the findings labeled wrong or debatable were policies showing rows their owners marked shared.
 
 The rule has no labels on projects JevGate was never tuned on, so its levels cannot be measured yet.
 

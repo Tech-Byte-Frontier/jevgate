@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says code turns off a security check or chooses a weak setting. It is right when a real connection accepts any certificate, passwords are kept with a fast hash, a session cookie is sent without its flags, or a secret is built into browser code. It is wrong when the weak setting is an option a caller or operator must ask for, when the value is no secret, or when the check it names protects nothing there, such as a CSRF exemption on a view that changes no data. Of the 49 findings labeled wrong or debatable so far outside Bend 2 code, 7 were CSRF exemptions on views that change nothing and 6 were plain connections inside a cluster by design.
+A finding says code turns off a security check or chooses a weak setting. It is right when a real connection accepts any certificate, passwords are kept with a fast hash, a session cookie is sent without its flags, or a secret is built into browser code. It is wrong when the weak setting is an option a caller or operator must ask for, when the value is no secret, or when the check it names protects nothing there, such as a CSRF exemption on a view that changes no data. The commonest causes of findings labeled wrong or debatable were CSRF exemptions on views that change nothing and plain connections inside a cluster by design.
 
 A password or token finding stays a review only when the function itself hashes with a fast hash or turns verification off; otherwise, since a callee or the platform may do it, it is a consider.
 

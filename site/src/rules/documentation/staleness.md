@@ -8,4 +8,4 @@ A finding says a document is a plan whose work is finished, or that a section te
 
 ## Findings it got wrong
 
-16 of the 17 findings labeled so far were right. The one labeled wrong is in one of the maintainer's own repositories, which these pages do not quote, so there is no example here.
+All but one of its labeled findings were right, and the one labeled wrong is in one of the maintainer's own repositories, which these pages do not quote, so there is no example here.

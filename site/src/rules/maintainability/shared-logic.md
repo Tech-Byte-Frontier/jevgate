@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says two or more places perform the same steps for the same purpose, so one shared implementation would serve them. It is right when the copies would change together: the same validation in two handlers, or a parser written twice, where a fix to one belongs in the other. It is wrong when the copies are setup that a framework or a test needs in each place, when their differences are the point, or when the shared lines are too few to be worth a function. Of the 443 findings labeled wrong or debatable so far outside Bend 2 code, 89 were spans too small to share and 48 were steps each test case writes out.
+A finding says two or more places perform the same steps for the same purpose, so one shared implementation would serve them. It is right when the copies would change together: the same validation in two handlers, or a parser written twice, where a fix to one belongs in the other. It is wrong when the copies are setup that a framework or a test needs in each place, when their differences are the point, or when the shared lines are too few to be worth a function. About a fifth of the findings labeled wrong or debatable outside Bend 2 code were spans too small to share, and steps each test case writes out were the next commonest cause.
 
 Short copies between test cases are notes, copies in test fixtures and helpers are at most a consider, and copies in code marked deprecated are not compared.
 

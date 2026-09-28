@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a long document would be easier to find and maintain split by subject, or that it mainly records past work. It is right for a runbook that holds unrelated subjects, or a finished plan kept among the living documents. It is wrong for one long guide or reference written for one reader, such as a contributing guide. Of the 11 findings labeled wrong so far, 4 were plans covering one release, which read as several subjects from their headings.
+A finding says a long document would be easier to find and maintain split by subject, or that it mainly records past work. It is right for a runbook that holds unrelated subjects, or a finished plan kept among the living documents. It is wrong for one long guide or reference written for one reader, such as a contributing guide. More than a third of the findings labeled wrong were plans covering one release, which read as several subjects from their headings.
 
 A document is judged from its headings alone, and a split finding is asked what kind of document it is: a kind that serves one subject clears it.
 

@@ -4,7 +4,7 @@
 
 ## When a finding is right
 
-A finding says a test checks only its mocks, computes its expected value with the logic it tests, asserts internal details instead of observable results, or mixes unrelated behaviors. It is right when the test would pass whatever the code did: it asserts the value its mock returns, or builds its expected value by calling the code under test. It is wrong when what the test reads is behavior a caller can observe: a panel's recorded output, a framework's documented hook, or the state the program acts on next. Of the 81 findings labeled wrong or debatable so far outside Bend 2 code, 37 read state that is the observable behavior and 15 checked a callback that is part of the public interface.
+A finding says a test checks only its mocks, computes its expected value with the logic it tests, asserts internal details instead of observable results, or mixes unrelated behaviors. It is right when the test would pass whatever the code did: it asserts the value its mock returns, or builds its expected value by calling the code under test. It is wrong when what the test reads is behavior a caller can observe: a panel's recorded output, a framework's documented hook, or the state the program acts on next. Nearly half of the findings labeled wrong or debatable read state that is the observable behavior, and about a fifth checked a callback that is part of the public interface.
 
 A test said to assert internal details is asked, with the bodies of the functions it calls, what its assertions read: results, state the program shows or acts on next, or effects a caller observes clear it.
 
