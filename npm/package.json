@@ -1,6 +1,6 @@
 {
   "name": "@tech-byte-frontier/jevgate",
-  "version": "0.25.0",
+  "version": "0.30.0",
   "description": "JevGate, the code-review gate for CI and coding agents: this package downloads the matching release binary, checks its SHA-256, caches it and runs it",
   "keywords": [
     "code-review",
