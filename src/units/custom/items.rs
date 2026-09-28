@@ -184,7 +184,11 @@ pub(super) fn changed(file: &FileContext<'_>, hunks: &[Hunk]) -> Vec<Item> {
             ]);
             Item {
                 state,
-                name: format!("lines {label}"),
+                name: if hunk.start == hunk.end {
+                    format!("line {label}")
+                } else {
+                    format!("lines {label}")
+                },
                 id,
                 location: file.location(hunk.start, hunk.end, None),
                 lines: hunk.end + 1 - hunk.start,

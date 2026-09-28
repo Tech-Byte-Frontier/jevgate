@@ -438,6 +438,8 @@ paths = ["**/*.rs", "**/*.kt"]
         [(21, 21)],
         "the changed line, not its context"
     );
+    assert_eq!(custom_units(&plan, "lib.rs")[0].name, "line 21");
+    assert_eq!(custom_units(&plan, "fresh.rs")[0].name, "lines 1–3");
     assert_eq!(
         hunks("renamed.kt"),
         [(11, 11)],
