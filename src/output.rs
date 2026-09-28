@@ -655,9 +655,13 @@ fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result
         return Ok(());
     }
     let files = report.files.iter().filter(|f| !f.left_out.is_empty());
+    let judged = match report.scope {
+        Scope::ChangedLines => "the code the change touched, the rest of it judged",
+        Scope::WholeFiles => "the code, the rest of each file judged",
+    };
     writeln!(
         out,
-        "\nLeft out where the parser could not read the code, the rest of each file judged: {} in {}.",
+        "\nLeft out where the parser could not read {judged}: {} in {}.",
         count(entries.len(), "unit"),
         count(files.count(), "file")
     )?;

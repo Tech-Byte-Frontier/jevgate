@@ -179,7 +179,9 @@ pub fn plan(
 /// for nor reported. A unit stays when one of its locations lies on lines
 /// the change touched in that location's file: a copy pair stays when
 /// either copy changed, and a copy in a file the check did not select is
-/// unchanged. Units of a file judged whole all stay.
+/// unchanged. Units of a file judged whole all stay. So does only the code
+/// the parser could not read where the change touched it: a grammar gap in
+/// a function the change left alone was named on every change to its file.
 fn keep_changed(inputs: &[Input], plan: &mut Plan) {
     let changes: BTreeMap<&Path, Option<&crate::revision::FileChange>> = inputs
         .iter()
@@ -192,11 +194,13 @@ fn keep_changed(inputs: &[Input], plan: &mut Plan) {
     };
     let mut kept = BTreeMap::<usize, std::collections::BTreeSet<String>>::new();
     for (&owner, file) in &mut plan.files {
-        if inputs[owner].changed.is_none() {
+        let Some(change) = &inputs[owner].changed else {
             continue;
-        }
+        };
         file.units
             .retain(|unit| chosen_when_planned(unit) || unit.locations.iter().any(touched));
+        file.left_out
+            .retain(|code| change.lines.touch(code.start_line, code.end_line));
         kept.insert(owner, file.units.iter().map(|u| u.id.clone()).collect());
     }
     plan.requests.retain(|request| {

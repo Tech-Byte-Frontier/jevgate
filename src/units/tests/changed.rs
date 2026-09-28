@@ -66,6 +66,46 @@ fn only_the_functions_a_change_touched_are_asked_and_reported() {
 }
 
 #[test]
+fn a_change_names_only_the_code_it_touched_that_the_parser_could_not_read() {
+    // tree-sitter-rust reads snapbox's `str![…]` as the type `str`, so `f3`
+    // is left out wherever the change falls.
+    let file = |edited: &[&str]| {
+        functions_file(&NAMES, edited).replacen(
+            "fn f3(values: &[i32]) -> i32 {\n    let mut total = 0;",
+            "fn f3(values: &[i32]) -> i32 {\n    let mut total = str![[\"x\"]].len() as i32;",
+            1,
+        )
+    };
+    let project = Project::new();
+    project.write("lib.rs", &file(&[]));
+    project.commit_all();
+    project.write("lib.rs", &file(&["f5"]));
+    let options = since("HEAD", &[catalog::FUNCTION_SIMPLIFICATION]);
+    let (_, plan) = planned(&project, &options);
+    assert_eq!(packed(&plan, "functions"), [["f5"]]);
+    assert!(
+        plan.files[&0].left_out.is_empty(),
+        "{:?}",
+        plan.files[&0].left_out
+    );
+    project.write("lib.rs", &file(&["f3", "f5"]));
+    let report = run(&project, &options, &mut scripted(0));
+    let left_out: Vec<&str> = report.files[0]
+        .left_out
+        .iter()
+        .map(|l| l.unit.as_str())
+        .collect();
+    assert_eq!(left_out, ["f3"]);
+    let mut out = Vec::new();
+    crate::output::agent(&mut out, &report, false, crate::output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("\nLeft out where the parser could not read the code the change touched, the rest of it judged: 1 unit in 1 file.\n  lib.rs:25 f3: The Rust parser could not read line 26.\n"),
+        "{text}"
+    );
+}
+
+#[test]
 fn lines_removed_inside_a_function_touch_it() {
     let project = Project::new();
     let source = format!("{}{}", function("f0"), long_function("f1"));
