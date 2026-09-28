@@ -153,6 +153,66 @@ fn an_edit_gets_its_findings_as_context_and_never_blocks() {
     assert_eq!(send(&project, &host, outside), json!({}));
 }
 
+/// A Kotlin function longer than twenty lines, as `long_function` is in
+/// Rust: a review at level 2.
+fn long_kotlin_function(name: &str) -> String {
+    let body: String = [
+        "var total = 0",
+        "for (value in values) {",
+        "    total += value",
+        "}",
+    ]
+    .iter()
+    .chain(&[
+        "var largest = Int.MIN_VALUE",
+        "for (value in values) {",
+        "    if (value > largest) {",
+        "        largest = value",
+        "    }",
+        "}",
+        "var smallest = Int.MAX_VALUE",
+        "for (value in values) {",
+        "    if (value < smallest) {",
+        "        smallest = value",
+        "    }",
+        "}",
+        "val spread = largest - smallest",
+        "val doubled = total * 2",
+        "return doubled + spread + 1",
+    ])
+    .map(|line| format!("    {line}\n"))
+    .collect();
+    format!("fun {name}(values: List<Int>): Int {{\n{body}}}\n")
+}
+
+#[test]
+fn an_edit_to_a_preview_language_s_file_is_checked_and_its_findings_never_block() {
+    let project = repository();
+    let host = reviewing();
+    send(&project, &host, prompt("add pricing"));
+    project.write("src/Shop.kt", &long_kotlin_function("spread"));
+    let reply = send(&project, &host, edit(&project, "src/Shop.kt"));
+    let text = context(&reply);
+    assert!(
+        text.starts_with("JevGate reviewed src/Shop.kt after this edit: 1 finding, none fails the quality gate.\n- src/Shop.kt:1 review maintainability/function-simplification: "),
+        "{text}"
+    );
+    assert!(
+        text.contains(" Not yet measured in Kotlin. Next: ")
+            && text.ends_with("None of them blocks the end of the turn."),
+        "{text}"
+    );
+    assert!(
+        send(&project, &host, stop(false)).get("decision").is_none(),
+        "Kotlin is in preview: its reviews do not fail the default gate"
+    );
+    // The same review in Rust fails it and keeps the agent working.
+    send(&project, &host, prompt("port it"));
+    project.write("lib.rs", &long_function("spread"));
+    send(&project, &host, edit(&project, "lib.rs"));
+    assert_eq!(send(&project, &host, stop(false))["decision"], "block");
+}
+
 #[test]
 fn a_baseline_is_not_replaced_by_the_few_files_a_hook_checked() {
     let project = repository();
