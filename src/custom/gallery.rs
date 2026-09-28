@@ -91,6 +91,9 @@ pub fn run(root: &Path, names: &[String], force: bool) -> Result<u8> {
     {
         note!("{warning}");
     }
+    for (question, _) in added.iter().filter(|(q, _)| config.leaves_out(&q.rule)) {
+        note!("{}", Config::unlisted_note(&question.rule));
+    }
     say!(
         "Commit {DIRECTORY}/. Each question fails the gate at its level; `--fail-on custom=report` reports without failing while you try them."
     );

@@ -63,6 +63,35 @@ impl Config {
         }
         Ok(config)
     }
+
+    /// Whether the `rules` list leaves out the custom question `rule`: a
+    /// list that names neither it nor a group holding it (`custom`,
+    /// `default` or `all`). A table of levels keeps every question it does
+    /// not turn off.
+    pub fn leaves_out(&self, rule: &str) -> bool {
+        let holding = [
+            rule,
+            catalog::CUSTOM_GROUP,
+            catalog::DEFAULT_GROUP,
+            catalog::ALL_GROUP,
+        ];
+        match &self.rules {
+            Rules::List(names) if !names.is_empty() => {
+                !names.iter().any(|name| holding.contains(&name.as_str()))
+            }
+            _ => false,
+        }
+    }
+
+    /// The note for a custom question `rule` the `rules` list leaves out,
+    /// which no check asks until the list names it.
+    pub fn unlisted_note(rule: &str) -> String {
+        format!(
+            "jevgate: {rule} is not asked: the `rules` list in {} leaves it out; add \"{}\" to it",
+            crate::init::CONFIG_FILE,
+            catalog::CUSTOM_GROUP
+        )
+    }
 }
 
 /// `[[scope]]`: gate levels for the files `paths` match. `fail_on` applies to
@@ -219,13 +248,25 @@ impl ConfigContext {
     /// less `off` entries and `--skip-rule`. Every name must exist.
     fn configure_rules(&self, args: &mut CheckArgs) -> Result<()> {
         let rules = self.rules();
-        let mut enabled = if args.rules.is_empty() {
+        let from_file = args.rules.is_empty();
+        let mut enabled = if from_file {
             configured_rules(&rules, &self.config.rules)?
         } else {
             expand(&rules, &args.rules)?.into_iter().collect()
         };
-        for skipped in expand(&rules, &args.skip_rules)? {
-            enabled.remove(skipped);
+        let skipped = expand(&rules, &args.skip_rules)?;
+        for rule in &skipped {
+            enabled.remove(rule);
+        }
+        if from_file {
+            // A question someone committed goes unasked only when they say so.
+            let unlisted = self
+                .questions
+                .iter()
+                .filter(|q| self.config.leaves_out(&q.rule) && !skipped.contains(&q.rule.as_str()));
+            for question in unlisted {
+                note!("{}", Config::unlisted_note(&question.rule));
+            }
         }
         args.rules = rules
             .iter()

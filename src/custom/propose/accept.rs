@@ -4,7 +4,7 @@
 //! any is moved.
 use super::PROPOSALS;
 use crate::{
-    config::ConfigContext,
+    config::{Config, ConfigContext},
     custom::{self, Kind, Question},
     schema::Strength,
 };
@@ -54,6 +54,9 @@ pub fn accept(ids: &[String], context: &ConfigContext) -> Result<u8> {
         let file = Path::new(custom::DIRECTORY).join(format!("{}.toml", question.id()));
         if let Some(warning) = custom::ignored(root, &file) {
             note!("{warning}");
+        }
+        if context.config.leaves_out(&question.rule) {
+            note!("{}", Config::unlisted_note(&question.rule));
         }
     }
     Ok(0)

@@ -235,3 +235,36 @@ fn an_invalid_example_stops_every_command_and_an_unaskable_one_the_test() {
         "an example that holds no unit never stops a check"
     );
 }
+
+#[test]
+fn a_question_the_rules_list_leaves_out_is_named_as_unasked() {
+    let project = with_questions(&[("body-logs", BODY_LOGS)]);
+    let stderr = |project: &Project, args: &[&str]| {
+        let output = project.command().args(args).output().unwrap();
+        assert!(output.status.success(), "{args:?}");
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    let note = "custom/body-logs is not asked: the `rules` list in jevgate.toml leaves it out; add \"custom\" to it";
+    std::fs::write(
+        project.0.join("jevgate.toml"),
+        "rules = [\"maintainability\"]\n",
+    )
+    .unwrap();
+    assert!(stderr(&project, &["check", "--dry-run"]).contains(note));
+    let named = ["check", "--dry-run", "--rule", "maintainability"];
+    assert!(
+        !stderr(&project, &named).contains(note),
+        "chosen on the command line"
+    );
+    let skipped = ["check", "--dry-run", "--skip-rule", "custom/body-logs"];
+    assert!(
+        !stderr(&project, &skipped).contains(note),
+        "left out on purpose"
+    );
+    let listed = "rules = [\"maintainability\", \"custom\"]\n";
+    std::fs::write(project.0.join("jevgate.toml"), listed).unwrap();
+    assert!(!stderr(&project, &["check", "--dry-run"]).contains(note));
+    std::fs::write(project.0.join("jevgate.toml"), "rules = [\"security\"]\n").unwrap();
+    let added = stderr(&project, &["rules", "add", "n-plus-one"]);
+    assert!(added.contains("custom/n-plus-one is not asked"), "{added}");
+}
