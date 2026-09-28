@@ -578,7 +578,7 @@ fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result
     if entries.len() > shown {
         writeln!(
             out,
-            "  … {} more; --verbose lists all.",
+            "  … {} more; --verbose shows all.",
             entries.len() - shown
         )?;
     }

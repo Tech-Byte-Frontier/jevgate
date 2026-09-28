@@ -84,7 +84,7 @@ fn a_partly_broken_file_is_judged_for_its_intact_units_and_names_the_rest() {
         "{}",
         text(&report, false)
     );
-    // Ten are listed; `--verbose` lists them all.
+    // Ten are listed; `--verbose` shows them all.
     let entry = report.files[0].left_out[0].clone();
     report.files[0].left_out = (1..=12)
         .map(|line| schema::LeftOut {
@@ -97,7 +97,7 @@ fn a_partly_broken_file_is_judged_for_its_intact_units_and_names_the_rest() {
     let short = text(&report, false);
     assert!(short.contains("  lib.rs:10 line 10: ") && !short.contains("lib.rs:11 "));
     assert!(
-        short.contains("  … 2 more; --verbose lists all.\n"),
+        short.contains("  … 2 more; --verbose shows all.\n"),
         "{short}"
     );
     assert!(text(&report, true).contains("  lib.rs:12 line 12: "));

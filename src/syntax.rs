@@ -301,10 +301,10 @@ fn without_tags(source: &str, server: bool) -> String {
 /// continuation, tree-sitter-rust reads snapbox's `str![…]` as the type
 /// `str` (one error in each of 12 mdbook test files), and tree-sitter-bend2
 /// lacks Bend 2's erased binders (`for ~a: T`) and typed lets.
-pub(crate) fn error_regions(root: Node<'_>) -> Vec<Range<usize>> {
+pub(crate) fn error_regions(node: Node<'_>) -> Vec<Range<usize>> {
     let mut regions = Vec::new();
-    if root.has_error() {
-        holding_errors(root, &mut regions);
+    if node.has_error() {
+        holding_errors(node, &mut regions);
     }
     regions
 }
