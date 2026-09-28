@@ -194,12 +194,9 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         }
     };
     // Whether errors are tolerable depends on the path, not only the source.
+    let root = tree.root_node();
     ensure!(
-        if template(path, source) && !server_template {
-            !tree.root_node().has_error()
-        } else {
-            !tree.root_node().is_error()
-        },
+        !root.is_error() && !(root.has_error() && !server_template && template(path, source, root)),
         "Syntax errors: semantic evaluation was not attempted"
     );
     Ok(Some(tree))
@@ -222,13 +219,30 @@ fn parse_in_time(parser: &mut Parser, text: &str) -> Option<Tree> {
 }
 
 /// A generator template, whose placeholders are no syntax of its language:
-/// a file under a `templates` directory, or one holding ERB tags (`<%=`)
-/// or `dotnet new` conditions (`//#if`). Its parse errors keep it unjudged.
-fn template(path: &Path, source: &str) -> bool {
+/// a file under a `templates` directory, one holding `dotnet new`
+/// conditions (`//#if`), or one holding an ERB tag (`<%`) in its code
+/// rather than in a string or comment. A C format such as `"<%d>"` is no
+/// tag: suckless st's `x.c`, 70 intact functions and one macro the C grammar
+/// cannot read, was skipped whole for one. Its parse errors keep it unjudged.
+fn template(path: &Path, source: &str, root: Node<'_>) -> bool {
     path.iter()
         .any(|part| matches!(part.to_str(), Some("templates" | "template")))
-        || source.contains("<%")
         || source.contains("//#if")
+        || source
+            .match_indices("<%")
+            .any(|(at, tag)| !in_text(root, at..at + tag.len()))
+}
+
+/// Whether `bytes` lie in a string, a heredoc or a comment.
+fn in_text(root: Node<'_>, bytes: Range<usize>) -> bool {
+    std::iter::successors(
+        root.descendant_for_byte_range(bytes.start, bytes.end),
+        Node::parent,
+    )
+    .any(|node| {
+        let kind = node.kind();
+        crate::analysis::is_comment(node) || kind.contains("string") || kind.contains("heredoc")
+    })
 }
 
 /// A file of a project template such as a cookiecutter's, under a directory
@@ -353,6 +367,18 @@ mod tests {
                 .has_error(),
             "outside a template its tags are syntax errors"
         );
+    }
+
+    #[test]
+    fn an_erb_tag_is_one_in_code_and_not_in_a_string_or_a_comment() {
+        // A function, and a `main` whose argument macros the C grammar
+        // cannot read (suckless st's `ARGBEGIN`); `"<%d>"` is a format.
+        let c = "int twice(int x) {\n    return x * 2;\n}\n\nint main(int argc, char *argv[]) {\n    ARGBEGIN {\n    default:\n        usage();\n    } ARGEND;\n    printf(\"<%d>\\n\", twice(argc));\n    return 0;\n}\n";
+        let path = Path::new("x.c");
+        assert!(parse(path, c).unwrap().unwrap().root_node().has_error());
+        assert!(parse(path, &format!("/* <%= banner %> */\n{c}")).is_ok());
+        // In code, a tag is a generator template's placeholder.
+        assert!(parse(path, &format!("int <%= name %>(void);\n{c}")).is_err());
     }
 
     #[test]

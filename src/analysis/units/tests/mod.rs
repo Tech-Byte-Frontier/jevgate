@@ -125,9 +125,10 @@ fn a_grammar_gap_leaves_the_rest_of_a_file_to_judge() {
         .map(|u| u.name)
         .collect();
     assert_eq!(names, ["other"]);
-    // A generator template's placeholders keep it unjudged.
+    // A generator template's placeholders keep it unjudged: under a
+    // templates directory, or an ERB tag in its code.
     assert!(parse(Path::new("lib/templates/store.ts"), SIGNATURES).is_err());
-    let erb = format!("// <%= banner %>\n{SIGNATURES}");
+    let erb = format!("export const <%= name %> = 1\n{SIGNATURES}");
     assert!(parse(Path::new("store.ts"), &erb).is_err());
 }
 
