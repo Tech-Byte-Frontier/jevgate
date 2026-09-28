@@ -17,8 +17,8 @@ pub struct Session<'a> {
     pub store: &'a Store,
     pub evaluator: &'a mut dyn Evaluator,
     pub requests: u32,
-    pub paid_input_tokens: u64,
-    pub paid_output_tokens: u64,
+    /// What this invocation's requests were billed.
+    pub paid: crate::requests::Usage,
     pub budget: TokenBudget,
     /// Uploaded bytes and billed input tokens of fresh requests, for calibration.
     pub observed: (u64, u64),
@@ -104,6 +104,9 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         concurrency: args.concurrency,
         paid_input_tokens: 0,
         paid_output_tokens: 0,
+        paid_models: BTreeMap::new(),
+        unmetered_requests: 0,
+        estimated_usd: Some(0.0),
         stages: BTreeMap::new(),
         settled: false,
         files,
@@ -387,8 +390,11 @@ impl Session<'_> {
 
     fn progress(&self, report: &mut Report) -> Result<()> {
         report.api_requests = self.requests;
-        report.paid_input_tokens = self.paid_input_tokens;
-        report.paid_output_tokens = self.paid_output_tokens;
+        report.paid_input_tokens = self.paid.input_tokens;
+        report.paid_output_tokens = self.paid.output_tokens;
+        report.paid_models = self.paid.models.clone();
+        report.unmetered_requests = self.paid.unmetered;
+        report.estimated_usd = self.paid.usd();
         self.verify_current(report);
         report.update_status();
         self.publish(report)

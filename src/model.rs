@@ -1,8 +1,21 @@
 //! What a model name says: a pinned version, whose answers never change, or an
-//! alias that can move to a new version.
+//! alias that can move to a new version; and what its input costs.
 
 /// The longest model name accepted from a provider.
 const MAX_NAME_BYTES: usize = 128;
+
+/// Jev 1.13's published price in dollars per million input tokens; output
+/// tokens are free. TypeSafe's models page (https://docs.typesafe.ai/models),
+/// checked on `PRICE_CHECKED`; OpenRouter's and Vercel AI Gateway's listings
+/// give the same price.
+pub const INPUT_USD_PER_MILLION: f64 = 0.042;
+pub const PRICE_CHECKED: &str = "2026-09-28";
+
+/// Model lines with a published price. A name is priced when its base name is
+/// the line or one of its versions: `jev-1.13`, `jev-1.13.0`,
+/// `typesafe/jev-1.13`. An alias that names no version, such as
+/// `typesafe-ai/jev`, is not: its price follows whatever it points to.
+const PRICED_LINES: [&str; 1] = ["jev-1.13"];
 
 /// A name a provider may return: letters, digits and `-_.`, with `/` between a
 /// gateway's namespace and the model (`typesafe/jev-1.13`) and `~` for
@@ -27,9 +40,28 @@ pub fn base_name(name: &str) -> &str {
 /// `~typesafe/jev-latest`.
 pub fn pinned(name: &str) -> bool {
     let version = base_name(name).rsplit('-').next().unwrap_or_default();
-    let parts: Vec<&str> = version.split('.').collect();
-    !name.contains('~')
-        && parts.len() == 3
+    !name.contains('~') && dotted_numbers(version, 3)
+}
+
+/// Estimated dollars for `tokens` input tokens answered by `name`; none when
+/// its price is unknown. No tokens cost nothing, whatever the model.
+pub fn usd(name: &str, tokens: u64) -> Option<f64> {
+    let base = base_name(name);
+    let priced = PRICED_LINES.iter().any(|line| {
+        base.strip_prefix(line).is_some_and(|rest| {
+            rest.is_empty()
+                || rest
+                    .strip_prefix('.')
+                    .is_some_and(|patch| dotted_numbers(patch, 1))
+        })
+    });
+    (tokens == 0 || priced).then(|| tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
+}
+
+/// Whether `text` is `count` runs of digits joined by dots: `1.13.0` for three.
+fn dotted_numbers(text: &str, count: usize) -> bool {
+    let parts: Vec<&str> = text.split('.').collect();
+    parts.len() == count
         && parts
             .iter()
             .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))
@@ -82,5 +114,28 @@ mod tests {
         }
         assert_eq!(base_name("typesafe/jev-1.13"), "jev-1.13");
         assert_eq!(base_name("jev-1.13.0"), "jev-1.13.0");
+    }
+
+    #[test]
+    fn the_jev_1_13_line_is_priced_under_any_namespace_and_aliases_are_not() {
+        for name in [
+            "jev-1.13.0",
+            "jev-1.13",
+            "typesafe/jev-1.13",
+            "typesafe-ai/jev-1.13.2",
+        ] {
+            let usd = usd(name, 1_000_000).unwrap_or_else(|| panic!("{name}"));
+            assert!((usd - INPUT_USD_PER_MILLION).abs() < 1e-12, "{name}");
+        }
+        for name in [
+            "jev-latest",
+            "typesafe-ai/jev",
+            "~typesafe/jev-latest",
+            "jev-1.130",
+            "jev-1.13.x",
+        ] {
+            assert_eq!(usd(name, 1_000), None, "{name}");
+        }
+        assert_eq!(usd("typesafe-ai/jev", 0), Some(0.0));
     }
 }

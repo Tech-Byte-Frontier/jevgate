@@ -12,24 +12,14 @@ use std::{
 /// Consider findings shown by default; `--verbose` shows all.
 const TOP_CONSIDER: usize = 10;
 
-// Published Jev rate, checked 2026-09-18:
-// https://typesafe.ai/blog/introducing-system-one-models-and-jev
-pub const INPUT_USD_PER_MILLION: f64 = 0.042;
-pub const PRICE_CHECKED: &str = "2026-09-18";
-
 /// `n` and a noun, plural unless `n` is one: "1 finding", "2 findings".
 pub fn count(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
-/// Estimated dollars for this invocation's paid input tokens, for a priced model.
-pub fn estimated_usd(report: &Report) -> Option<f64> {
-    usd(&report.requested_model, report.paid_input_tokens)
-}
-
-/// Estimated dollars for `tokens` input tokens of `model`, when it is priced.
-fn usd(model: &str, tokens: u64) -> Option<f64> {
-    (model == "jev-1.13.0").then(|| tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
+/// The headline's cost: estimated dollars, or unknown, never a guessed $0.
+fn cost(usd: Option<f64>) -> String {
+    usd.map_or(" · cost unknown".into(), |usd| format!(" · ~${usd:.4}"))
 }
 
 // ANSI select-graphic-rendition codes.
@@ -161,8 +151,7 @@ pub(crate) fn headline(report: &Report) -> String {
         let planned: u64 = stages.clone().map(|s| s.planned_requests).sum();
         let cached: u64 = stages.clone().map(|s| s.planned_cached).sum();
         let tokens: u64 = stages.map(|s| s.planned_tokens).sum();
-        let cost = usd(&report.requested_model, tokens)
-            .map_or(String::new(), |usd| format!(" · ~${usd:.4}"));
+        let cost = cost(crate::model::usd(&report.requested_model, tokens));
         return format!(
             "JevGate: dry run · {} files · {planned} first-pass requests, {cached} answered by the cache · ~{tokens} new input tokens{cost}; follow-ups depend on the answers",
             report.files.len()
@@ -173,7 +162,7 @@ pub(crate) fn headline(report: &Report) -> String {
         Some(gate) => format!("gate failed: {}", gate.reasons.join("; ")),
         None => "gate not evaluated".to_string(),
     };
-    let cost = estimated_usd(report).map_or(String::new(), |usd| format!(" · ~${usd:.4}"));
+    let cost = cost(report.estimated_usd);
     format!(
         "JevGate: {} · {gate} · {} files · {} API requests · {} input tokens{cost}",
         report.status,

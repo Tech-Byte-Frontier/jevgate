@@ -247,7 +247,10 @@ Reading the JSON report (--format json or .jevgate/latest.json):
                      measured) or advisory (below the level in force)
   files[].dimensions per rule: status, unit counts and the units left undecided
   files[].judgments  every raw answer, first pass and follow-ups
-  api_requests, paid_input_tokens, paid_output_tokens   this run's usage";
+  api_requests, paid_input_tokens, paid_output_tokens   this run's usage
+  paid_models        input tokens by the model that answered them
+  estimated_usd      this run's cost; null when a response reported no usage
+                     (unmetered_requests) or the model has no known price";
 
 const COMPLETIONS_EXAMPLES: &str = "\
 Examples:

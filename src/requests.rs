@@ -171,7 +171,7 @@ impl Session<'_> {
         let batch: Vec<&Value> = pending.iter().map(|(_, r)| *r).collect();
         let store = self.store;
         let requests_count = &mut self.requests;
-        let paid = (&mut self.paid_input_tokens, &mut self.paid_output_tokens);
+        let paid = &mut self.paid;
         let observed = &mut self.observed;
         self.evaluator.evaluate_queue(
             &batch,
@@ -181,10 +181,14 @@ impl Session<'_> {
                 let (i, request) = pending[index];
                 *requests_count += u32::from(outcome.attempted);
                 let receipt = &mut receipts[i];
-                record(store, request, outcome, receipt);
-                *paid.0 += receipt.metrics.input_tokens;
-                *paid.1 += receipt.metrics.output_tokens;
-                if receipt.metrics.evaluated_judgments > 0 {
+                let billed = record(store, request, outcome, receipt);
+                // An answer without usage says nothing of its tokens, so it
+                // stays out of the bytes-per-token calibration.
+                let metered = billed.as_ref().is_some_and(|b| b.input_tokens.is_some());
+                if let Some(billed) = billed {
+                    paid.bill(billed);
+                }
+                if metered && receipt.metrics.evaluated_judgments > 0 {
                     observed.0 += serde_json::to_vec(&provider_request(request))
                         .map_or(0, |v| v.len() as u64);
                     observed.1 += receipt.metrics.input_tokens;
@@ -194,13 +198,60 @@ impl Session<'_> {
     }
 }
 
-/// Record one outcome: timing, token usage, and a validated answer saved to the cache.
+/// What one answered request was billed: the model that answered, and the
+/// tokens its response reported.
+pub(super) struct Billed {
+    model: String,
+    /// None when the response reported no usage.
+    input_tokens: Option<u64>,
+    output_tokens: u64,
+}
+
+/// What this invocation's requests were billed, and by which models.
+#[derive(Default)]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// Input tokens by the model that answered them.
+    pub models: BTreeMap<String, u64>,
+    /// Answers whose response reported no usage.
+    pub unmetered: u32,
+}
+
+impl Usage {
+    fn bill(&mut self, billed: Billed) {
+        self.output_tokens += billed.output_tokens;
+        match billed.input_tokens {
+            Some(tokens) => {
+                self.input_tokens += tokens;
+                *self.models.entry(billed.model).or_default() += tokens;
+            }
+            None => self.unmetered += 1,
+        }
+    }
+
+    /// Dollars, priced by the model that answered each request; unknown when
+    /// an answer reported no usage or a model has no published price.
+    pub fn usd(&self) -> Option<f64> {
+        if self.unmetered > 0 {
+            return None;
+        }
+        self.models
+            .iter()
+            .map(|(model, tokens)| crate::model::usd(model, *tokens))
+            .sum()
+    }
+}
+
+/// Record one outcome: timing, token usage, and a validated answer saved to
+/// the cache. Returns what an answered request was billed, even when its
+/// answer failed validation.
 fn record(
     store: &crate::storage::Store,
     request: &Value,
     outcome: crate::transport::Outcome,
     receipt: &mut Receipt,
-) {
+) -> Option<Billed> {
     receipt.metrics.service_ms = outcome.elapsed_ms;
     receipt.metrics.queue_wait_ms = outcome.started_ms;
     receipt.metrics.evidence_bytes = if outcome.attempted {
@@ -208,9 +259,17 @@ fn record(
     } else {
         0
     };
+    let mut billed = None;
     receipt.result = outcome.result.and_then(|body| {
-        receipt.metrics.input_tokens += usage(&body, "input_tokens");
-        receipt.metrics.output_tokens += usage(&body, "output_tokens");
+        let input_tokens = response::input_tokens(&body);
+        let output_tokens = response::output_tokens(&body);
+        receipt.metrics.input_tokens += input_tokens.unwrap_or(0);
+        receipt.metrics.output_tokens += output_tokens;
+        billed = Some(Billed {
+            model: body["model"].as_str().unwrap_or_default().to_owned(),
+            input_tokens,
+            output_tokens,
+        });
         response::validate(&body, request)?;
         let timestamp = schema::now();
         store.save(
@@ -229,6 +288,7 @@ fn record(
             receipt.metrics.failed_attempts = 1;
         }
     }
+    billed
 }
 
 pub(super) fn require_current(
@@ -273,16 +333,6 @@ fn require_paths(
         }
     }
     Ok(())
-}
-
-/// A usage count above this is corrupt, not a real count, and is ignored.
-const MAX_REPORTED_TOKENS: u64 = 1_000_000_000;
-
-fn usage(body: &Value, field: &str) -> u64 {
-    body["usage"][field]
-        .as_u64()
-        .filter(|n| *n <= MAX_REPORTED_TOKENS)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

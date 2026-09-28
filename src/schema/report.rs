@@ -264,6 +264,18 @@ pub struct Report {
     pub concurrency: u32,
     pub paid_input_tokens: u64,
     pub paid_output_tokens: u64,
+    /// This invocation's paid input tokens by the model that answered them,
+    /// which for an alias is the version it pointed to.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub paid_models: BTreeMap<String, u64>,
+    /// Paid requests whose response reported no token usage; their tokens are
+    /// not in `paid_input_tokens`, and the cost is unknown.
+    #[serde(default)]
+    pub unmetered_requests: u32,
+    /// Estimated dollars for this invocation's paid requests, priced by the
+    /// model that answered each; null when unknown.
+    #[serde(default)]
+    pub estimated_usd: Option<f64>,
     #[serde(default)]
     pub stages: BTreeMap<String, StageMetrics>,
     pub settled: bool,

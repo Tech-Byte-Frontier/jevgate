@@ -13,12 +13,12 @@ fn dimension(rule: &str, d: &Dimension) -> Value {
 }
 
 fn batch_cost(report: &Report) -> Option<Value> {
-    crate::output::estimated_usd(report).map(|usd| {
+    report.estimated_usd.map(|usd| {
         json!({
             "estimated_usd": usd,
-            "input_per_million": crate::output::INPUT_USD_PER_MILLION,
+            "input_per_million": crate::model::INPUT_USD_PER_MILLION,
             "output_per_million": 0.0,
-            "checked_at": crate::output::PRICE_CHECKED
+            "checked_at": crate::model::PRICE_CHECKED
         })
     })
 }
@@ -162,13 +162,12 @@ mod tests {
             serde_json::json!({"right": 20, "labeled": 23})
         );
         assert!(!html.contains("id=\"root\""));
-        report.paid_input_tokens = 1_000_000;
-        report.paid_output_tokens = 12_345;
-        let cost = batch_cost(&report).unwrap();
-        assert!((cost["estimated_usd"].as_f64().unwrap() - 0.042).abs() < 1e-12);
-        report.paid_input_tokens = 0;
         assert_eq!(batch_cost(&report).unwrap()["estimated_usd"], 0.0);
-        report.requested_model = "unknown-model".into();
+        report.estimated_usd = Some(0.042);
+        let cost = batch_cost(&report).unwrap();
+        assert_eq!(cost["estimated_usd"], 0.042);
+        assert_eq!(cost["checked_at"], crate::model::PRICE_CHECKED);
+        report.estimated_usd = None;
         assert!(batch_cost(&report).is_none());
         assert!(!html.contains("def value()"));
     }

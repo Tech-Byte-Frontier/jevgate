@@ -7,7 +7,12 @@ use serde_json::{Map, Value};
 const ROUNDING_PER_VALUE: f64 = 0.005;
 const MAX_MASS_ERROR: f64 = 0.05;
 const FLOAT_NOISE: f64 = 1e-9;
+/// A usage count above this is corrupt, not a real count, and is ignored.
+const MAX_REPORTED_TOKENS: u64 = 1_000_000_000;
 
+/// A response whose answers match the request's questions. Its `usage` is not
+/// required: a gateway need not pass TypeSafe's through, and such an answer
+/// counts as unmetered rather than as free.
 pub fn validate(response: &Value, request: &Value) -> Result<()> {
     validate_model(response, request)?;
     let answers = response["answers"].as_object().context("Missing answers")?;
@@ -27,15 +32,23 @@ pub fn validate(response: &Value, request: &Value) -> Result<()> {
             validate_distribution(answer, question)?;
         }
     }
-    for field in ["input_tokens", "output_tokens"] {
-        ensure!(
-            response["usage"][field]
-                .as_u64()
-                .is_some_and(|n| n <= 1_000_000_000),
-            "Missing token usage"
-        );
-    }
     Ok(())
+}
+
+/// The billed input tokens a response reports; none when it reports no usage.
+pub fn input_tokens(response: &Value) -> Option<u64> {
+    token_count(response, "input_tokens")
+}
+
+/// The output tokens a response reports, zero when it reports none: they are free.
+pub fn output_tokens(response: &Value) -> u64 {
+    token_count(response, "output_tokens").unwrap_or(0)
+}
+
+fn token_count(response: &Value, field: &str) -> Option<u64> {
+    response["usage"][field]
+        .as_u64()
+        .filter(|n| *n <= MAX_REPORTED_TOKENS)
 }
 
 /// A well-formed model name; when a pinned version was requested, that
@@ -150,14 +163,20 @@ fn validate_choice(answer: &Value, probabilities: &Map<String, Value>) -> Result
     Ok(())
 }
 
+/// The cached form of a validated response: its model, the typed answers and,
+/// when it reported one, its usage.
 pub fn cache_value(response: &Value, request: &Value) -> Value {
     let mut answers = serde_json::Map::new();
     for (key, question) in request["questions"].as_object().unwrap() {
         let kind = question["type"].as_str().unwrap();
         answers.insert(key.clone(), typed_fields(&response["answers"][key], kind));
     }
-    serde_json::json!({"model":response["model"], "answers":answers,
-        "usage":{"input_tokens":response["usage"]["input_tokens"], "output_tokens":response["usage"]["output_tokens"]}})
+    let mut value = serde_json::json!({"model": response["model"], "answers": answers});
+    if let Some(input) = input_tokens(response) {
+        value["usage"] =
+            serde_json::json!({"input_tokens": input, "output_tokens": output_tokens(response)});
+    }
+    value
 }
 
 /// Only the fields a typed answer defines; anything else the provider sent is dropped.
@@ -217,6 +236,28 @@ mod tests {
                 validate(&response, &request).is_err(),
                 "{requested} {answered}"
             );
+        }
+    }
+
+    #[test]
+    fn an_answer_without_usage_is_accepted_as_unmetered_and_cached_without_it() {
+        let (request, mut response) = exchange("typesafe-ai/jev", "typesafe-ai/jev");
+        assert_eq!(input_tokens(&response), Some(10));
+        let cached = cache_value(&response, &request);
+        assert_eq!(
+            cached["usage"],
+            json!({"input_tokens": 10, "output_tokens": 1})
+        );
+        for usage in [
+            Value::Null,
+            json!({"inputTokens": 10}),
+            json!({"input_tokens": -1}),
+        ] {
+            response["usage"] = usage;
+            assert!(validate(&response, &request).is_ok(), "{response}");
+            assert_eq!(input_tokens(&response), None);
+            assert!(cache_value(&response, &request).get("usage").is_none());
+            assert!(validate(&cache_value(&response, &request), &request).is_ok());
         }
     }
 }

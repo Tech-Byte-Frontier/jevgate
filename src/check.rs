@@ -89,8 +89,7 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
         store: &store,
         evaluator: &mut client,
         requests: 0,
-        paid_input_tokens: 0,
-        paid_output_tokens: 0,
+        paid: Default::default(),
         budget: token_budget::TokenBudget::load(&context.root),
         observed: (0, 0),
     };

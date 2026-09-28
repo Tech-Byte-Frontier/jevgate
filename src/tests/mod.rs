@@ -187,8 +187,7 @@ pub(super) fn session<'a>(
         store,
         evaluator,
         requests: 0,
-        paid_input_tokens: 0,
-        paid_output_tokens: 0,
+        paid: Default::default(),
         budget: token_budget::TokenBudget::default(),
         observed: (0, 0),
     }
@@ -297,6 +296,51 @@ fn model_and_refresh_invalidate_cache() {
     options.refresh = true;
     run(&project, &options, &mut mock);
     assert_eq!(mock.calls, 3);
+}
+
+/// Answers as a provider that names `model` and reports usage only when `metered`.
+struct Answering {
+    model: &'static str,
+    metered: bool,
+}
+impl transport::Evaluator for Answering {
+    fn evaluate(&mut self, request: &Value) -> anyhow::Result<Value> {
+        let mut body = answer(request, 0);
+        body["model"] = json!(self.model);
+        if !self.metered {
+            body.as_object_mut().unwrap().remove("usage");
+        }
+        Ok(body)
+    }
+}
+
+#[test]
+fn cost_is_priced_by_the_answering_model_and_unknown_without_usage() {
+    let project = Project::new();
+    project.write("lib.rs", &function("f"));
+    let mut options = args();
+    options.model = Some("jev-latest".into());
+    let metered = Answering {
+        model: "jev-1.13.0",
+        metered: true,
+    };
+    let report = run(&project, &options, &mut { metered });
+    assert_eq!(report.paid_models, [("jev-1.13.0".to_string(), 10)].into());
+    assert!((report.estimated_usd.unwrap() - 10.0 * 0.042 / 1e6).abs() < 1e-15);
+    assert!(output::headline(&report).ends_with("· 10 input tokens · ~$0.0000"));
+    options.model = Some("typesafe-ai/jev".into());
+    let unmetered = Answering {
+        model: "typesafe-ai/jev",
+        metered: false,
+    };
+    let report = run(&project, &options, &mut { unmetered });
+    assert!(report.complete);
+    assert_eq!((report.api_requests, report.unmetered_requests), (1, 1));
+    assert_eq!((report.paid_input_tokens, report.estimated_usd), (0, None));
+    assert!(output::headline(&report).ends_with("· 0 input tokens · cost unknown"));
+    let replay = run(&project, &options, &mut Mock::default());
+    assert_eq!((replay.api_requests, replay.estimated_usd), (0, Some(0.0)));
+    assert!(replay.files.iter().all(|file| file.cached));
 }
 
 #[test]
