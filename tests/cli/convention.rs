@@ -85,13 +85,7 @@ fn chosen(question: &Value, option: &str) -> Value {
 
 #[test]
 fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request_and_a_turn() {
-    let project = Project::new();
-    std::fs::write(project.0.join("AGENTS.md"), AGENTS).unwrap();
-    std::fs::create_dir(project.0.join("src")).unwrap();
-    std::fs::write(project.0.join("src/lib.rs"), JUDGED_RS).unwrap();
-    git(&project, &["init", "-q"]);
-    git(&project, &["add", "."]);
-    git(&project, &["commit", "-qm", "base"]);
+    let project = Project::committed_with(&[("AGENTS.md", AGENTS), ("src/lib.rs", JUDGED_RS)]);
     let provider = scripted();
     let jevgate = |args: &[&str]| {
         let output = project

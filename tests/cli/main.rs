@@ -31,10 +31,20 @@ impl Project {
     }
     /// A Git repository with [`JUDGED_RS`] committed as `lib.rs`.
     fn committed() -> Self {
+        Self::committed_with(&[("lib.rs", JUDGED_RS)])
+    }
+    /// A Git repository with each of `files`, a path and its text, committed.
+    fn committed_with(files: &[(&str, &str)]) -> Self {
         let project = Self::new();
-        std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+        for (path, text) in files {
+            let file = project.0.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, text).unwrap();
+        }
         git(&project, &["init", "-q"]);
-        git(&project, &["add", "lib.rs"]);
+        let mut add = vec!["add", "--"];
+        add.extend(files.iter().map(|(path, _)| *path));
+        git(&project, &add);
         git(&project, &["commit", "-qm", "start"]);
         project
     }
