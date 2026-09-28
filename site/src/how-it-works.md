@@ -71,12 +71,21 @@ signatures, or one candidate pair.
    page once one reads the request. RailsGoat's `raw cookies[:font]` and
    JavaVulnerableLab's scriptlet queries were read by no rule. A template
    holding neither is not selected.
-   A file whose parse holds syntax errors is not judged, unless they are few
-   and small (at most three regions, an eighth of the source in all), since
+   A syntax error leaves out the unit it sits in, not its file, since
    grammars miss some valid code: tree-sitter-typescript reads a call
    signature starting with `<T>` on the line after another as its
-   continuation, which left four of zustand's source files unjudged. The
-   definitions that hold an error are then left out. A file under a
+   continuation, tree-sitter-rust reads snapbox's `str![…]` as the type
+   `str`, and tree-sitter-bend2 lacks Bend 2's erased binders (`for ~a: T`).
+   A definition or test whose syntax holds an error is left out with the
+   comments inside it (a Bend 2 test is its whole program), and so are
+   module constants and top-level statements that hold one; errors outside
+   every unit are left out by their lines, and the report names all of it.
+   The outline, the one question about the whole file, is asked only when
+   90% or more of the file's non-blank lines parsed: leaving out whole
+   members of 55 clean outlines, the first answer moved as little as with
+   one small member missing above 90%, twice as much from 70% to 90%, and
+   more below. A file with no intact unit is skipped, as is one whose top
+   level the parser could not read. A file under a
    directory named with a `{{ … }}` placeholder, as in a cookiecutter
    template, is parsed without its Jinja tags (statements and comments
    blanked, placeholders read as names of the same length): 31 of

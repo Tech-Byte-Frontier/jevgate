@@ -146,7 +146,7 @@ With `--base`, only what the change touches is asked about and reported: units o
 
 ## A file is skipped
 
-Skipped files are listed with the reason: generated, vendored or minified code, migrations, an unsupported language, syntax errors, a parser that did not finish within 10 seconds, Bend 1 code (JevGate reads Bend 2), or a path outside the upload patterns. `generated`, `tests` and the upload patterns in `jevgate.toml` change what is selected. A file larger than `max_file_bytes` is not skipped but reported as `needs-context`, never truncated, and so is a unit whose request the provider refuses as beyond the model's context.
+Skipped files are listed with the reason: generated, vendored or minified code, migrations, an unsupported language, syntax errors that leave no unit to judge, a parser that did not finish within 10 seconds, Bend 1 code (JevGate reads Bend 2), or a path outside the upload patterns. A file with fewer syntax errors is judged for the units they leave intact, and the ones left out are listed after the findings (all of them with `--verbose`) and in the report's `left_out`; its outline is asked only when 90% of its lines parsed. Grammars miss some valid code, so a left-out unit is often correct code the parser cannot read yet. `generated`, `tests` and the upload patterns in `jevgate.toml` change what is selected. A file larger than `max_file_bytes` is not skipped but reported as `needs-context`, never truncated, and so is a unit whose request the provider refuses as beyond the model's context.
 
 ## No colors, or escape codes in a log
 
