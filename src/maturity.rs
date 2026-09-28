@@ -127,6 +127,29 @@ pub fn measure(rule: &str, level: Strength) -> Option<&'static Measure> {
     TABLE.iter().find(|m| m.rule == key && m.level == level)
 }
 
+/// Why `rule` has no share of right findings on unseen projects at a level:
+/// the laws rule judges Bend 2 code, whose labeled projects this table
+/// leaves out; any other has no labeled finding there yet.
+pub fn unmeasured(rule: &str) -> &'static str {
+    if catalog::find(rule).is_some_and(|found| found.key == catalog::LAWS) {
+        "labeled only on Bend 2 projects, which the maturity table leaves out"
+    } else {
+        "none labeled yet on projects JevGate was never tuned on"
+    }
+}
+
+/// How often findings of `rule` at `level` were right on unseen projects,
+/// "54% of 85 right on projects JevGate was never tuned on", or why that
+/// is unknown.
+pub fn unseen_share(rule: &str, level: Strength) -> String {
+    measure(rule, level)
+        .and_then(|m| m.unseen.summary())
+        .map_or_else(
+            || unmeasured(rule).into(),
+            |share| format!("{share} right on projects JevGate was never tuned on"),
+        )
+}
+
 /// Whether the default gate fails on findings of `rule` at `level`.
 pub fn mature(rule: &str, level: Strength) -> bool {
     measure(rule, level).is_some_and(Measure::mature)
@@ -233,5 +256,22 @@ mod tests {
             "12.5% rounds up"
         );
         assert_eq!(unseen(catalog::ACCESS_CONTROL), None);
+    }
+
+    #[test]
+    fn a_level_without_a_share_says_why() {
+        assert_eq!(
+            unseen_share(catalog::SHARED_LOGIC, Review),
+            "54% of 85 right on projects JevGate was never tuned on"
+        );
+        assert_eq!(
+            unseen_share(catalog::ACCESS_CONTROL, Review),
+            "none labeled yet on projects JevGate was never tuned on"
+        );
+        assert_eq!(
+            unseen_share("tests/laws", Review),
+            "labeled only on Bend 2 projects, which the maturity table leaves out",
+            "law findings were labeled, on the Bend 2 projects kept apart"
+        );
     }
 }

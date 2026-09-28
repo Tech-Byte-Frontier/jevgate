@@ -363,13 +363,11 @@ pub(crate) fn measuring_note(finding: &Finding) -> Option<String> {
     if finding.gate != Some(Gating::Measuring) {
         return None;
     }
-    let measured = crate::maturity::measure(&finding.rule, finding.strength)
-        .and_then(|m| m.unseen.summary())
-        .map_or_else(|| "none labeled yet".into(), |s| format!("{s} right"));
     Some(format!(
-        "Does not fail the gate: {} {}s are still being measured ({measured} on projects JevGate was never tuned on).",
+        "Does not fail the gate: {} {}s are still being measured ({}).",
         finding.rule,
-        label(&finding.strength)
+        label(&finding.strength),
+        crate::maturity::unseen_share(&finding.rule, finding.strength)
     ))
 }
 

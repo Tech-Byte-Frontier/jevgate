@@ -74,7 +74,7 @@ const openPaths=new Set(Array.isArray(saved.open)?saved.open:[]);
 function save(){try{sessionStorage.setItem('jevgate:'+data.root,JSON.stringify({query:$('search').value,filter:$('filter').value,open:[...openPaths],page,pageSize:Number($('page-size').value),scroll:window.scrollY}))}catch{}}
 const order=['review','consider','note','error','needs-context','uncertain','pending','clear','not-applicable','skipped'];
 const files=[...data.files].sort((a,b)=>order.indexOf(a.status)-order.indexOf(b.status)||a.path.localeCompare(b.path));
-function stillMeasured(finding){const unseen=rules.get(finding.rule)?.maturity?.[finding.strength]?.unseen;const right=unseen&&unseen.labeled?Math.round(100*unseen.right/unseen.labeled)+'% of '+unseen.labeled+' right':'none labeled yet';return 'Does not fail the gate: '+name(finding.rule)+' '+finding.strength+'s are still being measured ('+right+' on projects JevGate was never tuned on).'}
+function stillMeasured(finding){const rule=rules.get(finding.rule);const unseen=rule?.maturity?.[finding.strength]?.unseen;const share=unseen&&unseen.labeled?Math.round(100*unseen.right/unseen.labeled)+'% of '+unseen.labeled+' right on projects JevGate was never tuned on':rule?.unmeasured;return 'Does not fail the gate: '+name(finding.rule)+' '+finding.strength+'s are still being measured ('+share+').'}
 function findingRow(finding){
  const row=el('details',null,'row finding-row'),summary=el('summary'),main=el('span',null,'main');
  main.append(el('span','Line '+finding.line+(finding.baselined?' · baselined':finding.suppressed?' · allowed: '+finding.suppressed:''),'path'),el('span',finding.message,'lead'));

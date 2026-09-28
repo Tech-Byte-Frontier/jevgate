@@ -432,7 +432,7 @@ pub fn table() -> String {
     lines.extend(rules.iter().map(|rule| table_row(rule, width)));
     lines.push(String::new());
     lines.push(format!(
-        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected. The rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right.",
+        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected. The rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
         crate::maturity::MIN_PERCENT_RIGHT,
         crate::maturity::MIN_LABELS
     ));

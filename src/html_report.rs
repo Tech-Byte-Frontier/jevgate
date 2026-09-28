@@ -45,7 +45,8 @@ pub fn render(report: &Report) -> Result<String> {
         .into_iter()
         .map(|r| {
             json!({"key":r.key,"id":r.id,"description":r.inspection,
-                "maturity":crate::maturity::describe(r.key)})
+                "maturity":crate::maturity::describe(r.key),
+                "unmeasured":crate::maturity::unmeasured(r.key)})
         })
         .collect();
     // A run that leaves out default rules lists fewer files; say so.

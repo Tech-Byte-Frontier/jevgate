@@ -42,6 +42,7 @@ def rules_page(binary):
         "The other findings are reported without failing it.",
         "*Reviews right* and *considers right* give the share of labeled findings that were right on",
         "those projects, and how many were labeled; a debatable one counts as not right.",
+        "`tests/laws` is labeled only on Bend 2 projects, which these numbers leave out.",
         "",
         "| Rule | Key | Default | Fails by default | Reviews right | Considers right | Question |",
         "|---|---|---|---|---|---|---|",
