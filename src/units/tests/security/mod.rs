@@ -211,12 +211,38 @@ fn a_parameter_in_a_path_or_url_is_a_note_until_callers_show_another_party() {
         ("resource", noul_at(0.95)),
         ("url", noul_at(0.95)),
         ("origin", spread(0.0, 0.9, 0.1)),
+        ("url_parts", choice_of("given", &URL_PARTS)),
     ];
     let finding = &first_finding(&project, &options, &mut eval);
     assert_eq!(finding.strength, Strength::Note);
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-918 server-side request forgery")
+    );
+}
+
+#[test]
+fn a_decided_url_finding_on_the_programs_own_host_is_clear() {
+    let (project, mut options) = security_project(FETCH_QUOTE);
+    let mut status = |parts: &str| {
+        let mut eval = scripted(0);
+        eval.overrides = vec![
+            ("resource", noul_at(0.95)),
+            ("url", noul_at(0.95)),
+            ("origin", spread(0.0, 0.0, 1.0)),
+            ("url_parts", choice_of(parts, &URL_PARTS)),
+        ];
+        let report = run(&project, &options, &mut eval);
+        options.refresh = true;
+        report.files[0].dimensions[catalog::INJECTION]
+            .status
+            .clone()
+    };
+    assert_eq!(status("outside"), Status::Review);
+    assert_eq!(
+        status("own"),
+        Status::Clear,
+        "a configured base URL with an id in its path"
     );
 }
 

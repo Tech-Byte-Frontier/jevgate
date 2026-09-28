@@ -92,7 +92,7 @@ pub(in crate::units) const SETTLES: [SettleKind; 14] = [
         checks: &["url"],
         clears: &questions::OWN_PARTS,
         callers: true,
-        when: SettleWhen::Undecided,
+        when: SettleWhen::NotClear,
         files: SettleFiles::All,
     },
     SettleKind {
