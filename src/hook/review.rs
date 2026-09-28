@@ -377,12 +377,7 @@ fn accepted_now(root: &Path, report: &Report) -> BTreeSet<String> {
 
 /// `check`'s arguments with the repository's configuration, for `scope`.
 fn arguments(context: &ConfigContext, scope: Scope) -> Result<CheckArgs> {
-    #[derive(clap::Parser)]
-    struct Defaults {
-        #[command(flatten)]
-        args: CheckArgs,
-    }
-    let mut args = <Defaults as clap::Parser>::parse_from(["jevgate"]).args;
+    let mut args = CheckArgs::defaults();
     check::configure(&mut args, context)?;
     // Never printed: the hook answers with its own JSON.
     args.format = Some(Format::Json);
