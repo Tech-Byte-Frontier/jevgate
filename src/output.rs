@@ -393,31 +393,31 @@ fn emit_summary(out: &mut impl Write, report: &Report) -> Result<()> {
     if !lines.is_empty() {
         writeln!(out, "\n{}.", lines.join(" · "))?;
     }
-    emit_reasons(out, report, Status::Error, "Failed", "Not judged")?;
-    emit_reasons(out, report, Status::Skipped, "Skipped", "Skipped")
+    for (label, status) in [("Failed", Status::Error), ("Skipped", Status::Skipped)] {
+        for (reason, n) in reasons(report, status) {
+            writeln!(out, "{label} {n}: {reason}")?;
+        }
+    }
+    Ok(())
 }
 
-/// Each reason the files of `status` give, with how many give it, as
-/// `Failed 1: TypeSafe HTTP 402 (credits exhausted; …)`: a run that could
-/// not finish says why without --verbose, and the MCP tool, which returns
-/// this text, can tell exhausted credits from a missing key.
-fn emit_reasons(
-    out: &mut impl Write,
-    report: &Report,
-    status: Status,
-    verb: &str,
-    unknown: &str,
-) -> Result<()> {
-    let mut reasons = BTreeMap::<&str, usize>::new();
+/// Each reason the files of `status` give, with how many give it: a run that
+/// could not finish says why without --verbose, as `Failed 1: TypeSafe HTTP
+/// 402 (credits exhausted; …)`, and the MCP tools, which return these lines,
+/// can tell exhausted credits from a missing key.
+pub(crate) fn reasons(report: &Report, status: Status) -> BTreeMap<&str, usize> {
+    let unknown = if status == Status::Skipped {
+        "Skipped"
+    } else {
+        "Not judged"
+    };
+    let mut reasons = BTreeMap::new();
     for file in report.files.iter().filter(|f| f.status == status) {
         *reasons
             .entry(file.error.as_deref().unwrap_or(unknown))
             .or_default() += 1;
     }
-    for (reason, n) in reasons {
-        writeln!(out, "{verb} {n}: {reason}")?;
-    }
-    Ok(())
+    reasons
 }
 
 /// Estimated tokens each harness loads at session start, then loading facts.
@@ -546,6 +546,26 @@ mod tests {
             "  src/a.rs:12 [maintainability/shared-logic] Copies: 50% alike,\nsee `b`\n    → Share one | implementation\n"
         );
         assert!(!Style::for_stdout(ColorChoice::Never).0);
+    }
+
+    #[test]
+    fn the_summary_says_why_files_failed() {
+        let project = crate::tests::Project::new();
+        project.write("a.rs", &crate::tests::function("a"));
+        project.write("b.rs", &crate::tests::function("b"));
+        let mut mock = crate::tests::Mock {
+            malformed: true,
+            ..Default::default()
+        };
+        let report = crate::tests::run(&project, &crate::tests::args(), &mut mock);
+        let mut out = Vec::new();
+        agent(&mut out, &report, false, Style::PLAIN).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let reason = report.files[0].error.as_deref().unwrap();
+        assert!(
+            text.contains(&format!("\n2 files failed.\nFailed 2: {reason}\n")),
+            "{text}"
+        );
     }
 
     #[test]
