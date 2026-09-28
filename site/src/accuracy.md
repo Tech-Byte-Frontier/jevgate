@@ -8,6 +8,8 @@ How often JevGate's findings are right, from findings labeled by reading the cod
 
 Below 20 labels a cell gives the counts without a percentage: a few more labels could move such a share by many points. This is the table this release of JevGate uses; `jevgate rules` prints its unseen shares, and each finding in the reports says how often its rule and level were right. Each rule's page gives what it looks at and findings it got wrong.
 
+The table is the ten supported languages'. A finding in a [preview language](languages.md#support-levels) is weighed by that language's own counts, from 37 projects chosen for those languages and labeled the same way, and never fails the check by default.
+
 ## How it is measured
 
 - **The corpus.** Open-source projects of many kinds, from web frameworks and command-line tools to intentionally vulnerable applications, plus the maintainer's own applications, each pinned at a commit. JevGate runs every rule on each of them.
