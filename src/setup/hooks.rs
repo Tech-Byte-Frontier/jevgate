@@ -209,6 +209,8 @@ pub(super) fn is_jevgate(handler: &Json) -> bool {
 }
 
 /// The first word of a shell command, quoted or not, and what follows it.
+/// An unquoted word also ends where a shell operator starts, as `hook` does
+/// in `jevgate hook; exit 0` and `jevgate hook||echo`.
 fn first_word(command: &str) -> (&str, &str) {
     let command = command.trim_start();
     match command.chars().next() {
@@ -220,7 +222,9 @@ fn first_word(command: &str) -> (&str, &str) {
             }
         }
         _ => {
-            let end = command.find(char::is_whitespace).unwrap_or(command.len());
+            let end = command
+                .find(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|'))
+                .unwrap_or(command.len());
             (&command[..end], &command[end..])
         }
     }

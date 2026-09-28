@@ -63,7 +63,7 @@ fn an_agent_is_set_up_once_and_taken_out() {
     );
     let settings = std::fs::read_to_string(home(&project, ".claude/settings.json")).unwrap();
     assert!(
-        settings.contains("\"command\": \"jevgate hook\""),
+        settings.contains("\"command\": \"jevgate hook || echo '{"),
         "{settings}"
     );
     assert!(home(&project, ".codex/AGENTS.md").is_file());

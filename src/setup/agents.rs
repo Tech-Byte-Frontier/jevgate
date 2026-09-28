@@ -37,9 +37,28 @@ impl Target {
     }
 }
 
-/// The command the hooks run: a stable string, since Codex and Gemini CLI
-/// trust a hook by its command and would ask again after any change.
-pub(super) const COMMAND: &str = "jevgate hook";
+/// The commands the hooks run. Each must stay byte for byte the same across
+/// versions: Codex trusts a hook by its hash and Gemini CLI by its name and
+/// command, and both would ask again after any change.
+///
+/// A `jevgate` missing from the agent's `PATH` exits 127 in the shell, and
+/// one older than 0.27 exits 2 on `hook`, which Claude Code reads as "erase
+/// the prompt" and Codex, with no cap on stop blocks, as "keep working"
+/// until someone interrupts it. `init` checks the `jevgate` on its own
+/// `PATH`, but not the one a teammate has, nor the one an agent finds from a
+/// login shell (Codex runs `$SHELL -lc`). So where the agent's shell allows,
+/// a failure answers the agent itself: Claude Code runs hooks with `sh`, Git
+/// Bash (which Git for Windows brings, and the hook needs Git) or PowerShell
+/// 7, and Codex with the login shell, all of which read `||`.
+pub(super) const COMMAND: &str = "jevgate hook || echo '{\"systemMessage\": \"JevGate could not check: jevgate hook is missing, older than 0.27 or failed. Install JevGate 0.27 or later where this agent finds it (https://tech-byte-frontier.github.io/jevgate/install.html). Nothing was blocked.\"}'";
+/// Gemini CLI runs hooks with `bash -c`, or with Windows PowerShell 5.1,
+/// which has no `||`. It denies on any exit other than 0 and 1, reading
+/// stderr as the reason when stdout is empty (hookRunner.js, 0.61.0), so a
+/// missing `jevgate` would block every prompt. Exiting 0 turns the shell's
+/// error into a message Gemini CLI shows the person, in both shells.
+pub(super) const GEMINI_COMMAND: &str = "jevgate hook; exit 0";
+/// Cursor's shell is not documented, so its command is left plain; Cursor
+/// lets any exit but 2 through.
 const CURSOR_COMMAND: &str = "jevgate hook --agent cursor";
 const START_SECS: u64 = 20;
 const EDIT_SECS: u64 = 40;
@@ -98,7 +117,7 @@ const CODEX: HookSet = HookSet {
 };
 const GEMINI: HookSet = HookSet {
     shape: Shape::Gemini,
-    command: COMMAND,
+    command: GEMINI_COMMAND,
     hooks: &[
         start("SessionStart"),
         start("BeforeAgent"),

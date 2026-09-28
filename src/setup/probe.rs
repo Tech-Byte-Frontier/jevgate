@@ -37,6 +37,10 @@ pub(super) fn problem(path: Option<&OsStr>) -> Option<String> {
 
 /// The first program `name` in `path`, as a shell would find it: with
 /// Windows' executable extensions, or with an executable bit elsewhere.
+/// Directories npm adds only while `npx` or a package script runs are
+/// passed over: `npx @tech-byte-frontier/jevgate init --agent claude` runs
+/// with npx's own copy first on `PATH`, which is gone when the agent starts
+/// its hooks.
 pub(super) fn find(path: &OsStr, name: &str) -> Option<PathBuf> {
     let names: Vec<String> = if cfg!(windows) {
         let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
@@ -49,8 +53,17 @@ pub(super) fn find(path: &OsStr, name: &str) -> Option<PathBuf> {
         vec![name.to_string()]
     };
     std::env::split_paths(path)
+        .filter(|directory| !npm_run_only(directory))
         .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
         .find(|candidate| executable(candidate))
+}
+
+/// Whether npm puts `directory` on `PATH` only for the command it runs:
+/// npx's cache (`~/.npm/_npx/HASH/node_modules/.bin`) and a package's
+/// `node_modules/.bin`.
+fn npm_run_only(directory: &Path) -> bool {
+    directory.ends_with("node_modules/.bin")
+        || directory.components().any(|c| c.as_os_str() == "_npx")
 }
 
 #[cfg(unix)]

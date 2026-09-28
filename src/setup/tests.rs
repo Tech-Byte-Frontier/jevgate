@@ -273,7 +273,7 @@ fn each_agent_gets_its_own_hook_fields() {
         handler,
         Json::object([
             ("type", "command".into()),
-            ("command", "jevgate hook".into()),
+            ("command", agents::COMMAND.into()),
             ("timeout", 40u64.into()),
             ("statusMessage", "JevGate is checking the edit".into()),
         ])
@@ -282,8 +282,10 @@ fn each_agent_gets_its_own_hook_fields() {
     let rendered = json::render(&gemini, &json::Layout::default());
     assert!(rendered.contains("\"AfterTool\"") && rendered.contains("\"write_file|replace\""));
     assert!(rendered.contains("\"timeout\": 40000") && rendered.contains("\"name\": \"jevgate\""));
+    assert!(rendered.contains("\"command\": \"jevgate hook; exit 0\""));
     let (_, codex) = placed(Target::Codex);
-    assert!(json::render(&codex, &json::Layout::default()).contains("\"apply_patch\""));
+    let rendered = json::render(&codex, &json::Layout::default());
+    assert!(rendered.contains("\"apply_patch\"") && rendered.contains("jevgate hook || echo"));
     let (_, cursor) = placed(Target::Cursor);
     assert_eq!(cursor.get("version"), Some(&1u64.into()));
     let Some(Json::Array(edits)) = cursor.get("hooks").unwrap().get("postToolUse") else {
@@ -324,6 +326,8 @@ fn jevgates_handlers_are_found_however_written() {
     };
     for (handler, ours) in [
         (shell("jevgate hook"), true),
+        (shell(agents::COMMAND), true),
+        (shell(agents::GEMINI_COMMAND), true),
         (shell("jevgate hook --agent cursor"), true),
         (shell("/usr/local/bin/jevgate hook --timeout 20"), true),
         (
@@ -331,12 +335,14 @@ fn jevgates_handlers_are_found_however_written() {
             true,
         ),
         (shell("jevgate.EXE hook"), true),
-        (shell("jevgate hook || echo '{}'"), true),
+        (shell("jevgate hook||echo '{}'"), true),
+        (shell("jevgate hook&"), true),
         (exec("jevgate", "hook"), true),
         (exec("jevgate", "check"), false),
         (shell("jevgate check --base HEAD"), false),
         (shell("echo jevgate hook"), false),
         (shell("jevgate hooks"), false),
+        (shell("jevgate;hook"), false),
         (shell("not-jevgate hook"), false),
         (Json::object([("type", "prompt".into())]), false),
     ] {
@@ -552,18 +558,50 @@ fn hooks_running_twice_are_warned_about() {
         &places.claude.join("settings.json"),
         "{\n  \"enabledPlugins\": {\n    \"jevgate@jevgate\": true\n  }\n}\n",
     );
-    let claude = Plan::new(&setup(&[Target::Claude]), &places).unwrap();
-    let warnings = claude.warnings(&places);
+    let only_claude = setup(&[Target::Claude]);
+    let claude = Plan::new(&only_claude, &places).unwrap();
+    let warnings = claude.warnings(&only_claude, &places);
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("plugin is enabled"), "{warnings:?}");
-    let both = apply(&setup(&[Target::Claude, Target::Cursor]), &places);
+    let claude_and_cursor = setup(&[Target::Claude, Target::Cursor]);
+    let both = apply(&claude_and_cursor, &places);
     assert!(
-        both.warnings(&places)
+        both.warnings(&claude_and_cursor, &places)
             .iter()
             .any(|w| w.contains("twice in Cursor"))
     );
-    let codex = Plan::new(&setup(&[Target::Codex]), &places).unwrap();
-    assert!(codex.warnings(&places).is_empty(), "Codex runs neither");
+    let only_codex = setup(&[Target::Codex]);
+    let codex = Plan::new(&only_codex, &places).unwrap();
+    assert!(
+        codex.warnings(&only_codex, &places).is_empty(),
+        "Codex runs neither"
+    );
+}
+
+#[test]
+fn a_repository_outside_git_is_warned_about() {
+    let project = Project::new();
+    let places = places(&project);
+    let repository = AgentSetup {
+        project: true,
+        ..setup(&[Target::Codex])
+    };
+    let plan = Plan::new(&repository, &places).unwrap();
+    let warnings = plan.warnings(&repository, &places);
+    assert!(
+        warnings.len() == 1 && warnings[0].contains("is not in a Git repository"),
+        "{warnings:?}"
+    );
+    let user = setup(&[Target::Codex]);
+    assert!(
+        Plan::new(&user, &places)
+            .unwrap()
+            .warnings(&user, &places)
+            .is_empty(),
+        "a user's hooks serve every repository"
+    );
+    fs::create_dir_all(places.root.join(".git")).unwrap();
+    assert!(plan.warnings(&repository, &places).is_empty());
 }
 
 #[test]
@@ -578,24 +616,30 @@ fn the_project_is_the_git_work_trees_top() {
     assert_eq!(project_root(&outside), outside);
 }
 
+/// What a JevGate before 0.27 answers `jevgate hook` with.
+#[cfg(unix)]
+const OLDER: &str = "echo \"error: unrecognized subcommand 'hook'\" >&2\nexit 2\n";
+
+/// A directory under `project` holding a `jevgate` that runs `script` after
+/// reading its input.
+#[cfg(unix)]
+fn fake_jevgate(project: &Project, dir: &str, script: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = project.0.join(dir);
+    let path = bin.join("jevgate");
+    write(&path, &format!("#!/bin/sh\ncat > /dev/null\n{script}"));
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
 #[cfg(unix)]
 #[test]
 fn the_jevgate_on_path_must_answer_the_hooks() {
-    use std::os::unix::fs::PermissionsExt;
     let project = Project::new();
-    let program = |dir: &str, script: &str| {
-        let bin = project.0.join(dir);
-        let path = bin.join("jevgate");
-        write(&path, &format!("#!/bin/sh\ncat > /dev/null\n{script}"));
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        bin
-    };
+    let program = |dir: &str, script: &str| fake_jevgate(&project, dir, script);
     let answers = program("current", "printf '{}\\n'\n");
     assert_eq!(probe::problem(Some(answers.as_os_str())), None);
-    let older = program(
-        "older",
-        "echo \"error: unrecognized subcommand 'hook'\" >&2\nexit 2\n",
-    );
+    let older = program("older", OLDER);
     let problem = probe::problem(Some(older.as_os_str())).unwrap();
     assert!(
         problem.contains("exited 2 (error: unrecognized subcommand 'hook')"),
@@ -616,5 +660,92 @@ fn the_jevgate_on_path_must_answer_the_hooks() {
     assert_eq!(
         probe::find(&first, "jevgate"),
         Some(answers.join("jevgate"))
+    );
+    // npx runs a package with its copy first on PATH, gone once npx exits.
+    let npx = program(".npm/_npx/0a1b/node_modules/.bin", "printf '{}\\n'\n");
+    let local = program("repo/node_modules/.bin", "printf '{}\\n'\n");
+    let during_npx = std::env::join_paths([&npx, &local, &older]).unwrap();
+    assert_eq!(
+        probe::find(&during_npx, "jevgate"),
+        Some(older.join("jevgate"))
+    );
+    let only_npx = std::env::join_paths([&npx, &local]).unwrap();
+    let problem = probe::problem(Some(&only_npx)).unwrap();
+    assert!(
+        problem.starts_with("no jevgate is on your PATH"),
+        "{problem}"
+    );
+}
+
+/// `shell -c command` with only `bin` on `PATH`, as an agent runs a hook.
+#[cfg(unix)]
+fn run_hook_command(shell: &str, command: &str, bin: &Path) -> std::process::Output {
+    std::process::Command::new(shell)
+        .args(["-c", command])
+        .env("PATH", bin)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_missing_or_older_jevgate_is_told_and_never_blocks() {
+    let project = Project::new();
+    let missing = project.0.join("missing");
+    fs::create_dir_all(&missing).unwrap();
+    let older = fake_jevgate(&project, "older", OLDER);
+    for bin in [&missing, &older] {
+        // Claude Code runs `sh -c`, Codex the login shell: the reply is the guard's.
+        let output = run_hook_command("/bin/sh", agents::COMMAND, bin);
+        assert!(output.status.success(), "{output:?}");
+        let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let message = reply["systemMessage"].as_str().unwrap();
+        assert!(
+            message.starts_with("JevGate could not check")
+                && message.ends_with("Nothing was blocked."),
+            "{message}"
+        );
+        // Gemini CLI runs `bash -c` and, with exit 0 and nothing on stdout,
+        // shows stderr to the person instead of denying with it.
+        let output = run_hook_command("/bin/bash", agents::GEMINI_COMMAND, bin);
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
+    }
+    let current = fake_jevgate(&project, "current", "printf '{}\\n'\n");
+    for (shell, command) in [
+        ("/bin/sh", agents::COMMAND),
+        ("/bin/bash", agents::GEMINI_COMMAND),
+    ] {
+        let output = run_hook_command(shell, command, &current);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(output.stdout, b"{}\n", "a working hook's reply alone");
+    }
+}
+
+/// Gemini CLI on Windows runs hooks with PowerShell (5.1 unless PowerShell
+/// 7 is installed) and appends a check of `$LASTEXITCODE`, which `exit 0`
+/// comes before.
+#[cfg(windows)]
+#[test]
+fn a_missing_jevgate_never_blocks_gemini_on_windows() {
+    let project = Project::new();
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let powershell = Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let command = format!(
+        "{}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}",
+        agents::GEMINI_COMMAND
+    );
+    let output = std::process::Command::new(powershell)
+        .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+        .env("PATH", &project.0)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        !output.stderr.is_empty(),
+        "the shell's error, which Gemini CLI shows"
     );
 }

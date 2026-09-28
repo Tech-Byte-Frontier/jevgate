@@ -262,7 +262,7 @@ impl Plan {
     /// what the person does next.
     fn advise(&self, setup: &AgentSetup, places: &Places, path: Option<&std::ffi::OsStr>) {
         for warning in self
-            .warnings(places)
+            .warnings(setup, places)
             .into_iter()
             .chain(probe::problem(path))
         {
@@ -282,10 +282,11 @@ impl Plan {
         }
     }
 
-    /// JevGate's hooks running twice in one agent after this run: the
-    /// plugin beside Claude Code's hooks, or Cursor running both its own
-    /// hooks and Claude Code's.
-    fn warnings(&self, places: &Places) -> Vec<String> {
+    /// What keeps the hooks from working as meant after this run: a
+    /// repository outside Git, where the hook cannot tell what a turn changed,
+    /// or JevGate running twice in one agent (the plugin beside Claude Code's
+    /// hooks, or Cursor running both its own hooks and Claude Code's).
+    fn warnings(&self, setup: &AgentSetup, places: &Places) -> Vec<String> {
         let setting_up = |target| self.agents.iter().any(|(t, _)| *t == target);
         let hooked = |target| {
             places
@@ -294,6 +295,12 @@ impl Plan {
                 .any(|path| self.settings(path).is_some_and(|s| hooks::handlers(&s) > 0))
         };
         let mut warnings = Vec::new();
+        if setup.project && !places.root.join(".git").exists() {
+            warnings.push(format!(
+                "{} is not in a Git repository: the hook compares snapshots Git takes, so there it only says it could not check",
+                places.root.display()
+            ));
+        }
         if setting_up(Target::Claude) && self.plugin_enabled(places) {
             warnings.push(
                 "the JevGate plugin is enabled in Claude Code and runs the same hooks: keep one of them (`/plugin` disables the plugin; `jevgate init --agent claude --remove` takes these out)"
@@ -354,9 +361,10 @@ fn notes(target: Target) -> &'static [&'static str] {
     match target {
         Target::Codex => &[
             "Codex runs new or changed hooks only once you trust them: open /hooks in Codex and trust JevGate's.",
+            "On macOS and Linux, Codex starts hooks from a login shell: jevgate must be on the PATH your login profile sets, not only in .zshrc or .bashrc.",
         ],
         Target::Gemini => &[
-            "Gemini CLI starts hooks without your shell's environment: save your key with `jevgate auth login`, or keep it in the repository's .env.",
+            "With Gemini CLI's security.environmentVariableRedaction on, hooks do not get TYPESAFE_API_KEY: save your key with `jevgate auth login`, or keep it in the repository's .env.",
         ],
         Target::Opencode => &[
             "OpenCode loads the plugin when it starts. OpenCode 2 runs a different plugin API and does not load it yet.",
