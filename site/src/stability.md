@@ -31,6 +31,7 @@ These are judgments or presentation, and any release can change them; the change
 - **The questions an undecided unit left open**, as the JSON report and the MCP verify items quote them: their wording, answers and the state paths they name change when a rule's questions do.
 - **Request bodies and the answer cache**: the cache is safe to delete or restore at any version; unmatched entries are simply not used.
 - **The default model**: a release can pin a newer model version, which re-asks every unit once. Set `model` in `jevgate.toml` to keep one.
+- **The [question gallery](question-gallery.md)**: which questions it holds, and their wording, levels and thresholds, change as they are measured. A question file `jevgate rules add` wrote keeps its wording until `--force` replaces it.
 
 ## Reruns of an unchanged commit
 

@@ -20,7 +20,7 @@ jevgate check --fail-on custom=report               # ask them without failing t
 
 ## How they were measured
 
-Each question was asked of 6 to 12 projects where it applies, without the built-in questions, with jev-1.13.0 in September 2026. Every finding at the question's threshold was labeled from the code: right, wrong, or debatable when competent maintainers would disagree. A debatable finding counts as not right. The numbers above are of the files as shipped: replayed from the cached answers, they ask exactly what was measured.
+Each question was asked of 6 to 12 projects where it applies, without the built-in questions, with jev-1.13.0 in September 2026. Every finding at the question's threshold was labeled from the code: right, wrong, or debatable when competent maintainers would disagree. A debatable finding counts as not right. The numbers are for the files as shipped: replayed from the cached answers, the files ask exactly what the measured runs asked.
 
 A question ships at `review` when at least 80% of its findings were right over at least 10 findings, and at `consider` from 60%, or at 80% over fewer. A question's first wording was revised at most once, and a project whose findings informed the wording or threshold is counted as tuned; the sections say which. Of the 29 projects, 24 are open source and 5 are the maintainer's own. Four of them (microblog, laravel-realworld, nest-realworld and bakerydemo) were asked last, of the files as shipped: they added one right and one debatable n-plus-one finding, none in 79 more handlers, and two wrong findings that took a sixth question, global-state, out of the gallery.
 

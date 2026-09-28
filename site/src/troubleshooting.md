@@ -130,6 +130,8 @@ A file is `uncertain` when some of its answers stayed undecided after the follow
 
 A unit whose request carried a comment or string written to steer a reviewer is uncertain too, listed as `text written to steer a reviewer (line N)`, since its answers may be the text's rather than the code's. Remove the text and the unit is judged again.
 
+A custom question with a high threshold leaves more units undecided, since a unit is clear only at one minus the threshold or below: the gallery's `todo-without-owner`, at 0.95, leaves most comments undecided. Lower the threshold, or narrow the question with `paths`, if the listing is in the way.
+
 ## A review did not fail the check
 
 By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the check; `jevgate rules` shows which, and how often each rule's reviews and considers were right ([accuracy](accuracy.md) says how that is measured). The other findings are reported, and the output says their rules are still being measured. To fail on them, set a level: `--fail-on review` or `fail_on = ["review"]` for every rule, or `--fail-on maintainability/shared-logic=review` for one.
