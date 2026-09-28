@@ -629,6 +629,33 @@ fn a_file_outside_the_upload_patterns_is_not_read() {
 }
 
 #[test]
+fn a_file_that_is_not_utf8_is_not_read_and_the_rest_are_asked() {
+    let project = Project::new();
+    project.write("AGENTS.md", AGENTS);
+    std::fs::create_dir_all(project.0.join("web")).unwrap();
+    std::fs::write(
+        project.0.join("web/CLAUDE.md"),
+        b"- Never log \xff bodies.\n",
+    )
+    .unwrap();
+    let mut rules = Rules::default();
+    let printed = propose(
+        &project,
+        &arguments(ProposeFormat::Table, false),
+        &mut rules,
+    );
+    assert_eq!((printed.code, rules.calls), (0, 2));
+    assert!(
+        printed
+            .stdout
+            .contains("Not read: web/CLAUDE.md (Source is not UTF-8: "),
+        "{}",
+        printed.stdout
+    );
+    assert_eq!(proposals(&project), IDS.map(|id| format!("{id}.toml")));
+}
+
+#[test]
 fn translations_are_read_only_when_named() {
     let project = Project::new();
     project.write("AGENTS.md", AGENTS);

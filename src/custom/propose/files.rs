@@ -4,12 +4,15 @@ use super::lines::{self, Line};
 use crate::{
     boundary::Boundary,
     config::ConfigContext,
-    docs::load::{Load, Reader},
+    docs::{
+        Instructions,
+        load::{Load, Reader},
+    },
 };
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     path::{Path, PathBuf},
 };
 
@@ -68,7 +71,7 @@ pub fn read(
             Ok(source) => files.push(File {
                 source_hash: crate::schema::hash(source.as_bytes()),
                 lines: lines::lines(&source),
-                scope: scope(instructions.get(&path).map_or(&[], Vec::as_slice)),
+                scope: scope(instructions.judged.get(&path).map_or(&[], Vec::as_slice)),
                 path,
             }),
             Err(error) => skipped.push(Skipped {
@@ -87,7 +90,7 @@ pub fn read(
 fn selected(
     paths: &[PathBuf],
     context: &ConfigContext,
-    instructions: &BTreeMap<PathBuf, Vec<Reader>>,
+    instructions: &Instructions,
 ) -> Result<(BTreeSet<PathBuf>, BTreeSet<PathBuf>)> {
     let mut chosen = BTreeSet::new();
     let mut directories = Vec::new();
@@ -121,16 +124,17 @@ fn selected(
     Ok((chosen, translations))
 }
 
-/// The instruction files under `directory`, each with whether it is a
-/// translation outside it: `docs/i18n/ja/CLAUDE.md` is one under the root,
-/// and none under `docs/i18n/ja`.
+/// The instruction files under `directory`, those that could not be read
+/// included, each with whether it is a translation outside it:
+/// `docs/i18n/ja/CLAUDE.md` is one under the root, and none under
+/// `docs/i18n/ja`.
 fn under<'a>(
-    instructions: &'a BTreeMap<PathBuf, Vec<Reader>>,
+    instructions: &'a Instructions,
     directory: &'a Path,
 ) -> impl Iterator<Item = (&'a PathBuf, bool)> + 'a {
     let within = crate::docs::discover::translation(directory);
-    instructions
-        .keys()
+    let found = instructions.judged.keys().chain(&instructions.unread);
+    found
         .filter(move |file| file.starts_with(directory))
         .map(move |file| {
             let translated = file

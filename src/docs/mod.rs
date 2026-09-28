@@ -62,14 +62,29 @@ pub fn scan(root: &Path) -> Result<Repository> {
     })
 }
 
-/// The instruction files a documentation rule judges, with who reads each
-/// and when: what `jevgate rules propose` reads when no file is named.
-pub fn instructions(root: &Path) -> Result<BTreeMap<PathBuf, Vec<load::Reader>>> {
+/// The instruction files `jevgate rules propose` reads when no file is
+/// named.
+pub struct Instructions {
+    /// Those a documentation rule judges, with who reads each and when.
+    pub judged: BTreeMap<PathBuf, Vec<load::Reader>>,
+    /// Those found but not read, too large or not UTF-8, so a reader can say
+    /// why: a CLAUDE.md saved as UTF-16 would otherwise vanish unnoticed.
+    pub unread: BTreeSet<PathBuf>,
+}
+
+pub fn instructions(root: &Path) -> Result<Instructions> {
     let found = discover::discover(root)?;
     let (files, generated_files) = agent_files(root, &found);
+    let read: BTreeSet<&PathBuf> = files.iter().map(|f| &f.path).collect();
+    let unread = found
+        .agent
+        .iter()
+        .filter(|path| !read.contains(path))
+        .cloned()
+        .collect();
     let mut judged = readers(files, &found);
     judged.retain(|path, readers| !readers.is_empty() && !generated_files.contains(path));
-    Ok(judged)
+    Ok(Instructions { judged, unread })
 }
 
 /// The instruction files `found` names, parsed with who reads each, and
