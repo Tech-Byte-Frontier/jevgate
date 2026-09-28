@@ -8,7 +8,7 @@ jevgate check --rule custom --dry-run               # what they would ask and co
 jevgate check --fail-on custom=report               # ask them without failing the gate
 ```
 
-`jevgate rules add` writes each question's file into `.jevgate/questions/`, where it becomes a file the project owns: adapt its guidance and paths to the code, and commit it. It fails the gate at its level, as any custom question does, so try it with `--fail-on custom=report` first. `jevgate rules add` is offline and writes the wording the installed version measured; `--force` restores it over an edited file. Each file is also shown below, and kept in the repository's [`gallery/`](https://github.com/Tech-Byte-Frontier/jevgate/tree/main/gallery) directory.
+`jevgate rules add` writes each question's file into `.jevgate/questions/`, where it becomes a file the project owns: adapt its guidance and paths to the code, and commit it. It says how often the question was right and whether it fails the gate: like any custom question, a review question fails the gate on its reviews and a note never does, so try a review question with `--fail-on custom=report` first. `jevgate rules add` is offline and writes the wording the installed version measured; `--force` restores it over an edited file. Each file is also shown below, and kept in the repository's [`gallery/`](https://github.com/Tech-Byte-Frontier/jevgate/tree/main/gallery) directory.
 
 | Question | Asked of each | Level | Projects | Units | Findings | Right |
 |---|---|---|---|---|---|---|
@@ -16,13 +16,13 @@ jevgate check --fail-on custom=report               # ask them without failing t
 | [swallowed-errors](#swallowed-errors) | function | review at 0.80 | 6 | 1,550 | 17 | 14 (82%) |
 | [resource-leak](#resource-leak) | function | review at 0.80 | 6 | 1,212 | 14 | 12 (86%) |
 | [thin-handlers](#thin-handlers) | request handler | review at 0.80 | 12 | 645 | 13 | 12 (92%) |
-| [n-plus-one](#n-plus-one) | function | consider at 0.80 | 11 | 1,864 | 7 | 5 (71%) |
+| [n-plus-one](#n-plus-one) | function | note at 0.80 | 11 | 1,864 | 7 | 5 (71%) |
 
 ## How they were measured
 
 Each question was asked of 6 to 12 projects where it applies, without the built-in questions, with jev-1.13.0 in September 2026. Every finding at the question's threshold was labeled from the code: right, wrong, or debatable when competent maintainers would disagree. A debatable finding counts as not right. The numbers are for the files as shipped: replayed from the cached answers, the files ask exactly what the measured runs asked.
 
-A question ships at `review` when at least 80% of its findings were right over at least 10 findings, and at `consider` from 60%, or at 80% over fewer. A question's first wording was revised at most once, and a project whose findings informed the wording or threshold is counted as tuned; the sections say which. Of the 29 projects, 24 are open source and 5 are the maintainer's own. Four of them (microblog, laravel-realworld, nest-realworld and bakerydemo) were asked last, of the files as shipped: they added one right and one debatable n-plus-one finding, none in 79 more handlers, and two wrong findings that took a sixth question, global-state, out of the gallery.
+Any level but `note` fails the gate once a question is added, so a question ships at `review` when at least 80% of its findings were right over at least 10 findings, and as a `note`, whose findings are listed but never fail the gate, from 60%. That is a lower bar than JevGate's own rules meet before they fail the gate by default, at least 80% right over 20 findings on projects never used to tune them, and three of the four review questions draw most of their right findings from one project each, as their sections say. A question's first wording was revised at most once, and a project whose findings informed the wording or threshold is counted as tuned; the sections say which. Of the 29 projects, 24 are open source and 5 are the maintainer's own. Four of them (microblog, laravel-realworld, nest-realworld and bakerydemo) were asked last, of the files as shipped: they added one right and one debatable n-plus-one finding, none in 79 more handlers, and two wrong findings that took a sixth question, global-state, out of the gallery.
 
 The counts are small. They say how often a question is right when it fires, not how much it finds: no one labeled the units it cleared.
 
@@ -78,7 +78,7 @@ On 12 projects (645 handlers), 12 of 13 findings were right, 11 of them in lobst
 
 Does a function run a database query or a network call once per item of a loop, where one query or call could handle all the items?
 
-On 11 projects (1,864 functions), 5 of 7 findings were right: linkace's HTML and CSV exports, which query each link's tags (and lists) over all of a user's links; lobsters' `MessagesController::batch_delete`, a query and a save per selected message; spring-realworld's `createNew` and laravel-realworld's `ArticleController::store`, a lookup and an insert per tag of an article. Debatable: linkace's `getOldTaxonomyItems`, one lookup per item of a form shown again after a validation error, a handful at most, and bakerydemo's random-data command, one insert per item, where `bulk_create` would skip the `save()` its models may rely on. It is a consider: 71% right.
+On 11 projects (1,864 functions), 5 of 7 findings were right: linkace's HTML and CSV exports, which query each link's tags (and lists) over all of a user's links; lobsters' `MessagesController::batch_delete`, a query and a save per selected message; spring-realworld's `createNew` and laravel-realworld's `ArticleController::store`, a lookup and an insert per tag of an article. Debatable: linkace's `getOldTaxonomyItems`, one lookup per item of a form shown again after a validation error, a handful at most, and bakerydemo's random-data command, one insert per item, where `bulk_create` would skip the `save()` its models may rely on. It is a note: 71% right, below the 80% a question needs here to fail the gate.
 
 ```toml
 {{#include ../../gallery/n-plus-one.toml}}

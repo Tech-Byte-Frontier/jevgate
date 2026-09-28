@@ -23,8 +23,8 @@ fn an_added_question_is_listed_asked_and_tracked_by_git() {
     );
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(
-        text.contains("Added custom/swallowed-errors (function, review at 0.80) in .jevgate/questions/swallowed-errors.toml")
-            && text.contains("Added custom/n-plus-one (function, consider at 0.80)"),
+        text.contains("Added custom/swallowed-errors (function, review at 0.80) in .jevgate/questions/swallowed-errors.toml: 14 of 17 findings right on 6 projects; it fails the gate on its reviews.")
+            && text.contains("Added custom/n-plus-one (function, note at 0.80) in .jevgate/questions/n-plus-one.toml: 5 of 7 findings right on 11 projects; a note, it never fails the gate."),
         "{text}"
     );
     let rules = project.command().arg("rules").output().unwrap();

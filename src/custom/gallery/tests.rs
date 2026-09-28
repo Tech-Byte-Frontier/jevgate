@@ -96,6 +96,26 @@ fn the_docs_page_shows_every_gallery_question_from_its_file() {
             "{}'s section includes the file itself, so the page cannot drift from it",
             entry.name
         );
+        let link = format!("| [{0}](#{0}) |", entry.name);
+        let row = page.lines().find(|line| line.starts_with(&link)).unwrap();
+        // | Question | Asked of each | Level | Projects | Units | Findings | Right |
+        let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+        let question = entry.question().unwrap();
+        let measured = &entry.measured;
+        assert_eq!(
+            (cells[3], cells[4], cells[6]),
+            (
+                question.asked().split_once(", ").unwrap().1,
+                measured.projects.to_string().as_str(),
+                measured.findings.to_string().as_str()
+            ),
+            "{}: the table gives the file's level and the numbers `rules add` prints",
+            entry.name
+        );
+        assert!(
+            cells[7].starts_with(&format!("{} (", measured.right)),
+            "{row}"
+        );
     }
     let summary = fs::read_to_string(repository("site/src/SUMMARY.md")).unwrap();
     assert!(summary.contains("(question-gallery.md)"));
@@ -136,7 +156,7 @@ fn adding_again_keeps_the_same_file_and_refuses_an_edited_one_without_force() {
     let path = project.0.join(".jevgate/questions/n-plus-one.toml");
     let edited = entry("n-plus-one")
         .text
-        .replace("level = \"consider\"", "level = \"review\"");
+        .replace("level = \"note\"", "level = \"review\"");
     fs::write(&path, &edited).unwrap();
     let error = refused(added(&project, &["n-plus-one"], false));
     assert!(

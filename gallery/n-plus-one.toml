@@ -6,5 +6,5 @@ background = "One query per item (the N+1 problem) is fast with ten rows and slo
 guidance = "Count: a query, ORM lookup, lazily loaded association, `fetch`, HTTP client call or RPC inside a `for`, `while`, `each`, `map`, `forEach` or comprehension, once per element, when the elements could be loaded or sent together (an `IN` query, a join, eager loading, a bulk insert or a batch endpoint). Fine: a loop over a handful of known items; pages of a paginated API fetched in order; retries; calls that must run one at a time to be correct; work that already batches; a loop that only builds one query sent after it; calls on objects already in memory."
 unit = "function"
 threshold = 0.8
-level = "consider"
+level = "note"
 next_step = "Load or send the items together: one query with IN or a join, eager loading, or a bulk call."

@@ -3,7 +3,7 @@
 //! `jevgate rules add` works offline and writes the wording this version
 //! measured; the docs' question gallery page gives each one's numbers.
 use super::{DIRECTORY, Kind, Question, Spec};
-use crate::{catalog, config::Config};
+use crate::{catalog, config::Config, output};
 use anyhow::{Context, Result, anyhow, bail};
 use std::{
     fs,
@@ -11,29 +11,45 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A gallery question: its name, which is its file name and its id, and
-/// the file.
+/// A gallery question: its name, which is its file name and its id, the
+/// file, and how it measured.
 pub struct Entry {
     pub name: &'static str,
     text: &'static str,
+    measured: Measured,
+}
+
+/// How often a gallery question was right when it fired, as the docs page
+/// gives it: its right findings among those labeled, and on how many
+/// projects it was asked.
+struct Measured {
+    right: usize,
+    findings: usize,
+    projects: usize,
 }
 
 macro_rules! entry {
-    ($name:literal) => {
+    ($name:literal, $right:literal of $findings:literal on $projects:literal) => {
         Entry {
             name: $name,
             text: include_str!(concat!("../../gallery/", $name, ".toml")),
+            measured: Measured {
+                right: $right,
+                findings: $findings,
+                projects: $projects,
+            },
         }
     };
 }
 
-/// Every gallery question, in the order the docs page lists them.
+/// Every gallery question, in the order the docs page lists them, with its
+/// right findings of those labeled and its projects.
 pub const ENTRIES: &[Entry] = &[
-    entry!("todo-without-owner"),
-    entry!("swallowed-errors"),
-    entry!("resource-leak"),
-    entry!("thin-handlers"),
-    entry!("n-plus-one"),
+    entry!("todo-without-owner", 31 of 31 on 7),
+    entry!("swallowed-errors", 14 of 17 on 6),
+    entry!("resource-leak", 12 of 14 on 6),
+    entry!("thin-handlers", 12 of 13 on 12),
+    entry!("n-plus-one", 5 of 7 on 11),
 ];
 
 impl Entry {
@@ -61,6 +77,21 @@ impl Entry {
     fn path(&self) -> PathBuf {
         PathBuf::from(format!("{DIRECTORY}/{}.toml", self.name))
     }
+
+    /// How it measured and whether it fails the gate at its level:
+    /// `14 of 17 findings right on 6 projects; it fails the gate on its reviews`.
+    fn standing(&self, question: &Question) -> String {
+        let Measured {
+            right,
+            findings,
+            projects,
+        } = self.measured;
+        let gate = match question.blocks().first() {
+            Some(level) => format!("it fails the gate on its {}s", output::label(level)),
+            None => "a note, it never fails the gate".into(),
+        };
+        format!("{right} of {findings} findings right on {projects} projects; {gate}")
+    }
 }
 
 /// `jevgate rules add`: write the gallery questions `names` into the
@@ -78,11 +109,13 @@ pub fn run(root: &Path, names: &[String], force: bool) -> Result<u8> {
             _ => "",
         };
         let state = if *written { "Added" } else { "Already added:" };
+        let entry = ENTRIES.iter().find(|entry| entry.name == question.id());
         say!(
-            "{state} {} ({}{needs}) in {}",
+            "{state} {} ({}{needs}) in {}: {}.",
             question.rule,
             question.asked(),
-            question.source.display()
+            question.source.display(),
+            entry.map_or_else(String::new, |entry| entry.standing(question))
         );
     }
     if let Some(warning) = added
@@ -95,7 +128,7 @@ pub fn run(root: &Path, names: &[String], force: bool) -> Result<u8> {
         note!("{}", Config::unlisted_note(&question.rule));
     }
     say!(
-        "Commit {DIRECTORY}/. Each question fails the gate at its level; `--fail-on custom=report` reports without failing while you try them."
+        "Commit {DIRECTORY}/. `--fail-on custom=report` reports every question without failing the gate while you try them."
     );
     say!("Next: jevgate check --rule custom --dry-run, then jevgate check");
     Ok(0)
