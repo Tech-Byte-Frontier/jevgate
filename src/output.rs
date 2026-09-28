@@ -368,35 +368,51 @@ pub(crate) fn measuring_note(finding: &Finding) -> Option<String> {
     ))
 }
 
-/// Counts of undecided, unsent and failed files, and skip reasons.
+/// Counts of undecided, unsent and failed files, then why files failed and
+/// why they were skipped.
 fn emit_summary(out: &mut impl Write, report: &Report) -> Result<()> {
-    let count = |status: Status| report.files.iter().filter(|f| f.status == status).count();
+    let files = |status: Status| report.files.iter().filter(|f| f.status == status).count();
     let undecided = report
         .files
         .iter()
         .filter(|f| f.dimensions.values().any(|d| d.status == Status::Uncertain))
         .count();
     let summary = [
-        (undecided, "with uncertain units"),
-        (count(Status::NeedsContext), "need context"),
-        (count(Status::Error), "failed"),
+        (undecided, "with uncertain units", "with uncertain units"),
+        (files(Status::NeedsContext), "needs context", "need context"),
+        (files(Status::Error), "failed", "failed"),
     ];
     let lines: Vec<_> = summary
         .iter()
-        .filter(|(n, _)| *n > 0)
-        .map(|(n, text)| format!("{n} files {text}"))
+        .filter(|(n, ..)| *n > 0)
+        .map(|&(n, one, many)| format!("{} {}", count(n, "file"), if n == 1 { one } else { many }))
         .collect();
     if !lines.is_empty() {
         writeln!(out, "\n{}.", lines.join(" · "))?;
     }
-    let mut skipped = BTreeMap::<String, usize>::new();
-    for file in report.files.iter().filter(|f| f.status == Status::Skipped) {
-        *skipped
-            .entry(file.error.clone().unwrap_or_else(|| "Skipped".into()))
+    emit_reasons(out, report, Status::Error, "Failed", "Not judged")?;
+    emit_reasons(out, report, Status::Skipped, "Skipped", "Skipped")
+}
+
+/// Each reason the files of `status` give, with how many give it, as
+/// `Failed 1: TypeSafe HTTP 402 (credits exhausted; …)`: a run that could
+/// not finish says why without --verbose, and the MCP tool, which returns
+/// this text, can tell exhausted credits from a missing key.
+fn emit_reasons(
+    out: &mut impl Write,
+    report: &Report,
+    status: Status,
+    verb: &str,
+    unknown: &str,
+) -> Result<()> {
+    let mut reasons = BTreeMap::<&str, usize>::new();
+    for file in report.files.iter().filter(|f| f.status == status) {
+        *reasons
+            .entry(file.error.as_deref().unwrap_or(unknown))
             .or_default() += 1;
     }
-    for (reason, n) in skipped {
-        writeln!(out, "Skipped {n}: {reason}")?;
+    for (reason, n) in reasons {
+        writeln!(out, "{verb} {n}: {reason}")?;
     }
     Ok(())
 }

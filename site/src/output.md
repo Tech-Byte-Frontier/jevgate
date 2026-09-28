@@ -21,6 +21,8 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 | 1 | Gate failed |
 | 2 | Run incomplete, invalid configuration or invalid usage |
 
+After the findings, the agent text gives each reason files failed or were skipped, with how many files give it, such as `Failed 3: TypeSafe HTTP 402 (credits exhausted; …)`, so an incomplete run says why without `--verbose`, and so does the MCP server's `jevgate_check`, which returns this text.
+
 `--fail-on review|consider|mature|uncertain|none` sets what fails the gate; `--fail-on security=consider` sets it for one group or rule. The default, `mature`, fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate rules` lists them, and [configuration](configuration.md#what-fails-the-check-by-default) explains it. Baselined findings, findings allowed by a comment, and notes never fail the gate.
 
 The agent text marks each finding that fails the gate with `(fails the gate)`, and says when reviews did not fail it because their rules are still being measured. The JSON report records how the gate counted each new finding in its `gate` field: `fails`, `measuring` (reported without failing: the level is `mature` and its rule and level are still being measured) or `advisory` (the level in force does not count it, as `review` does not count a consider). `fail_on_mature` says what `mature` stands for among the selected rules.
