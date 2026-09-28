@@ -149,9 +149,9 @@ fn finding_schema() -> Value {
             "end_line": {"type": "integer"},
             "rule": {"type": "string"},
             "strength": {"type": "string", "enum": ["review", "consider", "note"], "description": "review: act on it when it is right; consider: fix it or say why the code should stay; note: optional. `gate` says whether it fails the gate"},
-            "message": {"type": "string"},
+            "message": {"type": "string", "description": "Why it was found, then how often findings of its rule and level were right: `Right 87% of the time (23 labels).`, or `Not yet measured.` below 20 labels; a note's message alone"},
             "action": {"type": "string", "description": "The next step"},
-            "probability": {"type": "number", "description": "The concern probability that set the level"},
+            "probability": {"type": "number", "description": "The probability of the answer that set the level: how sure that answer was, not how often such findings are right"},
             "precision": {
                 "type": "object",
                 "description": "How often findings of its rule and level were right on projects JevGate was never tuned on, as `jevgate rules` counts them; absent for notes",

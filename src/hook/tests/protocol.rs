@@ -308,3 +308,46 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
     assert!(both.ends_with("\n1 finding reported earlier this turn remains (1 fails the quality gate).\nFindings that fail the gate block the end of the turn until they are fixed; the others are optional."), "{both}");
     assert_eq!(text::after_edit(&file, (&[], &[]), &[], &[], &[]), None);
 }
+
+/// A finding of `rule` at `strength` that fails the gate, carrying its rule
+/// and level's precision as the gate records it, with a why of `words` words.
+fn measured(rule: &str, strength: Strength, words: usize) -> Flagged {
+    Flagged {
+        path: PathBuf::from("src/a.rs"),
+        finding: crate::schema::Finding {
+            message: "word ".repeat(words),
+            gate: Some(crate::schema::Gating::Fails),
+            precision: crate::maturity::precision(rule, strength),
+            ..crate::tests::finding_of(rule, strength)
+        },
+        accepted_this_turn: false,
+    }
+}
+
+#[test]
+fn a_finding_line_says_how_often_findings_like_it_were_right_after_its_why() {
+    let line = |flagged: Flagged| {
+        let reason = text::block_reason(&[flagged], 1, false);
+        reason
+            .lines()
+            .find(|l| l.starts_with("- "))
+            .unwrap()
+            .to_string()
+    };
+    let simplify = "maintainability/function-simplification";
+    assert_eq!(
+        line(measured(simplify, Strength::Review, 3)),
+        "- src/a.rs:12 review maintainability/function-simplification (fails the gate): word word word. Right 87% of the time (23 labels). Next: Share one | implementation."
+    );
+    // A long why is cut before the sentence, never the sentence itself.
+    let long = line(measured(simplify, Strength::Review, 200));
+    assert!(
+        long.contains(" word word… Right 87% of the time (23 labels). Next: "),
+        "{long}"
+    );
+    let few = line(measured("tests/value", Strength::Consider, 3));
+    assert!(
+        few.contains(": word word word. Not yet measured. Next: "),
+        "{few}"
+    );
+}

@@ -542,6 +542,45 @@ mod tests {
     }
 
     #[test]
+    fn a_findings_message_ends_with_how_often_findings_like_it_were_right() {
+        let said = |rule: &str, strength: Strength| Finding {
+            message: "It mixes jobs.".into(),
+            ..crate::tests::finding_of(rule, strength)
+        };
+        let report = report(
+            vec![
+                said("maintainability/function-simplification", Strength::Review),
+                said("tests/value", Strength::Consider),
+                said("maintainability/shared-logic", Strength::Note),
+            ],
+            Vec::new(),
+        );
+        let notes = Selection::new(&json!({}), None, true).unwrap();
+        let result = value(&structured(&report, &notes, 1));
+        let findings: Vec<(&Value, &Value)> = result["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| (&f["message"], &f["precision"]))
+            .collect();
+        assert_eq!(
+            findings,
+            [
+                (
+                    &json!("It mixes jobs. Right 87% of the time (23 labels)."),
+                    &json!({"right": 20, "labeled": 23})
+                ),
+                (
+                    &json!("It mixes jobs. Not yet measured."),
+                    &json!({"right": 1, "labeled": 2})
+                ),
+                (&json!("It mixes jobs."), &Value::Null),
+            ],
+            "as the agent text and the hook say it; a note carries neither"
+        );
+    }
+
+    #[test]
     fn verify_items_come_highest_concern_first_with_their_questions_answered() {
         let report = report(
             Vec::new(),

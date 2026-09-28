@@ -502,8 +502,9 @@ fn list(head: &str, found: &[Flagged], tail: &str, room: usize) -> String {
     text
 }
 
-/// `- path:line level rule (fails the gate): why Next: step`, from the
-/// fields the MCP tools return for the same finding.
+/// `- path:line level rule (fails the gate): why Right 87% of the time (23
+/// labels). Next: step`, from the fields the MCP tools return for the same
+/// finding. A long why is cut, never how often such findings were right.
 fn line(flagged: &Flagged) -> String {
     let finding = FindingView::new(&flagged.path, &flagged.finding);
     let mark = match (finding.fails(), flagged.accepted_this_turn) {
@@ -512,13 +513,14 @@ fn line(flagged: &Flagged) -> String {
         (false, true) => " (accepted this turn)",
         (false, false) => "",
     };
+    let why = sentence(&flagged.finding.message, WHY_CHARS);
     format!(
         "- {}:{} {} {}{mark}: {} Next: {}",
         finding.path.display(),
         finding.line,
         output::label(&finding.strength),
         finding.rule,
-        sentence(finding.message, WHY_CHARS),
+        output::claimed(&why, &flagged.finding, output::Style::PLAIN),
         sentence(finding.action, NEXT_CHARS)
     )
 }

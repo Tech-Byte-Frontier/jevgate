@@ -4,6 +4,7 @@
 //! whichever door it came through.
 use crate::{
     maturity::Labels,
+    output::{self, Style},
     schema::{Finding, Gating, Strength},
 };
 use serde::Serialize;
@@ -22,9 +23,16 @@ pub(crate) struct FindingView<'r> {
     pub end_line: usize,
     pub rule: &'r str,
     pub strength: Strength,
-    pub message: &'r str,
+    /// Why it was found, then how often findings of its rule and level were
+    /// right, as the agent text says it: "… Right 87% of the time (23
+    /// labels)." or "… Not yet measured."; a note's message alone.
+    pub message: String,
     pub action: &'r str,
+    /// The probability of the answer that set its level: how sure that answer
+    /// was, not how often such findings are right.
     pub probability: f64,
+    /// Right of labeled findings of its rule and level on projects JevGate
+    /// was never tuned on, as `jevgate rules` counts them; none for a note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub precision: Option<Labels>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,7 +59,7 @@ impl<'r> FindingView<'r> {
                 .map_or(finding.line, |l| l.end_line),
             rule: &finding.rule,
             strength: finding.strength,
-            message: &finding.message,
+            message: output::claim(finding, Style::PLAIN),
             action: &finding.action,
             probability: rounded(finding.concern_probability),
             precision: finding.precision,

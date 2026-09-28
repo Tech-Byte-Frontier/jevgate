@@ -440,15 +440,22 @@ pub(crate) fn measuring_note(finding: &Finding) -> Option<String> {
 /// of the answer that set its level: "… Right 87% of the time (23 labels)."
 /// or "… Not yet measured."; a note's message alone.
 pub(crate) fn claim(finding: &Finding, style: Style) -> String {
+    claimed(&finding.message, finding, style)
+}
+
+/// `why`, the finding's message or a cut of it, then how often findings of
+/// its rule and level were right, as [`claim`] ends it: the agent hook cuts
+/// a long message, never the sentence a reader weighs the finding by.
+pub(crate) fn claimed(why: &str, finding: &Finding, style: Style) -> String {
     let Some(labels) = finding.precision else {
-        return finding.message.clone();
+        return why.to_string();
     };
     let words = crate::maturity::precision_in_words(&finding.rule, labels);
     let mut chars = words.chars();
     let sentence = chars.next().map_or_else(String::new, |first| {
         format!("{}{}.", first.to_uppercase(), chars.as_str())
     });
-    format!("{} {}", finding.message, style.paint(DIM, &sentence))
+    format!("{why} {}", style.paint(DIM, &sentence))
 }
 
 /// Counts of undecided, unsent and failed files, then why files failed and
