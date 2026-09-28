@@ -151,7 +151,8 @@ test("the launcher runs the binary with the same arguments and exit code", { ski
   const home = path.join(directory, "home");
   const env = { XDG_CACHE_HOME: path.join(directory, "xdg") };
   const captured = streams();
-  const run = () => launcher.main(["check", "--base", "HEAD"], { env, home, streams: captured, fetchBytes: served.fetchBytes });
+  // `sums: null`: no shipped copy, even when one was downloaded into the package to publish it.
+  const run = () => launcher.main(["check", "--base", "HEAD"], { env, home, streams: captured, fetchBytes: served.fetchBytes, sums: null });
   assert.equal(await run(), 3);
   assert.equal(fs.readFileSync(record, "utf8").trim(), "check --base HEAD");
   assert.match(captured.out.stderr, /downloading JevGate/);
