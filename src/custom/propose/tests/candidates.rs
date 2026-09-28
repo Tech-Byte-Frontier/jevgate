@@ -12,6 +12,22 @@ fn texts(found: &[Line]) -> Vec<(usize, &str, Option<&str>)> {
 }
 
 #[test]
+fn the_block_jevgate_writes_for_agents_is_no_candidate() {
+    let block = "<!-- jevgate:begin (written by `jevgate init --agent`) -->\n## JevGate\n\n- Fix findings marked \"(fails the gate)\" before you finish.\n<!-- jevgate:end -->\n";
+    let found = lines(&format!(
+        "# Rules\n\n- Never log request bodies.\n\n{block}\n- Keep handlers thin.\n"
+    ));
+    assert_eq!(
+        texts(&found),
+        [
+            (3, "Never log request bodies.", None),
+            (11, "Keep handlers thin.", None)
+        ],
+        "JevGate's own instructions are not the project's"
+    );
+}
+
+#[test]
 fn candidates_are_list_items_at_any_depth_and_paragraphs_with_what_introduces_them() {
     let found = lines(AGENTS);
     let rules = Some("Handlers follow these rules:");

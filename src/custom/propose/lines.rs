@@ -1,8 +1,9 @@
 //! The candidate lines of an instruction file: each list item, at any
 //! depth, and each paragraph, with the heading above it and the text that
-//! introduces it. Code, tables, headings, HTML comments and `@path` imports
-//! hold no rule, and a line ending in `:` that opens a list introduces its
-//! items rather than stating one.
+//! introduces it. Code, tables, headings, HTML comments, `@path` imports and
+//! the block `jevgate init --agent` writes hold no rule of the project's,
+//! and a line ending in `:` that opens a list introduces its items rather
+//! than stating one.
 use crate::{
     custom::characters::{BYTE_ORDER_MARK, printable},
     docs::markdown,
@@ -36,7 +37,7 @@ pub struct Line {
 /// first line's heading or frontmatter.
 pub fn lines(source: &str) -> Vec<Line> {
     let source = source.strip_prefix(BYTE_ORDER_MARK).unwrap_or(source);
-    let blanked = markdown::blank_comments(source);
+    let blanked = markdown::blank_comments(&crate::setup::blank_block(source));
     let all: Vec<&str> = blanked.lines().collect();
     let mut found = Vec::new();
     for section in markdown::parse(&blanked).sections {

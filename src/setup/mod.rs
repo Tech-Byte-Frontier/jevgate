@@ -15,6 +15,7 @@ mod tests;
 mod text;
 
 pub use agents::Target;
+pub(crate) use text::blank_block;
 
 use agents::{Part, Places};
 use anyhow::{Context, Result, bail};

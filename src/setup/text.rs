@@ -3,7 +3,7 @@
 //! of its own where the agent reads a directory of rules (Claude Code,
 //! Cursor) or plugins (OpenCode).
 use anyhow::{Result, bail};
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
 /// What JevGate's findings mean to the agent, between its markers.
 pub(super) const INSTRUCTIONS: &str = include_str!("instructions.md");
@@ -46,6 +46,25 @@ pub(super) fn without_block(text: &str) -> Result<Option<String>> {
     };
     let rest = format!("{before}{}", &text[range.end..]);
     Ok((!rest.trim_start_matches('\u{feff}').trim().is_empty()).then_some(rest))
+}
+
+/// `text` with JevGate's block blanked line for line, so what reads a
+/// person's instructions, such as `rules propose`, leaves out what `init
+/// --agent` wrote and finds every other line where it is; as it is without
+/// a block, or with markers out of pairs.
+pub(crate) fn blank_block(text: &str) -> Cow<'_, str> {
+    let Ok(Some(range)) = find(text) else {
+        return Cow::Borrowed(text);
+    };
+    let blank: String = text[range.clone()]
+        .chars()
+        .map(|c| if c == '\n' { c } else { ' ' })
+        .collect();
+    Cow::Owned(format!(
+        "{}{blank}{}",
+        &text[..range.start],
+        &text[range.end..]
+    ))
 }
 
 /// Whether `text` is a file JevGate wrote whole.
@@ -137,6 +156,19 @@ mod tests {
             assert!(with_block(text, BLOCK).is_err(), "{text:?}");
             assert!(without_block(text).is_err(), "{text:?}");
         }
+    }
+
+    #[test]
+    fn a_blanked_block_keeps_the_lines_around_it() {
+        let text = with_block("# Rules\n\nRun the tests.\n", INSTRUCTIONS).unwrap();
+        let blanked = blank_block(&text);
+        assert_eq!(blanked.lines().count(), text.lines().count());
+        assert!(blanked.starts_with("# Rules\n\nRun the tests.\n"));
+        assert!(!blanked.contains("JevGate"), "{blanked}");
+        assert_eq!(
+            blank_block("Text.\n<!-- jevgate:end -->\n"),
+            "Text.\n<!-- jevgate:end -->\n"
+        );
     }
 
     #[test]
