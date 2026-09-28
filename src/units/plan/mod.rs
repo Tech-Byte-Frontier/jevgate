@@ -158,6 +158,9 @@ pub fn plan(
     for &owner in &scope.documents {
         file::plan_document_steering(&scope, owner, args, budget, &mut result);
     }
+    for &(owner, _) in &scope.texts {
+        file::plan_text_steering(&scope, owner, args, budget, &mut result);
+    }
     result
 }
 

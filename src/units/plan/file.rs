@@ -207,6 +207,23 @@ pub(super) fn plan_document_steering(
     ask_steering(scope, owner, texts, (args, budget), plan);
 }
 
+/// Ask about each paragraph of a text file only custom questions read (a
+/// source file without a parser, Terraform, a shell script) that addresses
+/// a reviewer or a model and that a request of the file sends: a `file` or
+/// `hunk` unit asked beside it cannot clear on its answers.
+pub(super) fn plan_text_steering(
+    scope: &Scope<'_>,
+    owner: usize,
+    args: &CheckArgs,
+    budget: Limits<'_>,
+    plan: &mut Plan,
+) {
+    let source = scope.inputs[owner].source.as_deref().unwrap_or("");
+    let texts =
+        crate::analysis::steering::paragraphs(source, crate::analysis::steering::Audience::Anyone);
+    ask_steering(scope, owner, texts, (args, budget), plan);
+}
+
 /// One selected code file's facts, with the role a web framework gives it.
 fn file_context<'a>(
     input: &'a Input,
