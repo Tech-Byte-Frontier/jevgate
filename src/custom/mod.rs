@@ -381,6 +381,17 @@ pub(crate) fn question_files(directory: &Path) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+/// Whether `path`, relative to the repository root, is a question file of
+/// [`DIRECTORY`].
+pub(crate) fn in_directory(path: &Path) -> bool {
+    path.parent() == Some(Path::new(DIRECTORY)) && question_file(path)
+}
+
+/// Whether the text of the question file at `path` loads as a question.
+pub(crate) fn loads(path: &Path, text: &str) -> bool {
+    from_text(text, &stem(path), path.to_path_buf()).is_ok()
+}
+
 /// Whether a file of the questions directory is read as a question: a
 /// `.toml` file whose name does not start with a dot, as editors name their
 /// backups.

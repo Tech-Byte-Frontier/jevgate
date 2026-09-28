@@ -280,7 +280,7 @@ fn guards_noticed(guards: &[&Guard]) -> Option<String> {
             output::count(guards.len() - SHOWN_GUARDS, "more")
         ));
     }
-    text.push_str("JevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, the baseline and `jevgate: allow` comments as they were when the turn began.");
+    text.push_str("JevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began.");
     Some(text)
 }
 
@@ -303,9 +303,14 @@ pub(super) fn guards_user(guards: &[Guard]) -> Option<String> {
         guards::summary(guards),
         named.join("; ")
     );
-    let edited = |g: &Guard| matches!(g.kind, Kind::Allow | Kind::Configuration | Kind::Baseline);
+    let edited = |g: &Guard| {
+        matches!(
+            g.kind,
+            Kind::Allow | Kind::Configuration | Kind::Question | Kind::Baseline
+        )
+    };
     if guards.iter().any(edited) {
-        text.push_str(" Its gate read jevgate.toml, the baseline and `jevgate: allow` comments as they were when the turn began.");
+        text.push_str(" Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began.");
     }
     Some(text)
 }

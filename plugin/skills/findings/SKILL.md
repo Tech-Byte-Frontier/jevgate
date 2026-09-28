@@ -20,10 +20,10 @@ JevGate is a code-review gate. It asks TypeSafe Jev short, typed questions about
 
 ## Never, unless the person asks
 
-- Edit `jevgate-baseline.json` or `jevgate.toml`, or run `jevgate baseline`: accepting findings is the person's decision.
+- Edit `jevgate-baseline.json`, `jevgate.toml` or the custom questions in `.jevgate/questions/`, or run `jevgate baseline`: accepting findings is the person's decision.
 - Add `jevgate: allow(RULE)` comments, delete or skip tests, or reword code only to change the answer.
 
-Within a turn, none of these unblocks a finding: JevGate reads `jevgate.toml`, the baseline and allow comments as they were when the turn began, and reports each such edit to the person.
+Within a turn, none of these unblocks a finding: JevGate reads `jevgate.toml`, custom questions, the baseline and allow comments as they were when the turn began, and reports each such edit to the person.
 
 ## When JevGate could not check
 

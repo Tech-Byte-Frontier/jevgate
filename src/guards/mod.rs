@@ -1,11 +1,11 @@
 //! Guards: what a change does to the checks around the code. Code finds new
 //! suppressions, skipped, focused or deleted tests, and edits to
-//! `jevgate.toml` or the baseline; Jev is asked only whether a changed
-//! assertion now checks less and whether text addressed to a reviewer is
-//! written to steer it. Guards are reported, never fail a check: most
-//! suppressions and skips are legitimate, JevGate cannot see the other
-//! tools' findings, and the two questions have no labels on unseen projects.
-//! What the agent hook does within a turn is in `hook`.
+//! `jevgate.toml`, custom question files or the baseline; Jev is asked only
+//! whether a changed assertion now checks less and whether text addressed to
+//! a reviewer is written to steer it. Guards are reported, never fail a
+//! check: most suppressions and skips are legitimate, JevGate cannot see the
+//! other tools' findings, and the two questions have no labels on unseen
+//! projects. What the agent hook does within a turn is in `hook`.
 mod cases;
 mod lines;
 mod markers;
@@ -25,8 +25,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// jevgate.toml and the baseline are read whole up to this size, as the
-/// baseline itself is.
+/// jevgate.toml, question files and the baseline are read whole up to this
+/// size, as the baseline itself is.
 const SETTINGS_BYTES: u64 = crate::baseline::BASELINE_BYTES;
 /// A quoted line is cut at this many characters.
 const TEXT_CHARS: usize = 160;
@@ -45,6 +45,8 @@ pub enum Kind {
     /// A test that Jev reads as checking less than before.
     WeakerAssertion,
     Configuration,
+    /// A custom question file of `.jevgate/questions/`.
+    Question,
     Baseline,
     /// A file of code people wrote that the change makes JevGate skip: it
     /// now reads as generated code or a copied library, grew past
@@ -197,6 +199,7 @@ pub fn summary<'a>(guards: impl IntoIterator<Item = &'a Guard>) -> String {
         named(Kind::DeletedTest, "removes tests"),
         counted(Kind::WeakerAssertion, "weakens", "test"),
         named(Kind::Configuration, "edits jevgate.toml"),
+        named(Kind::Question, "edits custom questions"),
         named(Kind::Baseline, "edits jevgate-baseline.json"),
         (of(Kind::SkippedFile) > 0).then(|| {
             let files = output::count(of(Kind::SkippedFile), "file");
@@ -246,10 +249,12 @@ pub(crate) fn scan(root: &Path, args: &CheckArgs, config: &Config, scope: &[Path
     scan
 }
 
-/// Whether `path` is jevgate.toml or the baseline, read whole and compared
-/// by what they say.
+/// Whether `path` is jevgate.toml, a custom question file or the baseline,
+/// read whole and compared by what they say.
 fn settings(path: &Path) -> bool {
-    path == Path::new(CONFIG_FILE) || path == Path::new(BASELINE_FILE)
+    path == Path::new(CONFIG_FILE)
+        || path == Path::new(BASELINE_FILE)
+        || crate::custom::in_directory(path)
 }
 
 /// What the scan reads of a change: each changed file's text now, the

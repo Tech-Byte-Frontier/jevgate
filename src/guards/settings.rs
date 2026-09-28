@@ -1,7 +1,7 @@
-//! Edits to `jevgate.toml` and the baseline, compared by what they say:
-//! comments, layout and the baseline's time are not an edit.
+//! Edits to `jevgate.toml`, custom question files and the baseline, compared
+//! by what they say: comments, layout and the baseline's time are not an edit.
 use super::{Guard, Kind, join};
-use crate::{baseline::BASELINE_FILE, output};
+use crate::{baseline::BASELINE_FILE, init::CONFIG_FILE, output};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -10,21 +10,24 @@ use std::{
 /// Configuration keys named in a message, at most.
 const SHOWN_KEYS: usize = 6;
 
-/// What an edit changed in jevgate.toml or the baseline.
+/// What an edit changed in jevgate.toml, a question file or the baseline.
 enum Edit {
     /// Only comments, layout or the baseline's time: nothing it says.
     Same,
-    /// What changed, as a phrase: "fail_on, rules", "accepts 2 more findings".
+    /// What changed, as a phrase: "fail_on, rules", "level, threshold",
+    /// "accepts 2 more findings".
     Named(String),
     /// The version before does not parse.
     Unreadable,
 }
 
-/// An edit to jevgate.toml or the baseline, from the text `before` and
-/// `after` it (none when the file did not exist). One that no longer parses
-/// says so: the agent hook's gate reads the file as the turn began, so the
-/// agent cannot switch the gate off by breaking it, and the person hears why
-/// the next turn cannot be checked.
+/// An edit to jevgate.toml, a custom question file or the baseline, from the
+/// text `before` and `after` it (none when the file did not exist). One that
+/// no longer parses, or a question that no longer loads, says so: the agent
+/// hook's gate reads the file as the turn began, so the agent cannot switch
+/// the gate off by breaking it, and the person hears why the next turn
+/// cannot be checked. A question file's edit names the keys that changed, as
+/// jevgate.toml's does: its level, threshold, question or guidance.
 pub(super) fn settings_guard(
     path: &Path,
     before: Option<&str>,
@@ -33,22 +36,27 @@ pub(super) fn settings_guard(
     let baseline = path == Path::new(BASELINE_FILE);
     let kind = if baseline {
         Kind::Baseline
-    } else {
+    } else if path == Path::new(CONFIG_FILE) {
         Kind::Configuration
+    } else {
+        Kind::Question
     };
-    let parses = |text: &str| {
-        if baseline {
-            crate::baseline::parses(text)
-        } else {
-            toml::from_str::<crate::config::Config>(text).is_ok()
-        }
+    let parses = |text: &str| match kind {
+        Kind::Baseline => crate::baseline::parses(text),
+        Kind::Configuration => toml::from_str::<crate::config::Config>(text).is_ok(),
+        _ => crate::custom::loads(path, text),
+    };
+    let broken = if kind == Kind::Question {
+        "load"
+    } else {
+        "parse"
     };
     let (text, message) = match (before, after) {
         (None, None) => return None,
         (_, Some(after)) if !parses(after) => (
             String::new(),
             format!(
-                "is {} and does not parse",
+                "is {} and does not {broken}",
                 if before.is_some() { "edited" } else { "added" }
             ),
         ),

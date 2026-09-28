@@ -171,6 +171,46 @@ fn edits_that_change_no_setting_are_not_reported() {
 }
 
 #[test]
+fn edits_to_custom_question_files_name_what_they_change() {
+    let project = repository();
+    let body = "question = \"Does this function log a request body?\"\nunit = \"function\"\n";
+    for id in ["lowered", "broken", "gone", "reworded"] {
+        project.write(&format!(".jevgate/questions/{id}.toml"), body);
+    }
+    project.git(&["add", "."]);
+    project.git(&["commit", "-qm", "questions"]);
+    let questions = project.0.join(".jevgate/questions");
+    project.write(
+        ".jevgate/questions/lowered.toml",
+        &format!("{body}level = \"note\"\nthreshold = 0.95\n"),
+    );
+    project.write(
+        ".jevgate/questions/broken.toml",
+        "question = \"Logs a body.\"\n",
+    );
+    std::fs::remove_file(questions.join("gone.toml")).unwrap();
+    project.write(
+        ".jevgate/questions/reworded.toml",
+        &format!("# why\n{body}"),
+    );
+    project.write(".jevgate/questions/added.toml", body);
+    project.write(".jevgate/questions/notes.md", "not a question");
+    let scan = scanned(&project);
+    assert_eq!(
+        described(&scan),
+        [
+            ".jevgate/questions/added.toml is added",
+            ".jevgate/questions/broken.toml is edited and does not load",
+            ".jevgate/questions/gone.toml is deleted",
+            ".jevgate/questions/lowered.toml is edited: level, threshold",
+        ],
+        "a comment changes nothing a question asks"
+    );
+    assert!(scan.guards.iter().all(|g| g.kind == Kind::Question));
+    assert_eq!(summary(&scan.guards), "edits custom questions");
+}
+
+#[test]
 fn a_file_the_change_makes_jevgate_skip_is_a_guard() {
     let project = repository();
     project.write(

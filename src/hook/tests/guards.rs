@@ -52,7 +52,7 @@ fn an_allow_comment_added_in_the_turn_does_not_let_the_agent_stop() {
         "{why}"
     );
     assert!(
-        message(&blocked).ends_with("JevGate: this turn adds 1 `jevgate: allow` comment (lib.rs:1 accepts a finding: // jevgate: allow(function-simplification) it reads as one job). Its gate read jevgate.toml, the baseline and `jevgate: allow` comments as they were when the turn began."),
+        message(&blocked).ends_with("JevGate: this turn adds 1 `jevgate: allow` comment (lib.rs:1 accepts a finding: // jevgate: allow(function-simplification) it reads as one job). Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began."),
         "{blocked}"
     );
     // From the next turn on, the comment is the person's to keep or remove.
@@ -208,20 +208,22 @@ fn questioned(ignored: bool) -> Project {
 fn a_question_the_turn_deletes_lowers_or_breaks_does_not_let_the_agent_stop() {
     let lowered = format!("{BODY_LOGS}level = \"note\"\n");
     let edits = [
-        ("lowered", Some(lowered.as_str()), false),
+        ("lowered", Some(lowered.as_str()), false, "is edited: level"),
         (
             "broken",
             Some("question = \"Logs a body.\"\nunit = \"function\"\n"),
             false,
+            "is edited and does not load",
         ),
-        ("deleted", None, false),
+        ("deleted", None, false, "is deleted"),
         (
             "lowered, where Git ignores it",
             Some(lowered.as_str()),
             true,
+            "is edited: level",
         ),
     ];
-    for (how, text, ignored) in edits {
+    for (how, text, ignored, told) in edits {
         let project = questioned(ignored);
         let host = reviewing();
         send(&project, &host, prompt("log the orders"));
@@ -236,6 +238,12 @@ fn a_question_the_turn_deletes_lowers_or_breaks_does_not_let_the_agent_stop() {
         assert!(
             reason(&blocked).contains("- lib.rs:1 review custom/body-logs (fails the gate): "),
             "{how}: {blocked}"
+        );
+        assert!(
+            message(&blocked).contains(&format!(
+                "this turn edits custom questions (.jevgate/questions/body-logs.toml {told}). Its gate read jevgate.toml, custom questions,"
+            )),
+            "the person is told: {how}: {blocked}"
         );
         // From the next turn on, the edit is the person's to keep or undo.
         send(&project, &host, prompt("go on"));
@@ -320,7 +328,7 @@ fn an_edit_to_jevgate_toml_alone_is_told_to_the_person() {
     assert!(stopped.get("decision").is_none());
     assert_eq!(
         message(&stopped),
-        "JevGate: this turn edits jevgate.toml (jevgate.toml is edited: fail_on). Its gate read jevgate.toml, the baseline and `jevgate: allow` comments as they were when the turn began."
+        "JevGate: this turn edits jevgate.toml (jevgate.toml is edited: fail_on). Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began."
     );
 }
 
@@ -336,7 +344,7 @@ fn a_suppression_and_a_skipped_test_reach_the_agent_once_and_the_person_at_the_s
     let first = send(&project, &host, edit(&project, "lib.rs"));
     assert_eq!(
         context(&first),
-        "JevGate noticed that this turn adds 1 suppression so far:\n- lib.rs:1 turns off the Rust compiler or Clippy here: #[allow(dead_code)]\nJevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, the baseline and `jevgate: allow` comments as they were when the turn began."
+        "JevGate noticed that this turn adds 1 suppression so far:\n- lib.rs:1 turns off the Rust compiler or Clippy here: #[allow(dead_code)]\nJevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began."
     );
     assert!(
         send(&project, &host, edit(&project, "lib.rs"))
