@@ -52,7 +52,7 @@ With `--base`, a check asks only about what the change touched, as it does for t
 
 Each request tells Jev what the unit is, as the built-in requests do: the file's path and language, and the unit's literal place in the request, as in "For the function in `functions[2].source`: Does this function write a request body, or a field of one, to a log?". Background and guidance go beside the question as labeled keys. `jevgate check --dry-run --show-requests` prints every request without sending anything.
 
-A unit whose source a built-in question already sends is asked in the same request: a function beside function simplification, a test beside test value, a comment beside the comments rule, an instruction section beside agent context. Its source goes up once. The other units are asked in requests of their own, stage `custom`: functions, comments and sections up to eight to a request, tests and files one to a request, and hunks up to eight of one file. Adding or rewording a question changes the requests it rides in, so their built-in questions are asked again once; after that, both are answered from the cache.
+A unit whose source a built-in question already sends is asked in the same request: a function beside function simplification, a test beside test value, a comment beside the comments rule, an instruction section beside agent context. Its source goes up once. The other units are asked in requests of their own, stage `custom`: functions, comments and sections up to eight to a request, tests and files one to a request, and hunks up to eight of one file. Each question's answer is cached apart, so adding or rewording a question asks only that question: the requests it rides in are sent again with their units' source and that question alone, and their built-in questions are answered from the cache, including a cache an earlier version wrote.
 
 ## Findings and the gate
 
@@ -155,14 +155,14 @@ An example file is uploaded, so it is read as a checked file is: inside the repo
 
 ## Cost
 
-Beside the built-in questions a unit adds only its question: about 90 tokens for a one-line question, more with background and guidance (about 230 for the one measured below). On its own, a request also carries the unit's source and about 280 tokens of its own. Measured by dry run on eight open-source projects (3,773 functions), one function question with guidance took:
+When the built-in questions are asked too, as about new or changed code, a unit riding beside them adds only its question: about 90 tokens for a one-line question, more with background and guidance (about 200 for the one measured below). On its own, a request also carries the unit's source and about 280 tokens of its own. Measured by dry run on eight open-source projects (3,773 functions) whose caches answered the default rules, one function question with background and guidance took:
 
 | | Requests | New input tokens | Cost |
 |---|---|---|---|
-| Alone (`--rule custom`) | 1,560 | 1.48 million | $0.06 |
-| Beside the default rules | 889 of its own | 1.83 million once, when it is added | $0.08 |
+| Alone (`--rule custom`) | 1,560 | 1.58 million | $0.07 |
+| Beside the default rules, added to cached code | 889 of its own, and the 849 it rides in sent again with it alone | 1.59 million once | $0.07 |
 
-Beside the default rules, 1,792 functions rode in function-simplification requests; the rest, mostly functions of fewer than five body lines, which the split question skips, were asked on their own. With `--base`, only the units a change touched are asked, and reruns are answered from the cache for free.
+Beside the default rules, 1,792 functions rode in function-simplification requests; the rest, mostly functions of fewer than five body lines, which the split question skips, were asked on their own. Added to code whose answers are cached, the question was the only one asked, 3,773 times, and none of the 3,137 cached built-in questions was asked again; sent with the functions' source again, it cost about what it costs alone, where asking the built-in questions again too would have taken 1.94 million. Riding saves when the code changes: its source then goes up once for both. With `--base`, only the units a change touched are asked, and reruns are answered from the cache for free.
 
 `jevgate rules test` asks one request per example, or per eight of its units: about 280 tokens beyond the example's text and the question. The 23 examples above took 29,258 input tokens ($0.0012), and each rerun from the cache none.
 
@@ -172,7 +172,7 @@ Beside the default rules, 1,792 functions rode in function-simplification reques
 
 `.jevgate/questions/` is meant to be committed. JevGate's own `.jevgate/.gitignore` keeps it tracked and the cache ignored; the one versions before 0.29 wrote, which ignores everything, is rewritten by the next check that is not a dry run. A `.gitignore` entry that ignores `.jevgate/` as a whole hides the questions too. Every command says when Git ignores a question file, which rule does, and how to keep it: for a root entry, ignore `/.jevgate/*` and keep `!/.jevgate/questions/` instead.
 
-The question files are read with the repository's own `jevgate.toml`, once per run: `check --watch` stops when one changes, as it does for `jevgate.toml`, and the MCP server reads them afresh for each call. `--config FILE` reads only that file's `[[question]]` tables, so a pull request cannot edit a question to pass a policy a workflow applies with `--config`, and the check names the question files it left unread. `--questions DIR` reads question files from `DIR` instead, such as a copy of the base branch's; [Continuous integration](ci.md) has the recipe.
+The question files are read with the repository's own `jevgate.toml`, once per run: `check --watch` stops when one changes, as it does for `jevgate.toml`, and the MCP server reads them afresh for each call, its rules tool listing them with their definitions. Within an agent's turn, [`jevgate hook`](coding-agents.md) reads them, and the `[[question]]` tables of `jevgate.toml`, as they were when the turn began, question files Git ignores included, so a turn that deletes a question, lowers it to a note or breaks it is still judged by it, and the person is told of the edit (a `question` [guard](output.md#guards)); a `hunk` question there asks about what the turn changed. A text file only a question's `paths` name is read once Git tracks it, in the hook as in a check: an agent's new shell script is asked about after `git add`. `--config FILE` reads only that file's `[[question]]` tables, so a pull request cannot edit a question to pass a policy a workflow applies with `--config`, and the check names the question files it left unread. `--questions DIR` reads question files from `DIR` instead, such as a copy of the base branch's; [Continuous integration](ci.md) has the recipe.
 
 ## Proposed from instruction files
 
