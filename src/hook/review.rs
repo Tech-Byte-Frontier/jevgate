@@ -126,6 +126,15 @@ pub(super) struct Unreviewed {
 }
 
 impl Unreviewed {
+    /// A file the agent edited inside a Git repository of its own, which
+    /// the turn's snapshots do not see.
+    pub fn unseen(path: PathBuf) -> Self {
+        Self {
+            path,
+            why: "it is inside a Git repository of its own (a submodule or nested clone), whose files this repository's snapshots do not record; check it in that repository".into(),
+        }
+    }
+
     /// The same file, not judged for the same reason, has the same id.
     pub fn id(&self) -> String {
         crate::schema::hash(format!("unreviewed {} {}", self.path.display(), self.why).as_bytes())

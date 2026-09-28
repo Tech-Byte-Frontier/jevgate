@@ -49,6 +49,12 @@ pub(super) struct Turn {
     /// otherwise repeat them ten times.
     #[serde(default)]
     pub reported: Vec<String>,
+    /// Files the agent edited inside a Git repository of their own, such as
+    /// a submodule, relative to the root: the turn's snapshots record only
+    /// that repository's commit, so no check of the turn sees them, and the
+    /// person is told at its end.
+    #[serde(default)]
+    pub unseen: Vec<String>,
 }
 
 impl Turn {
@@ -70,6 +76,18 @@ impl Turn {
             carried: true,
             ..Self::begin(session, unchecked.tree, unchecked.notice)
         }
+    }
+
+    /// Remember `paths` as edited where the turn's snapshots do not see;
+    /// whether any was new.
+    pub fn remember_unseen(&mut self, paths: impl IntoIterator<Item = String>) -> bool {
+        let before = self.unseen.len();
+        for path in paths {
+            if !self.unseen.contains(&path) {
+                self.unseen.push(path);
+            }
+        }
+        self.unseen.len() != before
     }
 
     /// Whether `prompt` is this turn's own block reason sent back as a prompt.

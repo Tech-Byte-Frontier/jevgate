@@ -6,7 +6,7 @@ use super::{
     Host,
     agents::{self, Event, Kind, Reply},
     outage,
-    review::{self, Checked, Flagged},
+    review::{self, Checked, Flagged, Unreviewed},
     text,
     turn::{self, Turn},
 };
@@ -236,13 +236,43 @@ impl<'a> Hook<'a> {
         files
     }
 
+    /// Whether `file` is inside a Git repository of its own below the root,
+    /// a submodule or a nested clone: a snapshot records only its commit.
+    fn nested(&self, file: &Path) -> bool {
+        file.ancestors()
+            .skip(1)
+            .take_while(|dir| *dir != self.root && dir.starts_with(&self.root))
+            .any(|dir| dir.join(".git").exists())
+    }
+
     /// Check the edited files since the turn began (whole, without a turn)
-    /// and tell the agent their findings. Nothing blocks.
+    /// and tell the agent their findings. Nothing blocks. Files inside a
+    /// repository of their own are named as not reviewed, and remembered for
+    /// the person at the end of the turn.
     fn after_edit(&self) -> Reply {
-        let turn = self.load();
-        let files = self.edited();
+        let mut turn = self.load();
+        let (nested, files): (Vec<PathBuf>, Vec<PathBuf>) = self
+            .edited()
+            .into_iter()
+            .partition(|file| self.nested(file));
+        let nested = relative(&self.root, &nested);
+        if let Some(turn) = turn.as_mut().filter(|_| !nested.is_empty()) {
+            let paths = nested.iter().map(|path| path.display().to_string());
+            if turn.remember_unseen(paths) {
+                let _ = turn::save(&self.root, turn);
+            }
+        }
         if files.is_empty() {
-            return turn.map_or_else(Reply::default, |turn| self.context(turn, None));
+            let unreviewed: Vec<Unreviewed> = nested.into_iter().map(Unreviewed::unseen).collect();
+            let unreviewed: Vec<&Unreviewed> = unreviewed.iter().collect();
+            let context = text::after_edit(&[], (&[], &[]), &[], &[], &unreviewed);
+            return match turn {
+                Some(turn) => self.context(turn, context),
+                None => Reply {
+                    agent: context,
+                    ..Reply::default()
+                },
+            };
         }
         let shown = relative(&self.root, &files);
         let named = text::named(&shown);
@@ -253,13 +283,16 @@ impl<'a> Hook<'a> {
             },
             None => None,
         };
-        let checked = match self.check(review::Scope {
+        let mut checked = match self.check(review::Scope {
             trees,
             paths: files,
         }) {
             Ok(checked) => checked,
             Err(unfinished) => return failed(self.event, &named, &unfinished.reason),
         };
+        checked
+            .unreviewed
+            .extend(nested.into_iter().map(Unreviewed::unseen));
         let Some(mut turn) = turn else {
             let undecided: Vec<_> = checked.undecided.iter().collect();
             let guards: Vec<_> = checked.guards.iter().collect();
@@ -355,8 +388,14 @@ impl<'a> Hook<'a> {
     /// undecided results fail it: at most three times a turn, and not again
     /// when nothing changed since the last block. A stop that is not blocked
     /// ends the turn. The person hears of the turn's guards.
-    fn decide(&self, turn: Turn, now: String, checked: Checked) -> Reply {
+    fn decide(&self, turn: Turn, now: String, mut checked: Checked) -> Reply {
         let blocks = if self.event.continued { turn.blocks } else { 0 };
+        let unseen = turn
+            .unseen
+            .iter()
+            .map(PathBuf::from)
+            .map(Unreviewed::unseen);
+        checked.unreviewed.extend(unseen);
         let guards = text::joined(
             text::unreviewed_user(&checked.unreviewed),
             text::guards_user(&checked.guards),

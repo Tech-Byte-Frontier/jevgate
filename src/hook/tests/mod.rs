@@ -752,6 +752,34 @@ fn outside_git_nothing_is_checked_blocked_or_written_and_it_is_said_once() {
     assert!(!project.0.join(".jevgate").exists());
 }
 
+#[test]
+fn an_edit_inside_a_repository_of_its_own_is_named_as_not_reviewed() {
+    let project = repository();
+    let nested = project.0.join("lib2");
+    project.write("lib2/src/x.rs", &function("x"));
+    for args in [
+        &["init", "-q"][..],
+        &["add", "."],
+        &["commit", "-qm", "nested"],
+    ] {
+        crate::tests::git::run(&nested, args);
+    }
+    let host = reviewing();
+    send(&project, &host, prompt("grow x"));
+    project.write("lib2/src/x.rs", &long_function("x"));
+    let edited = send(&project, &host, edit(&project, "lib2/src/x.rs"));
+    assert!(
+        context(&edited).starts_with("JevGate did not review lib2/src/x.rs: it is inside a Git repository of its own (a submodule or nested clone)"),
+        "{edited}"
+    );
+    let stopped = send(&project, &host, stop(false));
+    assert!(stopped.get("decision").is_none(), "{stopped}");
+    assert_eq!(
+        message(&stopped),
+        "JevGate did not review 1 file this turn changed: lib2/src/x.rs (it is inside a Git repository of its own (a submodule or nested clone))."
+    );
+}
+
 /// A link planted where the marks go is neither written through nor
 /// pruned through: its target's week-old file stays.
 #[cfg(unix)]
