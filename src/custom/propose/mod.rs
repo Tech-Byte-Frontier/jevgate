@@ -1,10 +1,10 @@
 //! `jevgate rules propose`: custom questions proposed from the lines of the
 //! project's agent instruction files. Code finds the files and splits them
 //! into candidate lines (`files`, `lines`); Jev answers of each line whether
-//! it states a rule one piece of the code shows, and which piece (`ask`);
-//! each line it calls a rule becomes a question that quotes it
-//! (`proposal`), written for a person to edit and accept (`saved`,
-//! `accept`). Jev classifies; it writes nothing.
+//! it states a rule one piece of the code shows, and which piece, then of
+//! each rule what would check it (`ask`); each rule no tool already checks
+//! becomes a question that quotes it (`proposal`), written for a person to
+//! edit and accept (`saved`, `accept`). Jev classifies; it writes nothing.
 mod accept;
 mod ask;
 mod files;
