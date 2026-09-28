@@ -23,9 +23,15 @@ pub const SITE: &str = "https://tech-byte-frontier.github.io/jevgate/";
 
 impl Rule {
     /// The rule's page on the site, `site/src/rules/<ID>.md`: what it looks
-    /// at, how often it was right, and findings it got wrong.
+    /// at, how often it was right, and findings it got wrong. A custom
+    /// question, a team's own, has none: its page is the one on writing and
+    /// testing custom questions.
     pub fn page(&self) -> String {
-        format!("{SITE}rules/{}.html", self.id)
+        if self.group == CUSTOM_GROUP {
+            format!("{SITE}custom-questions.html")
+        } else {
+            format!("{SITE}rules/{}.html", self.id)
+        }
     }
 }
 

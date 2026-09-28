@@ -56,13 +56,15 @@ A unit whose source a built-in question already sends is asked in the same reque
 
 ## Findings and the gate
 
-At or above its threshold, an answer is a finding at the question's level, with the probability in the message:
+At or above its threshold, an answer is a finding at the question's level:
 
 ```text
 Review (1):
-  src/api/orders.ts:41 [custom/no-body-logs] `createOrder`: Does this function write a request body, or a field of one, to a log? Yes (0.93).
+  src/api/orders.ts:41 [custom/no-body-logs] (fails the gate) `createOrder`: Does this function write a request body, or a field of one, to a log? Yes. Not yet measured.
     → Log the request id instead of the body.
 ```
+
+A built-in rule's finding ends with how often findings of its rule and level were right on projects JevGate was never tuned on; a team's own question was labeled on none, so its findings say `Not yet measured.` and carry `precision` of 0 labeled in the JSON report, the MCP results and SARIF, and never a built-in rule's. Its examples, below, are how you measure it. The JSON report keeps each answer's probability (`concern_probability`), and SARIF links a custom question to this page.
 
 At or below one minus the threshold, the unit is clear. Between the two it is undecided, listed with the question under `--verbose`, and never fails the gate unless you ask for that with `--fail-on custom/no-body-logs=uncertain`.
 

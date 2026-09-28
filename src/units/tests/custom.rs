@@ -139,7 +139,20 @@ fn yes_at_the_threshold_is_a_finding_at_the_question_level_that_fails_the_gate()
     assert_eq!(finding.strength, Strength::Consider);
     assert_eq!(
         finding.message,
-        "`charge`: Does this function write a request body to a log? Yes (0.75)."
+        "`charge`: Does this function write a request body to a log? Yes."
+    );
+    assert_eq!(finding.concern_probability, 0.75);
+    // A team's question has no labels, and never borrows a built-in rule's.
+    assert_eq!(
+        finding.precision,
+        Some(crate::maturity::Labels::default()),
+        "labeled on no project"
+    );
+    assert!(
+        crate::output::claim(finding, crate::output::Style::PLAIN)
+            .ends_with("Yes. Not yet measured."),
+        "{}",
+        crate::output::claim(finding, crate::output::Style::PLAIN)
     );
     assert_eq!(finding.action, "Log the request id instead.");
     assert_eq!(finding.rule_version, options.questions[0].version);

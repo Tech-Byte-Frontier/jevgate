@@ -86,18 +86,33 @@ fn document(
 /// as a tag (code scanning lists rules tagged `security` as security alerts),
 /// and its page on the site. Code scanning shows `help` beside each alert, the
 /// Markdown form when there is one, and not `helpUri`, so the help ends with
-/// the page too.
+/// the page too. A custom question has no measured page: its help gives the
+/// guidance its author wrote, and links how custom questions are asked and
+/// tested.
 fn rule(rule: &catalog::Rule) -> Value {
-    const PAGE: &str = "How often it was right, and findings it got wrong";
-    let (question, acceptable, page) = (rule.inspection, rule.acceptable_example, rule.page());
+    let custom = rule.group == catalog::CUSTOM_GROUP;
+    let (link, part) = if custom {
+        ("How custom questions are asked and tested", "Guidance")
+    } else {
+        (
+            "How often it was right, and findings it got wrong",
+            "Acceptable",
+        )
+    };
+    let (question, detail, page) = (rule.inspection, rule.acceptable_example, rule.page());
+    let (mut text, mut markdown) = (question.to_string(), question.to_string());
+    if !detail.is_empty() {
+        text.push_str(&format!("\n\n{part}: {detail}"));
+        markdown.push_str(&format!("\n\n**{part}:** {detail}"));
+    }
     json!({
         "id": rule.id,
         "name": rule.key,
         "shortDescription": {"text": title(rule.id)},
         "fullDescription": {"text": question},
         "help": {
-            "text": format!("{question}\n\nAcceptable: {acceptable}\n\n{PAGE}: {page}"),
-            "markdown": format!("{question}\n\n**Acceptable:** {acceptable}\n\n[{PAGE}]({page})"),
+            "text": format!("{text}\n\n{link}: {page}"),
+            "markdown": format!("{markdown}\n\n[{link}]({page})"),
         },
         "helpUri": page,
         "properties": {"tags": [rule.group]},
@@ -258,6 +273,7 @@ mod tests {
         let custom = Finding {
             rule: "custom/body-logs".into(),
             gate: Some(Gating::Fails),
+            precision: crate::maturity::precision("custom/body-logs", Strength::Review),
             ..crate::tests::finding(Strength::Review)
         };
         let args = crate::tests::args();
@@ -273,7 +289,28 @@ mod tests {
             "Does this function log a request body?"
         );
         assert_eq!(rules[index]["properties"]["tags"], json!(["custom"]));
-        assert_eq!(run["results"][0]["level"], "error");
+        let page = "https://tech-byte-frontier.github.io/jevgate/custom-questions.html";
+        assert_eq!(
+            rules[index]["helpUri"], page,
+            "no page of a team's question"
+        );
+        let help = rules[index]["help"]["text"].as_str().unwrap();
+        assert!(
+            help.ends_with(&format!(
+                "How custom questions are asked and tested: {page}"
+            )),
+            "{help}"
+        );
+        assert!(!help.contains("Acceptable:"), "{help}");
+        let result = &run["results"][0];
+        assert_eq!(result["level"], "error");
+        assert_eq!(
+            result["properties"]["precision"],
+            json!({"right": 0, "labeled": 0}),
+            "no built-in rule's labels"
+        );
+        let text = result["message"]["text"].as_str().unwrap();
+        assert!(text.contains("Not yet measured."), "{text}");
     }
 
     #[test]
