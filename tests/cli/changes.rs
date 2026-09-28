@@ -117,6 +117,43 @@ fn base_judges_changed_lines_unless_whole_files_is_given() {
 }
 
 #[test]
+fn base_reads_the_repository_git_dir_names() {
+    // A work tree whose repository is kept elsewhere is found only through
+    // GIT_DIR and GIT_WORK_TREE: a check honors them, as it honors those Git
+    // sets for a hook, where the tests' own Git drops them.
+    let project = Project::new();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();
+    std::fs::write(project.0.join("other.rs"), JUDGED_RS).unwrap();
+    git(&project, &["init", "-q"]);
+    git(&project, &["add", "."]);
+    git(&project, &["commit", "-qm", "baseline"]);
+    let elsewhere = Project::new();
+    let store = elsewhere.0.join("store.git");
+    std::fs::rename(project.0.join(".git"), &store).unwrap();
+    std::fs::write(project.0.join("lib.rs"), JUDGED_RS.replace("+ 1", "+ 2")).unwrap();
+    let output = project
+        .command()
+        .env("GIT_DIR", &store)
+        .env("GIT_WORK_TREE", &project.0)
+        .args(["check", "--dry-run", "--format", "json", "--base", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let paths: Vec<&str> = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["lib.rs"]);
+}
+
+#[test]
 fn a_config_file_given_by_path_replaces_the_repository_one() {
     let project = Project::new();
     std::fs::write(
