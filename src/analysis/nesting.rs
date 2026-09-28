@@ -200,29 +200,49 @@ fn after_else(node: Node<'_>) -> bool {
 /// it, each other clause they list and each final `else` block.
 fn chain(node: Node<'_>, language: &Language) -> usize {
     let mut length = 1;
-    let mut current = node;
-    loop {
-        let mut next = None;
-        let mut cursor = current.walk();
-        for child in current.children(&mut cursor) {
-            if continues(child, language) {
-                next = Some(child);
-            } else if language.clauses.contains(&child.kind()) {
-                match child
-                    .named_child(0)
-                    .filter(|inner| continues(*inner, language))
-                {
-                    Some(inner) => next = Some(inner),
-                    None => length += 1,
+    let mut current = Some(node);
+    while let Some(conditional) = current.take() {
+        let mut cursor = conditional.walk();
+        for child in conditional.children(&mut cursor) {
+            match branch(child, language) {
+                Branch::Continues(next) => {
+                    length += 1;
+                    current = Some(next);
                 }
-            } else if child.is_named() && after_else(child) {
-                length += 1;
+                Branch::Adds => length += 1,
+                Branch::Other => {}
             }
         }
-        let Some(inner) = next else {
-            return length;
+    }
+    length
+}
+
+/// What one child of a conditional is to its chain.
+enum Branch<'t> {
+    /// The next conditional of the chain: `else if`.
+    Continues(Node<'t>),
+    /// Another branch: an `elif`, `elseif` or final `else`.
+    Adds,
+    Other,
+}
+
+fn branch<'t>(child: Node<'t>, language: &Language) -> Branch<'t> {
+    if continues(child, language) {
+        return Branch::Continues(child);
+    }
+    if language.clauses.contains(&child.kind()) {
+        // C's `else` clause holds the next `if` alone; `elif` holds a body.
+        return match child
+            .named_child(0)
+            .filter(|inner| continues(*inner, language))
+        {
+            Some(next) => Branch::Continues(next),
+            None => Branch::Adds,
         };
-        length += 1;
-        current = inner;
+    }
+    if child.is_named() && after_else(child) {
+        Branch::Adds
+    } else {
+        Branch::Other
     }
 }

@@ -6,6 +6,7 @@ mod generic;
 mod go;
 mod java;
 mod javascript;
+mod navigation;
 mod php;
 mod python;
 mod ruby;

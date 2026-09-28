@@ -219,7 +219,10 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Resul
             test_lines: Vec::new(),
         }));
     }
-    let prepared = prepare(input, args)?;
+    let prepared = match crate::analysis::generic::of(&input.result.path) {
+        Some(language) => generic_prepared(language, input.result.role == "test"),
+        None => prepare(input, args)?,
+    };
     match prepared.action {
         Action::Skip => Ok(Plan::Skip(prepared.classification)),
         Action::Purpose => {
@@ -494,11 +497,8 @@ fn generic_prepared(language: &crate::analysis::generic::Language, test: bool) -
 }
 
 fn prepare(input: &Input, args: &CheckArgs) -> Result<Prepared> {
-    let path = &input.result.path;
-    if let Some(language) = crate::analysis::generic::of(path) {
-        return Ok(generic_prepared(language, input.result.role == "test"));
-    }
     let original = input.source.clone().unwrap_or_default();
+    let path = &input.result.path;
     let located = locate_tests(path, &original)?;
     // A Bend 2 test is a whole program, so on a test path a file that
     // defines `main` is one test, whether it ends in the output its run
