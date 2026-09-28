@@ -309,6 +309,32 @@ fn an_alias_answer_that_expires_in_a_session_is_asked_once_and_replaced() {
 }
 
 #[test]
+fn a_batch_uses_an_earlier_versions_answer_wherever_it_asks_the_question() {
+    let project = Project::new();
+    let options = args();
+    let first = three_questions();
+    let second = sharing_long(&first);
+    // Kept at the top of each scale; the mock answers at the bottom.
+    save_whole(&project, &first, schema::now() - 60);
+    let mut mock = Mock::default();
+    // `second`, which no earlier version asked, is looked up first.
+    let receipts = ask(&project, &options, &mut mock, &[&second, &first]);
+    assert_eq!(
+        asked(&mock),
+        [["short"]],
+        "the kept answer is not bought again"
+    );
+    assert_eq!(
+        long(&receipts[0]),
+        long(&receipts[1]),
+        "one answer in the batch"
+    );
+    let rerun = ask(&project, &options, &mut mock, &[&second, &first]);
+    assert_eq!(mock.calls, 1);
+    assert_eq!(long(&rerun[0]), long(&receipts[0]), "the rerun reads it");
+}
+
+#[test]
 fn paid_tokens_are_what_was_sent_and_a_file_counts_its_answers_shares() {
     let project = Project::new();
     project.write("lib.rs", &format!("{}{}", function("a"), function("b")));

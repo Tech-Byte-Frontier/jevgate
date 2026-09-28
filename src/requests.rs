@@ -117,15 +117,28 @@ impl Session<'_> {
         receipts: &mut [Receipt],
     ) -> Vec<Pending<'r>> {
         let cache = self.store.reader();
-        let mut pending = Vec::new();
-        for (index, request) in requests.iter().enumerate() {
-            let mut lookup = Lookup::new(self.args, request, Some(&cache), &self.answered);
-            let carried = std::mem::take(&mut lookup.carried);
-            if !carried.is_empty() {
-                // A copy that cannot be written is made again from the
-                // whole-request entry on the next run; this run has the answers.
-                let _ = self.store.copy_answers(&lookup.state, carried);
+        let mut copied = false;
+        let mut lookups: Vec<Lookup> = requests
+            .iter()
+            .map(|request| {
+                let (lookup, copy) = self.look_up(request, &cache);
+                copied |= copy;
+                lookup
+            })
+            .collect();
+        if copied {
+            // A request looked up before another one of the batch copied an
+            // earlier version's answers about its state reads them now: the
+            // batch then gives a question one answer, which a rerun reads,
+            // and does not buy an answer the cache holds.
+            for (lookup, request) in lookups.iter_mut().zip(requests) {
+                if lookup.lacks_answers() {
+                    *lookup = self.look_up(request, &cache).0;
+                }
             }
+        }
+        let mut pending = Vec::new();
+        for (index, (request, lookup)) in requests.iter().zip(lookups).enumerate() {
             let receipt = &mut receipts[index];
             match lookup.unanswered(request) {
                 None => {
@@ -148,6 +161,18 @@ impl Session<'_> {
             }
         }
         pending
+    }
+
+    /// The cached answers to `request`, after copying those it carried over
+    /// from an earlier version's whole-request entry into its state's file;
+    /// and whether any were copied.
+    fn look_up(&self, request: &Value, cache: &crate::storage::CacheReader) -> (Lookup, bool) {
+        let mut lookup = Lookup::new(self.args, request, Some(cache), &self.answered);
+        let carried = std::mem::take(&mut lookup.carried);
+        // A copy that cannot be written is made again from the whole-request
+        // entry on the next run; this run has the answers.
+        let copied = !carried.is_empty() && self.store.copy_answers(&lookup.state, carried).is_ok();
+        (lookup, copied)
     }
 
     /// Upload `pending` through the evaluator, rechecking each source first,

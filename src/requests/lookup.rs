@@ -229,6 +229,11 @@ impl Lookup {
         Ok(timestamp)
     }
 
+    /// Whether a question of the request has no cached answer.
+    pub(super) fn lacks_answers(&self) -> bool {
+        !self.missing.is_empty()
+    }
+
     /// `request` with only the questions to ask: none when every one is
     /// answered, and the request itself, not a copy, when none is (every
     /// request of a first run).
