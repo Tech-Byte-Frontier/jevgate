@@ -133,8 +133,8 @@ fn base_reads_the_repository_git_dir_names() {
     std::fs::write(project.0.join("lib.rs"), JUDGED_RS.replace("+ 1", "+ 2")).unwrap();
     let output = project
         .command()
-        .env("GIT_DIR", &store)
-        .env("GIT_WORK_TREE", &project.0)
+        .env("GIT_DIR", plain(&store))
+        .env("GIT_WORK_TREE", plain(&project.0))
         .args(["check", "--dry-run", "--format", "json", "--base", "HEAD"])
         .output()
         .unwrap();
@@ -151,6 +151,17 @@ fn base_reads_the_repository_git_dir_names() {
         .map(|f| f["path"].as_str().unwrap())
         .collect();
     assert_eq!(paths, ["lib.rs"]);
+}
+
+/// A path as a person would give it to Git. The tests' temporary directories
+/// are canonical, which on Windows is the verbatim form `\\?\C:\…`, and Git for
+/// Windows reads a `GIT_DIR` in that form as "not a git repository".
+fn plain(path: &std::path::Path) -> std::path::PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with(r"UNC\") => std::path::PathBuf::from(rest),
+        _ => path.to_path_buf(),
+    }
 }
 
 #[test]
