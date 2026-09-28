@@ -294,16 +294,41 @@ fn undecided_units_are_listed_with_the_questions_left_undecided() {
     let report = run(&project, &options, &mut scripted(3));
     let dimension = &report.files[0].dimensions["function_simplification"];
     assert_eq!(dimension.status, Status::Uncertain);
-    assert_eq!(
-        dimension.undecided,
-        [crate::schema::Undecided {
-            unit: "borderline".into(),
-            line: 1,
-            questions: vec!["splitting".into()],
-            values: Vec::new(),
-        }]
+    let [unit] = dimension.undecided.as_slice() else {
+        panic!("{:?}", dimension.undecided);
+    };
+    assert_eq!((unit.unit.as_str(), unit.line), ("borderline", 1));
+    assert_eq!(unit.questions, ["splitting"]);
+    assert_eq!(unit.locations[0].end_line, 8);
+    assert!(
+        unit.concern > 0.0 && unit.concern < crate::policy::REVIEW_PROBABILITY,
+        "{}",
+        unit.concern
     );
+    // The question as it was asked, the evidence it named, what each answer
+    // means and the answer that left it open.
+    let [open] = unit.open.as_slice() else {
+        panic!("{:?}", unit.open);
+    };
+    assert_eq!(
+        (open.id.as_str(), open.pass),
+        ("split", crate::schema::Pass::First)
+    );
+    assert!(open.text.contains("`functions[0].source`"), "{}", open.text);
+    assert_eq!(open.evidence, ["functions[0].source"]);
+    assert!(open.options["2"].starts_with("Yes."), "{:?}", open.options);
+    let asked = report.files[0]
+        .judgments
+        .iter()
+        .find(|j| j.question == "split")
+        .unwrap();
+    assert_eq!(open.answer, asked.answer);
     options.refresh = true;
+    let review = run(&project, &options, &mut scripted(2));
+    assert_eq!(
+        review.files[0].findings[0].fingerprint, unit.fingerprint,
+        "the fingerprint a finding of the unit has"
+    );
     let report = run(&project, &options, &mut scripted(0));
     assert!(
         report.files[0].dimensions["function_simplification"]

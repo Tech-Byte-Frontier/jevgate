@@ -159,6 +159,21 @@ pub struct Confirms {
     pub logging: Option<FollowUp>,
 }
 
+impl Confirms {
+    fn all(&self) -> impl Iterator<Item = &FollowUp> {
+        [
+            &self.values,
+            &self.checked,
+            &self.queried,
+            &self.rendered,
+            &self.readers,
+            &self.logging,
+        ]
+        .into_iter()
+        .flatten()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Detail {
     Function {
@@ -340,6 +355,46 @@ pub struct UnitPlan {
     pub identity: String,
     pub detail: Detail,
     pub recheck: Option<FollowUp>,
+}
+
+impl UnitPlan {
+    /// Every follow-up planned for the unit, asked or not: where an answer
+    /// given after the first pass was asked.
+    fn follow_ups(&self) -> impl Iterator<Item = &FollowUp> {
+        let planned: Vec<&FollowUp> = match &self.detail {
+            Detail::Function { locate, .. }
+            | Detail::Values { locate, .. }
+            | Detail::Constants { locate, .. } => locate.iter().collect(),
+            Detail::Outline { kind, parts, .. } => kind
+                .iter()
+                .chain(parts.iter().map(|part| &part.follow_up))
+                .collect(),
+            Detail::Comment { kind, .. } => kind.iter().collect(),
+            Detail::Security {
+                trace,
+                settles,
+                confirms,
+                ..
+            } => trace
+                .iter()
+                .chain(settles.iter().map(|settle| &settle.request))
+                .chain(confirms.all())
+                .collect(),
+            Detail::Document { locate, kind, .. } => locate.iter().chain(kind).collect(),
+            Detail::Stale { check, settle, .. } | Detail::DocPair { check, settle, .. } => {
+                check.iter().chain(settle).collect()
+            }
+            Detail::Test { confirm } | Detail::TestPair { confirm, .. } => confirm.iter().collect(),
+            Detail::Pair { .. }
+            | Detail::Plan { .. }
+            | Detail::Section { .. }
+            | Detail::Handler { .. }
+            | Detail::Access(_)
+            | Detail::Job { .. }
+            | Detail::Law => Vec::new(),
+        };
+        self.recheck.iter().chain(planned)
+    }
 }
 
 #[derive(Clone, Debug, Default)]

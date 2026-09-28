@@ -93,7 +93,8 @@ fn composition_is_pure_and_repeatable_from_saved_judgments() {
     let options = args();
     let report: Report = run(&project, &options, &mut scripted(2));
     let (_, plan) = planned(&project, &options);
-    let again = compose::compose(&plan.files[&0], &report.files[0].judgments);
+    let first: Vec<_> = plan.requests.iter().collect();
+    let again = compose::compose(&plan.files[&0], &report.files[0].judgments, &first);
     assert_eq!(again.status, report.files[0].status);
     assert_eq!(
         again
@@ -106,6 +107,61 @@ fn composition_is_pure_and_repeatable_from_saved_judgments() {
             .iter()
             .map(|f| &f.fingerprint)
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn every_undecided_unit_quotes_each_question_it_left_open() {
+    let source = format!(
+        "const REGION: &str = \"eu-west-1\";\n\nfn connect() -> Client {{\n    Client::new(\"db.internal:5432\", 30_000)\n}}\n\nfn find(conn: &Connection, name: &str) -> Result<Row> {{\n    let sql = format!(\"SELECT id FROM users WHERE name = '{{name}}'\");\n    conn.query_row(&sql, [], Row::from)\n}}\n\n/// Totals the values.\npub fn total(values: &[i32]) -> i32 {{\n    // Start at zero\n    let mut sum = 0;\n    for value in values {{\n        // Add the value\n        sum += value;\n    }}\n    sum\n}}\n\n{}",
+        long_function("busy")
+    );
+    let (project, mut options) = project_with(
+        &[
+            ("Cargo.toml", "[package]\nname = \"demo\"\n"),
+            ("src/lib.rs", &source),
+            (
+                "tests/total.rs",
+                "#[test]\nfn totals() {\n    let sum = demo::total(&[1, 2]);\n    assert_eq!(sum, 3);\n    assert!(sum > 0);\n}\n",
+            ),
+            (
+                "AGENTS.md",
+                "# Testing\nTests live beside the code and use the fixtures in `testdata/`.\n\n# Release\nRun `scripts/release.sh` and tag with `v`.\n",
+            ),
+        ],
+        &[],
+    );
+    options.rules = crate::catalog::keys().into_iter().map(Into::into).collect();
+    options.include_tests = true;
+    let report = run(&project, &options, &mut scripted(3));
+    let undecided: Vec<_> = report
+        .files
+        .iter()
+        .flat_map(|f| f.dimensions.values())
+        .flat_map(|d| &d.undecided)
+        .collect();
+    let rules: std::collections::BTreeSet<&str> = report
+        .files
+        .iter()
+        .flat_map(|f| &f.dimensions)
+        .filter(|(_, d)| !d.undecided.is_empty())
+        .map(|(rule, _)| rule.as_str())
+        .collect();
+    assert!(rules.len() >= 3, "{rules:?}");
+    for unit in &undecided {
+        assert_eq!(unit.open.len(), unit.questions.len(), "{unit:#?}");
+        assert_eq!(unit.fingerprint.len(), 64);
+        for open in &unit.open {
+            assert!(!open.evidence.is_empty(), "{open:#?}");
+            assert!(open.options.len() >= 2, "{open:#?}");
+        }
+    }
+    assert!(
+        undecided
+            .iter()
+            .flat_map(|u| &u.open)
+            .any(|open| open.pass != crate::schema::Pass::First),
+        "answers given after the first pass are quoted from their follow-ups"
     );
 }
 

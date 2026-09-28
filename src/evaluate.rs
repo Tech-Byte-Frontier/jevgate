@@ -547,14 +547,20 @@ fn add_metrics(stage: &mut crate::schema::StageMetrics, m: &crate::schema::Stage
     stage.evidence_bytes += m.evidence_bytes;
 }
 
-/// Compose each planned file's recorded judgments into dimensions and findings.
+/// Compose each planned file's recorded judgments into dimensions and
+/// findings, with the requests its units were first asked in.
 fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
+    let mut first = BTreeMap::<usize, Vec<&crate::units::Planned>>::new();
+    for planned in &plan.requests {
+        first.entry(planned.owner).or_default().push(planned);
+    }
     for (&owner, file_plan) in &plan.files {
         let file = &mut report.files[owner];
         if file.status == Status::Error {
             continue;
         }
-        let composed = crate::units::compose::compose(file_plan, &file.judgments);
+        let asked = first.get(&owner).map_or(&[][..], Vec::as_slice);
+        let composed = crate::units::compose::compose(file_plan, &file.judgments, asked);
         file.syntax_checked = true;
         file.dimensions = composed.dimensions;
         file.findings = composed.findings;

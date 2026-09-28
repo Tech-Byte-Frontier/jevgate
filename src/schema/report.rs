@@ -1,7 +1,7 @@
 //! The report's structure: per-file results, findings and their locations,
 //! per-rule dimensions, stage metrics and the report itself, as `--format
 //! json` and `.jevgate/latest.json` write it.
-use super::{Judgment, Status};
+use super::{Answer, Judgment, Pass, Status};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,14 +22,52 @@ pub struct Dimension {
 }
 
 /// A judged unit that stayed undecided, and the questions left undecided.
+/// Reports written before 0.27 hold only its name, line, questions and values.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Undecided {
     pub unit: String,
     pub line: usize,
+    /// The labels of the questions left undecided, or `no answer`.
     pub questions: Vec<String>,
     /// The candidate values, for a hardcoded-value unit with only a few.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
+    /// The fingerprint a finding of this unit would have: rule, path and
+    /// unit identity.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub fingerprint: String,
+    /// Where the unit is, as a finding of it would point.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<Location>,
+    /// The concern probability that stayed below the thresholds.
+    #[serde(default)]
+    pub concern: f64,
+    /// Each question left undecided, as it was asked, with the answer that
+    /// left it open: what a person or a coding agent needs to weigh it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open: Vec<OpenQuestion>,
+}
+
+/// An undecided question as it was asked.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OpenQuestion {
+    /// The question's id, as the unit's judgments record it.
+    pub id: String,
+    /// The pass whose answer left it open: a recheck or a trace asked it
+    /// again with more evidence.
+    pub pass: Pass,
+    /// The question as it was asked.
+    pub text: String,
+    /// The paths of the request's state the question names, such as
+    /// `functions[0].source`: the evidence it judged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+    /// What each answer means, by the names `answer`'s probabilities use: a
+    /// Score's levels by position, a Noul's `true` and `false`, a Choice's
+    /// options (empty for an option the state defines, such as a block id).
+    #[serde(default)]
+    pub options: BTreeMap<String, String>,
+    pub answer: Answer,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

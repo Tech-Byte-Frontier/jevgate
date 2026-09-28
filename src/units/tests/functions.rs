@@ -123,6 +123,11 @@ fn uncertain_units_get_one_recheck_that_replaces_them_only_when_decisive() {
     let report = run(&project, &options, &mut still);
     assert_eq!(report.files[0].status, Status::Uncertain);
     assert!(report.files[0].findings.is_empty());
+    // An undecided recheck leaves the first answer in place, so the caller's
+    // open question is quoted as the first pass asked it.
+    let undecided = &report.files[0].dimensions["function_simplification"].undecided;
+    let caller = undecided.iter().find(|u| u.unit == "caller").unwrap();
+    assert_eq!(caller.open[0].pass, crate::schema::Pass::First);
 }
 
 #[test]

@@ -5,7 +5,7 @@
 //! finding's level, `located` where a finding points, and `redundant` and
 //! `comments` report tests and comments together.
 use super::{
-    Access, Block, Detail, FilePlan, Presence, UnitPlan,
+    Access, Block, Detail, FilePlan, Planned, Presence, UnitPlan,
     outcome::{
         Answers, Outcome, QUERIED, at_most_note, benefit, checks, choice, choice_mass, confirmable,
         document_split, errors_found, escape_found, logs_found, lowered, noul, open,
@@ -34,6 +34,7 @@ mod caps;
 mod comments;
 mod due;
 mod located;
+mod open;
 mod redundant;
 use answers::*;
 use caps::*;
@@ -43,6 +44,7 @@ pub use due::{
     unlocated_units, unparted_units, unqueried_units, unsettled, untraced_units,
 };
 use located::*;
+use open::Quotes;
 use redundant::*;
 
 pub struct Composed {
@@ -51,14 +53,17 @@ pub struct Composed {
     pub status: Status,
 }
 
-pub fn compose(plan: &FilePlan, judgments: &[Judgment]) -> Composed {
+/// Compose a file's judgments; `first` holds the requests its units were
+/// first asked in, which an undecided unit quotes its open questions from.
+pub fn compose(plan: &FilePlan, judgments: &[Judgment], first: &[&Planned]) -> Composed {
     let few = few_comment_lines(plan, judgments);
+    let quotes = Quotes { judgments, first };
     let mut tally = Tally::default();
     for (rule, omitted) in &plan.rules {
         tally.counts.entry(rule).or_default().omitted = *omitted;
     }
     for unit in &plan.units {
-        tally.add(plan, unit, judgments, &few);
+        tally.add(plan, unit, quotes, &few);
     }
     let Tally {
         mut counts,
@@ -118,13 +123,8 @@ struct Tally<'p> {
 impl<'p> Tally<'p> {
     /// Counts one unit under its rule and keeps what it contributes: a
     /// finding, a comment to group, a redundant test pair or an undecided unit.
-    fn add(
-        &mut self,
-        plan: &FilePlan,
-        unit: &'p UnitPlan,
-        judgments: &[Judgment],
-        few: &BTreeSet<&str>,
-    ) {
+    fn add(&mut self, plan: &FilePlan, unit: &'p UnitPlan, quotes: Quotes, few: &BTreeSet<&str>) {
+        let judgments = quotes.judgments;
         let count = self.counts.entry(unit.rule).or_default();
         if !counted_as_judged(unit, judgments, count) {
             return;
@@ -167,7 +167,7 @@ impl<'p> Tally<'p> {
                 self.undecided
                     .entry(unit.rule)
                     .or_default()
-                    .push(undecided_unit(unit, &answers));
+                    .push(undecided_unit(plan, unit, outcome, &answers, quotes));
             }
         }
         if let (
@@ -300,40 +300,17 @@ fn deciding_questions(rule: &str) -> &'static [&'static str] {
 /// so the entry names what the question was about without repeating the code.
 const SHOWN_VALUES: usize = 3;
 
-/// The unit and its undecided questions; with no answers, why.
-fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
-    let get = |q: &str| answers.get(q).copied();
-    let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
-        .then(|| value_signals(&get, &unit.detail, true))
-        .flatten();
-    // Instruction sections and section pairs settle some signals by others.
-    let settled_sections = match unit.rule {
-        catalog::AGENT_CONTEXT => super::outcome::section_signals(&get),
-        catalog::DOC_DUPLICATION => super::outcome::pair_signals(
-            &get,
-            matches!(
-                unit.detail,
-                Detail::DocPair {
-                    translated: true,
-                    ..
-                }
-            ),
-        ),
-        _ => None,
-    };
-    let mut questions: Vec<String> = match (settled_values, settled_sections) {
-        (Some(signals), _) => signals
-            .iter()
-            .filter(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
-            .map(|(q, ..)| question_label(q).to_string())
-            .collect(),
-        (None, Some(signals)) => signals
-            .iter()
-            .filter(|(_, o)| matches!(o, Outcome::Uncertain(_)))
-            .map(|(q, _)| question_label(q).to_string())
-            .collect(),
-        (None, None) => undecided_questions(unit.rule, answers),
-    };
+/// The unit, where it is, how close it came to a finding and the questions
+/// it left undecided, each as it was asked; with no answers, why.
+fn undecided_unit(
+    plan: &FilePlan,
+    unit: &UnitPlan,
+    outcome: Outcome,
+    answers: &Answers<'_>,
+    quotes: Quotes,
+) -> Undecided {
+    let open = open_questions(unit, answers);
+    let mut questions: Vec<String> = open.iter().map(|q| question_label(q).to_string()).collect();
     if answers.is_empty() {
         questions.push("no answer".into());
     }
@@ -355,11 +332,51 @@ fn undecided_unit(unit: &UnitPlan, answers: &Answers<'_>) -> Undecided {
         values,
         line: unit.locations.first().map_or(1, |l| l.start_line),
         questions,
+        fingerprint: fingerprint(unit.rule, plan, &unit.identity),
+        locations: unit.locations.clone(),
+        concern: outcome.concern(),
+        open: quotes.open(unit, &open, answers),
+    }
+}
+
+/// The questions whose answers left a unit undecided.
+fn open_questions(unit: &UnitPlan, answers: &Answers<'_>) -> Vec<&'static str> {
+    let get = |q: &str| answers.get(q).copied();
+    let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
+        .then(|| value_signals(&get, &unit.detail, true))
+        .flatten();
+    // Instruction sections and section pairs settle some signals by others.
+    let settled_sections = match unit.rule {
+        catalog::AGENT_CONTEXT => super::outcome::section_signals(&get),
+        catalog::DOC_DUPLICATION => super::outcome::pair_signals(
+            &get,
+            matches!(
+                unit.detail,
+                Detail::DocPair {
+                    translated: true,
+                    ..
+                }
+            ),
+        ),
+        _ => None,
+    };
+    match (settled_values, settled_sections) {
+        (Some(signals), _) => signals
+            .iter()
+            .filter(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
+            .map(|(q, ..)| *q)
+            .collect(),
+        (None, Some(signals)) => signals
+            .iter()
+            .filter(|(_, o)| matches!(o, Outcome::Uncertain(_)))
+            .map(|(q, _)| *q)
+            .collect(),
+        (None, None) => undecided_questions(unit.rule, answers),
     }
 }
 
 /// The deciding questions of a rule whose own answers stayed undecided.
-fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<String> {
+fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<&'static str> {
     deciding_questions(rule)
         .iter()
         .filter(|q| {
@@ -375,7 +392,7 @@ fn undecided_questions(rule: &str, answers: &Answers<'_>) -> Vec<String> {
                 matches!(outcome, Outcome::Uncertain(_))
             })
         })
-        .map(|q| question_label(q).to_string())
+        .copied()
         .collect()
 }
 
