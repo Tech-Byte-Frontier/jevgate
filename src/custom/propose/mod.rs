@@ -62,6 +62,8 @@ fn settings(args: &ProposeArgs, context: &ConfigContext) -> Result<CheckArgs> {
         "--show-requests uses JSON output; omit --format or use --format json"
     );
     let mut check = CheckArgs::defaults();
+    check.cache_only = args.cache_only;
+    check.max_requests = args.max_requests;
     context.configure(&mut check)?;
     check.env_file.clone_from(&args.env_file);
     check.dry_run = args.dry_run;
@@ -106,9 +108,13 @@ fn propose(
     let mut candidates = proposal::decide(&files, &asked, &mut saved);
     let errors = asked.errors();
     let code = if errors.is_empty() { 0 } else { 2 };
+    // TOML is for pasting into jevgate.toml, where a written proposal would
+    // define each question a second time.
+    if format != ProposeFormat::Toml {
+        saved::write(&context.root, &mut candidates)?;
+    }
     let (stdout, notes) = match format {
         ProposeFormat::Table => {
-            saved::write(&context.root, &mut candidates)?;
             let table = render::table(&files, &skipped, &candidates, (&usage, &errors));
             (table, Vec::new())
         }

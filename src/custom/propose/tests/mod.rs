@@ -174,6 +174,8 @@ fn arguments(format: ProposeFormat, dry_run: bool) -> ProposeArgs {
         format: Some(format),
         dry_run,
         show_requests: false,
+        cache_only: false,
+        max_requests: None,
         env_file: None,
     }
 }
@@ -411,7 +413,11 @@ fn a_copy_of_a_rule_in_another_file_is_proposed_once() {
             ("CLAUDE.md", "repeated"),
         ]
     );
-    assert!(proposals(&project).is_empty(), "JSON writes nothing");
+    assert_eq!(
+        proposals(&project).len(),
+        2,
+        "JSON writes the proposals, as the table does, so each id can be accepted"
+    );
 }
 
 #[test]
@@ -509,6 +515,24 @@ fn a_refused_request_leaves_the_run_incomplete() {
     );
     assert_eq!(toml.notes, ["HTTP 402: credits exhausted"]);
     assert!(proposals(&project).is_empty());
+}
+
+#[test]
+fn a_run_from_the_cache_or_within_a_budget_asks_no_more_than_it_may() {
+    let project = Project::new();
+    project.write("AGENTS.md", AGENTS);
+    let mut cached = arguments(ProposeFormat::Toml, false);
+    cached.cache_only = true;
+    let mut rules = Rules::default();
+    let printed = propose(&project, &cached, &mut rules);
+    assert_eq!((printed.code, rules.calls), (2, 0), "nothing cached yet");
+    let mut budget = arguments(ProposeFormat::Toml, false);
+    budget.max_requests = Some(1);
+    let printed = propose(&project, &budget, &mut rules);
+    assert_eq!((printed.code, rules.calls), (2, 1), "{:?}", printed.notes);
+    proposed(&project);
+    let printed = propose(&project, &cached, &mut rules);
+    assert_eq!(printed.code, 0, "{:?}", printed.notes);
 }
 
 #[test]

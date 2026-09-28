@@ -143,6 +143,12 @@ pub struct ProposeArgs {
     /// With --dry-run, include every request body (the exact lines and questions)
     #[arg(long, requires = "dry_run")]
     pub show_requests: bool,
+    /// Use cached answers only and never contact the provider; a line without one leaves the run incomplete
+    #[arg(long, conflicts_with = "dry_run")]
+    pub cache_only: bool,
+    /// Stop after this many API attempts; reaching it leaves the run incomplete
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000))]
+    pub max_requests: Option<u32>,
     /// Credential file holding TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY [default: <repository root>/.env]
     ///
     /// Read as `check` reads it: TYPESAFE_API_KEY in the environment takes
@@ -166,9 +172,9 @@ impl ProposeArgs {
 pub enum ProposeFormat {
     /// Write the proposals to .jevgate/proposals/ and list them
     Table,
-    /// Print the proposals as [[question]] tables for jevgate.toml; write nothing
+    /// Print the proposals as [[question]] tables to paste into jevgate.toml, instead of writing them
     Toml,
-    /// Print every line with its answers and proposal; write nothing
+    /// Write the proposals to .jevgate/proposals/, and print every line with its answers and proposal
     Json,
 }
 
