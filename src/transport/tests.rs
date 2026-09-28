@@ -459,29 +459,43 @@ fn an_exchange_sends_the_bearer_key_and_keeps_the_request_id() {
     );
 }
 
-#[test]
-fn a_rate_limit_waits_the_milliseconds_the_provider_asks_for() {
-    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let counter = std::sync::Arc::clone(&calls);
-    let (provider, endpoint) = mock(move |received| {
-        if counter.fetch_add(1, Ordering::Relaxed) == 0 {
-            Reply::json(429, &json!({}))
-                .header("retry-after-ms", "400")
-                .header("retry-after", "30")
+/// A mock provider that replies to the first request with what `first` makes
+/// of its answer, and answers every later one.
+fn mock_first(first: impl Fn(Reply) -> Reply + Send + Sync + 'static) -> (MockProvider, Endpoint) {
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    mock(move |received| {
+        let reply = answered(received);
+        if calls.fetch_add(1, Ordering::Relaxed) == 0 {
+            first(reply)
         } else {
-            answered(received)
+            reply
         }
-    });
-    let (agent, request, start) = (agent(ATTEMPT_TIMEOUT), question(), Instant::now());
+    })
+}
+
+/// The outcome of one request sent to `endpoint` through a one-worker queue.
+fn queued(agent: &ureq::Agent, endpoint: &Endpoint) -> Outcome {
+    let request = question();
     let mut last = None;
     fast().evaluate_queue(
         &[&request],
         1,
         &|_| Ok(()),
-        |request| send(&agent, &endpoint, "k", request),
+        |request| send(agent, endpoint, "k", request),
         &mut |_, outcome| last = Some(outcome),
     );
-    let outcome = last.unwrap();
+    last.unwrap()
+}
+
+#[test]
+fn a_rate_limit_waits_the_milliseconds_the_provider_asks_for() {
+    let (provider, endpoint) = mock_first(|_| {
+        Reply::json(429, &json!({}))
+            .header("retry-after-ms", "400")
+            .header("retry-after", "30")
+    });
+    let start = Instant::now();
+    let outcome = queued(&agent(ATTEMPT_TIMEOUT), &endpoint);
     assert!(outcome.result.is_ok());
     assert_eq!((outcome.retries, provider.received().len()), (1, 2));
     let waited = start.elapsed();
@@ -541,29 +555,12 @@ const MAX_WORKERS: usize = crate::options::MAX_CONCURRENCY as usize;
 
 #[test]
 fn a_slow_answer_times_out_and_is_sent_once_more() {
-    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let counter = std::sync::Arc::clone(&calls);
-    let (provider, endpoint) = mock(move |received| {
-        let mut reply = answered(received);
-        if counter.fetch_add(1, Ordering::Relaxed) == 0 {
-            reply.delay = Duration::from_secs(2);
-        }
-        reply
+    let (provider, endpoint) = mock_first(|reply| Reply {
+        delay: Duration::from_secs(2),
+        ..reply
     });
-    let (agent, request, start) = (
-        agent(Duration::from_millis(300)),
-        question(),
-        Instant::now(),
-    );
-    let mut last = None;
-    fast().evaluate_queue(
-        &[&request],
-        1,
-        &|_| Ok(()),
-        |request| send(&agent, &endpoint, "k", request),
-        &mut |_, outcome| last = Some(outcome),
-    );
-    let outcome = last.unwrap();
+    let start = Instant::now();
+    let outcome = queued(&agent(Duration::from_millis(300)), &endpoint);
     assert!(outcome.result.is_ok(), "{:?}", outcome.result.err());
     assert_eq!((outcome.retries, provider.received().len()), (1, 2));
     assert!(

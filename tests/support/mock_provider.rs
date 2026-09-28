@@ -88,43 +88,60 @@ impl MockProvider {
 }
 
 fn serve(stream: TcpStream, log: &Mutex<Vec<Received>>, respond: &Respond) {
+    let Some(request) = read_request(&stream) else {
+        return;
+    };
+    log.lock().unwrap().push(request.clone());
+    let reply = respond(&request);
+    std::thread::sleep(reply.delay);
+    write_reply(stream, &reply);
+}
+
+/// The request on `stream`, or none when the client closed it first.
+fn read_request(stream: &TcpStream) -> Option<Received> {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
-        return;
+        return None;
     }
     let mut words = line.split_whitespace();
     let (method, path) = (
-        words.next().unwrap_or_default(),
-        words.next().unwrap_or_default(),
+        words.next().unwrap_or_default().to_owned(),
+        words.next().unwrap_or_default().to_owned(),
     );
-    let mut headers = Vec::new();
-    loop {
-        let mut header = String::new();
-        reader.read_line(&mut header).unwrap();
-        let header = header.trim_end();
-        if header.is_empty() {
-            break;
-        }
-        let (name, value) = header.split_once(':').unwrap();
-        headers.push((name.trim().to_owned(), value.trim().to_owned()));
-    }
+    let headers = read_headers(&mut reader);
     let length = headers
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
         .map_or(0, |(_, value)| value.parse().unwrap());
     let mut body = vec![0; length];
     reader.read_exact(&mut body).unwrap();
-    let request = Received {
-        method: method.to_owned(),
-        path: path.to_owned(),
+    Some(Received {
+        method,
+        path,
         headers,
         body: String::from_utf8(body).unwrap(),
-    };
-    log.lock().unwrap().push(request.clone());
-    let reply = respond(&request);
-    std::thread::sleep(reply.delay);
-    let mut out = stream;
+    })
+}
+
+/// The header lines, up to the blank line that ends them.
+fn read_headers(reader: &mut impl BufRead) -> Vec<(String, String)> {
+    let mut headers = Vec::new();
+    loop {
+        let mut header = String::new();
+        reader.read_line(&mut header).unwrap();
+        let header = header.trim_end();
+        if header.is_empty() {
+            return headers;
+        }
+        let (name, value) = header.split_once(':').unwrap();
+        headers.push((name.trim().to_owned(), value.trim().to_owned()));
+    }
+}
+
+/// Send `reply`, closing the connection after it. The client may have given
+/// up waiting; a failed write is its business.
+fn write_reply(mut stream: TcpStream, reply: &Reply) {
     let mut head = format!(
         "HTTP/1.1 {} Mock\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
         reply.status,
@@ -133,8 +150,7 @@ fn serve(stream: TcpStream, log: &Mutex<Vec<Received>>, respond: &Respond) {
     for (name, value) in &reply.headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
-    // The client may have given up waiting; a failed write is its business.
-    let _ = out.write_all(format!("{head}\r\n{}", reply.body).as_bytes());
+    let _ = stream.write_all(format!("{head}\r\n{}", reply.body).as_bytes());
 }
 
 /// Levels: 0 answers the bottom of every scale (clear), 1 the middle (consider,
