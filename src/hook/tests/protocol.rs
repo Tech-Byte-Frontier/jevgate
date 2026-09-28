@@ -251,6 +251,10 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
     assert!(
         reason.contains("\n20 more findings not shown; .jevgate/latest.json holds every finding")
     );
+    assert!(
+        reason.contains("\nFix them, then finish. If a finding is mistaken, keep the code"),
+        "{reason}"
+    );
     let short = text::after_edit(&[PathBuf::from("src/a.rs")], &failing(2, 3), &[], &[]).unwrap();
     assert!(!short.contains("not shown"), "{short}");
     // Guards take their room first: the whole context still fits.

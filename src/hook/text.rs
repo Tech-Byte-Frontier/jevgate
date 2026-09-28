@@ -101,13 +101,19 @@ fn findings_after_edit(
 /// instruction. Its first line names the block, so a prompt that repeats it
 /// is known as this turn's continuation.
 pub(super) fn block_reason(failing: &[Flagged], block: u32) -> String {
+    let one = failing.len() == 1;
     let head = format!(
         "JevGate blocked the end of this turn ({block} of at most {MAX_BLOCKS}): {} in code changed this turn {} the quality gate.",
         output::count(failing.len(), "finding"),
-        if failing.len() == 1 { "fails" } else { "fail" }
+        if one { "fails" } else { "fail" }
     );
-    let mut tail = String::from(
-        "Fix them, then finish. If a finding is mistaken, keep the code as it is and say why in your reply; JevGate does not block again when nothing changed.",
+    let (them, a_finding) = if one {
+        ("it", "it")
+    } else {
+        ("them", "a finding")
+    };
+    let mut tail = format!(
+        "Fix {them}, then finish. If {a_finding} is mistaken, keep the code as it is and say why in your reply; JevGate does not block again when nothing changed."
     );
     if failing.iter().any(|f| f.accepted_this_turn) {
         tail.push_str(" A finding accepted this turn, by a baseline entry or a `jevgate: allow` comment, counts until the next turn: accepting findings is the person's call, so leave that to them.");
