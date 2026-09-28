@@ -1,6 +1,6 @@
 //! The MCP server over stdin and stdout, driven by a scripted client.
 use super::*;
-use mock_provider::{MockProvider, Reply};
+use mock_provider::{MockProvider, Reply, answer};
 use serde_json::{Value, json};
 use std::io::Write;
 
@@ -252,13 +252,7 @@ fn a_run_stopped_by_exhausted_credits_says_why_in_the_agent_text_and_to_the_agen
         Reply::json(402, &json!({"error": "private"}))
             .header("x-typesafe-request-id", "req_mock402")
     });
-    let run = || {
-        let mut command = project.command();
-        command
-            .env("TYPESAFE_API_KEY", "key")
-            .env("JEVGATE_BASE_URL", &provider.url);
-        command
-    };
+    let run = || project.asking(&provider, "key");
     let reason = "Failed 1: TypeSafe HTTP 402 (credits exhausted; add credits or turn on auto-refill at https://console.typesafe.ai); request was not retried; request id req_mock402";
     let output = run().args(["check", "."]).output().unwrap();
     let agent = String::from_utf8_lossy(&output.stdout);
@@ -282,4 +276,47 @@ fn a_run_stopped_by_exhausted_credits_says_why_in_the_agent_text_and_to_the_agen
         json!([reason]),
         "the structured result says why too"
     );
+}
+
+#[test]
+fn findings_say_how_the_checks_gate_counted_them() {
+    // Every answer at the top of its scale: the long function is a
+    // function-simplification review, which the default gate fails on, and
+    // the region a hardcoded-values review, which it still measures.
+    let project = Project::new();
+    std::fs::write(
+        project.0.join("jevgate.toml"),
+        "rules = [\"hardcoded-values\", \"function-simplification\"]\n",
+    )
+    .unwrap();
+    let region = format!("const REGION: &str = \"eu-west-1\";\n{LONG_RS}");
+    std::fs::write(project.0.join("lib.rs"), region).unwrap();
+    let provider = MockProvider::start(|received| Reply::json(200, &answer(&received.json(), 2)));
+    let messages = session(
+        project.asking(&provider, "key"),
+        &[
+            call(1, "jevgate_check", json!({})),
+            call(2, "jevgate_findings", json!({})),
+        ],
+    );
+    for id in [1, 2] {
+        let (reply, _) = reply_to(&messages, id);
+        let result = &reply["result"]["structuredContent"];
+        let counted: Vec<(&str, &str)> = result["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| (f["rule"].as_str().unwrap(), f["gate"].as_str().unwrap()))
+            .collect();
+        assert_eq!(
+            counted,
+            [
+                ("maintainability/function-simplification", "fails"),
+                ("maintainability/hardcoded-values", "measuring")
+            ],
+            "{id}: failures first, as the check's gate counted them"
+        );
+        assert_eq!(result["exit_code"], 1, "{id}");
+        assert_eq!(result["gate"]["reasons"], json!(["1 new review finding"]));
+    }
 }
