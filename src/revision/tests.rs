@@ -176,13 +176,8 @@ fn changes_from_git_hold_each_files_lines_and_its_base_text() {
 
 #[test]
 fn a_root_below_the_git_top_level_sees_its_own_paths() {
-    let project = Project::new();
-    project.write("pkg/lib.rs", LIB);
-    project.write("other/lib.rs", LIB);
-    project.commit_all();
-    project.write("pkg/lib.rs", &LIB.replace("one", "uno"));
-    project.write("other/lib.rs", &LIB.replace("one", "uno"));
-    let root = project.0.join("pkg");
+    let (project, root, _) = below_the_top(&[]);
+    project.write("other.rs", "fn other() { 1 }\n");
     let changes = Changes::load(&root, "HEAD")
         .unwrap()
         .with_lines(&root, [Path::new("lib.rs")])
@@ -326,13 +321,7 @@ fn lines_between_two_snapshots_are_the_ones_the_turn_changed() {
 
 #[test]
 fn snapshots_of_a_root_below_the_git_top_level_are_compared_relative_to_it() {
-    let project = Project::new();
-    project.write("app/lib.rs", LIB);
-    project.write("other.rs", "fn other() {}\n");
-    project.commit_all();
-    let root = project.0.join("app");
-    let before = snapshot_of(&project, &root);
-    project.write("app/lib.rs", &LIB.replace("one", "uno"));
+    let (project, root, before) = below_the_top(&[]);
     project.write("app/new.rs", "fn new() {}\n");
     project.write("other.rs", "fn other() { 1 }\n");
     let after = snapshot_of(&project, &root);
@@ -349,4 +338,39 @@ fn snapshots_of_a_root_below_the_git_top_level_are_compared_relative_to_it() {
         .unwrap();
     assert_eq!(file.lines, lines(&[(2, 2)], &[]));
     assert_eq!(file.before().unwrap().1, LIB);
+}
+
+/// A committed project whose `jevgate.toml` would sit in `app/`, with
+/// `extra` files there too; its root and a snapshot taken from it, then
+/// `app/lib.rs` edited on line 2.
+fn below_the_top(extra: &[(&str, &str)]) -> (Project, PathBuf, String) {
+    let project = Project::new();
+    project.write("app/lib.rs", LIB);
+    project.write("other.rs", "fn other() {}\n");
+    for (name, text) in extra {
+        project.write(&format!("app/{name}"), text);
+    }
+    project.commit_all();
+    let root = project.0.join("app");
+    let tree = snapshot_of(&project, &root);
+    project.write("app/lib.rs", &LIB.replace("one", "uno"));
+    (project, root, tree)
+}
+
+#[test]
+fn blobs_are_read_from_a_tree_relative_to_the_root() {
+    let big = "x".repeat(100);
+    let (_project, root, tree) = below_the_top(&[("big.rs", &big), ("data.bin", "a\0b")]);
+    let paths = ["lib.rs", "missing.rs", "big.rs", "data.bin", "../other.rs"].map(Path::new);
+    // LIB is 70 bytes, big.rs 100.
+    let texts = blobs(&root, &tree, &paths, 96).unwrap();
+    assert_eq!(
+        texts,
+        BTreeMap::from([
+            (PathBuf::from("lib.rs"), LIB.to_string()),
+            (PathBuf::from("../other.rs"), "fn other() {}\n".to_string()),
+        ]),
+        "the tree's text, not the working tree's; missing, large and binary blobs are left out"
+    );
+    assert!(blobs(&root, &tree, &[], 96).unwrap().is_empty());
 }

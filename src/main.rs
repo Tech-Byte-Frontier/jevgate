@@ -37,6 +37,7 @@ mod file_kind;
 mod gate;
 mod github;
 mod gitlab;
+mod guards;
 mod hook;
 mod html_report;
 mod init;

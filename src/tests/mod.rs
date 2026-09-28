@@ -12,6 +12,7 @@ pub(super) mod git;
 #[path = "../../tests/support/mock_provider.rs"]
 pub(super) mod mock_provider;
 pub(super) use mock_provider::answer;
+mod guards;
 mod scope;
 #[path = "../../tests/support/temp_dir.rs"]
 mod temp_dir;

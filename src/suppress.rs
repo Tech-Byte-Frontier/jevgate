@@ -39,6 +39,18 @@ pub fn apply(root: &Path, report: &mut Report) {
     }
 }
 
+/// Whether `line` holds an allow comment that accepts findings, as `apply`
+/// reads it: one naming a rule and giving a reason.
+pub fn accepts(line: &str) -> bool {
+    parse(line).is_some_and(|allow| {
+        !allow.reason.is_empty()
+            && allow
+                .rules
+                .iter()
+                .any(|name| catalog::select(name).is_some())
+    })
+}
+
 /// The allow comment naming `rule` on 1-based `line`, or in the block of
 /// comment and attribute lines directly above it.
 fn allow_for(lines: &[&str], line: usize, rule: &str) -> Option<Allow> {
@@ -129,6 +141,13 @@ mod tests {
         }
         assert_eq!(parse("// jevgate: allow shared_logic"), None);
         assert_eq!(parse("let jevgate = 1;"), None);
+        assert!(accepts(
+            "# jevgate: allow(injection) the query is a constant"
+        ));
+        assert!(!accepts("// jevgate: allow(injection)"), "no reason");
+        assert!(!accepts(
+            "/// a line that holds a `jevgate: allow(…)` comment"
+        ));
     }
 
     #[test]

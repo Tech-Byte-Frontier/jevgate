@@ -89,6 +89,7 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
         } else {
             schema::Scope::WholeFiles
         },
+        guards: Vec::new(),
         schema_version: schema::SCHEMA_VERSION,
         command: "check".into(),
         rubric_version: schema::RUBRIC.into(),
@@ -170,6 +171,18 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
         skip(&mut report.files[*owner], reason);
     }
     planned.extend(plan.requests.into_iter().map(|p| p.request));
+    count_planned(report, args, root, budget, planned);
+}
+
+/// Count `planned` requests in their stages, as priced by `budget`, and
+/// keep them for `--show-requests`.
+fn count_planned(
+    report: &mut Report,
+    args: &CheckArgs,
+    root: &std::path::Path,
+    budget: &TokenBudget,
+    planned: impl IntoIterator<Item = serde_json::Value>,
+) {
     for request in planned {
         let stage = report
             .stages
@@ -188,6 +201,42 @@ fn preview(inputs: &[Input], args: &CheckArgs, root: &std::path::Path, report: &
                 .push(crate::requests::provider_request(&request).into_owned());
         }
     }
+}
+
+/// A dry run's guards: what code finds in the change within `scope`, and
+/// the questions about rewritten tests a run would ask, counted like the
+/// first pass.
+pub fn preview_guards(
+    report: &mut Report,
+    args: &CheckArgs,
+    context: &ConfigContext,
+    scope: &[PathBuf],
+) {
+    let scan = crate::guards::scan(&context.root, args, &context.config, scope);
+    let budget = TokenBudget::load(&context.root);
+    let requests = weaker_requests(&scan.changed_tests, args, &budget);
+    count_planned(
+        report,
+        args,
+        &context.root,
+        &budget,
+        requests.into_iter().map(|r| r.1),
+    );
+    report.guards = scan.guards;
+}
+
+/// The question whether each of `tests` checks less than before, for those
+/// the budget can send.
+fn weaker_requests<'t>(
+    tests: &'t [crate::guards::ChangedTest],
+    args: &CheckArgs,
+    budget: &TokenBudget,
+) -> Vec<(&'t crate::guards::ChangedTest, serde_json::Value)> {
+    tests
+        .iter()
+        .map(|test| (test, crate::units::weaker_request(args.model(), test)))
+        .filter(|(_, request)| budget.fits(request))
+        .collect()
 }
 
 /// A file's view as a run decides it after its purpose request, when the
@@ -256,11 +305,61 @@ impl Session<'_> {
             }
         }
         compose_files(&plan, report);
+        self.guard(report);
         if self.observed.1 > 0 {
             self.budget.observe(self.observed.0, self.observed.1);
             self.budget.save(self.store)?;
         }
         self.progress(report)
+    }
+
+    /// What the change does to the checks around the code (`guards`): what
+    /// code finds, and the tests whose rewritten assertions Jev reads as
+    /// checking less.
+    fn guard(&mut self, report: &mut Report) {
+        let scope = crate::inventory::scope(self.args, self.context).unwrap_or_default();
+        let scan = crate::guards::scan(&self.context.root, self.args, &self.context.config, &scope);
+        let mut guards = scan.guards;
+        guards.extend(self.weaker_tests(&scan.changed_tests, report));
+        crate::guards::sort(&mut guards);
+        report.guards = guards;
+    }
+
+    /// Ask whether each test whose assertions the change rewrote now checks
+    /// less; at 0.80 it is a guard. A question left unanswered leaves the
+    /// run incomplete, as any other does, but for one refused as beyond the
+    /// model's context, which is not asked, as a unit too large to send.
+    fn weaker_tests(
+        &mut self,
+        tests: &[crate::guards::ChangedTest],
+        report: &mut Report,
+    ) -> Vec<crate::guards::Guard> {
+        let asked = weaker_requests(tests, self.args, &self.budget);
+        if asked.is_empty() {
+            return Vec::new();
+        }
+        let receipts = self.queries(&asked.iter().map(|(_, r)| r).collect::<Vec<_>>());
+        let mut guards = Vec::new();
+        for ((test, request), receipt) in asked.iter().zip(receipts) {
+            let stage = crate::requests::stage(request);
+            add_metrics(
+                report.stages.entry(stage.into()).or_default(),
+                &receipt.metrics,
+            );
+            match receipt.result {
+                Ok((body, ..)) => guards.extend(
+                    crate::units::weaker_answer(&body)
+                        .and_then(|p| crate::guards::Guard::weaker(test, p)),
+                ),
+                Err(error) if beyond_context(&error) => {}
+                Err(error) => report.errors.push(format!(
+                    "Cannot ask whether test `{}` in {} checks less than before: {error:#}",
+                    test.name,
+                    test.path.display()
+                )),
+            }
+        }
+        guards
     }
 
     /// Classify every pending file: ready with a gate view, waiting on a

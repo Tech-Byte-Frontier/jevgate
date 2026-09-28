@@ -12,6 +12,7 @@ pub mod imports;
 pub mod literals;
 pub mod nesting;
 pub(crate) mod php;
+pub mod regions;
 pub mod routes;
 pub mod ruby;
 pub mod sites;

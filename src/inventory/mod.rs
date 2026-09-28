@@ -411,7 +411,12 @@ fn pending_result(
 
 /// Build output, or a library copied into the repository, found from a
 /// file's content: the role it takes instead of the one its path gave.
-fn not_written_here(path: &std::path::Path, role: &str, source: &str) -> Option<&'static str> {
+/// `path` is on disk, for a minified sibling.
+pub(crate) fn not_written_here(
+    path: &std::path::Path,
+    role: &str,
+    source: &str,
+) -> Option<&'static str> {
     if discovery::generated_source(source) {
         Some("generated")
     } else if role == "source" && discovery::vendored(path, Some(source)) {

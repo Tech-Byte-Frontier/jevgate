@@ -53,15 +53,8 @@ pub fn comments(path: &Path, source: &str, units: &[Unit]) -> Result<Vec<Comment
     let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(Vec::new());
     };
-    let mut raw = Vec::new();
-    collect(tree.root_node(), source, &mut raw);
-    if super::bend::file(path) {
-        // A Bend 2 test's `#|` lines are the output its run must print.
-        raw.retain(|r| !super::bend::output_line(&source[r.span.clone()]));
-    }
-    raw.sort_by_key(|r: &Raw| r.span.start);
     let lines: Vec<&str> = source.split('\n').collect();
-    let blocks = merge(raw, source);
+    let blocks = blocks(path, tree.root_node(), source);
     // Lines where a comment on its own line starts: code shown below a
     // comment stops there.
     let starts: BTreeSet<usize> = blocks
@@ -96,6 +89,27 @@ pub fn comments(path: &Path, source: &str, units: &[Unit]) -> Result<Vec<Comment
         ));
     }
     Ok(found)
+}
+
+/// Every comment of a parsed file as a byte span, in order: consecutive
+/// line comments merged, with Python docstrings; none left out.
+pub fn spans(path: &Path, root: Node<'_>, source: &str) -> Vec<Range<usize>> {
+    blocks(path, root, source)
+        .into_iter()
+        .map(|block| block.span)
+        .collect()
+}
+
+/// The comment blocks under `root`, in order.
+fn blocks(path: &Path, root: Node<'_>, source: &str) -> Vec<Block> {
+    let mut raw = Vec::new();
+    collect(root, source, &mut raw);
+    if super::bend::file(path) {
+        // A Bend 2 test's `#|` lines are the output its run must print.
+        raw.retain(|r| !super::bend::output_line(&source[r.span.clone()]));
+    }
+    raw.sort_by_key(|r: &Raw| r.span.start);
+    merge(raw, source)
 }
 
 struct Raw {

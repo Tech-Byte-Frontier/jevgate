@@ -35,13 +35,16 @@ struct Accepted {
     reason: Option<Disposition>,
 }
 
+/// A baseline is read whole up to this size.
+pub const BASELINE_BYTES: u64 = 16 * 1024 * 1024;
+
 /// The committed baseline, when there is one.
 fn read_baseline(root: &Path) -> Result<Option<Baseline>> {
     let path = root.join(BASELINE_FILE);
     if !path.exists() {
         return Ok(None);
     }
-    let text = crate::inventory::read_source(&path, 16 * 1024 * 1024)
+    let text = crate::inventory::read_source(&path, BASELINE_BYTES)
         .with_context(|| format!("Cannot read {BASELINE_FILE}"))?;
     let baseline: Baseline =
         serde_json::from_str(&text).with_context(|| format!("Invalid {BASELINE_FILE}"))?;

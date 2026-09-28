@@ -12,6 +12,7 @@ mod comments;
 mod csharp;
 mod deserializers;
 mod documentation;
+mod guards;
 mod languages;
 mod laws;
 mod maintainability;
@@ -26,6 +27,7 @@ pub use comments::*;
 pub use csharp::*;
 pub use deserializers::*;
 pub use documentation::*;
+pub use guards::*;
 pub use languages::*;
 pub use laws::*;
 pub use maintainability::*;
@@ -108,7 +110,14 @@ mod tests {
 
     /// Every question, so each test below checks them all.
     fn all() -> Vec<Value> {
-        [maintainability(), test_rules(), security(), documentation()].concat()
+        [
+            maintainability(),
+            test_rules(),
+            security(),
+            documentation(),
+            vec![weaker()],
+        ]
+        .concat()
     }
 
     fn maintainability() -> Vec<Value> {

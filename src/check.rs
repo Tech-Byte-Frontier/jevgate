@@ -134,6 +134,7 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
     };
     let (previous, mut report) = first_snapshot(args, context, &inputs);
     if args.dry_run {
+        evaluate::preview_guards(&mut report, args, context, &scope);
         output::emit(&report, args)?;
         return Ok(0);
     }

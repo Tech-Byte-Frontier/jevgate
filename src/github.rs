@@ -35,6 +35,16 @@ pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<(
     for (path, finding) in &shown {
         writeln!(out, "{}", annotation(path, finding))?;
     }
+    // Notices, which do not take the error and warning slots findings use.
+    for guard in &report.guards {
+        let line = guard.line.map_or(String::new(), |l| format!(",line={l}"));
+        writeln!(
+            out,
+            "::notice file={}{line},title=JevGate guard::{}",
+            property(&guard.path.to_string_lossy()),
+            data(&guard.describe())
+        )?;
+    }
     if let Some(file) = std::env::var_os("GITHUB_STEP_SUMMARY") {
         let written = std::fs::OpenOptions::new()
             .append(true)
@@ -76,8 +86,8 @@ fn label(finding: &Finding) -> String {
     output::label(&finding.strength)
 }
 
-/// The Markdown job summary: the headline, then a table of findings, with
-/// the ones that fail the gate in bold.
+/// The Markdown job summary: the headline, a table of findings, with the
+/// ones that fail the gate in bold, then the guards.
 fn summary(report: &Report, shown: &[(&Path, &Finding)]) -> String {
     let mut text = format!("### {}\n\n", output::headline(report));
     for error in &report.errors {
@@ -96,32 +106,56 @@ fn summary(report: &Report, shown: &[(&Path, &Finding)]) -> String {
     }
     if shown.is_empty() {
         text.push_str("No new review or consider findings.\n\n");
-        return text;
+    } else {
+        text.push_str(&findings_table(shown));
+        if let Some(line) = output::measuring(report) {
+            text.push_str(&format!("{line}\n\n"));
+        }
     }
-    text.push_str("| | Location | Rule | Finding |\n|---|---|---|---|\n");
-    for (path, finding) in shown.iter().take(SUMMARY_ROWS) {
+    text.push_str(&guards_list(&report.guards));
+    text
+}
+
+/// The guards as a Markdown list; nothing without any.
+fn guards_list(guards: &[crate::guards::Guard]) -> String {
+    if guards.is_empty() {
+        return String::new();
+    }
+    let heading = format!(
+        "**Guards ({}):** {}.\n\n",
+        guards.len(),
+        output::GUARDS_HEADING
+    );
+    heading + &capped(guards.iter().map(|g| format!("- {}", cell(&g.describe()))))
+}
+
+/// The findings as a Markdown table, those that fail the gate in bold.
+fn findings_table(shown: &[(&Path, &Finding)]) -> String {
+    let rows = shown.iter().map(|(path, finding)| {
         let level = if finding.fails_gate() {
             format!("**{}**", label(finding))
         } else {
             label(finding)
         };
-        text.push_str(&format!(
-            "| {level} | `{}:{}` | `{}` | {} → {} |\n",
+        format!(
+            "| {level} | `{}:{}` | `{}` | {} → {} |",
             cell(&path.to_string_lossy()),
             finding.line,
             finding.rule,
             cell(&finding.message),
             cell(&finding.action)
-        ));
-    }
-    if shown.len() > SUMMARY_ROWS {
-        text.push_str(&format!(
-            "\n{} more in `.jevgate/latest.json`.\n",
-            shown.len() - SUMMARY_ROWS
-        ));
-    }
-    if let Some(line) = output::measuring(report) {
-        text.push_str(&format!("\n{line}\n"));
+        )
+    });
+    String::from("| | Location | Rule | Finding |\n|---|---|---|---|\n") + &capped(rows)
+}
+
+/// The first [`SUMMARY_ROWS`] of `rows`, a line each, then how many more
+/// the JSON report holds.
+fn capped(rows: impl ExactSizeIterator<Item = String>) -> String {
+    let more = rows.len().saturating_sub(SUMMARY_ROWS);
+    let mut text: String = rows.take(SUMMARY_ROWS).map(|row| row + "\n").collect();
+    if more > 0 {
+        text.push_str(&format!("\n{more} more in `.jevgate/latest.json`.\n"));
     }
     text.push('\n');
     text
@@ -257,5 +291,42 @@ mod tests {
         );
         assert!(rows[1].contains("50% alike, see `b` → Share one \\| implementation"));
         assert!(rows[2].starts_with("| consider |"));
+    }
+
+    #[test]
+    fn guards_are_notices_and_a_list_in_the_summary() {
+        let guards: Vec<crate::guards::Guard> = (1..=52)
+            .map(|line| {
+                serde_json::from_value(serde_json::json!({
+                    "kind": "suppression", "path": "a,b.py", "line": line, "text": "x = 1 # noqa: E501",
+                    "message": "turns off flake8 or Ruff here", "id": line.to_string()
+                }))
+                .unwrap()
+            })
+            .collect();
+        let mut report = crate::evaluate::snapshot(
+            &[],
+            &Default::default(),
+            &crate::tests::args(),
+            crate::evaluate::SnapshotContext {
+                root: Path::new("."),
+                generation: 1,
+                requests: 0,
+            },
+        );
+        report.guards = guards;
+        let mut out = Vec::new();
+        emit(&mut out, &report, &crate::tests::args()).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(
+            out.starts_with("::notice file=a%2Cb.py,line=1,title=JevGate guard::a,b.py:1 turns off flake8 or Ruff here: x = 1 # noqa: E501\n"),
+            "{out}"
+        );
+        let list = guards_list(&report.guards);
+        assert_eq!(list.lines().filter(|l| l.starts_with("- ")).count(), 50);
+        assert!(
+            list.contains("\n2 more in `.jevgate/latest.json`.\n"),
+            "{list}"
+        );
     }
 }

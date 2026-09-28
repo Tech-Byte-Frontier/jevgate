@@ -11,6 +11,11 @@ use std::{
 
 /// Consider findings shown by default; `--verbose` shows all.
 const TOP_CONSIDER: usize = 10;
+/// Guards shown by default; `--verbose` shows all.
+const TOP_GUARDS: usize = 10;
+/// Says what guards are, after their count.
+pub(crate) const GUARDS_HEADING: &str =
+    "changes to the checks around this code, for a person to look at; they never fail the gate";
 
 /// `n` and a noun, plural unless `n` is one: "1 finding", "2 findings".
 pub fn count(n: usize, noun: &str) -> String {
@@ -130,6 +135,7 @@ pub(super) fn agent(
     if let Some(line) = measuring(report) {
         writeln!(out, "\n{line}")?;
     }
+    emit_guards(out, report, verbose, style)?;
     emit_summary(out, report)?;
     if let Some(load) = &report.context_load {
         emit_context_load(out, load)?;
@@ -336,6 +342,31 @@ fn emit_considers(
     };
     let heading = format!("Consider ({}{more}):", consider.len());
     emit_section(out, &heading, BOLD_YELLOW, &consider[..shown], style)
+}
+
+/// What the change does to the checks around the code, one line each: the
+/// first ten, or all with `verbose`.
+fn emit_guards(out: &mut impl Write, report: &Report, verbose: bool, style: Style) -> Result<()> {
+    let guards = &report.guards;
+    if guards.is_empty() {
+        return Ok(());
+    }
+    let shown = if verbose {
+        guards.len()
+    } else {
+        TOP_GUARDS.min(guards.len())
+    };
+    let more = if guards.len() > shown {
+        format!(", first {shown}; --verbose shows all")
+    } else {
+        String::new()
+    };
+    let heading = format!("Guards ({}{more}): {GUARDS_HEADING}", guards.len());
+    writeln!(out, "\n{}", style.paint(BOLD, &heading))?;
+    for guard in &guards[..shown] {
+        writeln!(out, "  {}", guard.describe())?;
+    }
+    Ok(())
 }
 
 /// A blank line, a heading, then its findings.

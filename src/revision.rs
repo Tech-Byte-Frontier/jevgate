@@ -563,6 +563,75 @@ pub fn snapshot(root: &Path, index: &Path, scratch: &Path) -> Result<String> {
     object_id(&tree?)
 }
 
+/// The text of each of `paths` (relative to `root`) in `revision`, a commit
+/// or tree, read by one Git process: a path the revision lacks, or whose
+/// blob is larger than `limit`, not UTF-8 or holds NUL bytes, is left out.
+pub(crate) fn blobs(
+    root: &Path,
+    revision: &str,
+    paths: &[&Path],
+    limit: u64,
+) -> Result<BTreeMap<PathBuf, String>> {
+    use std::io::Write;
+    // The batch protocol reads one object name per line.
+    let paths: Vec<&Path> = paths
+        .iter()
+        .copied()
+        .filter(|p| !p.to_string_lossy().contains(['\n', '\r']))
+        .collect();
+    let mut texts = BTreeMap::new();
+    if paths.is_empty() {
+        return Ok(texts);
+    }
+    let mut child = git_command(root, &["cat-file", "--batch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("Cannot run Git")?;
+    let names: String = paths
+        .iter()
+        .map(|p| format!("{revision}:./{}\n", p.to_string_lossy().replace('\\', "/")))
+        .collect();
+    let mut stdin = child.stdin.take().context("Git has no stdin")?;
+    // Written on a thread, so Git never waits on a full output pipe.
+    let writer = std::thread::spawn(move || stdin.write_all(names.as_bytes()));
+    let mut out = BufReader::new(child.stdout.take().context("Git has no stdout")?);
+    for path in paths {
+        let mut header = String::new();
+        if out.read_line(&mut header)? == 0 {
+            break;
+        }
+        // `<id> <type> <size>`, then the content and a newline; or `<name>
+        // missing` alone, for a path the revision lacks.
+        let header = header.trim_end();
+        if header.ends_with(" missing") {
+            continue;
+        }
+        let size: u64 = header
+            .rsplit(' ')
+            .next()
+            .and_then(|size| size.parse().ok())
+            .with_context(|| format!("Git printed an unexpected object header: {header}"))?;
+        let mut content = (&mut out).take(size);
+        if size > limit {
+            std::io::copy(&mut content, &mut std::io::sink())?;
+        } else {
+            let mut bytes = Vec::new();
+            content.read_to_end(&mut bytes)?;
+            if !bytes.contains(&0)
+                && let Ok(text) = String::from_utf8(bytes)
+            {
+                texts.insert(path.to_path_buf(), text);
+            }
+        }
+        out.read_exact(&mut [0])?;
+    }
+    let _ = writer.join();
+    let _ = child.wait();
+    Ok(texts)
+}
+
 impl Changes {
     /// The changes a check with a base reviews: since the fork point of
     /// `--base` and HEAD, or, from the agent hook, between two snapshots.

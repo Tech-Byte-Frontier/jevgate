@@ -276,6 +276,12 @@ pub struct Report {
     pub deleted_files: Vec<PathBuf>,
     #[serde(default)]
     pub scope: Scope,
+    /// What the change since the base does to the checks around the code
+    /// (suppressions, skipped or deleted tests, weaker assertions, edits to
+    /// jevgate.toml or the baseline), and text written to steer a reviewer.
+    /// Reported; never failing the gate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guards: Vec<crate::guards::Guard>,
     pub schema_version: u32,
     pub command: String,
     pub rubric_version: String,
