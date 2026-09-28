@@ -96,6 +96,19 @@ impl FileUnits {
             .collect();
     }
 
+    /// Leave out the module constants on the lines syntax errors left out.
+    pub(super) fn leave_out_constants(&mut self, source: &str) {
+        if !self.partial() {
+            return;
+        }
+        let left_out = self.left_out_code(source);
+        self.constants.retain(|c| {
+            !left_out
+                .iter()
+                .any(|l| l.line <= c.end_line && c.line <= l.end_line)
+        });
+    }
+
     /// Whether the parse held syntax errors.
     pub fn partial(&self) -> bool {
         !self.left_out.is_empty() || !self.errors.is_empty()

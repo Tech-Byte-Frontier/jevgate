@@ -215,10 +215,8 @@ fn tagged(language: &super::generic::Language, root: Node<'_>, source: &str) -> 
     file
 }
 
-/// A file of a language with an analyzer of its own: its definitions and
-/// the syntax errors outside them, then its Bend 2 aliases and Django
-/// routes, its module constants outside what the errors left out, the
-/// statements outside every unit, and a server template's code.
+/// A file of a language with an analyzer of its own: the units its walk
+/// finds, then what the file holds outside them (`module_code`).
 fn walked(path: &Path, root: Node<'_>, source: &str) -> FileUnits {
     let settings = super::django::settings_module(path, root, source);
     let mut file = FileUnits {
@@ -232,6 +230,20 @@ fn walked(path: &Path, root: Node<'_>, source: &str) -> FileUnits {
     if let Some(names) = &file.bend {
         unaliased_calls(&mut file.units, &names.aliases);
     }
+    module_code(path, (root, source), settings, &mut file);
+    file
+}
+
+/// What a file holds outside its units: a Django module's routes and
+/// constants, its module constants but those on lines syntax errors left
+/// out, the statements that run outside every unit (a Django settings
+/// module's with `settings`), and a server template's code.
+fn module_code(
+    path: &Path,
+    (root, source): (Node<'_>, &str),
+    settings: bool,
+    file: &mut FileUnits,
+) {
     if file.django {
         file.routes = super::django::routes(root, source);
         if !settings {
@@ -239,20 +251,12 @@ fn walked(path: &Path, root: Node<'_>, source: &str) -> FileUnits {
         }
     }
     file.constants = super::literals::constants(root, source);
-    if file.partial() {
-        let left_out = file.left_out_code(source);
-        file.constants.retain(|c| {
-            !left_out
-                .iter()
-                .any(|l| l.line <= c.end_line && c.line <= l.end_line)
-        });
-    }
+    file.leave_out_constants(source);
     let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
     file.setup = setup_of(path, root, source, &spans, settings);
     if crate::components::server_template(path) {
         file.template_code = super::template_code::template_code(path, source);
     }
-    file
 }
 
 /// The statements that run outside every unit: a framework configuration's
