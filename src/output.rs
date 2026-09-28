@@ -23,7 +23,7 @@ pub fn count(n: usize, noun: &str) -> String {
 }
 
 /// The headline's cost: estimated dollars, or unknown, never a guessed $0.
-fn cost(usd: Option<f64>) -> String {
+pub(crate) fn cost(usd: Option<f64>) -> String {
     usd.map_or(" · cost unknown".into(), |usd| format!(" · ~${usd:.4}"))
 }
 
@@ -105,7 +105,7 @@ pub fn emit(report: &Report, args: &CheckArgs) -> Result<()> {
     }
 }
 
-fn broken_pipe(error: &anyhow::Error) -> bool {
+pub(crate) fn broken_pipe(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
             .downcast_ref::<std::io::Error>()
@@ -218,11 +218,16 @@ pub(crate) fn headline(report: &Report) -> String {
 /// ` via OpenRouter` when a gateway answered, so a key found in the
 /// environment never bills another account unseen; nothing for TypeSafe.
 fn via(report: &Report) -> String {
-    crate::provider::Provider::named(&report.provider)
-        .filter(|provider| *provider != crate::provider::Provider::Typesafe)
-        .map_or(String::new(), |provider| {
-            format!(" via {}", provider.service().label)
-        })
+    crate::provider::Provider::named(&report.provider).map_or(String::new(), through)
+}
+
+/// ` via <gateway>` for a gateway's key; nothing for TypeSafe's.
+pub(crate) fn through(provider: crate::provider::Provider) -> String {
+    if provider == crate::provider::Provider::Typesafe {
+        String::new()
+    } else {
+        format!(" via {}", provider.service().label)
+    }
 }
 
 /// Characters of a commit id shown, as Git abbreviates it.

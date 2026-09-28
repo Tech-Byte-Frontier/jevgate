@@ -6,6 +6,7 @@ mod custom;
 mod django;
 mod documentation;
 mod duplicates;
+mod examples;
 mod functions;
 mod handlers;
 mod hardcoded;

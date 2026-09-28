@@ -331,11 +331,18 @@ impl Session<'_> {
         }
         compose_files(&plan, report);
         self.guard(&plan, report);
+        self.calibrate()?;
+        self.progress(report)
+    }
+
+    /// Keep the bytes per token of this session's fresh requests, so later
+    /// runs estimate what fits the provider limit from real usage.
+    pub fn calibrate(&mut self) -> Result<()> {
         if self.observed.1 > 0 {
             self.budget.observe(self.observed.0, self.observed.1);
             self.budget.save(self.store)?;
         }
-        self.progress(report)
+        Ok(())
     }
 
     /// What the change does to the checks around the code (`guards`): what

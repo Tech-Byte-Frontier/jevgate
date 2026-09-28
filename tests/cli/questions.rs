@@ -110,3 +110,91 @@ fn a_hunk_question_without_base_says_it_was_not_asked() {
         "{error}"
     );
 }
+
+/// A question file with a failing and a passing example.
+const EXAMPLED: &str = "question = \"Does this function write a request body to a log?\"\nunit = \"function\"\n\n[[failing]]\npath = \"src/orders.rs\"\ncode = \"fn charge(req: &Request) {\\n    log(req.body());\\n}\\n\"\n\n[[passing]]\npath = \"src/orders.rs\"\ncode = \"fn charge(req: &Request) {\\n    log(req.id());\\n}\\n\"\n";
+
+#[test]
+fn rules_test_asks_examples_and_a_dry_run_checks_them_offline() {
+    let project = with_questions(&[("body-logs", EXAMPLED), ("other", BODY_LOGS)]);
+    let output = project
+        .command()
+        .args(["rules", "test", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.starts_with("JevGate: rules test dry run · 2 examples · 1 question · 2 requests, 0 answered by the cache · ~"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("Without examples: custom/other.\n"),
+        "{text}"
+    );
+    assert!(!project.0.join(".jevgate/cache").exists());
+    let output = project.command().args(["rules", "test"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2), "no key: incomplete");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.starts_with("JevGate: rules test · incomplete: 2 of 2 examples not answered · ")
+            && text.contains("No API key configured"),
+        "{text}"
+    );
+    let output = project
+        .command()
+        .args(["rules", "--format", "json"])
+        .output()
+        .unwrap();
+    let rules: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let described = rules
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "custom/body-logs")
+        .unwrap();
+    assert_eq!(
+        described["custom"]["examples"],
+        serde_json::json!({"failing": 1, "passing": 1})
+    );
+}
+
+#[test]
+fn an_invalid_example_stops_every_command_and_an_unaskable_one_the_test() {
+    let unpathed = EXAMPLED.replacen("path = \"src/orders.rs\"\n", "", 1);
+    let project = with_questions(&[("body-logs", &unpathed)]);
+    for args in [&["rules"][..], &["check", "--dry-run"], &["rules", "test"]] {
+        let output = project.command().args(args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("Question custom/body-logs in .jevgate/questions/body-logs.toml: failing example 1: `path` is required with `code`"),
+            "{error}"
+        );
+    }
+    let fieldless = EXAMPLED.replace(
+        "fn charge(req: &Request) {\\n    log(req.id());\\n}\\n",
+        "const LIMIT: u32 = 3;\\n",
+    );
+    let project = with_questions(&[("body-logs", &fieldless)]);
+    let output = project
+        .command()
+        .args(["rules", "test", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("  error  passing 1            src/orders.rs: it holds no function"),
+        "{text}"
+    );
+    let output = project
+        .command()
+        .args(["check", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "an example that holds no unit never stops a check"
+    );
+}

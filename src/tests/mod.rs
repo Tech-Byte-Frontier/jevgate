@@ -4,7 +4,6 @@
 //! answer cache in `cache`.
 use super::*;
 use crate::{config::ConfigContext, options::CheckArgs};
-use clap::Parser;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 mod cache;
@@ -73,13 +72,8 @@ impl Project {
     }
 }
 
-#[derive(Parser)]
-struct TestCli {
-    #[command(flatten)]
-    args: CheckArgs,
-}
 pub(super) fn args() -> CheckArgs {
-    let mut a = TestCli::parse_from(["test"]).args;
+    let mut a = CheckArgs::defaults();
     a.rules = crate::catalog::keys().into_iter().map(Into::into).collect();
     a.fail_on = vec![options::FailOn::Mature];
     a

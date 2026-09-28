@@ -8,7 +8,20 @@ use crate::{
 
 /// `` `charge`: Does this function log a request body? Yes. ``
 pub(in crate::units) fn custom_wording(question: &'static Question, name: &str) -> Wording {
-    let subject = match (question.unit, name) {
+    (
+        format!(
+            "{}: {} Yes.",
+            custom_subject(question.unit, name),
+            question.question
+        ),
+        question.next_step.as_str(),
+    )
+}
+
+/// A custom unit of `kind` named `name`, as its finding begins:
+/// `` `charge` ``, "A comment in `total`", "This file".
+pub(in crate::units) fn custom_subject(kind: Kind, name: &str) -> String {
+    match (kind, name) {
         (Kind::Comment, TOP_LEVEL) => "A comment outside every definition".to_string(),
         (Kind::Comment, _) => format!("A comment in `{name}`"),
         (Kind::Section, PREAMBLE) => "The text before the first heading".to_string(),
@@ -16,9 +29,5 @@ pub(in crate::units) fn custom_wording(question: &'static Question, name: &str) 
         (Kind::File, _) => "This file".to_string(),
         (Kind::Hunk, _) => format!("The change at {name}"),
         (Kind::Function | Kind::Test, _) => format!("`{name}`"),
-    };
-    (
-        format!("{subject}: {} Yes.", question.question),
-        question.next_step.as_str(),
-    )
+    }
 }

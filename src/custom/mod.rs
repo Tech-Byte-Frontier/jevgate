@@ -2,14 +2,17 @@
 //! is the rule `custom/<id>`, asked as a Noul of every unit it names, with
 //! yes a violation at its own threshold and level. They come from
 //! `[[question]]` tables of the configuration and, with the repository's own
-//! configuration, from one file per question in `.jevgate/questions/`.
+//! configuration, from one file per question in `.jevgate/questions/`. Its
+//! examples (`examples`) are what `jevgate rules test` asks it about.
 use crate::{catalog, options::FailOn, schema::Strength};
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+mod examples;
 mod ignored;
 
+pub use examples::{Example, ExampleSpec, Expected, Text};
 pub use ignored::ignored;
 
 /// Question files, one per question, relative to the repository root.
@@ -54,6 +57,12 @@ pub struct Spec {
     /// The next step a finding shows. Default: fix it, or accept it with a `jevgate: allow` comment and a reason.
     #[serde(default)]
     pub next_step: Option<String>,
+    /// Examples of code that breaks the rule: `jevgate rules test` fails when the answer about one stays below the threshold.
+    #[serde(default)]
+    pub failing: Vec<ExampleSpec>,
+    /// Examples of code that keeps the rule: `jevgate rules test` fails when the answer about one reaches the threshold.
+    #[serde(default)]
+    pub passing: Vec<ExampleSpec>,
 }
 
 /// What a custom question is asked about.
@@ -155,6 +164,8 @@ pub struct Question {
     pub source: PathBuf,
     /// A hash of what it asks and how its answer is read.
     pub version: String,
+    /// Its failing examples, then its passing ones.
+    pub examples: Vec<Example>,
     /// The files it reads, for `jevgate rules`.
     scope: String,
     /// Where it is defined, for `jevgate rules`.
@@ -224,6 +235,12 @@ impl Question {
 
     /// The definition `jevgate rules --format json` adds to its entry.
     pub fn describe(&self) -> serde_json::Value {
+        let count = |expected| {
+            self.examples
+                .iter()
+                .filter(|e| e.expected == expected)
+                .count()
+        };
         serde_json::json!({
             "question": self.question,
             "background": self.background,
@@ -234,6 +251,10 @@ impl Question {
             "level": self.level,
             "next_step": self.next_step,
             "source": self.source,
+            "examples": {
+                "failing": count(Expected::Failing),
+                "passing": count(Expected::Passing),
+            },
         })
     }
 }
@@ -362,11 +383,12 @@ fn validate(spec: &Spec, id: &str, source: PathBuf) -> Result<Question> {
         level,
         source,
         version,
+        examples: checked.examples,
         scope,
     })
 }
 
-/// A question's texts, threshold and paths once checked.
+/// A question's texts, threshold, paths and examples once checked.
 struct Checked {
     question: String,
     background: Option<String>,
@@ -374,6 +396,7 @@ struct Checked {
     next_step: Option<String>,
     threshold: f64,
     matcher: globset::GlobSet,
+    examples: Vec<Example>,
 }
 
 /// The fields of `spec` a person writes freely, checked; the first problem
@@ -393,12 +416,15 @@ fn checked(spec: &Spec) -> Result<Checked, String> {
             THRESHOLDS.end()
         ));
     }
+    let matcher = crate::boundary::globs(&spec.paths)
+        .map_err(|error| format!("invalid paths {:?}: {error}", spec.paths))?;
+    let applies = |path: &Path| spec.paths.is_empty() || matcher.is_match(path);
     Ok(Checked {
         background: text(&spec.background, "background", TEXT_CHARS)?,
         guidance: text(&spec.guidance, "guidance", TEXT_CHARS)?,
         next_step: text(&spec.next_step, "next_step", NEXT_STEP_CHARS)?,
-        matcher: crate::boundary::globs(&spec.paths)
-            .map_err(|error| format!("invalid paths {:?}: {error}", spec.paths))?,
+        examples: examples::validate((&spec.failing, &spec.passing), applies)?,
+        matcher,
         question,
         threshold,
     })
@@ -452,11 +478,15 @@ fn version(checked: &Checked, unit: Kind, level: Strength) -> String {
 #[cfg(test)]
 pub const NAMES: &str = "^custom(/[a-z][a-z0-9]*(-[a-z0-9]+)*)?$";
 
-/// The limits validation holds a question to, in its JSON schema.
+/// The limits validation holds a question and its examples to, in the JSON
+/// schema's `definitions`.
 #[cfg(test)]
-pub fn schema(question: &mut serde_json::Value) {
+pub fn schema(definitions: &mut serde_json::Value) {
     use serde_json::json;
-    let fields = &mut question["properties"];
+    let example = &mut definitions["QuestionExample"];
+    example["oneOf"] = json!([{"required": ["code"]}, {"required": ["file"]}]);
+    example["dependentRequired"] = json!({"code": ["path"]});
+    let fields = &mut definitions["Question"]["properties"];
     fields["id"]["pattern"] = json!("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     fields["id"]["maxLength"] = json!(ID_CHARS);
     fields["question"]["pattern"] = json!("\\?\\s*$");

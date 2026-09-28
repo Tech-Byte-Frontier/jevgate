@@ -60,6 +60,7 @@ mod requests;
 mod response;
 mod response_headers;
 mod revision;
+mod rules_test;
 mod sarif;
 mod schema;
 mod server;

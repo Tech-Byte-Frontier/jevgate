@@ -3,7 +3,9 @@
 //! section or changed hunk of it, or one for the whole file, as its `unit`
 //! says. A unit whose evidence a built-in first-pass request of the file
 //! already sends is asked there (`ride`); the others are asked in requests
-//! of their own, packed as the built-in stage packs the same units.
+//! of their own, packed as the built-in stage packs the same units. Its
+//! examples are asked as those own requests ask (`examples`).
+pub(crate) mod examples;
 mod hunks;
 mod items;
 mod ride;

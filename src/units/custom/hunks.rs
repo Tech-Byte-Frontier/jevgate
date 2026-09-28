@@ -121,6 +121,20 @@ pub(super) fn parse(diff: &str, lines: usize) -> Vec<Hunk> {
     hunks
 }
 
+/// The hunks of an example change written by hand: diff lines under `@@`
+/// headers, or with none, one change from line 1. An empty line is an
+/// unchanged blank line, since editors strip the space a diff gives it.
+pub(super) fn example(diff: &str) -> Vec<Hunk> {
+    let lines: Vec<&str> = diff
+        .lines()
+        .map(|line| if line.is_empty() { " " } else { line })
+        .collect();
+    let headed = lines.iter().any(|line| line.starts_with("@@ "));
+    let header = if headed { "" } else { "@@ -1 +1 @@\n" };
+    // No line count to keep within: the example is all the file there is.
+    parse(&format!("{header}{}", lines.join("\n")), usize::MAX)
+}
+
 /// A new file's text as hunks that add every line.
 fn added(source: &str) -> Vec<Hunk> {
     let body: Vec<String> = source.lines().map(|line| format!("+{line}")).collect();

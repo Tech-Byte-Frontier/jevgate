@@ -317,7 +317,7 @@ fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
 
 /// A custom question's answer: a finding at its level once yes reaches its
 /// threshold, clear once no does, and undecided between.
-fn custom_outcome(question: &crate::custom::Question, answer: &Answer) -> Outcome {
+pub(super) fn custom_outcome(question: &crate::custom::Question, answer: &Answer) -> Outcome {
     let Answer::Noul { noul } = answer else {
         return Outcome::Missing;
     };

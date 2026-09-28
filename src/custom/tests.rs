@@ -258,3 +258,121 @@ fn a_question_file_git_ignores_is_named_with_the_rule_that_ignores_it() {
     project.write(".gitignore", "/.jevgate/*\n!/.jevgate/questions/\n");
     assert_eq!(ignored(&project.0, file), None);
 }
+
+const EXAMPLES: &str = r#"
+[[question.failing]]
+path = "src/api/orders.ts"
+code = "export function charge(req) { log(req.body); }"
+
+[[question.passing]]
+file = ".jevgate/questions/examples/audit.ts"
+path = "src/api/audit.ts"
+
+[[question.passing]]
+file = "tests/fixtures/ok.ts"
+"#;
+
+#[test]
+fn examples_come_failing_then_passing_and_leave_the_version_alone() {
+    let plain = configured(QUESTION).unwrap();
+    let questions = configured(&format!("{QUESTION}{EXAMPLES}")).unwrap();
+    let examples = &questions[0].examples;
+    let shown: Vec<(Expected, usize, &Path)> = examples
+        .iter()
+        .map(|e| (e.expected, e.number, e.path.as_path()))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (Expected::Failing, 1, Path::new("src/api/orders.ts")),
+            (Expected::Passing, 1, Path::new("src/api/audit.ts")),
+            (Expected::Passing, 2, Path::new("tests/fixtures/ok.ts")),
+        ],
+        "a file example stands for its own path unless `path` names another"
+    );
+    assert!(matches!(&examples[0].text, Text::Inline(code) if code.contains("req.body")));
+    assert!(matches!(&examples[1].text, Text::File(file) if file.ends_with("audit.ts")));
+    assert_eq!(
+        questions[0].version, plain[0].version,
+        "examples change nothing a check asks"
+    );
+    assert_eq!(
+        questions[0].describe()["examples"],
+        serde_json::json!({"failing": 1, "passing": 2})
+    );
+    let project = Project::new();
+    project.write(
+        ".jevgate/questions/no-body-logs.toml",
+        "question = \"Is it?\"\nunit = \"file\"\n[[failing]]\npath = \"a.sh\"\ncode = \"rm -rf /\"\n",
+    );
+    let directory = super::directory(&project.0);
+    let filed = load(
+        &project.0,
+        (&project.0.join("jevgate.toml"), &[]),
+        Some(&directory),
+    )
+    .unwrap();
+    assert_eq!(filed[0].examples.len(), 1, "a question file's [[failing]]");
+}
+
+#[test]
+fn an_invalid_example_is_an_error_naming_it_and_its_question() {
+    let paths = "paths = [\"src/**\"]\n";
+    for (example, problem) in [
+        ("", "failing example 1: give either `code` or `file`"),
+        (
+            "code = \"x\"\nfile = \"src/x.ts\"\n",
+            "give either `code` or `file`",
+        ),
+        ("code = \"  \"\npath = \"src/x.ts\"\n", "`code` is empty"),
+        ("code = \"x\"\n", "`path` is required with `code`"),
+        (
+            "code = \"x\"\npath = \"/etc/x.ts\"\n",
+            "`path` \"/etc/x.ts\" must be a path relative",
+        ),
+        (
+            "code = \"x\"\npath = \"src/../x.ts\"\n",
+            "`path` \"src/../x.ts\" must be a path relative",
+        ),
+        (
+            "code = \"x\"\npath = \"src\\\\x.ts\"\n",
+            "with `/` between its parts",
+        ),
+        (
+            "file = \"src/.env\"\n",
+            "src/.env is hidden, in a dependency or build directory, or a credential",
+        ),
+        (
+            "file = \".git/config\"\npath = \"src/config\"\n",
+            ".git/config is hidden",
+        ),
+        ("file = \"src/server.pem\"\n", "or a credential"),
+        (
+            "file = \".jevgate/questions/x.ts\"\n",
+            "its path .jevgate/questions/x.ts is outside the question's paths; set `path`",
+        ),
+        (
+            "code = \"x\"\npath = \"lib/x.ts\"\n",
+            "its path lib/x.ts is outside the question's paths",
+        ),
+    ] {
+        let text = format!("{QUESTION}{paths}[[question.failing]]\n{example}");
+        let error = configured(&text).unwrap_err().to_string();
+        assert!(
+            error.starts_with("Question custom/no-body-logs in jevgate.toml: failing example 1: ")
+                && error.contains(problem),
+            "{example}: {error}"
+        );
+    }
+    let unknown =
+        format!("{QUESTION}[[question.failing]]\ncode = \"x\"\npath = \"x.ts\"\nnote = \"y\"\n");
+    let error = format!("{:#}", configured(&unknown).unwrap_err());
+    assert!(error.contains("unknown field `note`"), "{error}");
+    let kept = format!(
+        "{QUESTION}{paths}[[question.passing]]\nfile = \".jevgate/questions/examples/a.ts\"\npath = \"src/a.ts\"\n"
+    );
+    assert!(
+        configured(&kept).is_ok(),
+        "the question directory holds example files"
+    );
+}

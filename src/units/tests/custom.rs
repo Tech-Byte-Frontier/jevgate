@@ -27,7 +27,7 @@ unit = "function"
 "#;
 
 /// Arguments selecting `rules`, configured from `toml` as a check does.
-fn configured(toml: &str, rules: &[&str]) -> CheckArgs {
+pub(super) fn configured(toml: &str, rules: &[&str]) -> CheckArgs {
     let context = ConfigContext {
         invocation_dir: ".".into(),
         root: ".".into(),
@@ -383,7 +383,7 @@ level = "consider"
 }
 
 /// Run Git in `project` with a fixed identity.
-fn git(project: &Project, args: &[&str]) {
+pub(super) fn git(project: &Project, args: &[&str]) {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(&project.0)

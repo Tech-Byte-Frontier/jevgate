@@ -35,7 +35,7 @@ mod workflows;
 
 use answers::Questions;
 pub use answers::{Asked, record};
-pub(crate) use custom::MAX_UNITS as MAX_CUSTOM_UNITS;
+pub(crate) use custom::{MAX_UNITS as MAX_CUSTOM_UNITS, examples};
 use evidence::{FileContext, compact, identity, pack, pack_runs, request, unique_ids};
 pub use follow_ups::{doc_checks, kinds, locates, parts, rechecks, settles, traces, value_kinds};
 pub use guards::{Steering, weaker_answer, weaker_request};

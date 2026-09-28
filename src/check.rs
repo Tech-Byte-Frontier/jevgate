@@ -41,11 +41,17 @@ pub(crate) fn credential_path(args: &CheckArgs, context: &ConfigContext) -> std:
 /// provider of the key the check will use, which its default model follows.
 pub(crate) fn configure(args: &mut CheckArgs, context: &ConfigContext) -> Result<()> {
     context.configure(args)?;
-    args.provider = crate::auth::sources::planned_provider(
-        &credential_path(args, context),
-        args.env_file.is_some(),
-    );
+    args.provider = planned_provider(args, context);
     Ok(())
+}
+
+/// The provider of the key a check will use, found before planning so the
+/// default model follows the key.
+pub(crate) fn planned_provider(
+    args: &CheckArgs,
+    context: &ConfigContext,
+) -> crate::provider::Provider {
+    crate::auth::sources::planned_provider(&credential_path(args, context), args.env_file.is_some())
 }
 
 /// Record a failed evaluation in the snapshot (and report) before returning the error.

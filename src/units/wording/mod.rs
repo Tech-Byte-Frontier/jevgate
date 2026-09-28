@@ -17,7 +17,7 @@ mod maintainability;
 mod security;
 mod test_rules;
 
-pub(super) use custom::custom_wording;
+pub(super) use custom::{custom_subject, custom_wording};
 pub(super) use documentation::{
     comment_reason, comment_wording, doc_pair_wording, document_wording, plan_wording,
     section_wording, stale_wording,

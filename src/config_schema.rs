@@ -27,7 +27,7 @@ pub fn schema() -> Value {
     bound_budgets(&mut schema["properties"]);
     list_levels(&mut schema);
     list_names(&mut schema["$defs"]);
-    crate::custom::schema(&mut schema["$defs"]["Question"]);
+    crate::custom::schema(&mut schema["$defs"]);
     schema
 }
 
@@ -153,6 +153,8 @@ mod tests {
         let question = &schema["$defs"]["Question"];
         assert_eq!(question["required"], json!(["question", "unit"]));
         assert_eq!(question["properties"]["threshold"]["maximum"], 0.99);
+        let example = &schema["$defs"]["QuestionExample"];
+        assert_eq!(example["dependentRequired"], json!({"code": ["path"]}));
         for name in [
             "security",
             "security/injection",

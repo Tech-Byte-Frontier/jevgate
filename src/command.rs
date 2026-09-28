@@ -42,6 +42,10 @@ fn init(force: bool) -> Result<u8> {
 fn configured(command: JevCommand) -> Result<u8> {
     let file = match &command {
         JevCommand::Check(args) => args.config.clone(),
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Test(args)),
+            ..
+        } => args.config.clone(),
         _ => None,
     };
     let context = ConfigContext::discover(file.as_deref())?;
@@ -70,7 +74,14 @@ fn configured(command: JevCommand) -> Result<u8> {
             reason,
             action: None,
         } => accept(&context, merge, reason),
-        JevCommand::Rules { format } => {
+        JevCommand::Rules {
+            action: Some(options::RulesAction::Test(args)),
+            ..
+        } => crate::rules_test::run(&args, &context),
+        JevCommand::Rules {
+            format,
+            action: None,
+        } => {
             match format {
                 options::RulesFormat::Json => say!(
                     "{}",

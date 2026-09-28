@@ -2,7 +2,9 @@
 //! their help text are in `commands`.
 mod commands;
 
-pub use commands::{BaselineAction, Disposition, JevCommand, OVERVIEW, RulesFormat};
+pub use commands::{
+    BaselineAction, Disposition, JevCommand, OVERVIEW, RulesAction, RulesFormat, RulesTestArgs,
+};
 
 use clap::{Args, ValueEnum};
 use std::{collections::BTreeMap, path::PathBuf};
@@ -340,6 +342,17 @@ fn source_extension(value: &str) -> Result<String, String> {
 }
 
 impl CheckArgs {
+    /// The arguments a `check` without flags has, for commands that ask as a
+    /// check does.
+    pub fn defaults() -> Self {
+        #[derive(clap::Parser)]
+        struct Defaults {
+            #[command(flatten)]
+            args: CheckArgs,
+        }
+        <Defaults as clap::Parser>::parse_from(["jevgate"]).args
+    }
+
     /// Whether a rule is selected, by key or ID.
     pub fn enabled(&self, key: &str) -> bool {
         self.rules

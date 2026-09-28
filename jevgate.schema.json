@@ -40,6 +40,13 @@
           "maxLength": 2000,
           "type": "string"
         },
+        "failing": {
+          "description": "Examples of code that breaks the rule: `jevgate rules test` fails when the answer about one stays below the threshold.",
+          "items": {
+            "$ref": "#/$defs/QuestionExample"
+          },
+          "type": "array"
+        },
         "guidance": {
           "description": "How to decide: what counts as a violation and what does not; sent with the question.",
           "maxLength": 2000,
@@ -59,6 +66,13 @@
           "description": "The next step a finding shows. Default: fix it, or accept it with a `jevgate: allow` comment and a reason.",
           "maxLength": 300,
           "type": "string"
+        },
+        "passing": {
+          "description": "Examples of code that keeps the rule: `jevgate rules test` fails when the answer about one reaches the threshold.",
+          "items": {
+            "$ref": "#/$defs/QuestionExample"
+          },
+          "type": "array"
         },
         "paths": {
           "description": "Globs of the files it applies to. Default: every file its unit applies to. For `file` and `hunk`, they can also name text files in languages JevGate does not parse.",
@@ -88,6 +102,42 @@
         "question",
         "unit"
       ],
+      "type": "object"
+    },
+    "QuestionExample": {
+      "additionalProperties": false,
+      "dependentRequired": {
+        "code": [
+          "path"
+        ]
+      },
+      "description": "An example of a custom question: a file's text that breaks or keeps its rule, written inline or read from a file.",
+      "oneOf": [
+        {
+          "required": [
+            "code"
+          ]
+        },
+        {
+          "required": [
+            "file"
+          ]
+        }
+      ],
+      "properties": {
+        "code": {
+          "description": "The example's text: a file's content, or for a `hunk` question the lines of a diff (`+` added, `-` removed, a space unchanged). Use `code` or `file`.",
+          "type": "string"
+        },
+        "file": {
+          "description": "A file holding the example, relative to the repository root. It is uploaded as a checked file is: inside the repository, not hidden (except under .jevgate/questions/), and within upload_allow and upload_deny. Use `code` or `file`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The file the example stands for, relative to the repository root: its language, and the path Jev reads. It must match the question's `paths`. Required with `code`; default: `file`.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "QuestionLevel": {
