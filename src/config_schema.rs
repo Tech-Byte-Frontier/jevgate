@@ -7,7 +7,14 @@ use serde_json::{Value, json};
 const ID: &str =
     "https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/main/jevgate.schema.json";
 /// Levels `fail_on` accepts; `[rules]` also accepts `off`.
-const LEVELS: [&str; 5] = ["review", "consider", "uncertain", "report", "none"];
+const LEVELS: [&str; 6] = [
+    "review",
+    "consider",
+    "mature",
+    "uncertain",
+    "report",
+    "none",
+];
 
 pub fn schema() -> Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(Config)).expect("a schema is JSON");

@@ -33,7 +33,7 @@ pub struct Config {
     pub max_file_bytes: Option<u64>,
     /// Ceiling on context bytes per request. Default: 32768.
     pub max_context_bytes: Option<u64>,
-    /// The level for rules without their own, like `--fail-on`. Default: ["review"].
+    /// The level for rules without their own, like `--fail-on`. Default: ["mature"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate rules` shows them.
     pub fail_on: Vec<String>,
     /// TypeSafe model; a pinned version keeps results repeatable. `--model` overrides it.
     pub model: Option<String>,
@@ -104,7 +104,7 @@ impl Level {
             .into_iter()
             .map(|name| {
                 FailOn::parse(name).ok_or_else(|| {
-                    anyhow!("Unknown level {name:?} for {target}; use review, consider, uncertain, report or off")
+                    anyhow!("Unknown level {name:?} for {target}; use review, consider, mature, uncertain, report or off")
                 })
             })
             .collect()
@@ -202,7 +202,7 @@ impl ConfigContext {
 
     /// Each enabled rule's gate levels. The command line wins over the file;
     /// within each, a rule's own entry wins over its group's, then over the
-    /// levels for every rule, then `review`.
+    /// levels for every rule, then `mature`.
     fn configure_gate(&self, args: &mut CheckArgs) -> Result<()> {
         let cli = Levels::from_cli(&args.fail_on_specs)?;
         let file = self.file_levels()?;
@@ -210,7 +210,7 @@ impl ConfigContext {
             .into_iter()
             .find(|levels| !levels.is_empty())
             .cloned()
-            .unwrap_or_else(|| vec![FailOn::Review]);
+            .unwrap_or_else(|| vec![FailOn::Mature]);
         args.fail_on = fallback.clone();
         args.rule_fail_on.clear();
         for rule in catalog::rules() {
@@ -444,7 +444,7 @@ mod tests {
     fn default_group_runs_when_nothing_is_configured() {
         let args = configured("", &[], &[]).unwrap();
         assert_eq!(args.rules, catalog::select(catalog::DEFAULT_GROUP).unwrap());
-        assert_eq!(args.fail_on, [FailOn::Review]);
+        assert_eq!(args.fail_on, [FailOn::Mature]);
         assert!(args.rule_fail_on.is_empty());
     }
 
@@ -463,7 +463,6 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(!args.rules.iter().any(|r| r == catalog::HARDCODED_VALUES));
         assert_eq!(args.fail_on, [FailOn::Consider]);
         assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Review]);
         assert_eq!(args.levels(catalog::TEST_REDUNDANCY), [FailOn::None]);
@@ -542,6 +541,49 @@ mod tests {
         ] {
             assert!(configured(invalid, &[], &[]).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn mature_is_the_default_and_a_level_like_the_others() {
+        let args = configured("", &["default", "documentation"], &[]).unwrap();
+        assert_eq!(args.levels(catalog::COMMENTS), [FailOn::Mature]);
+        let names = |pairs: &[(&str, &str)]| -> BTreeMap<String, Vec<String>> {
+            pairs
+                .iter()
+                .map(|(rule, level)| (rule.to_string(), vec![level.to_string()]))
+                .collect()
+        };
+        assert_eq!(
+            args.mature_level_names(),
+            names(&[
+                ("maintainability/function-simplification", "review"),
+                ("documentation/agent-context", "consider")
+            ])
+        );
+        let file = r#"
+            fail_on = ["consider"]
+            [rules]
+            security = "mature"
+            [[scope]]
+            paths = ["scripts/**"]
+            fail_on = ["mature", "uncertain"]
+        "#;
+        let args = configured(file, &["default", "security"], &[]).unwrap();
+        assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Consider]);
+        assert_eq!(args.levels(catalog::INJECTION), [FailOn::Mature]);
+        assert_eq!(
+            args.levels_at(catalog::SHARED_LOGIC, Path::new("scripts/a.py")),
+            [FailOn::Mature, FailOn::Uncertain]
+        );
+        assert_eq!(
+            args.mature_level_names(),
+            names(&[("maintainability/function-simplification", "review")]),
+            "mature in a scope; injection has no mature level"
+        );
+        let flagged = configured(file, &["default"], &[(None, FailOn::Mature)]).unwrap();
+        assert_eq!(flagged.levels(catalog::SHARED_LOGIC), [FailOn::Mature]);
+        let explicit = configured("fail_on = [\"review\"]", &[], &[]).unwrap();
+        assert!(explicit.mature_level_names().is_empty());
     }
 
     #[test]

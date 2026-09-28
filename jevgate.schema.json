@@ -6,6 +6,7 @@
           "enum": [
             "review",
             "consider",
+            "mature",
             "uncertain",
             "report",
             "none",
@@ -18,6 +19,7 @@
             "enum": [
               "review",
               "consider",
+              "mature",
               "uncertain",
               "report",
               "none",
@@ -168,6 +170,7 @@
             "enum": [
               "review",
               "consider",
+              "mature",
               "uncertain",
               "report",
               "none"
@@ -278,11 +281,12 @@
       "type": "array"
     },
     "fail_on": {
-      "description": "The level for rules without their own, like `--fail-on`. Default: [\"review\"].",
+      "description": "The level for rules without their own, like `--fail-on`. Default: [\"mature\"], which fails only on the levels of a rule measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate rules` shows them.",
       "items": {
         "enum": [
           "review",
           "consider",
+          "mature",
           "uncertain",
           "report",
           "none"

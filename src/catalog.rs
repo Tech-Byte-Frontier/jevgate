@@ -416,29 +416,59 @@ pub fn policy() -> BTreeMap<String, f64> {
 }
 
 /// One line per rule: ID, whether it runs by default, whether it needs
-/// `--include-tests`, and its question; groups and selection follow.
+/// `--include-tests`, the levels that fail the default gate, how often its
+/// reviews and considers were right on unseen projects, and its question;
+/// what the columns mean, groups and selection follow.
 pub fn table() -> String {
     let rules = rules();
     let width = rules.iter().map(|r| r.id.len()).max().unwrap_or(0);
-    let mut lines = vec![format!("{:width$}  DEFAULT  QUESTION", "RULE")];
-    for rule in &rules {
-        let default = match (rule.default_enabled, rule.requires_tests) {
-            (false, _) => "opt-in",
-            (true, true) => "tests",
-            (true, false) => "yes",
-        };
-        lines.push(format!(
-            "{:width$}  {default:7}  {}",
-            rule.id, rule.inspection
-        ));
-    }
+    let mut lines = vec![format!(
+        "{:width$}  DEFAULT  BLOCKS    REVIEWS RIGHT  CONSIDERS RIGHT  QUESTION",
+        "RULE"
+    )];
+    lines.extend(rules.iter().map(|rule| table_row(rule, width)));
     lines.push(String::new());
+    lines.push(format!(
+        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; the rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right.",
+        crate::maturity::MIN_PERCENT_RIGHT,
+        crate::maturity::MIN_LABELS
+    ));
     lines.push(format!(
         "Groups: {}, {DEFAULT_GROUP} (every rule marked yes or tests), {ALL_GROUP}.",
         groups().join(", ")
     ));
-    lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests.".into());
+    lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests. --fail-on and [rules] levels replace the default gate.".into());
     lines.join("\n")
+}
+
+fn table_row(rule: &Rule, width: usize) -> String {
+    use crate::{maturity, schema::Strength};
+    let default = match (rule.default_enabled, rule.requires_tests) {
+        (false, _) => "opt-in",
+        (true, true) => "tests",
+        (true, false) => "yes",
+    };
+    let mature: Vec<String> = maturity::mature_levels(rule.key)
+        .iter()
+        .map(crate::output::label)
+        .collect();
+    let blocks = if mature.is_empty() {
+        "-".to_string()
+    } else {
+        mature.join(", ")
+    };
+    let right = |level| {
+        maturity::measure(rule.key, level)
+            .and_then(|m| m.unseen.summary())
+            .unwrap_or_else(|| "-".into())
+    };
+    format!(
+        "{:width$}  {default:7}  {blocks:8}  {:13}  {:15}  {}",
+        rule.id,
+        right(Strength::Review),
+        right(Strength::Consider),
+        rule.inspection
+    )
 }
 
 pub fn describe() -> Value {
@@ -446,7 +476,9 @@ pub fn describe() -> Value {
         rules()
             .into_iter()
             .map(|r| {
+                let maturity = crate::maturity::describe(r.key);
                 let mut value = serde_json::to_value(r).unwrap();
+                value["maturity"] = maturity;
                 value["decision_policy"] = serde_json::json!(policy());
                 value
             })

@@ -66,14 +66,20 @@ pub enum JevCommand {
         #[command(subcommand)]
         action: Option<BaselineAction>,
     },
-    /// List every rule with its group, default and the question it asks
+    /// List every rule with its default, the levels that fail the check by default, and its question
     ///
     /// A rule is named by its ID (`maintainability/shared-logic`), its key
     /// (`shared_logic`) or its group (`maintainability`, `tests`, `security`,
     /// `documentation`, plus `default` and `all`) anywhere a rule is accepted:
     /// `--rule`, `--skip-rule`, `--fail-on TARGET=LEVEL` and `[rules]`.
+    ///
+    /// Each rule shows how often its reviews and considers were right on
+    /// projects JevGate was never tuned on, from findings labeled by hand. The
+    /// levels right at least 80% of the time over at least 20 labels are
+    /// mature: by default only they fail the check (`--fail-on mature`), and
+    /// the other findings are reported without failing it.
     Rules {
-        /// `table` for people; `json` adds scope, evidence unit, version and decision policy
+        /// `table` for people; `json` adds scope, evidence unit, version, labels per level and decision policy
         #[arg(long, value_enum, default_value_t = RulesFormat::Table)]
         format: RulesFormat,
     },
@@ -224,6 +230,7 @@ Examples:
   jevgate check --rule comments                    Only code comments: repeated code, filler, narrated edits
   jevgate check --include-tests                    Also judge test value and redundancy
   jevgate check --fail-on none                     Advisory: never exits 1; exits 2 when incomplete
+  jevgate check --fail-on review                   Fail on every review, not only on mature rules
   jevgate check --fail-on review --fail-on security=consider
   jevgate check --dry-run --show-requests          Exactly what would be uploaded, offline
   jevgate check --cache-only                       Replay cached answers; never contact TypeSafe
@@ -231,10 +238,13 @@ Examples:
 Reading the JSON report (--format json or .jevgate/latest.json):
   complete           false when any selected file was not judged; the exit code is then 2
   gate               passed, reasons, new_findings, baselined_findings
+  fail_on            the gate levels; fail_on_mature says what `mature` stands for
   files[].status     clear, note, consider, review, uncertain, needs-context,
                      not-applicable, skipped or error
   files[].findings   rule, strength, line, message, action, locations,
-                     concern_probability, fingerprint, baselined
+                     concern_probability, fingerprint, baselined, and gate:
+                     fails, measuring (its rule and level are still being
+                     measured) or advisory (below the level in force)
   files[].dimensions per rule: status, unit counts and the units left undecided
   files[].judgments  every raw answer, first pass and follow-ups
   api_requests, paid_input_tokens, paid_output_tokens   this run's usage";

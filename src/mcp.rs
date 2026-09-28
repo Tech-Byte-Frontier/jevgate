@@ -18,7 +18,9 @@ const MAX_FINDINGS: usize = 50;
 
 const INSTRUCTIONS: &str = "JevGate reviews code by asking TypeSafe Jev small questions about functions, files, tests and docs. \
 Call jevgate_check with `base` (such as origin/main) to review what changed; it uses the repository's jevgate.toml and TYPESAFE_API_KEY, and paid requests only for code the answer cache lacks. \
-Fix each `review` finding; for a `consider`, fix it or explain why the code should stay. Exit code 2 means the run could not finish: report it, never treat it as a pass. \
+Fix each `review` finding; for a `consider`, fix it or explain why the code should stay. \
+Findings marked to fail the gate (`gate: fails` in jevgate_findings) decide the exit code; by default only rules and levels measured right at least 80% of the time do, and the rest are reported. \
+Exit code 2 means the run could not finish: report it, never treat it as a pass. \
 jevgate_findings reads the last report without running anything.";
 
 pub fn run() -> Result<()> {
@@ -111,7 +113,8 @@ impl Server {
         Ok(format!("{text}\n\n({meaning})"))
     }
 
-    /// Findings of the last report, ranked, optionally for one path prefix.
+    /// Findings of the last report, those that fail the gate first, then by
+    /// rank, optionally for one path prefix.
     fn findings(&self, arguments: &Value) -> Result<String> {
         let report = crate::storage::read_latest(&self.root)
             .context("No report yet; call jevgate_check first")?;
@@ -170,8 +173,10 @@ fn strings(value: &Value, name: &str) -> Result<Vec<String>> {
     }
 }
 
+/// The findings of `report`, those that fail the gate first, so the cap
+/// never leaves one out for a finding that only warns.
 fn findings(report: &Report, prefix: Option<&str>, include_notes: bool) -> Value {
-    let all: Vec<Value> = output::ranked(report)
+    let all: Vec<Value> = output::failing_first(report)
         .into_iter()
         .filter(|(path, _)| prefix.is_none_or(|p| path.starts_with(p)))
         .filter(|(_, f)| include_notes || f.strength != crate::schema::Strength::Note)
@@ -186,6 +191,7 @@ fn findings(report: &Report, prefix: Option<&str>, include_notes: bool) -> Value
                 "probability": f.concern_probability,
                 "baselined": f.baselined,
                 "suppressed": f.suppressed,
+                "gate": f.gate,
             })
         })
         .collect();
@@ -337,6 +343,35 @@ mod tests {
             ]
         );
         assert!(check_arguments(&json!({"paths": "src"})).is_err());
+    }
+
+    #[test]
+    fn findings_say_how_the_gate_counted_them() {
+        use crate::{schema::Strength, tests::finding_of};
+        let lower = crate::schema::Finding {
+            rank: 0.5,
+            ..finding_of("maintainability/function-simplification", Strength::Review)
+        };
+        let report = crate::tests::gated(
+            vec![
+                finding_of("maintainability/shared-logic", Strength::Review),
+                lower,
+            ],
+            &crate::tests::args(),
+        );
+        let value = findings(&report, None, false);
+        let gates: Vec<&Value> = value["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| &f["gate"])
+            .collect();
+        assert_eq!(
+            gates,
+            [&json!("fails"), &json!("measuring")],
+            "a failure first, whatever its rank"
+        );
+        assert_eq!(value["gate"]["passed"], false);
     }
 
     #[test]

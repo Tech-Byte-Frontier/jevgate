@@ -28,6 +28,10 @@ Rate limits, overload and server errors (HTTP 408, 429, 500, 502–504, 520–52
 
 A file is `uncertain` when some of its answers stayed undecided after the follow-up questions. JevGate reports this instead of hiding it or counting the file as clear. `--verbose` lists each undecided unit and the question it stayed undecided on. It never fails the gate unless you ask for that with `--fail-on uncertain`.
 
+## A review did not fail the check
+
+By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the check; `jevgate rules` shows which, and how often each rule's reviews and considers were right. The other findings are reported, and the output says their rules are still being measured. To fail on them, set a level: `--fail-on review` or `fail_on = ["review"]` for every rule, or `--fail-on maintainability/shared-logic=review` for one.
+
 ## A finding is wrong
 
 Accept it with `jevgate baseline`, and record why with `jevgate baseline mark wrong PATH:LINE`; `jevgate baseline stats` counts each rule's mistaken findings. Reporting it with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml), with the finding from `.jevgate/latest.json` and a small piece of the code, is how the rules improve.

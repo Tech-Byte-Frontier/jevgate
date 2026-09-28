@@ -90,23 +90,7 @@ fn render(allow: &[String]) -> String {
     } else {
         format!("upload_allow = {}\n", list(allow))
     };
-    let mut rules = String::new();
-    for group in catalog::groups() {
-        let members: Vec<_> = catalog::rules()
-            .into_iter()
-            .filter(|r| r.group == group)
-            .collect();
-        let names: Vec<&str> = members
-            .iter()
-            .map(|r| r.id.trim_start_matches(&format!("{group}/")[..]))
-            .collect();
-        let comment = format!("# {}", names.join(", "));
-        if members.iter().all(|r| r.default_enabled) {
-            rules.push_str(&format!("{group} = \"review\"  {comment}\n"));
-        } else {
-            rules.push_str(&format!("# {group} = \"consider\"  {comment} (opt-in)\n"));
-        }
-    }
+    let rules: String = catalog::groups().into_iter().map(group_example).collect();
     format!(
         r#"#:schema https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/v{version}/jevgate.schema.json
 # JevGate configuration, written by `jevgate init`. Unknown keys are errors.
@@ -129,10 +113,14 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # max_requests = 200
 # concurrency = 4
 
-# Each group or rule ID set to a level is judged and fails the check at that
-# level: "review", "consider" (also fails on review), "uncertain", "report"
-# (judge, never fail) or "off". A rule's own entry wins over its group's.
-# Test rules also need include_tests or --include-tests.
+# Unset, the default rules run and only rule levels measured right at least
+# 80% of the time on projects JevGate was never tuned on fail the check
+# ("mature"; `jevgate rules` shows them); other findings are reported without
+# failing it. A group or rule ID set to a level is judged, every rule of a
+# group included, and fails the check at exactly that level: "review",
+# "consider" (also fails on review), "mature", "uncertain", "report" (judge,
+# never fail) or "off". A rule's own entry wins over its group's. Test rules
+# also need include_tests or --include-tests.
 [rules]
 {rules}
 # Levels for the files some paths match, such as report-only tooling. The last
@@ -144,6 +132,33 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
         model = crate::options::DEFAULT_MODEL,
         version = env!("CARGO_PKG_VERSION"),
     )
+}
+
+/// A commented `[rules]` line for one group: a level to set, and its rules,
+/// with the ones that do not run by default marked opt-in.
+fn group_example(group: &str) -> String {
+    let members: Vec<_> = catalog::rules()
+        .into_iter()
+        .filter(|r| r.group == group)
+        .collect();
+    let opt_in = members.iter().all(|r| !r.default_enabled);
+    let names: Vec<String> = members
+        .iter()
+        .map(|r| {
+            let name = r.id.trim_start_matches(&format!("{group}/")[..]);
+            if r.default_enabled || opt_in {
+                name.to_string()
+            } else {
+                format!("{name} (opt-in)")
+            }
+        })
+        .collect();
+    let (level, suffix) = if opt_in {
+        ("consider", " (opt-in)")
+    } else {
+        ("review", "")
+    };
+    format!("# {group} = \"{level}\"  # {}{suffix}\n", names.join(", "))
 }
 
 #[cfg(test)]
@@ -181,12 +196,25 @@ mod tests {
                 ".cursor/rules/**"
             ]
         );
-        let config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let config: Config = toml::from_str(&text).unwrap();
         assert_eq!(config.upload_allow, allow);
-        let Rules::Levels(levels) = config.rules else {
-            panic!("rules is a table of levels");
+        let levels = |config: Config| match config.rules {
+            Rules::Levels(levels) => levels,
+            Rules::List(_) => panic!("rules is a table of levels"),
         };
-        assert!(levels.contains_key("maintainability") && levels.contains_key("tests"));
+        assert!(levels(config).is_empty(), "the default rules and gate");
+        let uncommented: Vec<&str> = text
+            .lines()
+            .map(|line| {
+                let example = catalog::groups()
+                    .into_iter()
+                    .any(|g| line.starts_with(&format!("# {g} = ")));
+                if example { &line[2..] } else { line }
+            })
+            .collect();
+        let config: Config = toml::from_str(&uncommented.join("\n")).unwrap();
+        assert_eq!(levels(config).len(), catalog::groups().len());
         assert!(run(&dir, false).is_err(), "an existing file is kept");
         assert!(run(&dir, true).is_ok());
     }

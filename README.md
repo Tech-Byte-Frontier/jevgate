@@ -87,7 +87,7 @@ It reviews only the changed files, annotates each finding on its line and writes
 | 1 | Gate failed |
 | 2 | Run incomplete, invalid configuration or invalid usage |
 
-Findings are `review` (act on it), `consider` (worth a look) or `note` (optional). A file whose answers stay undecided is `uncertain`, never hidden or counted as clear. `--fail-on` and `jevgate.toml` set what fails the gate, per rule and per path. `jevgate baseline` accepts today's findings, and a `jevgate: allow(RULE) reason` comment accepts one where it is.
+Findings are `review` (act on it), `consider` (worth a look) or `note` (optional). A file whose answers stay undecided is `uncertain`, never hidden or counted as clear. By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the gate (`jevgate rules` shows them); the other findings are reported without failing it. `--fail-on` and `jevgate.toml` set what fails the gate, per rule and per path. `jevgate baseline` accepts today's findings, and a `jevgate: allow(RULE) reason` comment accepts one where it is.
 
 ## Privacy and cost
 

@@ -1,7 +1,6 @@
 //! `--format gitlab`: the findings as a GitLab Code Quality report, which
 //! merge requests show as a widget and on the changed lines.
 use crate::{
-    options::CheckArgs,
     output,
     schema::{Finding, Report, Strength},
 };
@@ -10,29 +9,34 @@ use serde_json::{Value, json};
 use std::{io::Write, path::Path};
 
 /// The findings the GitHub annotations show: `major` when a finding fails the
-/// gate, `minor` otherwise.
-pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<()> {
+/// gate, `minor` otherwise, and the description says when its rule and level
+/// are still being measured.
+pub fn emit(out: &mut impl Write, report: &Report) -> Result<()> {
     let issues: Vec<Value> = output::ranked(report)
         .into_iter()
         .filter(|(_, f)| f.strength != Strength::Note && !f.accepted())
-        .map(|(path, finding)| issue(path, finding, crate::gate::fails(finding, path, args)))
+        .map(|(path, finding)| issue(path, finding))
         .collect();
     serde_json::to_writer_pretty(&mut *out, &issues)?;
     writeln!(out)?;
     Ok(())
 }
 
-fn issue(path: &Path, finding: &Finding, fails: bool) -> Value {
+fn issue(path: &Path, finding: &Finding) -> Value {
     let end = finding
         .locations
         .iter()
         .find(|l| l.path == path && l.start_line == finding.line)
         .map_or(finding.line, |l| l.end_line.max(finding.line));
+    let mut description = format!("{} Next step: {}", finding.message, finding.action);
+    if let Some(note) = output::measuring_note(finding) {
+        description.push_str(&format!(" {note}"));
+    }
     json!({
-        "description": format!("{} Next step: {}", finding.message, finding.action),
+        "description": description,
         "check_name": finding.rule,
         "fingerprint": fingerprint(path, finding),
-        "severity": if fails { "major" } else { "minor" },
+        "severity": if finding.fails_gate() { "major" } else { "minor" },
         "location": {
             "path": path.to_string_lossy(),
             "lines": {"begin": finding.line.max(1), "end": end.max(1)},
@@ -58,12 +62,16 @@ fn fingerprint(path: &Path, finding: &Finding) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::finding;
+    use crate::{schema::Gating, tests::finding};
 
     #[test]
     fn issues_carry_severity_location_and_a_fingerprint() {
         let path = Path::new("src/a,b.rs");
-        let review = issue(path, &finding(Strength::Review), true);
+        let failing = Finding {
+            gate: Some(Gating::Fails),
+            ..finding(Strength::Review)
+        };
+        let review = issue(path, &failing);
         assert_eq!(review["severity"], "major");
         assert_eq!(review["check_name"], "maintainability/shared-logic");
         assert_eq!(review["location"]["path"], "src/a,b.rs");
@@ -75,10 +83,22 @@ mod tests {
                 .ends_with("Next step: Share one | implementation")
         );
         assert_eq!(review["fingerprint"].as_str().unwrap().len(), 64);
-        let consider = issue(path, &finding(Strength::Consider), false);
+        let consider = issue(path, &finding(Strength::Consider));
         assert_eq!(consider["severity"], "minor");
         let mut named = finding(Strength::Consider);
         named.fingerprint = "abc".into();
-        assert_eq!(issue(path, &named, false)["fingerprint"], "abc");
+        assert_eq!(issue(path, &named)["fingerprint"], "abc");
+        let measuring = Finding {
+            gate: Some(Gating::Measuring),
+            ..finding(Strength::Review)
+        };
+        let measured = issue(path, &measuring);
+        assert_eq!(measured["severity"], "minor");
+        assert!(
+            measured["description"]
+                .as_str()
+                .unwrap()
+                .ends_with("Next step: Share one | implementation Does not fail the gate: maintainability/shared-logic reviews are still being measured (54% of 85 right on projects JevGate was never tuned on).")
+        );
     }
 }

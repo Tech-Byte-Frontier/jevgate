@@ -36,14 +36,22 @@ def rules_page(binary):
         "its key or its group anywhere a rule is accepted: `--rule`, `--skip-rule`,",
         "`--fail-on TARGET=LEVEL`, `[rules]`, `[[scope]]` and `jevgate: allow(…)` comments.",
         "",
-        "| Rule | Key | Default | Question |",
-        "|---|---|---|---|",
+        "*Fails by default* names the levels that fail the check under the default gate level,",
+        "`mature`: those right at least 80% of the time over at least 20 findings labeled by hand on",
+        "projects JevGate was never tuned on. The other findings are reported without failing it.",
+        "*Reviews right* and *considers right* give the share of labeled findings that were right on",
+        "those projects, and how many were labeled; a debatable one counts as not right.",
+        "",
+        "| Rule | Key | Default | Fails by default | Reviews right | Considers right | Question |",
+        "|---|---|---|---|---|---|---|",
     ]
     for rule in rules:
         anchor = rule["id"].replace("/", "-")
         default = "yes" if rule["default_enabled"] else "opt-in"
+        maturity = rule["maturity"]
         lines.append(
-            f"| [`{rule['id']}`](#{anchor}) | `{rule['key']}` | {default} | {cell(rule['inspection'])} |"
+            f"| [`{rule['id']}`](#{anchor}) | `{rule['key']}` | {default} | {blocks(maturity)}"
+            f" | {right(maturity, 'review')} | {right(maturity, 'consider')} | {cell(rule['inspection'])} |"
         )
     group = None
     for rule in rules:
@@ -76,6 +84,20 @@ def rules_page(binary):
     ]
     lines += [f"| `{name}` | {value:g} |" for name, value in sorted(policy.items())]
     return "\n".join(lines) + "\n"
+
+
+def blocks(maturity):
+    """The levels that fail the default gate, or "no"."""
+    return ", ".join(level for level in ("review", "consider") if maturity.get(level, {}).get("mature")) or "no"
+
+
+def right(maturity, level):
+    """"87% of 23": labeled findings of a level right on unseen projects, or "-"."""
+    unseen = maturity.get(level, {}).get("unseen")
+    if not unseen or not unseen["labeled"]:
+        return "-"
+    percent = (200 * unseen["right"] + unseen["labeled"]) // (2 * unseen["labeled"])  # half up, as JevGate rounds
+    return f"{percent}% of {unseen['labeled']}"
 
 
 def configuration_page(schema_path):

@@ -15,7 +15,7 @@ for a `consider`, fix it or say why the code should stay as it is.
 
 | Exit code | Meaning for the agent |
 |---|---|
-| 0 | The gate passed; `consider` findings may still be worth a look |
+| 0 | The gate passed; `consider` findings, and reviews from rules still being measured, may still be worth fixing |
 | 1 | The gate failed: act on the findings listed |
 | 2 | The run could not finish (no key, provider rejection, request budget); report it, don't treat it as a pass |
 

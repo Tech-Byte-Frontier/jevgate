@@ -1,9 +1,7 @@
 //! `--format sarif`: the findings as a SARIF 2.1.0 log, for GitHub code
 //! scanning, GitLab and editors that read static analysis results.
 use crate::{
-    catalog,
-    options::CheckArgs,
-    output,
+    catalog, output,
     schema::{Finding, Report, Status, Strength},
 };
 use anyhow::Result;
@@ -14,30 +12,26 @@ const SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 const HOME: &str = "https://github.com/Tech-Byte-Frontier/jevgate";
 
 /// The same findings the GitHub annotations show: every new finding that is
-/// not a note, an `error` when it fails the gate and a `warning` otherwise.
-/// Run errors and files that could not be judged are tool notifications.
-pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<()> {
+/// not a note, an `error` when it fails the gate and a `warning` otherwise,
+/// with how the gate counted it as the `gate` property. Run errors and files
+/// that could not be judged are tool notifications.
+pub fn emit(out: &mut impl Write, report: &Report) -> Result<()> {
     let shown: Vec<(&Path, &Finding)> = output::ranked(report)
         .into_iter()
         .filter(|(_, f)| f.strength != Strength::Note && !f.accepted())
         .collect();
-    serde_json::to_writer_pretty(&mut *out, &document(report, &shown, args))?;
+    serde_json::to_writer_pretty(&mut *out, &document(report, &shown))?;
     writeln!(out)?;
     Ok(())
 }
 
-fn document(report: &Report, shown: &[(&Path, &Finding)], args: &CheckArgs) -> Value {
+fn document(report: &Report, shown: &[(&Path, &Finding)]) -> Value {
     let rules = catalog::rules();
     let results: Vec<Value> = shown
         .iter()
         .map(|(path, finding)| {
             let index = rules.iter().position(|r| r.id == finding.rule);
-            result(
-                path,
-                finding,
-                index,
-                crate::gate::fails(finding, path, args),
-            )
+            result(path, finding, index)
         })
         .collect();
     let mut notifications: Vec<Value> = report
@@ -101,7 +95,7 @@ fn title(id: &str) -> String {
     })
 }
 
-fn result(path: &Path, finding: &Finding, rule_index: Option<usize>, fails: bool) -> Value {
+fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
     let end = finding
         .locations
         .iter()
@@ -122,10 +116,14 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>, fails: bool
             })
         })
         .collect();
+    let mut text = format!("{}\n\nNext step: {}", finding.message, finding.action);
+    if let Some(note) = output::measuring_note(finding) {
+        text.push_str(&format!("\n\n{note}"));
+    }
     let mut value = json!({
         "ruleId": finding.rule,
-        "level": if fails { "error" } else { "warning" },
-        "message": {"text": format!("{}\n\nNext step: {}", finding.message, finding.action)},
+        "level": if finding.fails_gate() { "error" } else { "warning" },
+        "message": {"text": text},
         "locations": [{"physicalLocation": {
             "artifactLocation": artifact(path),
             "region": {"startLine": finding.line.max(1), "endLine": end.max(1)},
@@ -145,6 +143,9 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>, fails: bool
     if let Some(category) = &finding.category {
         value["properties"]["category"] = json!(category);
     }
+    if let Some(gate) = finding.gate {
+        value["properties"]["gate"] = json!(gate);
+    }
     value
 }
 
@@ -156,7 +157,7 @@ fn artifact(path: &Path) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::finding;
+    use crate::{options::CheckArgs, schema::Gating, tests::finding};
 
     fn report(args: &CheckArgs) -> Report {
         crate::evaluate::snapshot(
@@ -174,20 +175,31 @@ mod tests {
     #[test]
     fn results_name_their_rule_level_location_and_fingerprint() {
         let args = crate::tests::args();
-        let review = finding(Strength::Review);
-        let consider = finding(Strength::Consider);
+        let review = Finding {
+            gate: Some(Gating::Fails),
+            ..finding(Strength::Review)
+        };
+        let measuring = Finding {
+            gate: Some(Gating::Measuring),
+            ..finding(Strength::Review)
+        };
         let path = Path::new("src/a,b.rs");
-        let log = document(&report(&args), &[(path, &review), (path, &consider)], &args);
+        let log = document(&report(&args), &[(path, &review), (path, &measuring)]);
         assert_eq!(log["version"], "2.1.0");
         let run = &log["runs"][0];
         let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
         assert_eq!(rules.len(), catalog::rules().len());
         let results = run["results"].as_array().unwrap();
-        assert_eq!(
-            results[0]["level"], "error",
-            "a review fails the default gate"
-        );
+        assert_eq!(results[0]["level"], "error", "a review that fails the gate");
+        assert_eq!(results[0]["properties"]["gate"], "fails");
         assert_eq!(results[1]["level"], "warning");
+        assert_eq!(results[1]["properties"]["gate"], "measuring");
+        assert!(
+            results[1]["message"]["text"]
+                .as_str()
+                .unwrap()
+                .ends_with("reviews are still being measured (54% of 85 right on projects JevGate was never tuned on).")
+        );
         let first = &results[0];
         let index = first["ruleIndex"].as_u64().unwrap() as usize;
         assert_eq!(rules[index]["id"], "maintainability/shared-logic");
@@ -209,7 +221,7 @@ mod tests {
     #[test]
     fn security_rules_are_tagged_for_code_scanning() {
         let args = crate::tests::args();
-        let log = document(&report(&args), &[], &args);
+        let log = document(&report(&args), &[]);
         let rules = log["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .unwrap();

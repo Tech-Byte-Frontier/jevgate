@@ -43,7 +43,10 @@ pub fn render(report: &Report) -> Result<String> {
         .collect();
     let rules: Vec<_> = crate::catalog::rules()
         .into_iter()
-        .map(|r| json!({"key":r.key,"id":r.id,"description":r.inspection}))
+        .map(|r| {
+            json!({"key":r.key,"id":r.id,"description":r.inspection,
+                "maturity":crate::maturity::describe(r.key)})
+        })
         .collect();
     // A run that leaves out default rules lists fewer files; say so.
     let partial = crate::catalog::rules()
@@ -54,6 +57,7 @@ pub fn render(report: &Report) -> Result<String> {
         "refresh":report.watcher_pid.is_some(),"model":report.requested_model,
         "requests":report.api_requests,"tokens":report.paid_input_tokens,
         "cost":batch_cost(report),"gate":report.gate,"fail_on":report.fail_on,
+        "fail_on_mature":report.fail_on_mature,
         "errors":report.errors,"deleted":report.deleted_files,"files":files,"rules":rules,
         "selected":report.rules,"partial":partial});
     // Even a filename or analyzer message may contain </script>. Never let data
@@ -148,7 +152,15 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(decoded["fail_on"], serde_json::json!(["review"]));
+        assert_eq!(decoded["fail_on"], serde_json::json!(["mature"]));
+        assert_eq!(
+            decoded["fail_on_mature"],
+            serde_json::json!({"maintainability/function-simplification": ["review"], "documentation/agent-context": ["consider"]})
+        );
+        assert_eq!(
+            decoded["rules"][1]["maturity"]["review"]["unseen"],
+            serde_json::json!({"right": 20, "labeled": 23})
+        );
         assert!(!html.contains("id=\"root\""));
         report.paid_input_tokens = 1_000_000;
         report.paid_output_tokens = 12_345;

@@ -39,6 +39,21 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
             "comments"
         ]
     );
+    let rule = |key: &str| {
+        rules
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["key"] == key)
+            .unwrap()
+    };
+    let simplification = &rule("function_simplification")["maturity"];
+    assert_eq!(simplification["review"]["mature"], true);
+    assert_eq!(simplification["consider"]["mature"], false);
+    assert_eq!(
+        simplification["review"]["unseen"],
+        serde_json::json!({"right": 20, "labeled": 23})
+    );
     for arguments in [
         vec!["check", "--rule", "contracts", "--dry-run"],
         vec!["record"],
@@ -61,6 +76,25 @@ fn rules_table_names_rules_groups_and_opt_in_rules() {
         "{table}"
     );
     assert!(table.contains("security/injection") && table.contains("opt-in"));
+    let row = |id: &str| {
+        table
+            .lines()
+            .find(|line| line.starts_with(id))
+            .unwrap()
+            .split_whitespace()
+            .take(9)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(
+        row("maintainability/function-simplification"),
+        "maintainability/function-simplification yes review 87% of 23 67% of 126"
+    );
+    assert_eq!(
+        row("maintainability/hardcoded-values"),
+        "maintainability/hardcoded-values yes - 13% of 8 17% of 29"
+    );
+    assert!(table.contains("BLOCKS: the levels that fail the check by default"));
 }
 
 #[test]
@@ -120,10 +154,15 @@ fn skipped_rules_and_rule_levels_shape_the_run() {
         ],
     );
     assert_eq!(stages(&preview), ["functions"]);
-    assert_eq!(preview["fail_on"], serde_json::json!(["review"]));
+    assert_eq!(preview["fail_on"], serde_json::json!(["mature"]));
     assert_eq!(
         preview["fail_on_rules"],
         serde_json::json!({"maintainability/shared-logic": ["consider"]})
+    );
+    assert_eq!(
+        preview["fail_on_mature"],
+        serde_json::json!({"maintainability/function-simplification": ["review"]}),
+        "what `mature` stands for among the selected rules"
     );
 }
 

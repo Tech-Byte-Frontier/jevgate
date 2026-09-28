@@ -687,5 +687,6 @@ fn finding(
         rank: rank(p, lines),
         baselined: false,
         suppressed: None,
+        gate: None,
     }
 }

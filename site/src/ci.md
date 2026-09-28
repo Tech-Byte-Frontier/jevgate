@@ -22,11 +22,11 @@ jobs:
 
 The action installs a checked release binary, keeps `.jevgate/cache` in the Actions cache and runs `jevgate check --base <pull request base> --format github`; `args` passes more flags, such as `--rule security`. It runs on Linux, macOS and Windows runners.
 
-`--format github` annotates the changed lines with each finding. A finding that fails the gate is an error; the others are warnings. A Markdown table goes to the job summary, and the usual text goes to the log. The full JSON report is always at `.jevgate/latest.json` if you want to keep it as an artifact.
+`--format github` annotates the changed lines with each finding. A finding that fails the gate is an error; the others are warnings, and a warning whose rule and level are still being measured says so, with how often such findings were right. A Markdown table goes to the job summary, and the usual text goes to the log. The full JSON report is always at `.jevgate/latest.json` if you want to keep it as an artifact.
 
 - **Changed files only:** `--base` reviews what changed since the fork point with that revision, the same files a pull request diff shows, plus uncommitted and untracked files. It needs the history, so check out with `fetch-depth: 0`. When no supported file changed, the run passes without any request.
 - **Cache:** answers are stored under a hash of the exact request: source, questions and model. Restoring an older cache is always safe, and unchanged code costs nothing on the next run.
-- **Advisory or blocking:** `fail_on = ["none"]` in `jevgate.toml` or `--fail-on none` reports findings without failing. A run that could not finish (missing key, provider rejection, request budget reached) still exits 2, so an outage never passes as a clean review.
+- **Advisory or blocking:** by default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the check ([what fails by default](configuration.md#what-fails-the-check-by-default)); the other findings are warnings. `fail_on = ["review"]` in `jevgate.toml` or `--fail-on review` fails on every review, and `fail_on = ["none"]` or `--fail-on none` reports findings without failing. A run that could not finish (missing key, provider rejection, request budget reached) still exits 2, so an outage never passes as a clean review.
 - **A policy the change cannot edit:** a pull request can edit `jevgate.toml`. To apply the reviewed policy of the base branch instead, read it with `--config`:
 
   ```sh

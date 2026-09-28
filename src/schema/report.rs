@@ -122,6 +122,10 @@ pub struct Finding {
     /// finding is accepted as a baselined one is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suppressed: Option<String>,
+    /// How the gate counted it: none for notes and accepted findings, and
+    /// before the gate is applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<Gating>,
 }
 
 impl Finding {
@@ -129,6 +133,26 @@ impl Finding {
     pub fn accepted(&self) -> bool {
         self.baselined || self.suppressed.is_some()
     }
+
+    /// Whether the gate counted it as a failure.
+    pub fn fails_gate(&self) -> bool {
+        self.gate == Some(Gating::Fails)
+    }
+}
+
+/// How the gate counted a new finding, at the level in force for its rule
+/// and path. Set even when the run is incomplete and the gate not evaluated.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Gating {
+    /// It fails the gate.
+    Fails,
+    /// Reported without failing: the level is `mature`, and this rule and
+    /// level is still being measured.
+    Measuring,
+    /// Reported without failing: the level does not count it, as `review`
+    /// does not count a consider and `none` counts nothing.
+    Advisory,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,6 +252,11 @@ pub struct Report {
     /// Gate levels for the files `[[scope]]` paths match, in configuration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fail_on_paths: Vec<PathFailOn>,
+    /// What the `mature` level stands for: the levels of each selected rule
+    /// measured right at least 80% of the time on projects JevGate was never
+    /// tuned on, by rule ID, for the rules whose levels include `mature`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fail_on_mature: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<crate::gate::Gate>,
     pub api_requests: u32,

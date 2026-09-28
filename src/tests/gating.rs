@@ -15,7 +15,7 @@ fn gate_fails_only_on_the_configured_results() {
     ];
     for (level, status, default, stricter, stricter_code) in cases {
         options.refresh = true;
-        options.fail_on = vec![options::FailOn::Review];
+        options.fail_on = vec![options::FailOn::Mature];
         let mut mock = Mock {
             level,
             ..Default::default()
@@ -60,6 +60,18 @@ fn a_rule_level_fails_the_gate_only_for_that_rule() {
     }
 }
 
+/// A `[[scope]]` that sets `levels` for every rule in the files `glob` matches.
+fn every_rule_in(glob: &str, levels: Vec<options::FailOn>) -> options::PathLevels {
+    options::PathLevels {
+        paths: vec![glob.into()],
+        matcher: crate::boundary::globs(&[glob.into()]).unwrap(),
+        rules: crate::catalog::keys()
+            .into_iter()
+            .map(|key| (key.to_string(), levels.clone()))
+            .collect(),
+    }
+}
+
 #[test]
 fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
     let project = Project::new();
@@ -71,14 +83,7 @@ fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
         level: 4,
         ..Default::default()
     };
-    let scripts = |levels: Vec<options::FailOn>| options::PathLevels {
-        paths: vec!["scripts/**".into()],
-        matcher: crate::boundary::globs(&["scripts/**".into()]).unwrap(),
-        rules: crate::catalog::keys()
-            .into_iter()
-            .map(|key| (key.to_string(), levels.clone()))
-            .collect(),
-    };
+    let scripts = |levels| every_rule_in("scripts/**", levels);
     options.path_fail_on = vec![scripts(vec![options::FailOn::None])];
     let report = run(&project, &options, &mut mock);
     let gate = report.gate.as_ref().unwrap();
@@ -240,4 +245,130 @@ fn an_allow_comment_accepts_a_finding_only_with_a_reason() {
             "{comment}"
         );
     }
+}
+
+const SIMPLIFICATION: &str = "maintainability/function-simplification";
+const SHARED_LOGIC: &str = "maintainability/shared-logic";
+
+/// How the gate counted each finding of a report, in order.
+fn gates(report: &schema::Report) -> Vec<Option<schema::Gating>> {
+    report.files[0].findings.iter().map(|f| f.gate).collect()
+}
+
+#[test]
+fn the_default_gate_fails_only_on_mature_rule_levels() {
+    use schema::{Gating::*, Strength::*};
+    let accepted = schema::Finding {
+        baselined: true,
+        ..finding_of(SIMPLIFICATION, Review)
+    };
+    let findings = vec![
+        finding_of(SIMPLIFICATION, Review),
+        finding_of(SIMPLIFICATION, Consider),
+        finding_of(SHARED_LOGIC, Review),
+        finding_of(SIMPLIFICATION, Note),
+        accepted,
+    ];
+    let report = gated(findings.clone(), &args());
+    assert_eq!(
+        gates(&report),
+        [Some(Fails), Some(Measuring), Some(Measuring), None, None]
+    );
+    assert_eq!(
+        report.gate.as_ref().unwrap().reasons,
+        ["1 new review finding"]
+    );
+    assert_eq!(gate::exit_code(&report), 1);
+    let measured = gated(findings[1..].to_vec(), &args());
+    let gate = measured.gate.as_ref().unwrap();
+    assert!(gate.passed, "reviews still being measured are reported");
+    assert_eq!((gate.new_findings, gate.baselined_findings), (2, 1));
+    assert_eq!(gate::exit_code(&measured), 0);
+}
+
+#[test]
+fn an_explicit_level_replaces_the_default_exactly_as_it_says() {
+    use schema::{Gating::*, Strength::*};
+    let findings = vec![
+        finding_of(SIMPLIFICATION, Review),
+        finding_of(SHARED_LOGIC, Review),
+        finding_of(SHARED_LOGIC, Consider),
+    ];
+    let mut options = args();
+    options.fail_on = vec![options::FailOn::Review];
+    let report = gated(findings.clone(), &options);
+    assert_eq!(gates(&report), [Some(Fails), Some(Fails), Some(Advisory)]);
+    assert_eq!(report.gate.unwrap().reasons, ["2 new review findings"]);
+    // A level for one rule leaves the others at the default.
+    let mut options = args();
+    options.rule_fail_on = std::collections::BTreeMap::from([(
+        crate::catalog::SHARED_LOGIC.to_string(),
+        vec![options::FailOn::None],
+    )]);
+    let report = gated(findings.clone(), &options);
+    assert_eq!(
+        gates(&report),
+        [Some(Fails), Some(Advisory), Some(Advisory)]
+    );
+    // A scope's report level covers the mature rule too.
+    let mut options = args();
+    options.path_fail_on = vec![every_rule_in("src/**", vec![options::FailOn::None])];
+    let report = gated(findings, &options);
+    assert_eq!(gates(&report), [Some(Advisory); 3]);
+    assert_eq!(gate::exit_code(&report), 0);
+}
+
+#[test]
+fn agent_text_marks_what_fails_and_says_why_the_rest_did_not() {
+    use schema::Strength::*;
+    let report = gated(
+        vec![
+            finding_of(SIMPLIFICATION, Review),
+            finding_of(SHARED_LOGIC, Review),
+            finding_of(SHARED_LOGIC, Consider),
+        ],
+        &args(),
+    );
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("[maintainability/function-simplification] (fails the gate) Copies"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[maintainability/shared-logic] Copies"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n1 review and 1 consider did not fail the gate: by default only rules and levels right at least 80% of the time on projects JevGate was never tuned on fail it, and theirs are still being measured."),
+        "{text}"
+    );
+    let considers_only = gated(vec![finding_of(SHARED_LOGIC, Consider)], &args());
+    assert!(
+        output::measuring(&considers_only).is_none(),
+        "considers never failed by default"
+    );
+}
+
+#[test]
+fn a_capped_list_shows_the_findings_that_fail_the_gate_first() {
+    use schema::Strength::*;
+    let failing = schema::Finding {
+        rank: 0.1,
+        ..finding_of("documentation/agent-context", Consider)
+    };
+    let mut findings = vec![finding_of(SHARED_LOGIC, Consider); 11];
+    findings.push(failing);
+    let report = gated(findings, &args());
+    let mut out = Vec::new();
+    output::agent(&mut out, &report, false, output::Style::PLAIN).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    let section = text.split("Consider (").nth(1).unwrap();
+    assert!(
+        section.starts_with(
+            "12, top 10, those that fail the gate first; --verbose shows all):\n  src/lib.rs:12 [documentation/agent-context] (fails the gate)"
+        ),
+        "{text}"
+    );
 }

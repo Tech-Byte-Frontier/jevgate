@@ -4,6 +4,32 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- By default, only the rules and levels measured right on projects JevGate was never tuned on fail the check. The default gate level is now `mature`: a rule's reviews or considers fail the check when at least 80% of them were right on the 25 projects never used for tuning (11 held out, 14 fresh), over at least 20 findings labeled by hand from the code. Every other finding is still reported, marked as still being measured, and the check passes. Two levels are mature: function-simplification reviews (20 of 23 right, 87%) and agent-context considers (22 of 24, 92%; the documentation rules are opt-in, and the 22 right ones come from 4 of the maintainer's own repositories). On the unseen projects' full runs, the default gate failed on 122 findings, 57% of the labeled ones right (64% leaving the 13 debatable ones out), and on 17 of 22 projects; it now fails on 23, 87% right, and on 9 projects. On the 72 projects used for tuning: 468 findings at 73% to 95 at 83%, and 61 projects to 28. The 49 right reviews on unseen projects that no longer fail the check are still reported. The concern probability could not do this: unseen reviews were right 55%, 46%, 56% and 61% of the time with a probability below 0.90, below 0.95, below 0.98 and above. The labels were made on 0.24.1's findings and joined to 0.25.0's, replayed from the answer cache; 0.25.0 had turned 17 labeled security findings into notes, one on an unseen project, none in a mature level. Right / labeled on unseen and tuned projects, a debatable label counting as not right:
+
+  | Rule | Reviews, unseen | Reviews, tuned | Considers, unseen | Considers, tuned |
+  |---|---|---|---|---|
+  | File organization | 2/5 | 15/30 | 17/29 | 19/43 |
+  | Function simplification | **20/23 (87%)** | 57/69 | 85/126 (67%) | 147/197 |
+  | Shared logic | 46/85 (54%) | 181/240 (75%) | 85/158 (54%) | 146/244 |
+  | Hardcoded values | 1/8 | 15/28 | 5/29 | 32/57 |
+  | Injection | 3/4 | 81/96 | 5/13 | 27/47 |
+  | Sensitive data | 10/24 | 41/64 | 0/5 | 12/15 |
+  | Unsafe settings | 2/4 | 53/72 | 0/4 | 16/21 |
+  | Access control | - | 2/5 | - | 5/14 |
+  | Workflows | 1/1 | 0/1 | - | - |
+  | Test value | 3/5 | 5/11 | 1/2 | 20/27 |
+  | Test redundancy | 1/1 | 4/4 | 27/45 (60%) | 27/34 |
+  | Agent context | - | - | **22/24 (92%)** | 64/68 |
+  | Large docs | - | - | 1/1 | 1/5 |
+  | Staleness | - | - | 2/2 | 14/15 |
+  | Duplication | - | - | 3/20 | 5/22 |
+  | Code comments | - | - | 39/72 (54%) | 97/150 |
+
+  - Any level you set replaces the default exactly as it says: `fail_on = ["review"]` or `--fail-on review` fails on every review, as before; `--fail-on security=consider` sets one group and leaves the others at `mature`, which can also be set by name (`security = "mature"` in `[rules]`). Undecided answers never fail the check under `mature`.
+  - A `jevgate.toml` written by `jevgate init` before 0.26 sets `maintainability = "review"` and `tests = "review"`, which keeps every review of those groups failing the check; delete the two lines for the new default. `jevgate init` now writes each group as a commented example.
+  - The output says what fails. The agent text marks each finding that fails the gate `(fails the gate)`, and says when reviews did not fail it because their rules are still being measured and how to make them fail it. A GitHub warning, a SARIF result and a GitLab issue for such a finding say so, with how often its rule and level were right. The JSON report records how the gate counted each new finding as `gate` (`fails`, `measuring` or `advisory`), and `fail_on_mature` says what `mature` stands for among the selected rules; the HTML report and the MCP server's `jevgate_findings` show both.
+  - `jevgate rules` shows the levels that fail by default and how often each rule's reviews and considers were right on unseen projects, with the number labeled; `--format json` adds each level's labels on unseen and tuned projects as `maturity`.
+
 ## [0.25.0] - 2026-09-27
 
 Fixes from running JevGate on widely used projects under daily development (rtk, headroom, paperclip, hermes-agent, cc-switch, freellmapi, herdr, multica, OmniRoute, dify, openclaw, n8n), each checked against the code.

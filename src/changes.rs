@@ -158,6 +158,7 @@ mod tests {
             rank: 1.0,
             baselined: false,
             suppressed: None,
+            gate: None,
         }
     }
 

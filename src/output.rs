@@ -1,6 +1,6 @@
 use crate::{
     options::{CheckArgs, ColorChoice, Format},
-    schema::{FileResult, Finding, Report, Status, Strength},
+    schema::{FileResult, Finding, Gating, Report, Status, Strength},
 };
 use anyhow::Result;
 use std::{
@@ -101,8 +101,8 @@ pub fn emit(report: &Report, args: &CheckArgs) -> Result<()> {
             Style::for_stdout(args.color),
         ),
         Format::Github => crate::github::emit(&mut out, report, args),
-        Format::Sarif => crate::sarif::emit(&mut out, report, args),
-        Format::Gitlab => crate::gitlab::emit(&mut out, report, args),
+        Format::Sarif => crate::sarif::emit(&mut out, report),
+        Format::Gitlab => crate::gitlab::emit(&mut out, report),
     };
     match written {
         Err(error) if broken_pipe(&error) => Ok(()),
@@ -137,6 +137,9 @@ pub(super) fn agent(
 ) -> Result<()> {
     emit_header(out, report, style)?;
     emit_findings(out, report, verbose, style)?;
+    if let Some(line) = measuring(report) {
+        writeln!(out, "\n{line}")?;
+    }
     emit_summary(out, report)?;
     if let Some(load) = &report.context_load {
         emit_context_load(out, load)?;
@@ -209,10 +212,21 @@ pub(crate) fn ranked(report: &Report) -> Vec<(&Path, &Finding)> {
     findings
 }
 
-/// Every review, then the top-ranked considers (all with `verbose`). Notes
-/// are listed only with `verbose`; otherwise just counted.
+/// Every finding with its file's path: those that fail the gate first, then
+/// the rest, each highest rank first, so a capped list never leaves out a
+/// failure for a higher-ranked finding that only warns.
+pub(crate) fn failing_first(report: &Report) -> Vec<(&Path, &Finding)> {
+    let (failing, rest): (Vec<_>, Vec<_>) = ranked(report)
+        .into_iter()
+        .partition(|(_, f)| f.fails_gate());
+    failing.into_iter().chain(rest).collect()
+}
+
+/// Every review, then the top considers (all with `verbose`), those that
+/// fail the gate first. Notes are listed only with `verbose`; otherwise just
+/// counted.
 fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: Style) -> Result<()> {
-    let findings = ranked(report);
+    let findings = failing_first(report);
     let of = |strength: Strength| -> Vec<(&Path, &Finding)> {
         findings
             .iter()
@@ -230,24 +244,7 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: St
         emit_section(out, &heading, BOLD_RED, &review, style)?;
     }
     if !consider.is_empty() {
-        let shown = if verbose {
-            consider.len()
-        } else {
-            TOP_CONSIDER
-        };
-        let more = if consider.len() > shown {
-            format!(", top {shown}; --verbose shows all")
-        } else {
-            String::new()
-        };
-        let heading = format!("Consider ({}{more}):", consider.len());
-        emit_section(
-            out,
-            &heading,
-            BOLD_YELLOW,
-            &consider[..shown.min(consider.len())],
-            style,
-        )?;
+        emit_considers(out, &consider, verbose, style)?;
     }
     if notes.is_empty() {
         return Ok(());
@@ -264,6 +261,33 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: St
     emit_section(out, &heading, BOLD, &notes, style)
 }
 
+/// The top considers (all with `verbose`), under a heading that says how
+/// many there are and which are shown.
+fn emit_considers(
+    out: &mut impl Write,
+    consider: &[(&Path, &Finding)],
+    verbose: bool,
+    style: Style,
+) -> Result<()> {
+    let shown = if verbose {
+        consider.len()
+    } else {
+        TOP_CONSIDER.min(consider.len())
+    };
+    let more = if consider.len() > shown {
+        let order = if consider.iter().any(|(_, f)| f.fails_gate()) {
+            ", those that fail the gate first"
+        } else {
+            ""
+        };
+        format!(", top {shown}{order}; --verbose shows all")
+    } else {
+        String::new()
+    };
+    let heading = format!("Consider ({}{more}):", consider.len());
+    emit_section(out, &heading, BOLD_YELLOW, &consider[..shown], style)
+}
+
 /// A blank line, a heading, then its findings.
 fn emit_section(
     out: &mut impl Write,
@@ -277,6 +301,50 @@ fn emit_section(
         emit_finding(out, path, finding, style)?;
     }
     Ok(())
+}
+
+/// Why reviews did not fail the gate when their rules and levels are still
+/// being measured, with the considers beside them and how to make every
+/// review fail it; none when no review is left out that way.
+pub(crate) fn measuring(report: &Report) -> Option<String> {
+    let left_out = |strength: Strength| {
+        report
+            .files
+            .iter()
+            .flat_map(|f| &f.findings)
+            .filter(|f| f.strength == strength && f.gate == Some(Gating::Measuring))
+            .count()
+    };
+    let (reviews, considers) = (left_out(Strength::Review), left_out(Strength::Consider));
+    if reviews == 0 {
+        return None;
+    }
+    let considers = if considers > 0 {
+        format!(" and {}", count(considers, "consider"))
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "{}{considers} did not fail the gate: by default only rules and levels right at least {}% of the time on projects JevGate was never tuned on fail it, and theirs are still being measured. `jevgate rules` shows each one's precision; `--fail-on review` makes every review fail the gate.",
+        count(reviews, "review"),
+        crate::maturity::MIN_PERCENT_RIGHT
+    ))
+}
+
+/// Why a finding still being measured does not fail the gate, with its rule
+/// and level's precision on unseen projects; none for any other finding.
+pub(crate) fn measuring_note(finding: &Finding) -> Option<String> {
+    if finding.gate != Some(Gating::Measuring) {
+        return None;
+    }
+    let measured = crate::maturity::measure(&finding.rule, finding.strength)
+        .and_then(|m| m.unseen.summary())
+        .map_or_else(|| "none labeled yet".into(), |s| format!("{s} right"));
+    Some(format!(
+        "Does not fail the gate: {} {}s are still being measured ({measured} on projects JevGate was never tuned on).",
+        finding.rule,
+        label(&finding.strength)
+    ))
 }
 
 /// Counts of undecided, unsent and failed files, and skip reasons.
@@ -353,8 +421,8 @@ fn emit_context_load(out: &mut impl Write, load: &crate::docs::load::ContextLoad
     Ok(())
 }
 
-/// `path:line [rule] message`, then the next step; the location is bold and
-/// the rule dim.
+/// `path:line [rule] message`, then the next step; the location is bold,
+/// the rule dim, and a finding that fails the gate says so in red.
 fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Style) -> Result<()> {
     let location = format!("{}:{}", path.display(), finding.line);
     let accepted = match (&finding.suppressed, finding.baselined) {
@@ -363,9 +431,14 @@ fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Sty
         (None, false) => String::new(),
     };
     let rule = format!("[{}]{accepted}", finding.rule);
+    let fails = if finding.fails_gate() {
+        format!("{} ", style.paint(RED, "(fails the gate)"))
+    } else {
+        String::new()
+    };
     writeln!(
         out,
-        "  {} {} {}",
+        "  {} {} {fails}{}",
         style.paint(BOLD, &location),
         style.paint(DIM, &rule),
         finding.message

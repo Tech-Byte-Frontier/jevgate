@@ -39,6 +39,9 @@ pub enum FailOn {
     Review,
     /// New review or consider findings
     Consider,
+    /// New findings of the rule's mature levels, measured right at least 80%
+    /// of the time on projects JevGate was never tuned on (the default)
+    Mature,
     /// Files whose answers stayed undecided or that need context
     Uncertain,
     /// Nothing; findings are advisory and only an incomplete run exits 2
@@ -50,6 +53,7 @@ impl FailOn {
         match self {
             Self::Review => "review",
             Self::Consider => "consider",
+            Self::Mature => "mature",
             Self::Uncertain => "uncertain",
             Self::None => "none",
         }
@@ -78,7 +82,7 @@ fn fail_on_spec(value: &str) -> Result<FailOnSpec, String> {
         None => (None, value.trim()),
     };
     let level = FailOn::parse(level).ok_or_else(|| {
-        format!("Unknown level {level:?}; use review, consider, uncertain or none")
+        format!("Unknown level {level:?}; use review, consider, mature, uncertain or none")
     })?;
     Ok(FailOnSpec { target, level })
 }
@@ -147,14 +151,17 @@ pub struct CheckArgs {
     /// Deselect a rule ID, name, key or group (repeatable); applied after --rule and jevgate.toml
     #[arg(long = "skip-rule", value_name = "RULE", help_heading = RULES)]
     pub skip_rules: Vec<String>,
-    /// What fails the gate: LEVEL for every rule, or TARGET=LEVEL (repeatable) [default: review]
+    /// What fails the gate: LEVEL for every rule, or TARGET=LEVEL (repeatable) [default: mature]
     ///
-    /// LEVEL is review, consider (also fails on review), uncertain, or none
-    /// (advisory; `report` is accepted as a synonym). TARGET is a rule ID, key
-    /// or group, for example `security=consider`; the most specific target
-    /// wins. Flags replace `fail_on` and `[rules]` levels from jevgate.toml
-    /// for the rules they address. Notes and baselined findings never fail the
-    /// gate. An incomplete run exits 2 regardless of the gate.
+    /// LEVEL is review, consider (also fails on review), mature, uncertain, or
+    /// none (advisory; `report` is accepted as a synonym). `mature` fails only
+    /// on the levels of a rule measured right at least 80% of the time on
+    /// projects JevGate was never tuned on (`jevgate rules` shows them); other
+    /// findings are reported without failing. TARGET is a rule ID, key or
+    /// group, for example `security=consider`; the most specific target wins.
+    /// Flags replace `fail_on` and `[rules]` levels from jevgate.toml for the
+    /// rules they address. Notes and baselined findings never fail the gate.
+    /// An incomplete run exits 2 regardless of the gate.
     #[arg(long = "fail-on", value_name = "[TARGET=]LEVEL", value_parser = fail_on_spec, help_heading = RULES)]
     pub fail_on_specs: Vec<FailOnSpec>,
     /// The resolved levels for rules without their own: from --fail-on, else configuration.
@@ -355,6 +362,30 @@ impl CheckArgs {
                     .iter()
                     .map(|(key, levels)| (crate::catalog::id(key).to_string(), names(levels)))
                     .collect(),
+            })
+            .collect()
+    }
+
+    /// What `mature` stands for, for the report: the mature levels of each
+    /// selected rule that has some and whose levels include `mature` outside
+    /// scopes or in one, by rule ID.
+    pub fn mature_level_names(&self) -> BTreeMap<String, Vec<String>> {
+        let uses_mature = |key: &str| {
+            self.levels(key).contains(&FailOn::Mature)
+                || self.path_fail_on.iter().any(|scope| {
+                    scope
+                        .rules
+                        .get(key)
+                        .is_some_and(|l| l.contains(&FailOn::Mature))
+                })
+        };
+        self.rules
+            .iter()
+            .filter(|key| uses_mature(key))
+            .filter_map(|key| {
+                let levels = crate::maturity::mature_levels(key);
+                let names = levels.iter().map(crate::output::label).collect::<Vec<_>>();
+                (!names.is_empty()).then(|| (crate::catalog::id(key).to_string(), names))
             })
             .collect()
     }

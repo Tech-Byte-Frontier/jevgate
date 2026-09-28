@@ -6,7 +6,7 @@
 | `json` | The full report: every file, finding, raw answer and probability, gate and usage |
 | `jsonl` | One compact report per line; one per evaluation with `--watch` |
 | `github` | GitHub Actions annotations and job summary, then the agent text |
-| `sarif` | A SARIF 2.1.0 log for [GitHub code scanning](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github) and other SARIF readers: the findings the annotations show, `error` when they fail the gate |
+| `sarif` | A SARIF 2.1.0 log for [GitHub code scanning](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github) and other SARIF readers: the findings the annotations show, `error` when they fail the gate, with how the gate counted each as its `gate` property |
 | `gitlab` | A [GitLab Code Quality](https://docs.gitlab.com/ci/testing/code_quality/) report for merge requests: the same findings, `major` when they fail the gate and `minor` otherwise |
 
 Agent output is colored on a terminal; `--color never`, or `NO_COLOR` set to any value, turns it off, and `--color always` or `CLICOLOR_FORCE` turns it on for pipes and logs.
@@ -19,7 +19,9 @@ Findings are `review` (act on it), `consider` (worth a look) or `note` (optional
 | 1 | Gate failed |
 | 2 | Run incomplete, invalid configuration or invalid usage |
 
-`--fail-on review|consider|uncertain|none` sets what fails the gate; `--fail-on security=consider` sets it for one group or rule. Baselined findings, findings allowed by a comment, and notes never fail it.
+`--fail-on review|consider|mature|uncertain|none` sets what fails the gate; `--fail-on security=consider` sets it for one group or rule. The default, `mature`, fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on; `jevgate rules` lists them, and [configuration](configuration.md#what-fails-the-check-by-default) explains it. Baselined findings, findings allowed by a comment, and notes never fail the gate.
+
+The agent text marks each finding that fails the gate with `(fails the gate)`, and says when reviews did not fail it because their rules are still being measured. The JSON report records how the gate counted each new finding in its `gate` field: `fails`, `measuring` (reported without failing: the level is `mature` and its rule and level are still being measured) or `advisory` (the level in force does not count it, as `review` does not count a consider). `fail_on_mature` says what `mature` stands for among the selected rules.
 
 A single finding can also be accepted where it is, with a comment on its line or directly above it (doc comments and attributes may sit in between). The comment names a rule ID (`security/injection`), its name (`injection`), its key or a group, and needs a reason; without one it is ignored and the finding says so:
 

@@ -37,11 +37,10 @@ struct TestCli {
 pub(super) fn args() -> CheckArgs {
     let mut a = TestCli::parse_from(["test"]).args;
     a.rules = crate::catalog::keys().into_iter().map(Into::into).collect();
-    a.fail_on = vec![options::FailOn::Review];
+    a.fail_on = vec![options::FailOn::Mature];
     a
 }
 
-/// A function large enough to judge (five body lines).
 /// A shared-logic finding at `src/a,b.rs:12`, with text the output formats escape.
 pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Finding {
     crate::schema::Finding {
@@ -66,9 +65,31 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
         rank: 1.0,
         baselined: false,
         suppressed: None,
+        gate: None,
     }
 }
 
+/// A finding of `rule` (an ID) at `strength`, otherwise as [`finding`].
+pub(super) fn finding_of(rule: &str, strength: crate::schema::Strength) -> crate::schema::Finding {
+    crate::schema::Finding {
+        rule: rule.into(),
+        ..finding(strength)
+    }
+}
+
+/// A complete report of one judged file, `src/lib.rs`, holding `findings`,
+/// with the gate applied as `options` set it.
+pub(super) fn gated(findings: Vec<crate::schema::Finding>, options: &CheckArgs) -> schema::Report {
+    let project = Project::new();
+    project.write("src/lib.rs", &function("f"));
+    let (_, mut report) = snapshot(&project, options);
+    report.files[0].findings = findings;
+    report.complete = true;
+    gate::evaluate(&mut report, options);
+    report
+}
+
+/// A function large enough to judge (five body lines).
 pub(super) fn function(name: &str) -> String {
     format!(
         "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let doubled = total * 2;\n    doubled + 1\n}}\n"

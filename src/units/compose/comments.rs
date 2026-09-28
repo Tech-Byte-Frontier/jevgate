@@ -93,6 +93,7 @@ pub(super) fn comment_findings(
                 rank: rank(p, lines),
                 baselined: false,
                 suppressed: None,
+                gate: None,
             }
         })
         .collect()
