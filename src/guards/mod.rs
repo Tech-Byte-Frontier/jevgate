@@ -47,8 +47,8 @@ pub enum Kind {
     Configuration,
     Baseline,
     /// A file of code people wrote that the change makes JevGate skip: it
-    /// now reads as generated code or a copied library, or it grew past
-    /// `--max-file-bytes`.
+    /// now reads as generated code or a copied library, grew past
+    /// `--max-file-bytes`, is no longer UTF-8 or no longer parses.
     SkippedFile,
     /// Text addressed to a reviewer that Jev reads as written to steer it.
     Steering,
@@ -121,6 +121,11 @@ impl Guard {
             Skip::Size => (
                 "max_file_bytes",
                 format!("grows past max_file_bytes ({limit} bytes)"),
+            ),
+            Skip::Encoding => ("encoding", "is no longer UTF-8 text".to_string()),
+            Skip::Parse(reason) => (
+                "parse",
+                format!("no longer parses ({})", reason.trim_end_matches('.')),
             ),
         };
         let message = format!("{now}, so JevGate stops judging it");
@@ -270,6 +275,11 @@ impl<'c> Texts<'c> {
         {
             match files.read(path, settings(path)) {
                 Now::Text(text) => {
+                    // Its markers are still read: a check that skips the
+                    // file judges none of its code.
+                    if let Some(skip) = Files::unparsed(path, &text) {
+                        skipped.insert(path, skip);
+                    }
                     current.insert(path, text);
                 }
                 Now::Skipped(skip) => {
@@ -326,11 +336,12 @@ impl<'c> Texts<'c> {
                 files.guard(path, (previous, old), text, &mut scan, &mut tests);
             }
         }
-        // Skipped now, judged before: a marker or padding took the file out.
+        // Skipped now, judged before: a marker, padding, an encoding or a
+        // syntax the parser cannot read took the file out.
         for (path, skip) in &self.skipped {
             if self
                 .previous(changes, path)
-                .is_some_and(|old| files.written(path, old))
+                .is_some_and(|old| files.written(path, old) && skip.judged(path, old))
             {
                 scan.guards
                     .push(Guard::skipped_file(path, *skip, files.limit));
@@ -405,6 +416,21 @@ enum Skip {
     Copied(&'static str),
     /// It is larger than the read limit.
     Size,
+    /// Its bytes are not UTF-8, which the check reads.
+    Encoding,
+    /// Its language's parser cannot read it, with the check's skip reason.
+    Parse(&'static str),
+}
+
+impl Skip {
+    /// Whether the check judged `before`, the file's previous text, which
+    /// was read: a file that did not parse then was not judged either.
+    fn judged(self, path: &Path, before: &str) -> bool {
+        match self {
+            Self::Parse(_) => crate::syntax::parse(path, before).is_ok(),
+            _ => true,
+        }
+    }
 }
 
 /// Which changed files the scan reads, and how.
@@ -460,13 +486,26 @@ impl<'a> Files<'a> {
             return Now::Skipped(Skip::Size);
         }
         let Ok(text) = crate::inventory::read_source(&on_disk, self.limit) else {
-            return Now::Unread;
+            let bytes = std::fs::read(&on_disk).unwrap_or_default();
+            let not_utf8 = !bytes.contains(&0) && std::str::from_utf8(&bytes).is_err();
+            return if not_utf8 {
+                Now::Skipped(Skip::Encoding)
+            } else {
+                Now::Unread
+            };
         };
         let role = self.classifier.role(path);
         match crate::inventory::not_written_here(&on_disk, role, &text) {
             Some(kind) => Now::Skipped(Skip::Copied(kind)),
             None => Now::Text(text),
         }
+    }
+
+    /// Why the check skips `text`, the text of `path` it reads, when its
+    /// language's parser cannot read it.
+    fn unparsed(path: &Path, text: &str) -> Option<Skip> {
+        let error = crate::syntax::parse(path, text).err()?;
+        Some(Skip::Parse(crate::syntax::skip_reason(&error)))
     }
 
     /// Whether `text`, a version of `path`, is code people wrote.
