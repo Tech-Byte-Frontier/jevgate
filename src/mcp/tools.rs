@@ -148,7 +148,7 @@ fn finding_schema() -> Value {
             "line": {"type": "integer"},
             "end_line": {"type": "integer"},
             "rule": {"type": "string"},
-            "strength": {"type": "string", "enum": ["review", "consider", "note"], "description": "review: act on it; consider: fix it or say why the code should stay; note: optional"},
+            "strength": {"type": "string", "enum": ["review", "consider", "note"], "description": "review: act on it when it is right; consider: fix it or say why the code should stay; note: optional. `gate` says whether it fails the gate"},
             "message": {"type": "string"},
             "action": {"type": "string", "description": "The next step"},
             "probability": {"type": "number", "description": "The concern probability that set the level"},
@@ -165,7 +165,7 @@ fn finding_schema() -> Value {
 fn verify_schema() -> Value {
     json!({
         "type": "object",
-        "description": "A unit whose answers stayed undecided: never a finding, never failing the gate",
+        "description": "A unit whose answers stayed undecided: never a finding, and failing the gate only where jevgate.toml puts `uncertain` among its rule's levels",
         "properties": {
             "id": {"type": "string", "description": "The unit's fingerprint (rule, path and unit identity), made as a finding's is; stable across unrelated edits"},
             "path": {"type": "string"},

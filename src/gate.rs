@@ -3,7 +3,7 @@
 //! `maturity`. Classification never depends on this policy.
 use crate::{
     options::{CheckArgs, FailOn},
-    schema::{Finding, Gating, Report, Status, Strength},
+    schema::{FileResult, Finding, Gating, Report, Status, Strength},
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -97,21 +97,7 @@ fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> 
     if consider > 0 {
         reasons.push(crate::output::count(consider, "new consider finding"));
     }
-    let uncertain =
-        |rule: &str, path: &Path| args.levels_at(rule, path).contains(&FailOn::Uncertain);
-    let undecided = report
-        .files
-        .iter()
-        .filter(|f| {
-            // A file that needs context has no dimensions; any rule that
-            // fails on uncertain results for it counts it.
-            let any_uncertain = args.rules.iter().any(|rule| uncertain(rule, &f.path));
-            f.dimensions.iter().any(|(rule, d)| {
-                uncertain(rule, &f.path)
-                    && matches!(d.status, Status::Uncertain | Status::NeedsContext)
-            }) || (any_uncertain && f.status == Status::NeedsContext)
-        })
-        .count();
+    let undecided = undecided_files(report, args).count();
     if undecided > 0 {
         reasons.push(format!(
             "{} with uncertain or needs-context results",
@@ -119,6 +105,31 @@ fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> 
         ));
     }
     reasons
+}
+
+/// Whether undecided results of `rule` (a key) in `path` fail the gate: its
+/// level there includes `uncertain`.
+pub(crate) fn fails_undecided(args: &CheckArgs, rule: &str, path: &Path) -> bool {
+    args.levels_at(rule, path).contains(&FailOn::Uncertain)
+}
+
+/// The files whose undecided results fail the gate: a rule whose level
+/// includes `uncertain` left a unit undecided there, or the file needs
+/// context while any rule's level does, since it has no dimensions.
+pub(crate) fn undecided_files<'r>(
+    report: &'r Report,
+    args: &'r CheckArgs,
+) -> impl Iterator<Item = &'r FileResult> + 'r {
+    report.files.iter().filter(move |f| {
+        let any_uncertain = args
+            .rules
+            .iter()
+            .any(|rule| fails_undecided(args, rule, &f.path));
+        f.dimensions.iter().any(|(rule, d)| {
+            fails_undecided(args, rule, &f.path)
+                && matches!(d.status, Status::Uncertain | Status::NeedsContext)
+        }) || (any_uncertain && f.status == Status::NeedsContext)
+    })
 }
 
 /// Apply the baseline, allow comments and the gate policy to a settled

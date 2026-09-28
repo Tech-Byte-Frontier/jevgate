@@ -358,7 +358,7 @@ impl Structured<'_> {
             String::new()
         };
         let mut text = format!(
-            "Verify ({} undecided{shown}; read the code and decide, they never fail the gate):",
+            "Verify ({} undecided{shown}; read the code and decide, they fail the gate only under an `uncertain` level):",
             self.total_verify
         );
         for item in &self.verify {
@@ -569,7 +569,7 @@ mod tests {
         );
         let text = result.verify_text().unwrap();
         assert!(
-            text.starts_with("Verify (2 undecided; read the code and decide, they never fail the gate):\n  src/a.rs:20 [maintainability/function-simplification] high (concern 42%)\n    Would splitting the function in `functions[0].source` help? Yes 42% · No 38% · Slightly 20%\n"),
+            text.starts_with("Verify (2 undecided; read the code and decide, they fail the gate only under an `uncertain` level):\n  src/a.rs:20 [maintainability/function-simplification] high (concern 42%)\n    Would splitting the function in `functions[0].source` help? Yes 42% · No 38% · Slightly 20%\n"),
             "{text}"
         );
         let one = Selection::new(&json!({"max_verify": 1}), None, false).unwrap();

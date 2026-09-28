@@ -311,6 +311,59 @@ fn a_review_the_gate_still_measures_is_context_and_never_blocks() {
 }
 
 #[test]
+fn undecided_units_block_a_stop_where_the_gate_fails_on_them() {
+    let project = repository();
+    project.write(
+        "jevgate.toml",
+        "rules = [\"function-simplification\"]\nfail_on = [\"mature\", \"uncertain\"]\n",
+    );
+    project.git(&["commit", "-qam", "fail on undecided results"]);
+    // Answers split between the scale's ends leave a function undecided.
+    let split = host(|| {
+        Box::new(Mock {
+            level: 3,
+            ..Default::default()
+        })
+    });
+    send(&project, &split, prompt("refactor"));
+    project.write("lib.rs", &long_function("f"));
+    let edited = send(&project, &split, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited).contains("1 undecided unit fails the quality gate, which fails on undecided results here:\n- lib.rs:1 undecided maintainability/function-simplification (fails the gate): `f`:"),
+        "{edited}"
+    );
+    let blocked = send(&project, &split, stop(false));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+    let reason = blocked["reason"].as_str().unwrap();
+    assert!(
+        reason.starts_with("JevGate blocked the end of this turn (1 of at most 3): 1 undecided unit in code changed this turn fails the quality gate.\n- lib.rs:1 undecided maintainability/function-simplification (fails the gate): `f`:"),
+        "{reason}"
+    );
+    assert!(
+        reason.ends_with(
+            "or say why it is right as it is. JevGate does not block again when nothing changed."
+        ),
+        "{reason}"
+    );
+    assert_eq!(
+        message(&blocked),
+        "JevGate: 1 undecided unit in this turn's changes fails the quality gate; the agent is asked to fix it (block 1 of 3)."
+    );
+    let unchanged = send(&project, &split, stop(true));
+    assert!(unchanged.get("decision").is_none(), "{unchanged}");
+    assert!(
+        message(&unchanged).starts_with("JevGate lets the agent finish: nothing changed after its last block, and 1 undecided unit still fails the quality gate."),
+        "{unchanged}"
+    );
+    // The default gate never fails on undecided results.
+    project.write("jevgate.toml", "rules = [\"function-simplification\"]\n");
+    project.git(&["commit", "-qam", "the default gate"]);
+    send(&project, &split, prompt("again"));
+    project.write("lib.rs", &long_function("g"));
+    assert_eq!(send(&project, &split, stop(false)), json!({}));
+}
+
+#[test]
 fn a_stop_blocks_until_the_findings_are_fixed() {
     let project = repository();
     let host = reviewing();

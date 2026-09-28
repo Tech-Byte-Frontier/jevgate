@@ -118,11 +118,42 @@ impl Unreviewed {
     }
 }
 
-/// What one hook check found: the findings the agent may act on, what the
-/// change does to the checks around the code, and the files it did not judge.
+/// A unit the check left undecided where undecided results fail the gate:
+/// the person put `uncertain` among a rule's levels, so it fails the check
+/// as a finding does, and the hook blocks on it too.
+#[derive(Clone, Debug)]
+pub(super) struct Undecided {
+    pub path: PathBuf,
+    pub line: usize,
+    /// The rule's ID.
+    pub rule: String,
+    /// The unit and its open questions, or why the file was not decided.
+    pub what: String,
+}
+
+impl Undecided {
+    /// The same unit, undecided on the same questions, has the same id.
+    pub fn id(&self) -> String {
+        crate::schema::hash(
+            format!(
+                "undecided {} {} {} {}",
+                self.path.display(),
+                self.line,
+                self.rule,
+                self.what
+            )
+            .as_bytes(),
+        )
+    }
+}
+
+/// What one hook check found: the findings the agent may act on, the units
+/// left undecided that fail the gate, what the change does to the checks
+/// around the code, and the files it did not judge.
 #[derive(Debug, Default)]
 pub(super) struct Checked {
     pub flagged: Vec<Flagged>,
+    pub undecided: Vec<Undecided>,
     pub guards: Vec<Guard>,
     pub unreviewed: Vec<Unreviewed>,
 }
@@ -247,6 +278,7 @@ fn run(
     };
     Ok(Checked {
         flagged: flag(&report, &accepted_now),
+        undecided: undecided(&report, &args),
         guards: std::mem::take(&mut report.guards),
         unreviewed: unreviewed(&report),
     })
@@ -355,6 +387,44 @@ fn unreviewed(report: &Report) -> Vec<Unreviewed> {
                 .or_else(|| f.classification.as_ref().map(|c| c.reason.clone()))
                 .filter(|why| !why.is_empty())
                 .unwrap_or_else(|| "it was not judged".into()),
+        })
+        .collect()
+}
+
+/// The units whose undecided results fail the gate, as `gate` counts their
+/// files: each unit a rule whose level includes `uncertain` left undecided,
+/// with its open questions, or the file when none is named, as for a file
+/// that needs more context.
+fn undecided(report: &Report, args: &CheckArgs) -> Vec<Undecided> {
+    crate::gate::undecided_files(report, args)
+        .flat_map(|file| {
+            let units: Vec<Undecided> = file
+                .dimensions
+                .iter()
+                .filter(|(rule, _)| crate::gate::fails_undecided(args, rule, &file.path))
+                .flat_map(|(rule, dimension)| {
+                    dimension.undecided.iter().map(|unit| Undecided {
+                        path: file.path.clone(),
+                        line: unit.line,
+                        rule: crate::catalog::id(rule).to_string(),
+                        what: format!("`{}`: {}", unit.unit, unit.questions.join("; ")),
+                    })
+                })
+                .collect();
+            if units.is_empty() {
+                let why = file
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "JevGate needs more context to judge this file".to_string());
+                vec![Undecided {
+                    path: file.path.clone(),
+                    line: 1,
+                    rule: "file".into(),
+                    what: why,
+                }]
+            } else {
+                units
+            }
         })
         .collect()
 }

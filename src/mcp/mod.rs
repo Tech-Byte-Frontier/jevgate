@@ -24,7 +24,7 @@ const INSTRUCTIONS: &str = "JevGate reviews code by asking TypeSafe Jev small qu
 Call jevgate_check with `base` (such as origin/main) to review what changed; it uses the repository's jevgate.toml and the API key `jevgate auth status` shows, and paid requests only for code the answer cache lacks. \
 Fix each finding marked to fail the gate (`gate: fails`): they decide the exit code, and by default only rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail it. \
 Weigh the other `review` and `consider` findings: fix one when it is right, or say why the code should stay. \
-Each `verify` item is a question Jev left undecided about a unit, with the evidence it named and the probability of each answer: read the code there and change it only if you agree it should change; verify items never fail the gate. \
+Each `verify` item is a question Jev left undecided about a unit, with the evidence it named and the probability of each answer: read the code there and change it only if you agree it should change. Verify items fail the gate only where jevgate.toml puts `uncertain` among a rule's levels (the gate then gives the reason), never by default. \
 Each `guards` entry is something the change does to the checks around the code, such as a suppression, a skipped test or an edit to jevgate.toml: tell the person, who decides; guards never fail the gate. \
 Exit code 2 means the run could not finish: report it, never treat it as a pass. \
 jevgate_findings reads the last report without running anything.";
