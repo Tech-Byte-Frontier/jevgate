@@ -293,7 +293,13 @@ fn cost_is_priced_by_the_answering_model_and_unknown_without_usage() {
     assert_eq!((report.paid_input_tokens, report.estimated_usd), (0, None));
     assert!(output::headline(&report).ends_with("· 0 input tokens · cost unknown"));
     let replay = run(&project, &options, &mut Mock::default());
-    assert_eq!((replay.api_requests, replay.estimated_usd), (0, Some(0.0)));
+    assert_eq!(replay.api_requests, 0);
+    assert!(
+        replay
+            .estimated_usd
+            .is_some_and(|usd| usd.is_sign_positive() && usd == 0.0)
+    );
+    assert!(output::headline(&replay).ends_with("· 0 input tokens · ~$0.0000"));
     assert!(replay.files.iter().all(|file| file.cached));
 }
 

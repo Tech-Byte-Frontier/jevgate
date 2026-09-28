@@ -231,15 +231,15 @@ impl Usage {
     }
 
     /// Dollars, priced by the model that answered each request; unknown when
-    /// an answer reported no usage or a model has no published price.
+    /// an answer reported no usage or a model has no published price. The
+    /// fold starts at 0.0: a float `sum` of nothing is -0.0, shown as "$-0.0000".
     pub fn usd(&self) -> Option<f64> {
         if self.unmetered > 0 {
             return None;
         }
-        self.models
-            .iter()
-            .map(|(model, tokens)| crate::model::usd(model, *tokens))
-            .sum()
+        self.models.iter().try_fold(0.0, |total, (model, tokens)| {
+            Some(total + crate::model::usd(model, *tokens)?)
+        })
     }
 }
 
