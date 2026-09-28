@@ -91,8 +91,8 @@ use options::JevCommand;
 /// tests (with --include-tests), the opt-in security and documentation
 /// groups, and custom: a team's own conventions, written as questions. By
 /// default only rules and levels measured right at least 80% of the time on
-/// projects JevGate was never tuned on fail the check, and custom questions
-/// at their own level.
+/// projects JevGate was never tuned on fail the check, never in a preview
+/// language, and custom questions at their own level.
 #[derive(Parser)]
 #[command(version, after_long_help = options::OVERVIEW)]
 pub struct Cli {

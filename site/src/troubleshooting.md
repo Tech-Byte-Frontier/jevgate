@@ -134,7 +134,7 @@ A custom question with a high threshold leaves more units undecided, since a uni
 
 ## A review did not fail the check
 
-By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the check; `jevgate rules` shows which, and how often each rule's reviews and considers were right ([accuracy](accuracy.md) says how that is measured). The other findings are reported, and the output says their rules are still being measured. To fail on them, set a level: `--fail-on review` or `fail_on = ["review"]` for every rule, or `--fail-on maintainability/shared-logic=review` for one.
+By default only the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on fail the check; `jevgate rules` shows which, and how often each rule's reviews and considers were right ([accuracy](accuracy.md) says how that is measured). The other findings are reported, and the output says their rules are still being measured. A finding in a [preview language](languages.md#support-levels), such as Kotlin or Swift, never fails the default gate, whatever its rule and level, and the output says the language is in preview. To fail on them, set a level: `--fail-on review` or `fail_on = ["review"]` for every rule, or `--fail-on maintainability/shared-logic=review` for one.
 
 ## A finding is wrong
 
