@@ -82,13 +82,22 @@ pub(super) fn marks_directory(temporary: &Path) -> Option<PathBuf> {
     match std::fs::symlink_metadata(&directory) {
         Ok(metadata) => metadata.is_dir().then_some(directory),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let mut builder = std::fs::DirBuilder::new();
-            #[cfg(unix)]
-            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-            builder.create(&directory).ok().map(|()| directory)
+            owner_only_directory(&directory).ok().map(|()| directory)
         }
         Err(_) => None,
     }
+}
+
+/// Create `directory` so only its owner can open it where the system has
+/// permission bits; elsewhere a plain directory, as `auth::file` does.
+fn owner_only_directory(directory: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(directory)
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir(directory)
 }
 
 /// One event in its repository.
