@@ -320,6 +320,38 @@ fn one_request_answers_every_rule_about_its_functions() {
 }
 
 #[test]
+fn a_change_asks_every_rule_about_only_the_functions_it_touched_in_one_pack() {
+    // `f0` to `f2` form one run, whose end is `f2`; the change edits `f1`.
+    let source = |edited: &str| -> String {
+        ["f0", "f1", "f2"]
+            .iter()
+            .map(|name| match *name == edited {
+                true => queried(name).replace("total.max(40)", "total.max(41)"),
+                false => queried(name),
+            })
+            .collect()
+    };
+    let (project, mut options) = project_with(&[("lib.rs", &source(""))], &FUNCTION_RULES);
+    project.commit_all();
+    project.write("lib.rs", &source("f1"));
+    options.base = Some("HEAD".into());
+    let (_, plan) = planned(&project, &options);
+    assert_eq!(stages(&plan), ["functions"]);
+    let pack = &plan.requests[0];
+    assert_eq!(pack.request["state"]["functions"][0]["name"], "f1");
+    assert_eq!(
+        pack.request["state"]["functions"].as_array().unwrap().len(),
+        1
+    );
+    let mut rules: Vec<&str> = pack.asked.questions.iter().map(|q| q.rule).collect();
+    rules.dedup();
+    assert_eq!(rules, FUNCTION_RULES);
+    let units = &file_plan(&plan, "lib.rs").units;
+    assert_eq!(units.len(), FUNCTION_RULES.len());
+    assert!(units.iter().all(|u| u.name == "f1"));
+}
+
+#[test]
 fn a_function_added_to_one_run_is_the_only_pack_every_rule_asks_again() {
     // Runs end after `f2`, `f4` and `f8`, whose names hash to an end.
     let source = |added: bool| -> String {
