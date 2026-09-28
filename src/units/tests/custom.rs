@@ -423,6 +423,39 @@ level = "consider"
     assert_eq!((finding.line, finding.symbol.as_ref()), (1, None));
 }
 
+#[test]
+fn a_question_reads_only_the_text_files_git_tracks() {
+    let toml = r#"
+[[question]]
+id = "config-urls"
+question = "Does this configuration file hold a hardcoded production URL?"
+unit = "file"
+paths = ["*.json"]
+"#;
+    let project = Project::new();
+    project.write("lib.rs", &function("charge"));
+    project.write("settings.json", "{\"url\": \"https://example.com\"}\n");
+    git(&project, &["init", "-q"]);
+    git(&project, &["add", "."]);
+    git(&project, &["commit", "-qm", "base"]);
+    // What `google-github-actions/auth` writes into a CI workspace.
+    project.write("gha-creds-1a2b.json", "{\"private_key\": \"secret\"}\n");
+    project.write("staged.json", "{\"url\": \"https://example.org\"}\n");
+    git(&project, &["add", "staged.json"]);
+    let mut options = configured(toml, &["custom"]);
+    let read = |options: &CheckArgs| -> Vec<String> {
+        let (inputs, _) = planned(&project, options);
+        inputs
+            .iter()
+            .filter(|i| i.result.role == crate::inventory::TEXT)
+            .map(|i| i.result.path.display().to_string())
+            .collect()
+    };
+    assert_eq!(read(&options), ["settings.json", "staged.json"]);
+    options.base = Some(crate::revision::resolve(&project.0, "HEAD").unwrap());
+    assert_eq!(read(&options), ["staged.json"], "among the changed files");
+}
+
 /// Run Git in `project` with a fixed identity.
 pub(super) fn git(project: &Project, args: &[&str]) {
     let output = std::process::Command::new("git")

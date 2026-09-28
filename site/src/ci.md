@@ -45,6 +45,8 @@ The action installs a checked release binary, keeps `.jevgate/cache` in the Acti
   jevgate check --config "$RUNNER_TEMP/jevgate.toml" --questions "$RUNNER_TEMP/questions" --base "$BASE_SHA" --format github
   ```
 
+  A question's `paths` can name any text file, so a question reads only the text files Git tracks: an untracked file in the workspace can be a credential another step wrote, such as `google-github-actions/auth`'s `gha-creds-*.json`.
+
 - **Custom questions' examples:** `jevgate rules test` asks each [custom question](custom-questions.md#examples-and-jevgate-rules-test) about its failing and passing examples and exits 1 when one gets an example wrong, so a new model or a reworded question that stops separating them fails the job. Run it after the action, which puts `jevgate` on the path and restores the cache; its answers are saved with the check's, so it costs nothing until a question, an example or the model changes:
 
   ```yaml

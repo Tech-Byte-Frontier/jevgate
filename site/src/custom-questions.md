@@ -42,7 +42,7 @@ Every mistake is an error that names the question and its file. In `jevgate.toml
 | `file` | The whole file | |
 | `hunk` | Each changed hunk since `--base`, with three lines of context (a new or untracked file is added throughout; a long hunk is asked in parts of 80 lines) | `--base` |
 
-`file` and `hunk` work in any language. Without `paths` they read the source and test files JevGate reads, a Kotlin or Swift file it cannot parse included. With `paths` they also read any other text file the globs name, such as `infra/**/*.tf` or `scripts/*.sh`. Generated files, binary or non-UTF-8 files, hidden paths, files larger than `max_file_bytes` and paths outside `upload_allow` and `upload_deny` are never read. A file skipped for syntax errors stays skipped.
+`file` and `hunk` work in any language. Without `paths` they read the source and test files JevGate reads, a Kotlin or Swift file it cannot parse included. With `paths` they also read any other text file the globs name that Git tracks, such as `infra/**/*.tf` or `scripts/*.sh`: `git add` a new one first. An untracked file in a CI workspace can be a credential another step wrote there, such as `google-github-actions/auth`'s `gha-creds-*.json`, which `paths = ["*.json"]` would otherwise send. Generated files, binary or non-UTF-8 files, hidden paths, files larger than `max_file_bytes` and paths outside `upload_allow` and `upload_deny` are never read. A file skipped for syntax errors stays skipped.
 
 A `hunk` question without `--base`, and a `test` question without `--include-tests`, are not asked, and the check says so on stderr.
 

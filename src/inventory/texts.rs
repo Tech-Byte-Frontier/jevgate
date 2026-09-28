@@ -6,8 +6,8 @@ use super::*;
 /// already, or that its role set aside unread (a script, a fixture, a
 /// migration, type declarations): with `--base`, among the changed files;
 /// otherwise, over the repository. Generated files, hidden and dependency
-/// paths, credential names and files outside the upload patterns are never
-/// read.
+/// paths, credential names, files outside the upload patterns and files
+/// Git does not track are never read.
 pub(super) fn add_texts(
     args: &CheckArgs,
     context: &ConfigContext,
@@ -64,21 +64,32 @@ fn set_aside(input: &Input) -> bool {
 }
 
 /// The files that may be named: the changed ones with `--base`, else every
-/// file the walk finds, in path order.
+/// file the walk finds, in path order; in a Git repository, only those it
+/// tracks. Such a file is uploaded only because a question's glob matched
+/// it, and an untracked one in a CI workspace can be a credential another
+/// step wrote there, such as `google-github-actions/auth`'s
+/// `gha-creds-*.json`, which a `*.json` glob would send.
 fn candidates(
     context: &ConfigContext,
     changes: Option<&crate::revision::Changes>,
 ) -> Result<Vec<PathBuf>> {
-    if let Some(changes) = changes {
-        return Ok(changes.paths.keys().cloned().collect());
-    }
+    let untracked: BTreeSet<PathBuf> = crate::revision::untracked(&context.root)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let mut found = Vec::new();
-    for entry in walker(&context.root) {
-        let entry = entry.context("Failed while discovering Jev scope")?;
-        if entry.file_type().is_some_and(|t| t.is_file()) {
-            found.push(discovery::relative(entry.path(), &context.root)?);
+    match changes {
+        Some(changes) => found.extend(changes.paths.keys().cloned()),
+        None => {
+            for entry in walker(&context.root) {
+                let entry = entry.context("Failed while discovering Jev scope")?;
+                if entry.file_type().is_some_and(|t| t.is_file()) {
+                    found.push(discovery::relative(entry.path(), &context.root)?);
+                }
+            }
+            found.sort();
         }
     }
-    found.sort();
+    found.retain(|path| !untracked.contains(path));
     Ok(found)
 }

@@ -693,6 +693,16 @@ fn batched(out: &mut impl BufRead, limit: u64) -> Result<Batched> {
     })
 }
 
+/// The files under `root` that Git neither tracks nor ignores, relative to it.
+pub fn untracked(root: &Path) -> Result<Vec<PathBuf>> {
+    let names = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    names
+        .split(|b| *b == 0)
+        .filter(|name| !name.is_empty())
+        .map(|name| Ok(PathBuf::from(std::str::from_utf8(name)?)))
+        .collect()
+}
+
 impl Changes {
     /// The changes a check with a base reviews: since the fork point of
     /// `--base` and HEAD, or, from the agent hook, between two snapshots.
@@ -707,11 +717,8 @@ impl Changes {
     fn load(root: &Path, base: &str) -> Result<Self> {
         let revision = resolve(root, base)?;
         let (mut paths, deleted) = tracked_changes(root, &[&revision])?;
-        let untracked = git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-        for name in untracked.split(|b| *b == 0).filter(|s| !s.is_empty()) {
-            paths
-                .entry(PathBuf::from(std::str::from_utf8(name)?))
-                .or_insert(None);
+        for path in untracked(root)? {
+            paths.entry(path).or_insert(None);
         }
         Ok(Self {
             revision,
