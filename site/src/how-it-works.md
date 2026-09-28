@@ -85,33 +85,49 @@ signatures, or one candidate pair.
    members of 55 clean outlines, the first answer moved as little as with
    one small member missing above 90%, twice as much from 70% to 90%, and
    more below. A file with no intact unit is skipped, as is one whose top
-   level the parser could not read. A file under a
+   level the parser could not read, and one whose syntax nests more than
+   1,000 levels (the corpus's deepest nests 405), before any walk that
+   could overflow. What is left out is reported as code the parser could
+   not read, not as broken code: nearly every such error is a grammar gap. A file under a
    directory named with a `{{ … }}` placeholder, as in a cookiecutter
    template, is parsed without its Jinja tags (statements and comments
    blanked, placeholders read as names of the same length): 31 of
    cookiecutter-django's files had been skipped. Generator templates
-   (under `templates/`, or holding ERB tags or `//#if` conditions) keep the
-   strict rule, since their placeholders are not the language's syntax.
+   (under `templates/`, holding `//#if` conditions, or holding an ERB tag in
+   their code rather than in a string or comment, which a C format such as
+   `"<%d>"` is not) keep the strict rule, since their placeholders are not
+   the language's syntax.
    C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir and Lua are read by a
    generic tier (`src/analysis/generic`), in preview until measured on
    projects never used for tuning. One tag query per language, in the
    captures GitHub's code navigation uses, finds functions, methods, types
-   and calls, and a table names the nodes that hold statements, nest
-   control flow and hold literals. The grammars' own `tags.scm` tag what
+   and calls (C++ members defined outside their class or returning a
+   reference or pointer, and operators; Swift computed properties and
+   subscripts; Kotlin `init` blocks, constructors and accessors), and a
+   table names the nodes that hold statements, nest control flow and hold
+   literals. A `.h` header is read as C++ when its code is only C++
+   (`std::`, a namespace, a template, a class), and as C otherwise. The grammars' own `tags.scm` tag what
    names a definition (a C prototype's declarator, a Swift method's whole
    class), so the queries are JevGate's, with the definition itself as the
    captured node. These files get function simplification, file
    organization, shared logic and comments; values and security need a
    language's own sites and sources and are not asked. Their tests are
-   found by path (a `…Test` class, a Kotlin source set such as
-   `androidTest`, a Swift test target such as `VaporTests`, busted's
-   `spec/`, `*.bats`) and not judged yet, with no file-purpose request. No
+   found by path (a `…Test` class, a C file named `test…` or `…-test`, a
+   Kotlin source set such as `androidTest`, a Swift test target such as
+   `VaporTests`, busted's `spec/`, `*.bats`) and not judged yet, with no
+   file-purpose request; copied dependencies (`Pods`, `third_party`,
+   `deps`), Flutter's platform runners and Dart's generated files are
+   skipped. No
    imports are resolved, so an outline has no `used_by` and a function's
    callees are found by name within its language. Their units stay out of
    the other languages' evidence (test subjects, security traces, error
    handlers), their copies pair only within one family (C and C++), and
    they take only the places of the run's 64 copies the other languages
-   leave: ranked together, C benchmarks took a place from a Bend copy.
+   leave: ranked together, C benchmarks took a place from a Bend copy. A
+   Bash script runs on its own, so its copies pair with another script's
+   only when one reads the other in (`source`) or both read in the same
+   script of the project: 31 of the 45 Bash copies labeled on projects
+   never used for tuning paired standalone scripts, none of them right.
 2. **Local analysis** (`src/analysis/`). Units with signatures, calls, references
    and control-flow nesting; callbacks registered through calls, including
    module-level route handlers named by their registration

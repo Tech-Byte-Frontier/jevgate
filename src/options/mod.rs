@@ -139,8 +139,9 @@ pub struct CheckArgs {
     pub worktree_snapshot: Option<String>,
     /// Also judge tests: test value, redundancy, and shared logic among tests
     ///
-    /// Without it, test files are judged only for file organization. Also set
-    /// by `include_tests = true` in jevgate.toml.
+    /// Without it, test files are judged only for file organization. Test
+    /// files of the preview languages are not judged either way. Also set by
+    /// `include_tests = true` in jevgate.toml.
     #[arg(long, help_heading = SCOPE)]
     pub include_tests: bool,
     /// Related file sent as evidence for shared logic, callers and test subjects (repeatable)

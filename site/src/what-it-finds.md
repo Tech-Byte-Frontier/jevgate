@@ -6,12 +6,12 @@ Beside these rules, a team can write its own conventions as [custom questions](c
 
 | Rule | Example finding |
 |---|---|
-| File organization | This file holds several features that would be easier to find apart; the upload helpers would be most useful as their own module. Test files are judged too, at most as a consider. |
+| File organization | This file holds several features that would be easier to find apart; the upload helpers would be most useful as their own module. Test files are judged too, at most as a consider, except those of the [preview languages](languages.md#support-levels). |
 | Function simplification | `sync_accounts` mixes separate jobs in long blocks; lines 40–71 would be most useful as their own function. |
 | Shared logic | `createInvoice` and `createReceipt` perform the same steps; one shared implementation would serve both. |
 | Hardcoded values (opt-in: `--rule default --rule hardcoded-values`) | Module constants fix a value that differs between deployments; `apply_discount` special-cases one specific customer. On projects JevGate was never tuned on, 6 of its 37 labeled findings were right, against 47 of 85 on the projects it was tuned on, so it no longer runs by default. |
 
-**Tests** (with `--include-tests`; file organization judges test files without it, and the laws of Bend 2 code are judged where they are)
+**Tests** (with `--include-tests`; file organization judges test files without it, and the laws of Bend 2 code are judged where they are; test files of the preview languages are not judged yet)
 
 | Rule | Example finding |
 |---|---|

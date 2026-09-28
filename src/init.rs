@@ -103,7 +103,8 @@ fn render(allow: &[String]) -> String {
 upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 
 # Also judge tests (test value and redundancy), as --include-tests does.
-# File organization judges test files either way.
+# File organization judges test files either way, but not yet those of the
+# preview languages (C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir, Lua).
 # include_tests = true
 
 # The model, pinned so results stay repeatable; --model overrides it. The
