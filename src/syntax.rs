@@ -174,7 +174,8 @@ fn parsed_text(path: &Path, source: &str) -> Option<(tree_sitter::Language, Opti
 /// syntax errors leave out the units that hold them (`error_regions`); the
 /// file fails only when the parser could not read its top level, when it is
 /// a generator template holding any error, when it is Bend 1 code, or when
-/// its parse takes longer than `PARSE_TIME`.
+/// its parse takes longer than `PARSE_TIME` or nests deeper than
+/// `MAX_DEPTH`.
 pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
     let extension = extension(path);
     let server_template = crate::components::server_template(path);
@@ -192,35 +193,7 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         bail!(BEND1);
     }
     let key = (kind, crate::schema::hash(source.as_bytes()));
-    if let Some(reason) = PARSES.with(|cache| cache.borrow().refused.get(&key).copied()) {
-        bail!(reason);
-    }
-    let tree = match PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
-        Some(tree) => tree,
-        None => {
-            let mut parser = Parser::new();
-            parser.set_language(&language)?;
-            let tree = parse_in_time(&mut parser, scripts.as_deref().unwrap_or(source))
-                .ok_or(SLOW_PARSE)
-                .and_then(|tree| {
-                    if deeper_than(&tree, MAX_DEPTH) {
-                        Err(TOO_DEEP)
-                    } else {
-                        Ok(tree)
-                    }
-                });
-            match tree {
-                Ok(tree) => {
-                    PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
-                    tree
-                }
-                Err(reason) => {
-                    PARSES.with(|cache| cache.borrow_mut().refused.insert(key, reason));
-                    bail!(reason);
-                }
-            }
-        }
-    };
+    let tree = cached_tree(key, &language, scripts.as_deref().unwrap_or(source), source)?;
     // Whether errors are tolerable depends on the path, not only the source.
     let root = tree.root_node();
     ensure!(
@@ -228,6 +201,45 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<Option<Tree>> {
         "Syntax errors: semantic evaluation was not attempted"
     );
     Ok(Some(tree))
+}
+
+/// The tree of `text`, the code `source` holds, from the cache under `key`,
+/// or parsed with `language`. A parse that runs past `PARSE_TIME` or nests
+/// deeper than `MAX_DEPTH` is refused, and the refusal is cached too, so
+/// the same source is refused again without parsing it.
+fn cached_tree(
+    key: (String, String),
+    language: &tree_sitter::Language,
+    text: &str,
+    source: &str,
+) -> Result<Tree> {
+    if let Some(reason) = PARSES.with(|cache| cache.borrow().refused.get(&key).copied()) {
+        bail!(reason);
+    }
+    if let Some(tree) = PARSES.with(|cache| cache.borrow_mut().get(&key, source)) {
+        return Ok(tree);
+    }
+    let mut parser = Parser::new();
+    parser.set_language(language)?;
+    let tree = parse_in_time(&mut parser, text)
+        .ok_or(SLOW_PARSE)
+        .and_then(|tree| {
+            if deeper_than(&tree, MAX_DEPTH) {
+                Err(TOO_DEEP)
+            } else {
+                Ok(tree)
+            }
+        });
+    match tree {
+        Ok(tree) => {
+            PARSES.with(|cache| cache.borrow_mut().insert(key, source, &tree));
+            Ok(tree)
+        }
+        Err(reason) => {
+            PARSES.with(|cache| cache.borrow_mut().refused.insert(key, reason));
+            bail!(reason);
+        }
+    }
 }
 
 /// Whether a tree nests more than `limit` levels, found without recursion.
