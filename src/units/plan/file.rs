@@ -39,7 +39,7 @@ pub(super) fn plan_file(
     let context = file_context(input, owner, args, budget);
     let mut file = FilePlan {
         path: input.result.path.clone(),
-        left_out: left_out::entries(&scope.units[&owner], context.source),
+        left_out: left_out::entries(&scope.units[&owner], context.source, context.language),
         ..Default::default()
     };
     let lines = scope.test_lines(owner);

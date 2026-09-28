@@ -13,8 +13,12 @@ use crate::{analysis::units::FileUnits, schema::LeftOut, units::FilePlan};
 pub(super) const OUTLINE_COVERAGE: f64 = 0.9;
 
 /// The report's entry for each unit and each run of code outside every
-/// unit that syntax errors left out.
-pub(super) fn entries(parsed: &FileUnits, source: &str) -> Vec<LeftOut> {
+/// unit that syntax errors left out. It names the parser, not the code:
+/// nearly every error the corpus and the projects measured for 0.30 hold is
+/// valid code a grammar lacks (Swift's `x as? T ?? y`, Kotlin 2's backing
+/// fields, Bend 2's erased binders), and a coding agent told "syntax
+/// error" edits code that is correct.
+pub(super) fn entries(parsed: &FileUnits, source: &str, language: &str) -> Vec<LeftOut> {
     parsed
         .left_out_code(source)
         .into_iter()
@@ -22,7 +26,10 @@ pub(super) fn entries(parsed: &FileUnits, source: &str) -> Vec<LeftOut> {
             unit: l.name,
             start_line: l.line,
             end_line: l.end_line,
-            reason: format!("Syntax error at line {}.", l.error_line),
+            reason: format!(
+                "The {language} parser could not read line {}.",
+                l.error_line
+            ),
         })
         .collect()
 }

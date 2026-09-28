@@ -28,7 +28,10 @@ const PARSE_TIME: Duration = Duration::from_secs(10);
 const MAX_DEPTH: usize = 1_000;
 
 /// Why a file of a supported language was not judged, as its skip reason.
-pub(crate) const SYNTAX_ERRORS: &str = "Syntax errors; this file was not judged.";
+/// Most syntax errors are grammar gaps in valid code (`error_regions`), so
+/// the reason names what the parser could not do, not what the code is.
+pub(crate) const SYNTAX_ERRORS: &str =
+    "The parser could not read enough of this file; it was not judged.";
 pub(crate) const BEND1: &str = "Bend 1 syntax: JevGate reads Bend 2 (bendlang/bend 2.0.x), a different language that shares the .bend extension; this file was not judged.";
 pub(crate) const SLOW_PARSE: &str =
     "The parser did not finish within 10 seconds; this file was not judged.";

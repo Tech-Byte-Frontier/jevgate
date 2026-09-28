@@ -42,7 +42,7 @@ fn a_syntax_error_leaves_out_its_function_and_the_rest_of_the_file_is_judged() {
             unit: "broken".into(),
             start_line: 9,
             end_line: 16,
-            reason: "Syntax error at line 14.".into(),
+            reason: "The Rust parser could not read line 14.".into(),
         }]
     );
 }
@@ -152,7 +152,7 @@ fn a_test_holding_a_syntax_error_is_left_out_and_named() {
             unit: "parses".into(),
             start_line: 6,
             end_line: 8,
-            reason: "Syntax error at line 7.".into(),
+            reason: "The TypeScript parser could not read line 7.".into(),
         }]
     );
     assert_eq!(
@@ -174,7 +174,7 @@ fn a_generic_function_holding_an_error_is_left_out_with_its_comments() {
             unit: "broken".into(),
             start_line: 6,
             end_line: 10,
-            reason: "Syntax error at line 8.".into(),
+            reason: "The Kotlin parser could not read line 8.".into(),
         }]
     );
     let request = first_request(&plan, "comments");

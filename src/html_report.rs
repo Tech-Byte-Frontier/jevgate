@@ -138,7 +138,7 @@ mod tests {
             unit: "</script>".into(),
             start_line: 1,
             end_line: 2,
-            reason: "Syntax error at line 2.".into(),
+            reason: "The Rust parser could not read line 2.".into(),
         }];
         let html = render(&report).unwrap();
         assert!(!html.contains("<script>alert"));

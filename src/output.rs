@@ -542,7 +542,7 @@ fn emit_capped(out: &mut impl Write, report: &Report) -> Result<()> {
     Ok(())
 }
 
-/// The units syntax errors left out of judged files, one line each
+/// The units the parser could not read in judged files, one line each
 /// (`path:line unit: reason`), the first `TOP_LEFT_OUT` unless `verbose`.
 fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result<()> {
     let entries: Vec<(&Path, &LeftOut)> = report
@@ -556,7 +556,7 @@ fn emit_left_out(out: &mut impl Write, report: &Report, verbose: bool) -> Result
     let files = report.files.iter().filter(|f| !f.left_out.is_empty());
     writeln!(
         out,
-        "\nLeft out over syntax errors, the rest of each file judged: {} in {}.",
+        "\nLeft out where the parser could not read the code, the rest of each file judged: {} in {}.",
         count(entries.len(), "unit"),
         count(files.count(), "file")
     )?;

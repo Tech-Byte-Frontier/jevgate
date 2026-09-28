@@ -64,7 +64,7 @@ fn a_partly_broken_file_is_judged_for_its_intact_units_and_names_the_rest() {
             unit: "broken".into(),
             start_line: 9,
             end_line: 16,
-            reason: "Syntax error at line 14.".into(),
+            reason: "The Rust parser could not read line 14.".into(),
         }]
     );
     assert!(
@@ -79,7 +79,7 @@ fn a_partly_broken_file_is_judged_for_its_intact_units_and_names_the_rest() {
     };
     assert!(
         text(&report, false).contains(
-            "\nLeft out over syntax errors, the rest of each file judged: 1 unit in 1 file.\n  lib.rs:9 broken: Syntax error at line 14.\n"
+            "\nLeft out where the parser could not read the code, the rest of each file judged: 1 unit in 1 file.\n  lib.rs:9 broken: The Rust parser could not read line 14.\n"
         ),
         "{}",
         text(&report, false)
