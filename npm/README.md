@@ -1,6 +1,6 @@
 # JevGate
 
-[JevGate](https://tech-byte-frontier.github.io/jevgate/) is a code-review gate for CI and coding agents. It asks TypeSafe Jev short, typed questions about your code (a function, a file outline, a pair of copies, a test) and composes the answers into findings with a location, a probability and a next step.
+[JevGate](https://tech-byte-frontier.github.io/jevgate/) is a code-review gate for CI and coding agents. It asks TypeSafe Jev short, typed questions about your code (a function, a file outline, a pair of copies, a test) and composes the answers into findings with a location, how often findings like it were right, and a next step.
 
 This package runs JevGate's release binary on machines without Homebrew or cargo:
 
