@@ -551,23 +551,36 @@ mod tests {
         );
     }
 
+    /// Every Markdown file under `dir`, at any depth; other files, such as
+    /// the `.DS_Store` a file browser leaves, are not pages.
+    fn markdown(dir: &Path) -> Vec<PathBuf> {
+        let entries = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path());
+        entries
+            .flat_map(|path| {
+                if path.is_dir() {
+                    markdown(&path)
+                } else {
+                    vec![path]
+                }
+            })
+            .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
+            .collect()
+    }
+
     #[test]
     fn every_rule_page_names_a_rule() {
-        for group in std::fs::read_dir(site().join("rules")).unwrap() {
-            let group = group.unwrap().path();
-            for page in std::fs::read_dir(&group).unwrap() {
-                let page = page.unwrap().path();
-                let id = format!(
-                    "{}/{}",
-                    group.file_name().unwrap().to_string_lossy(),
-                    page.file_stem().unwrap().to_string_lossy()
-                );
-                assert!(
-                    rules().iter().any(|rule| rule.id == id),
-                    "{} names no rule",
-                    page.display()
-                );
-            }
+        let root = site().join("rules");
+        for page in markdown(&root) {
+            let relative = page.strip_prefix(&root).unwrap().with_extension("");
+            let parts: Vec<_> = relative.iter().map(|part| part.to_string_lossy()).collect();
+            let id = parts.join("/");
+            assert!(
+                rules().iter().any(|rule| rule.id == id),
+                "{} names no rule",
+                page.display()
+            );
         }
     }
 }
