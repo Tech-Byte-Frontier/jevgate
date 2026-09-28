@@ -119,7 +119,7 @@ fn project_doc(path: &Path) -> bool {
                     | "versioned_docs"
             )
             || release_dir(d)
-    });
+    }) || translation_dir(&dirs);
     let documentation = dirs.is_empty()
         || stem.starts_with("readme")
         || stem.starts_with("contributing")
@@ -130,6 +130,27 @@ fn project_doc(path: &Path) -> bool {
         && !hidden
         && !excluded
         && !RECORD_STEMS.contains(&stem.as_str())
+}
+
+/// Whether a document sits in one language's copy of the docs, such as
+/// `docs/i18n/am/` or Docusaurus's `i18n/zh-hans/`: a translation, whose
+/// stale links and repetition are the original's. OmniRoute keeps its docs
+/// in 30 languages, and 543 of its 547 staleness considers repeated an
+/// original's finding in a translation.
+fn translation_dir(dirs: &[String]) -> bool {
+    dirs.windows(2).any(|w| {
+        matches!(w[0].as_str(), "i18n" | "l10n" | "locales" | "translations") && locale_code(&w[1])
+    })
+}
+
+/// A language code, optionally with a script or region, such as `ja`,
+/// `zh-hans` or `pt_br`.
+fn locale_code(dir: &str) -> bool {
+    let (language, region) = dir.split_once(['-', '_']).unwrap_or((dir, ""));
+    (2..=3).contains(&language.len())
+        && language.chars().all(|c| c.is_ascii_lowercase())
+        && (region.is_empty()
+            || (2..=4).contains(&region.len()) && region.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
 /// A directory holding the docs of one release, such as `docs/versions/0.7.5`
@@ -353,6 +374,13 @@ mod tests {
             ("website/versioned_docs/version-2/intro.md", false),
             ("docs/v2/guide.md", true),
             ("docs/next/README.md", true),
+            ("docs/i18n/am/CONTRIBUTING.md", false),
+            ("docs/i18n/uk-UA/docs/guide.md", false),
+            (
+                "website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/intro.md",
+                false,
+            ),
+            ("docs/i18n/README.md", true),
         ] {
             assert_eq!(project_doc(Path::new(path)), expected, "{path}");
         }
