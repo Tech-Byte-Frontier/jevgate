@@ -157,10 +157,25 @@ impl Snapshot<'_> {
         .map(drop)
     }
 
-    /// Record each of `large` as its stand-in: the stand-ins are written
-    /// beside the scratch index and hashed by one Git process, since a
-    /// repository may hold many large untracked files.
+    /// Record each of `large` as its stand-in.
     fn stand_ins(&self, large: &[Large]) -> Result<()> {
+        let ids = self.hash_stand_ins(large)?;
+        // The index takes paths from the Git top level, which the root may sit below.
+        let prefix = String::from_utf8(self.git(&["rev-parse", "--show-prefix"], None)?)?;
+        let prefix = prefix.trim_end_matches('\n');
+        let entries: Vec<u8> = large
+            .iter()
+            .zip(&ids)
+            .flat_map(|(file, id)| format!("100644 {id}\t{prefix}{}\0", file.path).into_bytes())
+            .collect();
+        self.git(&["update-index", "-z", "--index-info"], Some(entries))
+            .map(drop)
+    }
+
+    /// The object IDs of the stand-ins of `large`, written to the object
+    /// store: from files beside the scratch index, by one Git process, since
+    /// a repository may hold many large untracked files.
+    fn hash_stand_ins(&self, large: &[Large]) -> Result<Vec<String>> {
         let texts: Vec<PathBuf> = (0..large.len())
             .map(|n| self.scratch.with_extension(format!("stand-in-{n}")))
             .collect();
@@ -186,17 +201,15 @@ impl Snapshot<'_> {
         for text in &texts {
             let _ = fs::remove_file(text);
         }
-        let ids = String::from_utf8(ids?)?;
-        // The index takes paths from the Git top level, which the root may sit below.
-        let prefix = String::from_utf8(self.git(&["rev-parse", "--show-prefix"], None)?)?;
-        let prefix = prefix.trim_end_matches('\n');
-        let mut entries = Vec::new();
-        for (file, id) in large.iter().zip(ids.lines()) {
-            ensure!(is_object_id(id), "Git did not print an object ID");
-            entries.extend(format!("100644 {id}\t{prefix}{}\0", file.path).bytes());
-        }
-        self.git(&["update-index", "-z", "--index-info"], Some(entries))
-            .map(drop)
+        let ids: Vec<String> = String::from_utf8(ids?)?
+            .lines()
+            .map(str::to_string)
+            .collect();
+        ensure!(
+            ids.len() == large.len() && ids.iter().all(|id| is_object_id(id)),
+            "Git did not print an object ID for each stand-in"
+        );
+        Ok(ids)
     }
 
     fn git(&self, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec<u8>> {
