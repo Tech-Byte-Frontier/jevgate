@@ -63,7 +63,7 @@
           "description": "The level of its findings, and the level at which it fails the gate unless `fail_on` or `--fail-on` says otherwise. Default: review."
         },
         "next_step": {
-          "description": "The next step a finding shows. Default: fix it, or accept it with a `jevgate: allow` comment and a reason.",
+          "description": "The next step a finding shows. Default: fix it; a person can accept it with a `jevgate: allow` comment and a reason.",
           "maxLength": 300,
           "type": "string"
         },

@@ -50,14 +50,16 @@ pub fn apply(root: &Path, report: &mut Report, ignored: &BTreeSet<(PathBuf, usiz
 }
 
 /// Whether `line` holds an allow comment that accepts findings, as `apply`
-/// reads it: one naming a rule and giving a reason.
+/// reads it: one naming a rule, a custom question (`custom/<id>`) or the
+/// `custom` group, and giving a reason.
 pub fn accepts(line: &str) -> bool {
     parse(line).is_some_and(|allow| {
         !allow.reason.is_empty()
-            && allow
-                .rules
-                .iter()
-                .any(|name| catalog::select(name).is_some())
+            && allow.rules.iter().any(|name| {
+                catalog::select(name).is_some()
+                    || name == catalog::CUSTOM_GROUP
+                    || catalog::custom(name)
+            })
     })
 }
 
@@ -174,6 +176,14 @@ mod tests {
             "# jevgate: allow(injection) the query is a constant"
         ));
         assert!(!accepts("// jevgate: allow(injection)"), "no reason");
+        for custom in ["custom/no-loops", "custom"] {
+            assert!(
+                accepts(&format!(
+                    "// jevgate: allow({custom}) the loops are needed here"
+                )),
+                "{custom}"
+            );
+        }
         assert!(!accepts(
             "/// a line that holds a `jevgate: allow(…)` comment"
         ));

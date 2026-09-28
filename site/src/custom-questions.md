@@ -27,7 +27,7 @@ One question per file works too: `.jevgate/questions/no-body-logs.toml` holds th
 | `paths` | every file the unit applies to | Globs of the files it applies to |
 | `threshold` | `0.8` | The probability of yes at or above which a unit breaks the rule, 0.5 to 0.99 |
 | `level` | `review` | The level of its findings: `review`, `consider` or `note` |
-| `next_step` | fix it, or allow it with a reason | The action its findings show |
+| `next_step` | fix it; a person can accept it with an allow comment and a reason | The action its findings show |
 
 Every mistake is an error that names the question and its file. In `jevgate.toml`, `jevgate.schema.json` (see [Configuration](configuration.md)) also completes and checks the keys as you type. `jevgate rules` lists the questions after the built-in rules.
 

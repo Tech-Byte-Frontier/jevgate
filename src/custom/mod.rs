@@ -61,7 +61,7 @@ pub struct Spec {
     /// The level of its findings, and the level at which it fails the gate unless `fail_on` or `--fail-on` says otherwise. Default: review.
     #[serde(default)]
     pub level: Option<Level>,
-    /// The next step a finding shows. Default: fix it, or accept it with a `jevgate: allow` comment and a reason.
+    /// The next step a finding shows. Default: fix it; a person can accept it with a `jevgate: allow` comment and a reason.
     #[serde(default)]
     pub next_step: Option<String>,
     /// Examples of code that breaks the rule: `jevgate rules test` fails when the answer about one stays below the threshold.
@@ -456,7 +456,9 @@ fn validate(spec: &Spec, id: &str, source: PathBuf) -> Result<Question> {
     };
     Ok(Question {
         next_step: checked.next_step.unwrap_or_else(|| {
-            format!("Fix it, or accept it with `jevgate: allow({rule}) reason` on its line")
+            format!(
+                "Fix it; a person can accept it with `jevgate: allow({rule}) reason` on its line"
+            )
         }),
         provenance: format!("custom question in {}", source.display()),
         rule,

@@ -254,6 +254,33 @@ fn a_question_the_turn_deletes_lowers_or_breaks_does_not_let_the_agent_stop() {
 }
 
 #[test]
+fn an_allow_comment_naming_a_custom_question_does_not_let_the_agent_stop() {
+    for named in ["custom/body-logs", "custom"] {
+        let project = questioned(false);
+        let host = reviewing();
+        send(&project, &host, prompt("log the orders"));
+        let allowed = format!(
+            "// jevgate: allow({named}) the body is redacted upstream\n{}",
+            long_function("charge")
+        );
+        project.write("lib.rs", &allowed);
+        let blocked = send(&project, &host, stop(false));
+        assert_eq!(blocked["decision"], "block", "{named}: {blocked}");
+        assert!(
+            reason(&blocked).contains(
+                "- lib.rs:2 review custom/body-logs (fails the gate; accepted this turn): "
+            ),
+            "{named}: {blocked}"
+        );
+        assert!(
+            message(&blocked)
+                .contains("this turn adds 1 `jevgate: allow` comment (lib.rs:1 accepts a finding"),
+            "the person is told: {named}: {blocked}"
+        );
+    }
+}
+
+#[test]
 fn a_question_that_stops_loading_is_not_carried_past_the_turn_that_restores_it() {
     let project = questioned(false);
     let host = reviewing();
