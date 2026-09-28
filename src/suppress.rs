@@ -94,8 +94,19 @@ pub(crate) fn annotation(line: &str) -> bool {
         .any(|start| line.starts_with(start))
 }
 
-/// Whether `name` (an ID, name, key or group) selects the rule with ID `rule`.
+/// Whether `name` (an ID, name, key or group) selects the rule with ID
+/// `rule`. A custom question is named by its ID, its group, `default` or
+/// `all`, never by the id alone.
 fn names(name: &str, rule: &str) -> bool {
+    if catalog::custom(rule) {
+        return name == rule
+            || [
+                catalog::CUSTOM_GROUP,
+                catalog::DEFAULT_GROUP,
+                catalog::ALL_GROUP,
+            ]
+            .contains(&name);
+    }
     let key = catalog::find(rule).map(|r| r.key);
     catalog::select(name).is_some_and(|keys| key.is_some_and(|key| keys.contains(&key)))
 }

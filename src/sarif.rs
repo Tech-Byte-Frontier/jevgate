@@ -16,18 +16,27 @@ const HOME: &str = "https://github.com/Tech-Byte-Frontier/jevgate";
 /// with how the gate counted it as the `gate` property and how often its
 /// rule and level were right as `precision`. Run errors and files that could
 /// not be judged are tool notifications.
-pub fn emit(out: &mut impl Write, report: &Report) -> Result<()> {
+pub fn emit(
+    out: &mut impl Write,
+    report: &Report,
+    questions: &'static [crate::custom::Question],
+) -> Result<()> {
     let shown: Vec<(&Path, &Finding)> = output::ranked(report)
         .into_iter()
         .filter(|(_, f)| f.strength != Strength::Note && !f.accepted())
         .collect();
-    serde_json::to_writer_pretty(&mut *out, &document(report, &shown))?;
+    serde_json::to_writer_pretty(&mut *out, &document(report, &shown, questions))?;
     writeln!(out)?;
     Ok(())
 }
 
-fn document(report: &Report, shown: &[(&Path, &Finding)]) -> Value {
-    let rules = catalog::rules();
+/// The log; `questions` describe the custom rules beside the built-in ones.
+fn document(
+    report: &Report,
+    shown: &[(&Path, &Finding)],
+    questions: &'static [crate::custom::Question],
+) -> Value {
+    let rules = catalog::with_custom(questions);
     let results: Vec<Value> = shown
         .iter()
         .map(|(path, finding)| {
@@ -194,7 +203,7 @@ mod tests {
         let review = counted(Strength::Review, Gating::Fails);
         let measuring = counted(Strength::Review, Gating::Measuring);
         let path = Path::new("src/a,b.rs");
-        let log = document(&report(&args), &[(path, &review), (path, &measuring)]);
+        let log = document(&report(&args), &[(path, &review), (path, &measuring)], &[]);
         assert_eq!(log["version"], "2.1.0");
         let run = &log["runs"][0];
         let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
@@ -232,7 +241,7 @@ mod tests {
 
     /// The reporting descriptor of rule `id` in a log without results.
     fn descriptor(id: &str) -> Value {
-        let log = document(&report(&crate::tests::args()), &[]);
+        let log = document(&report(&crate::tests::args()), &[], &[]);
         assert_eq!(log["runs"][0]["results"], json!([]));
         let rules = log["runs"][0]["tool"]["driver"]["rules"]
             .as_array()

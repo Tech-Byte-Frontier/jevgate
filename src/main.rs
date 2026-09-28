@@ -31,6 +31,7 @@ mod config;
 mod config_schema;
 mod context;
 mod context_units;
+mod custom;
 mod discovery;
 mod docs;
 mod evaluate;

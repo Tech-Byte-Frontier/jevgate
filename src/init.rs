@@ -130,6 +130,17 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # [[scope]]
 # paths = ["scripts/**", "tools/**"]
 # fail_on = ["report"]
+
+# Custom questions: a team convention as a yes/no question whose yes is a
+# finding, the rule custom/<id>. It fails the gate at its level. One question
+# per file also works, in .jevgate/questions/<id>.toml.
+# [[question]]
+# id = "no-body-logs"
+# question = "Does this function write a request body, or a field of one, to a log?"
+# guidance = "Logging the method, path, request id or status is fine."
+# unit = "function"  # function, file, test, section, comment, or hunk (with --base)
+# paths = ["src/api/**"]
+# level = "review"  # review, consider or note
 "#,
         model = crate::options::DEFAULT_MODEL,
         version = env!("CARGO_PKG_VERSION"),
@@ -218,6 +229,16 @@ mod tests {
             .collect();
         let config: Config = toml::from_str(&uncommented.join("\n")).unwrap();
         assert_eq!(levels(config).len(), catalog::groups().len());
+        let example: String = text
+            .lines()
+            .skip_while(|line| *line != "# [[question]]")
+            .map(|line| format!("{}\n", line.trim_start_matches("# ")))
+            .collect();
+        let questions = crate::custom::parse(&example).unwrap();
+        assert_eq!(
+            questions[0].rule, "custom/no-body-logs",
+            "the example is valid"
+        );
         assert!(run(&dir, false).is_err(), "an existing file is kept");
         assert!(run(&dir, true).is_ok());
     }

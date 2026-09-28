@@ -44,6 +44,7 @@ impl Project {
             invocation_dir: self.0.to_path_buf(),
             root: self.0.to_path_buf(),
             config: Default::default(),
+            questions: &[],
         }
     }
     /// Run Git in the project, with a fixed identity and no signing, apart

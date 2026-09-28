@@ -43,6 +43,8 @@ pub struct Config {
     pub include_tests: bool,
     /// Gate levels for the files some paths match, such as report-only tooling.
     pub scope: Vec<Scope>,
+    /// Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/<id>.toml` holds one per file.
+    pub question: Vec<crate::custom::Spec>,
 }
 
 /// `[[scope]]`: gate levels for the files `paths` match. `fail_on` applies to
@@ -117,11 +119,18 @@ pub struct ConfigContext {
     pub invocation_dir: PathBuf,
     pub root: PathBuf,
     pub config: Config,
+    /// Custom questions, loaded once per process and kept for its life:
+    /// rule keys are `&'static str` through planning and composition, as
+    /// the built-in ones are compiled in.
+    pub questions: &'static [crate::custom::Question],
 }
 
 impl ConfigContext {
     /// The repository around the working directory and its configuration:
     /// `file` when given (it must exist), else the root's jevgate.toml if any.
+    /// Question files are read only with the repository's own configuration,
+    /// so a change under review cannot edit a question to pass a policy that
+    /// `--config` applies.
     pub fn discover(file: Option<&Path>) -> Result<Self> {
         Self::discover_in(&std::env::current_dir()?.canonicalize()?, file)
     }
@@ -135,7 +144,7 @@ impl ConfigContext {
             Some(file) => (invocation_dir.join(file), true),
             None => (root.join(crate::init::CONFIG_FILE), false),
         };
-        let config = if required || file.exists() {
+        let config: Config = if required || file.exists() {
             let text = std::fs::read_to_string(&file)
                 .with_context(|| format!("Cannot read {}", file.display()))?;
             let config =
@@ -147,11 +156,26 @@ impl ConfigContext {
         } else {
             Config::default()
         };
+        let directory = (!required).then(|| crate::custom::directory(&root));
+        let questions =
+            crate::custom::load(&root, (&file, &config.question), directory.as_deref())?;
+        let filed = questions
+            .iter()
+            .find(|q| q.source.starts_with(crate::custom::DIRECTORY));
+        if let Some(warning) = filed.and_then(|q| crate::custom::ignored(&root, &q.source)) {
+            note!("{warning}");
+        }
         Ok(Self {
             invocation_dir,
             root,
             config,
+            questions: Box::leak(questions.into_boxed_slice()),
         })
+    }
+
+    /// The built-in rules and the custom questions.
+    pub fn rules(&self) -> Vec<catalog::Rule> {
+        catalog::with_custom(self.questions)
     }
 
     pub fn input_path(&self, path: &Path) -> PathBuf {
@@ -167,6 +191,7 @@ impl ConfigContext {
             args.context.push(self.root.join(path));
         }
         args.include_tests |= self.config.include_tests;
+        args.questions = self.questions;
         args.model = args.model.take().or_else(|| self.config.model.clone());
         args.cache_ttl_secs = args.cache_ttl_secs.or(self.config.cache_ttl_secs);
         args.project = crate::docs::project_opening(
@@ -181,17 +206,19 @@ impl ConfigContext {
     /// Rules from `--rule`, else the configuration, else the `default` group,
     /// less `off` entries and `--skip-rule`. Every name must exist.
     fn configure_rules(&self, args: &mut CheckArgs) -> Result<()> {
+        let rules = self.rules();
+        let default = [catalog::DEFAULT_GROUP.to_string()];
         let mut enabled = BTreeSet::new();
         if !args.rules.is_empty() {
-            enabled.extend(expand(&args.rules)?);
+            enabled.extend(expand(&rules, &args.rules)?);
         } else {
             match &self.config.rules {
-                Rules::List(names) if !names.is_empty() => enabled.extend(expand(names)?),
-                Rules::List(_) => enabled.extend(expand(&[catalog::DEFAULT_GROUP.into()])?),
+                Rules::List(names) if !names.is_empty() => enabled.extend(expand(&rules, names)?),
+                Rules::List(_) => enabled.extend(expand(&rules, &default)?),
                 Rules::Levels(levels) => {
-                    enabled.extend(expand(&[catalog::DEFAULT_GROUP.into()])?);
-                    for rule in catalog::rules() {
-                        match most_specific(levels, &rule) {
+                    enabled.extend(expand(&rules, &default)?);
+                    for rule in &rules {
+                        match most_specific(levels, rule) {
                             Some(level) if level.off() => enabled.remove(rule.key),
                             Some(_) => enabled.insert(rule.key),
                             None => false,
@@ -200,23 +227,24 @@ impl ConfigContext {
                 }
             }
         }
-        for skipped in expand(&args.skip_rules)? {
+        for skipped in expand(&rules, &args.skip_rules)? {
             enabled.remove(skipped);
         }
-        args.rules = catalog::keys()
-            .into_iter()
-            .filter(|key| enabled.contains(key))
-            .map(Into::into)
+        args.rules = rules
+            .iter()
+            .filter(|rule| enabled.contains(rule.key))
+            .map(|rule| rule.key.into())
             .collect();
         Ok(())
     }
 
     /// Each enabled rule's gate levels. The command line wins over the file;
     /// within each, a rule's own entry wins over its group's, then over the
-    /// levels for every rule, then `mature`.
+    /// levels for every rule, then `mature`, or a custom question's own level.
     fn configure_gate(&self, args: &mut CheckArgs) -> Result<()> {
-        let cli = Levels::from_cli(&args.fail_on_specs)?;
-        let file = self.file_levels()?;
+        let rules = self.rules();
+        let cli = Levels::from_cli(&rules, &args.fail_on_specs)?;
+        let file = self.file_levels(&rules)?;
         let fallback = [&cli.global, &file.global]
             .into_iter()
             .find(|levels| !levels.is_empty())
@@ -224,34 +252,54 @@ impl ConfigContext {
             .unwrap_or_else(|| vec![FailOn::Mature]);
         args.fail_on = fallback.clone();
         args.rule_fail_on.clear();
-        for rule in catalog::rules() {
+        for rule in &rules {
             if !args.rules.iter().any(|r| r == rule.key) {
                 continue;
             }
             let levels = cli
-                .target(&rule)
+                .target(rule)
                 .or_else(|| (!cli.global.is_empty()).then(|| cli.global.clone()))
-                .or_else(|| file.target(&rule))
-                .unwrap_or_else(|| fallback.clone());
+                .or_else(|| file.target(rule))
+                .unwrap_or_else(|| self.unaddressed(rule, &file.global, &fallback));
             if levels != fallback {
                 args.rule_fail_on.insert(rule.key.into(), levels);
             }
         }
-        self.configure_scopes(args, &cli)
+        self.configure_scopes(args, (&rules, &cli))
+    }
+
+    /// The levels of a rule no flag or `[rules]` entry addresses: `fail_on`
+    /// of the file, else a custom question's own level, since whoever wrote
+    /// and committed it chose where it fails, else `fallback`.
+    fn unaddressed(
+        &self,
+        rule: &catalog::Rule,
+        file: &[FailOn],
+        fallback: &[FailOn],
+    ) -> Vec<FailOn> {
+        let question = self.questions.iter().find(|q| q.rule == rule.key);
+        match question {
+            Some(question) if file.is_empty() => question.default_levels(),
+            _ => fallback.to_vec(),
+        }
     }
 
     /// The levels each `[[scope]]` sets for the enabled rules. A flag that
     /// addresses a rule wins over every scope, as over the rest of the file.
-    fn configure_scopes(&self, args: &mut CheckArgs, cli: &Levels) -> Result<()> {
+    fn configure_scopes(
+        &self,
+        args: &mut CheckArgs,
+        (all, cli): (&[catalog::Rule], &Levels),
+    ) -> Result<()> {
         args.path_fail_on.clear();
         for scope in &self.config.scope {
-            let levels = scope_levels(scope)?;
-            let rules = catalog::rules()
-                .into_iter()
+            let levels = scope_levels(scope, all)?;
+            let rules = all
+                .iter()
                 .filter(|rule| args.rules.iter().any(|r| r == rule.key))
                 .filter(|rule| cli.global.is_empty() && cli.target(rule).is_none())
                 .filter_map(|rule| {
-                    let own = levels.target(&rule);
+                    let own = levels.target(rule);
                     let every = (!levels.global.is_empty()).then(|| levels.global.clone());
                     own.or(every).map(|l| (rule.key.to_string(), l))
                 })
@@ -267,7 +315,7 @@ impl ConfigContext {
     }
 
     /// `fail_on` and the levels of the `[rules]` table.
-    fn file_levels(&self) -> Result<Levels> {
+    fn file_levels(&self, rules: &[catalog::Rule]) -> Result<Levels> {
         let mut levels = Levels::default();
         for name in &self.config.fail_on {
             levels
@@ -276,7 +324,7 @@ impl ConfigContext {
         }
         if let Rules::Levels(entries) = &self.config.rules {
             for (target, level) in entries {
-                expand(std::slice::from_ref(target))?;
+                expand(rules, std::slice::from_ref(target))?;
                 if !level.off() {
                     levels.targets.insert(target.clone(), level.levels(target)?);
                 }
@@ -328,7 +376,7 @@ fn cap_concurrency(args: &mut CheckArgs) {
 
 /// The levels one `[[scope]]` sets. `off` is not a gate level there: a rule
 /// is judged for every file or none, and `upload_deny` keeps files out.
-fn scope_levels(scope: &Scope) -> Result<Levels> {
+fn scope_levels(scope: &Scope, rules: &[catalog::Rule]) -> Result<Levels> {
     ensure!(!scope.paths.is_empty(), "Each [[scope]] needs paths");
     let mut levels = Levels::default();
     for name in &scope.fail_on {
@@ -337,7 +385,7 @@ fn scope_levels(scope: &Scope) -> Result<Levels> {
             .push(FailOn::parse(name).ok_or_else(|| anyhow!("Unknown fail_on value: {name}"))?);
     }
     for (target, level) in &scope.rules {
-        expand(std::slice::from_ref(target))?;
+        expand(rules, std::slice::from_ref(target))?;
         ensure!(
             !level.off(),
             "A [[scope]] cannot turn {target} off; use report, or upload_deny to skip the paths"
@@ -355,12 +403,12 @@ struct Levels {
 }
 
 impl Levels {
-    fn from_cli(specs: &[crate::options::FailOnSpec]) -> Result<Self> {
+    fn from_cli(rules: &[catalog::Rule], specs: &[crate::options::FailOnSpec]) -> Result<Self> {
         let mut levels = Self::default();
         for spec in specs {
             match &spec.target {
                 Some(target) => {
-                    expand(std::slice::from_ref(target))?;
+                    expand(rules, std::slice::from_ref(target))?;
                     levels
                         .targets
                         .entry(target.clone())
@@ -379,22 +427,47 @@ impl Levels {
     }
 }
 
-/// Rule keys named by rule IDs, names, keys or groups; an unknown name is an
-/// error.
-fn expand(names: &[String]) -> Result<Vec<&'static str>> {
+/// Keys of `rules` named by rule IDs, names, keys or groups; an unknown
+/// name is an error.
+fn expand(rules: &[catalog::Rule], names: &[String]) -> Result<Vec<&'static str>> {
     let mut keys = Vec::new();
     for name in names {
-        let selected = catalog::select(name).ok_or_else(|| {
-            anyhow!(
-                "Unknown rule or group: {name}; `jevgate rules` lists the rules (groups: {}, {}, {})",
-                catalog::groups().join(", "),
-                catalog::DEFAULT_GROUP,
-                catalog::ALL_GROUP
-            )
-        })?;
+        let selected = catalog::select_in(rules, name).ok_or_else(|| unknown(rules, name))?;
         keys.extend(selected);
     }
     Ok(keys)
+}
+
+/// Why `name` names no rule, with the names that would: the custom
+/// questions for a custom name, else the groups.
+fn unknown(rules: &[catalog::Rule], name: &str) -> anyhow::Error {
+    if name == catalog::CUSTOM_GROUP || catalog::custom(name) {
+        let defined: Vec<&str> = rules
+            .iter()
+            .filter(|r| r.group == catalog::CUSTOM_GROUP)
+            .map(|r| r.id)
+            .collect();
+        return match defined.as_slice() {
+            [] => anyhow!(
+                "Unknown custom question {name}: none is defined in jevgate.toml or {}",
+                crate::custom::DIRECTORY
+            ),
+            _ => anyhow!(
+                "Unknown custom question {name}; defined: {}",
+                defined.join(", ")
+            ),
+        };
+    }
+    let custom = format!("{}/{name}", catalog::CUSTOM_GROUP);
+    if rules.iter().any(|r| r.id == custom) {
+        return anyhow!("Unknown rule or group: {name}; a custom question is named {custom}");
+    }
+    anyhow!(
+        "Unknown rule or group: {name}; `jevgate rules` lists the rules (groups: {}, {}, {})",
+        catalog::groups().join(", "),
+        catalog::DEFAULT_GROUP,
+        catalog::ALL_GROUP
+    )
 }
 
 /// The entry that addresses `rule` most specifically: its ID or key, its
@@ -473,6 +546,7 @@ mod tests {
             invocation_dir: PathBuf::from("."),
             root: PathBuf::from("."),
             config: toml::from_str(toml_text)?,
+            questions: crate::custom::parse(toml_text)?,
         })
     }
 
@@ -706,6 +780,97 @@ mod tests {
         assert_eq!((args.model(), args.cache_ttl_secs()), ("jev-preview", 5));
         let defaults = configured("", &[], &[]).unwrap();
         assert_eq!(defaults.model(), crate::options::DEFAULT_MODEL);
+    }
+
+    const QUESTIONS: &str = r#"
+        [[question]]
+        id = "no-body-logs"
+        question = "Does this function write a request body to a log?"
+        unit = "function"
+        [[question]]
+        id = "owned-todos"
+        question = "Does this comment hold a TODO without an owner or an issue?"
+        unit = "comment"
+        level = "consider"
+    "#;
+
+    #[test]
+    fn custom_questions_are_selected_like_rules_by_id_group_default_and_all() {
+        let custom = |args: &CheckArgs| -> Vec<String> {
+            args.rules
+                .iter()
+                .filter(|r| catalog::custom(r))
+                .cloned()
+                .collect()
+        };
+        let both = ["custom/no-body-logs", "custom/owned-todos"];
+        assert_eq!(custom(&configured(QUESTIONS, &[], &[]).unwrap()), both);
+        for rules in [&["all"][..], &["default"], &["custom"]] {
+            assert_eq!(custom(&configured(QUESTIONS, rules, &[]).unwrap()), both);
+        }
+        let named = configured(QUESTIONS, &["custom/owned-todos"], &[]).unwrap();
+        assert_eq!(named.rules, ["custom/owned-todos"]);
+        assert!(custom(&configured(QUESTIONS, &["security"], &[]).unwrap()).is_empty());
+        let off = format!("{QUESTIONS}\n[rules]\n\"custom/no-body-logs\" = \"off\"\n");
+        assert_eq!(
+            custom(&configured(&off, &[], &[]).unwrap()),
+            ["custom/owned-todos"]
+        );
+        let listed = format!("rules = [\"security\"]\n{QUESTIONS}");
+        assert!(
+            custom(&configured(&listed, &[], &[]).unwrap()).is_empty(),
+            "a list selects rules, custom questions included"
+        );
+        for (rules, hint) in [
+            (
+                &["custom/nope"][..],
+                "defined: custom/no-body-logs, custom/owned-todos",
+            ),
+            (
+                &["no-body-logs"],
+                "a custom question is named custom/no-body-logs",
+            ),
+        ] {
+            let error = configured(QUESTIONS, rules, &[]).unwrap_err().to_string();
+            assert!(error.contains(hint), "{error}");
+        }
+        let error = configured("", &["custom"], &[]).unwrap_err().to_string();
+        assert!(error.contains("none is defined"), "{error}");
+    }
+
+    #[test]
+    fn a_custom_question_fails_the_gate_at_its_level_unless_a_level_is_configured() {
+        let args = configured(QUESTIONS, &[], &[]).unwrap();
+        assert_eq!(args.levels("custom/no-body-logs"), [FailOn::Review]);
+        assert_eq!(args.levels("custom/owned-todos"), [FailOn::Consider]);
+        assert_eq!(
+            args.rule_fail_on_names()["custom/owned-todos"],
+            ["consider"]
+        );
+        assert_eq!(args.levels(catalog::SHARED_LOGIC), [FailOn::Mature]);
+        let advisory = format!("fail_on = [\"none\"]\n{QUESTIONS}");
+        let args = configured(&advisory, &[], &[]).unwrap();
+        assert_eq!(args.levels("custom/owned-todos"), [FailOn::None]);
+        let grouped = format!("{QUESTIONS}\n[rules]\ncustom = \"report\"\n");
+        let args = configured(&grouped, &[], &[]).unwrap();
+        assert_eq!(args.levels("custom/no-body-logs"), [FailOn::None]);
+        let flagged = configured(QUESTIONS, &[], &[(None, FailOn::None)]).unwrap();
+        assert_eq!(flagged.levels("custom/no-body-logs"), [FailOn::None]);
+        let targeted = [(Some("custom/owned-todos"), FailOn::Review)];
+        let args = configured(QUESTIONS, &[], &targeted).unwrap();
+        assert_eq!(args.levels("custom/owned-todos"), [FailOn::Review]);
+        let scoped = format!(
+            "{QUESTIONS}\n[[scope]]\npaths = [\"scripts/**\"]\nrules = {{ \"custom/no-body-logs\" = \"report\" }}\n"
+        );
+        let args = configured(&scoped, &[], &[]).unwrap();
+        let at = |path: &str| {
+            args.levels_at("custom/no-body-logs", Path::new(path))
+                .to_vec()
+        };
+        assert_eq!(
+            (at("scripts/a.rs"), at("src/a.rs")),
+            (vec![FailOn::None], vec![FailOn::Review])
+        );
     }
 
     #[test]

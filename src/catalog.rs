@@ -282,6 +282,7 @@ pub fn rule_version(key: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub fn keys() -> Vec<&'static str> {
     rules().into_iter().map(|r| r.key).collect()
 }
@@ -289,6 +290,8 @@ pub fn keys() -> Vec<&'static str> {
 /// Every rule selected when none are configured.
 pub const DEFAULT_GROUP: &str = "default";
 pub const ALL_GROUP: &str = "all";
+/// The group of every custom question, whose rule IDs are `custom/<id>`.
+pub const CUSTOM_GROUP: &str = "custom";
 
 pub fn groups() -> Vec<&'static str> {
     let mut groups: Vec<&str> = rules().into_iter().map(|r| r.group).collect();
@@ -298,21 +301,28 @@ pub fn groups() -> Vec<&'static str> {
 
 /// Whether `name` is the rule's ID (`maintainability/file-organization`),
 /// its name (`file-organization`, the ID after its group) or its key
-/// (`file_organization`).
+/// (`file_organization`). A custom question has no short name: its id
+/// could be a built-in rule's name, such as `comments`.
 pub fn names(rule: &Rule, name: &str) -> bool {
     name == rule.key
         || name == rule.id
-        || rule
-            .id
-            .rsplit_once('/')
-            .is_some_and(|(_, short)| short == name)
+        || rule.group != CUSTOM_GROUP
+            && rule
+                .id
+                .rsplit_once('/')
+                .is_some_and(|(_, short)| short == name)
 }
 
 /// The rule keys a rule ID, name, key or group names; `None` when it names
 /// nothing.
 pub fn select(name: &str) -> Option<Vec<&'static str>> {
-    let selected: Vec<&str> = rules()
-        .into_iter()
+    select_in(&rules(), name)
+}
+
+/// The keys of the rules among `rules` that `name` names, as [`select`].
+pub fn select_in(rules: &[Rule], name: &str) -> Option<Vec<&'static str>> {
+    let selected: Vec<&str> = rules
+        .iter()
         .filter(|r| match name {
             ALL_GROUP => true,
             DEFAULT_GROUP => r.default_enabled,
@@ -321,6 +331,20 @@ pub fn select(name: &str) -> Option<Vec<&'static str>> {
         .map(|r| r.key)
         .collect();
     (!selected.is_empty()).then_some(selected)
+}
+
+/// The built-in rules, then the custom questions in the order they are
+/// defined.
+pub fn with_custom(questions: &'static [crate::custom::Question]) -> Vec<Rule> {
+    let mut all = rules();
+    all.extend(questions.iter().map(crate::custom::Question::rule));
+    all
+}
+
+/// Whether a rule key or ID names a custom question: `custom/<id>`.
+pub fn custom(key: &str) -> bool {
+    key.strip_prefix(CUSTOM_GROUP)
+        .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// How specifically `name` addresses `rule`: 3 for the rule itself, 2 for its
@@ -342,8 +366,13 @@ pub fn find(name: &str) -> Option<Rule> {
     rules().into_iter().find(|r| names(r, name))
 }
 
-pub fn id(key: &str) -> &'static str {
-    find(key).map_or("unknown", |r| r.id)
+/// A rule's ID by its key; a custom question's key is its ID.
+pub fn id(key: &str) -> &str {
+    match find(key) {
+        Some(rule) => rule.id,
+        None if custom(key) => key,
+        None => "unknown",
+    }
 }
 
 /// The thresholds and floors findings are decided with, as the report and
@@ -405,57 +434,76 @@ pub fn policy() -> BTreeMap<String, f64> {
 
 /// One line per rule: ID, whether it runs by default, whether it needs
 /// `--include-tests`, the levels that fail the default gate, how often its
-/// reviews and considers were right on unseen projects, and its question;
-/// what the columns mean, groups, selection and the site's pages follow.
-pub fn table() -> String {
-    let rules = rules();
+/// reviews and considers were right on unseen projects, and its question,
+/// then the custom questions with what they are asked about; what the
+/// columns mean, groups, selection and the site's pages follow.
+pub fn table(questions: &'static [crate::custom::Question]) -> String {
+    let rules = with_custom(questions);
     let width = rules.iter().map(|r| r.id.len()).max().unwrap_or(0);
     let mut lines = vec![format!(
         "{:width$}  DEFAULT  BLOCKS    REVIEWS RIGHT  CONSIDERS RIGHT  QUESTION",
         "RULE"
     )];
-    lines.extend(rules.iter().map(|rule| table_row(rule, width)));
+    lines.extend(rules.iter().map(|rule| {
+        let question = questions.iter().find(|q| q.rule == rule.id);
+        table_row(rule, width, question)
+    }));
+    let mut groups = groups();
+    if !questions.is_empty() {
+        groups.push(CUSTOM_GROUP);
+    }
     lines.push(String::new());
     lines.push(format!(
-        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected. The rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
+        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected, and a custom question fails it at its own level. The rest are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
         crate::maturity::MIN_PERCENT_RIGHT,
         crate::maturity::MIN_LABELS,
         crate::maturity::MIN_LABELS
     ));
     lines.push(format!(
         "Groups: {}, {DEFAULT_GROUP} (every rule marked yes or tests), {ALL_GROUP}.",
-        groups().join(", ")
+        groups.join(", ")
     ));
     lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests. --fail-on and [rules] levels replace the default gate.".into());
+    lines.push(format!(
+        "Custom questions come from [[question]] in jevgate.toml and {}/*.toml.",
+        crate::custom::DIRECTORY
+    ));
     lines.push(format!(
         "How the shares are measured: {SITE}accuracy.html; each rule's page, with findings it got wrong: {SITE}rules/RULE.html."
     ));
     lines.join("\n")
 }
 
-fn table_row(rule: &Rule, width: usize) -> String {
+/// A rule's row; a custom question blocks at its own level (a note never)
+/// and shows what it is asked about after its question.
+fn table_row(rule: &Rule, width: usize, question: Option<&crate::custom::Question>) -> String {
     use crate::{maturity, schema::Strength};
     let default = match (rule.default_enabled, rule.requires_tests) {
         (false, _) => "opt-in",
         (true, true) => "tests",
         (true, false) => "yes",
     };
-    let mature: Vec<String> = maturity::mature_levels(rule.key)
-        .iter()
-        .map(crate::output::label)
-        .collect();
-    let blocks = if mature.is_empty() {
+    let levels = match question {
+        Some(q) => [q.level]
+            .into_iter()
+            .filter(|l| *l != Strength::Note)
+            .collect(),
+        None => maturity::mature_levels(rule.key),
+    };
+    let blocks = if levels.is_empty() {
         "-".to_string()
     } else {
-        mature.join(", ")
+        let names: Vec<String> = levels.iter().map(crate::output::label).collect();
+        names.join(", ")
     };
     let right = |level| {
         maturity::measure(rule.key, level)
             .and_then(|m| m.unseen.summary())
             .unwrap_or_else(|| "-".into())
     };
+    let asked = question.map_or(String::new(), |q| format!(" [{}]", q.summary()));
     format!(
-        "{:width$}  {default:7}  {blocks:8}  {:13}  {:15}  {}",
+        "{:width$}  {default:7}  {blocks:8}  {:13}  {:15}  {}{asked}",
         rule.id,
         right(Strength::Review),
         right(Strength::Consider),
@@ -465,19 +513,27 @@ fn table_row(rule: &Rule, width: usize) -> String {
 
 /// Every rule for `jevgate rules --format json`: its catalog entry, its
 /// labels per level (`maturity`) and where they come from
-/// (`evaluation_dataset`), whether a threshold was measured for one of its
-/// questions (`thresholds_validated`), and the decision policy.
-pub fn describe() -> Value {
+/// (`evaluation_dataset`; for a custom question, the file that defines it),
+/// whether a threshold was measured for one of its questions
+/// (`thresholds_validated`), and the decision policy; a custom question also
+/// carries its definition (`custom`).
+pub fn describe(questions: &'static [crate::custom::Question]) -> Value {
     Value::Array(
-        rules()
+        with_custom(questions)
             .into_iter()
             .map(|r| {
                 let key = r.key;
+                let question = questions.iter().find(|q| q.rule == r.id);
                 let mut value = serde_json::to_value(r).unwrap();
                 value["maturity"] = crate::maturity::describe(key);
-                value["evaluation_dataset"] = crate::maturity::dataset(key).into();
+                value["evaluation_dataset"] = question
+                    .map_or_else(|| crate::maturity::dataset(key), |q| q.provenance().into())
+                    .into();
                 value["thresholds_validated"] = crate::policy::calibrated(key).into();
                 value["decision_policy"] = serde_json::json!(policy());
+                if let Some(question) = question {
+                    value["custom"] = question.describe();
+                }
                 value
             })
             .collect(),

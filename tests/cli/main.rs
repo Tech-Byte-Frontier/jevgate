@@ -11,6 +11,7 @@ mod mcp;
 #[path = "../support/mock_provider.rs"]
 mod mock_provider;
 mod preview;
+mod questions;
 mod rules;
 mod setup;
 #[path = "../support/temp_dir.rs"]

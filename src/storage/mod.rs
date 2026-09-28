@@ -18,6 +18,13 @@ use std::{
 /// Reports kept in `.jevgate/history/`, by generation; older ones are removed.
 const HISTORY: u64 = 64;
 
+/// `.jevgate/.gitignore`: the local state stays out of Git, and the custom
+/// question files beside it are committed.
+pub(crate) const IGNORE: &str = "# JevGate's local state. Custom questions in questions/ are committed.\n*\n!questions/\n!questions/**\n";
+/// What `.jevgate/.gitignore` held before custom questions: found as it was,
+/// it is rewritten, since it would keep `questions/` out of Git.
+const IGNORE_BEFORE: &str = "*\n";
+
 pub struct Store {
     pub directory: PathBuf,
     /// The cache files Git tracks as the store opens, which are never read.
@@ -53,6 +60,24 @@ fn real_directory(path: &Path, message: &'static str) -> Result<()> {
     Ok(())
 }
 
+/// Write `.jevgate/.gitignore`, or rewrite the one JevGate wrote before
+/// custom questions; one a person edited is left as it is.
+fn ignore_state(directory: &Path) -> Result<()> {
+    let path = directory.join(".gitignore");
+    if !path.exists() {
+        let created = OpenOptions::new().write(true).create_new(true).open(&path);
+        match created {
+            Ok(mut file) => file.write_all(IGNORE.as_bytes())?,
+            // Another JevGate process wrote it first.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    } else if fs::read_to_string(&path).is_ok_and(|text| text == IGNORE_BEFORE) {
+        atomic(&path, IGNORE.as_bytes(), Durability::Synced)?;
+    }
+    Ok(())
+}
+
 /// Hold the session lock for the life of the store, recording this process.
 fn lock_session(path: &Path) -> Result<fs::File> {
     ensure!(!path.is_symlink(), "Session lock must not be a symlink");
@@ -69,19 +94,13 @@ fn lock_session(path: &Path) -> Result<fs::File> {
     Ok(file)
 }
 
-/// `.jevgate/` under `root`, created with a `.gitignore` that ignores all of
-/// it. Taking no lock, it is where writers other than the session keep state.
+/// `.jevgate/` under `root`, created with a `.gitignore` that ignores the
+/// local state and keeps custom questions tracked (`ignore_state`). Taking
+/// no lock, it is where writers other than the session keep state.
 pub fn state_directory(root: &Path) -> Result<PathBuf> {
     let directory = root.join(".jevgate");
     real_directory(&directory, "Jev storage must be a real directory")?;
-    let ignore = directory.join(".gitignore");
-    if !ignore.exists() {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(ignore)?;
-        file.write_all(b"*\n")?;
-    }
+    ignore_state(&directory)?;
     Ok(directory)
 }
 
@@ -179,6 +198,21 @@ pub(crate) fn atomic(path: &Path, bytes: &[u8], durability: Durability) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_state_is_ignored_and_custom_questions_stay_tracked() {
+        let project = crate::tests::Project::new();
+        let ignore = project.0.join(".jevgate/.gitignore");
+        let read = || fs::read_to_string(&ignore).unwrap();
+        drop(Store::open(&project.0).unwrap());
+        assert_eq!(read(), IGNORE);
+        fs::write(&ignore, IGNORE_BEFORE).unwrap();
+        drop(Store::open(&project.0).unwrap());
+        assert_eq!(read(), IGNORE, "the old generated file is rewritten");
+        fs::write(&ignore, "*\n!notes.md\n").unwrap();
+        drop(Store::open(&project.0).unwrap());
+        assert_eq!(read(), "*\n!notes.md\n", "an edited one is kept");
+    }
 
     #[test]
     fn large_published_reports_remain_readable_in_latest_and_history() {

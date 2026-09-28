@@ -240,7 +240,7 @@ struct VerifyView<'r> {
     path: &'r Path,
     line: usize,
     end_line: usize,
-    rule: &'static str,
+    rule: &'r str,
     unit: &'r str,
     concern: f64,
     questions: Vec<QuestionView<'r>>,
@@ -249,7 +249,7 @@ struct VerifyView<'r> {
 impl<'r> VerifyView<'r> {
     /// A report written before 0.27 holds no open questions: the labels of
     /// the questions left undecided stand in for them.
-    fn new(path: &'r Path, rule: &str, unit: &'r Undecided) -> Self {
+    fn new(path: &'r Path, rule: &'r str, unit: &'r Undecided) -> Self {
         let questions = if unit.open.is_empty() {
             unit.questions
                 .iter()

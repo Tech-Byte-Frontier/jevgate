@@ -42,15 +42,18 @@ pub fn schema() -> Value {
             _ => level["items"]["enum"] = json!(with_off),
         }
     }
+    // A custom question is named by its ID, which only the configuration knows.
+    let named = json!({"anyOf": [{"enum": names}, {"pattern": crate::custom::NAMES}]});
     for rules in definitions["Rules"]["anyOf"].as_array_mut().unwrap() {
         match rules["type"].as_str() {
-            Some("array") => rules["items"]["enum"] = names.clone(),
-            _ => rules["propertyNames"] = json!({"enum": names}),
+            Some("array") => rules["items"] = json!({"type": "string", "anyOf": named["anyOf"]}),
+            _ => rules["propertyNames"] = named.clone(),
         }
     }
     let scope = &mut definitions["Scope"]["properties"];
     scope["fail_on"]["items"]["enum"] = levels;
-    scope["rules"]["propertyNames"] = json!({"enum": names});
+    scope["rules"]["propertyNames"] = named;
+    crate::custom::schema(&mut definitions["Question"]);
     schema
 }
 
@@ -83,6 +86,15 @@ fn tomlify(value: &mut Value) {
                 if let [single] = types.as_slice() {
                     let single = single.clone();
                     map.insert("type".into(), single);
+                }
+            }
+            // An optional enum is one of its schema or null.
+            if let Some(Value::Array(options)) = map.get_mut("anyOf") {
+                options.retain(|option| *option != json!({"type": "null"}));
+                if let [Value::Object(single)] = options.as_slice() {
+                    let single = single.clone();
+                    map.remove("anyOf");
+                    map.extend(single);
                 }
             }
             map.values_mut().for_each(tomlify);
@@ -122,9 +134,12 @@ mod tests {
     #[test]
     fn rule_names_and_levels_are_listed() {
         let schema = schema();
-        let names = schema["$defs"]["Scope"]["properties"]["rules"]["propertyNames"]["enum"]
-            .as_array()
-            .unwrap();
+        let named = &schema["$defs"]["Scope"]["properties"]["rules"]["propertyNames"];
+        let names = named["anyOf"][0]["enum"].as_array().unwrap();
+        assert_eq!(named["anyOf"][1]["pattern"], crate::custom::NAMES);
+        let question = &schema["$defs"]["Question"];
+        assert_eq!(question["required"], json!(["question", "unit"]));
+        assert_eq!(question["properties"]["threshold"]["maximum"], 0.99);
         for name in [
             "security",
             "security/injection",

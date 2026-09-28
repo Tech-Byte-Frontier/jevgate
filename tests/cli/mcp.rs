@@ -251,6 +251,37 @@ fn mcp_reports_an_incomplete_check_as_an_error_that_says_why() {
 }
 
 #[test]
+fn mcp_lists_the_repositorys_custom_questions_beside_the_rules() {
+    let project = Project::new();
+    std::fs::create_dir_all(project.0.join(".jevgate/questions")).unwrap();
+    std::fs::write(
+        project.0.join(".jevgate/questions/no-body-logs.toml"),
+        "question = \"Does this function write a request body to a log?\"\nunit = \"function\"\n",
+    )
+    .unwrap();
+    let messages = session(project.command(), &[call(1, "jevgate_rules", json!({}))]);
+    let (reply, _) = reply_to(&messages, 1);
+    let result = &reply["result"];
+    assert_eq!(result["isError"], false, "{result}");
+    let listed = result["structuredContent"]["rules"].as_array().unwrap();
+    let ids: Vec<&str> = listed
+        .iter()
+        .map(|rule| rule["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"security/injection"), "{ids:?}");
+    assert_eq!(
+        ids.last(),
+        Some(&"custom/no-body-logs"),
+        "the repository's questions too"
+    );
+    let source = listed.last().unwrap()["custom"]["source"].as_str().unwrap();
+    assert!(source.ends_with("no-body-logs.toml"), "{source}");
+    let text: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text, result["structuredContent"], "the text is the same JSON");
+}
+
+#[test]
 fn a_run_stopped_by_exhausted_credits_says_why_in_the_agent_text_and_to_the_agent() {
     let project = Project::new();
     std::fs::write(project.0.join("lib.rs"), JUDGED_RS).unwrap();

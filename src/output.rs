@@ -96,7 +96,7 @@ pub fn emit(report: &Report, args: &CheckArgs) -> Result<()> {
             Style::for_stdout(args.color),
         ),
         Format::Github => crate::github::emit(&mut out, report, args),
-        Format::Sarif => crate::sarif::emit(&mut out, report),
+        Format::Sarif => crate::sarif::emit(&mut out, report, args.questions),
         Format::Gitlab => crate::gitlab::emit(&mut out, report),
     };
     match written {

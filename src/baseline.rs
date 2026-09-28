@@ -226,7 +226,10 @@ pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]
         .with_context(|| format!("No {BASELINE_FILE}; run jevgate baseline first"))?;
     let mut marked = 0;
     for finding in &mut baseline.findings {
-        let rule = crate::catalog::find(&finding.rule).map(|r| r.key);
+        let rule = match crate::catalog::find(&finding.rule) {
+            Some(found) => Some(found.key),
+            None => crate::catalog::custom(&finding.rule).then_some(finding.rule.as_str()),
+        };
         if (rules.is_empty() || rule.is_some_and(|key| rules.contains(&key)))
             && targets.iter().any(|t| names(t, finding))
         {

@@ -48,7 +48,7 @@ pub(super) fn list() -> Value {
         {
             "name": "jevgate_rules",
             "title": "List JevGate's rules",
-            "description": "Every rule with its ID, group, default, the question it asks and what it looks at.",
+            "description": "Every rule with its ID, group, default, the question it asks and what it looks at, the repository's custom questions included.",
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
             "outputSchema": rules_schema(),
             "annotations": {"readOnlyHint": true},
@@ -228,6 +228,7 @@ fn rules_schema() -> Value {
                         "thresholds_validated": {"type": "boolean"},
                         "decision_policy": {"type": "object"},
                         "maturity": {"type": "object", "description": "For each level, how many labeled findings were right on projects JevGate was never tuned on (unseen) and on the ones it was tuned on, and whether the level fails the default gate (mature)"},
+                        "custom": {"type": "object", "description": "A custom question's definition, as jevgate.toml or its file in .jevgate/questions/ gives it, with the file that defines it (source); absent for built-in rules"},
                     },
                     "required": ["id", "key", "group", "default_enabled"],
                 },

@@ -31,64 +31,174 @@
         }
       ]
     },
+    "Question": {
+      "additionalProperties": false,
+      "description": "A question as a configuration writes it.",
+      "properties": {
+        "background": {
+          "description": "Why the rule exists; sent with the question.",
+          "maxLength": 2000,
+          "type": "string"
+        },
+        "guidance": {
+          "description": "How to decide: what counts as a violation and what does not; sent with the question.",
+          "maxLength": 2000,
+          "type": "string"
+        },
+        "id": {
+          "description": "Names the rule `custom/<id>`: lowercase letters, digits and single hyphens, starting with a letter. Required in jevgate.toml; a question file's name gives it.",
+          "maxLength": 48,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/QuestionLevel",
+          "description": "The level of its findings, and the level at which it fails the gate unless `fail_on` or `--fail-on` says otherwise. Default: review."
+        },
+        "next_step": {
+          "description": "The next step a finding shows. Default: fix it, or accept it with a `jevgate: allow` comment and a reason.",
+          "maxLength": 300,
+          "type": "string"
+        },
+        "paths": {
+          "description": "Globs of the files it applies to. Default: every file its unit applies to. For `file` and `hunk`, they can also name text files in languages JevGate does not parse.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "question": {
+          "description": "One yes/no question about each unit, ending in `?`; yes is a violation.",
+          "maxLength": 300,
+          "pattern": "\\?\\s*$",
+          "type": "string"
+        },
+        "threshold": {
+          "description": "The probability of yes at or above which a unit breaks the rule (0.5 to 0.99); at or below one minus it, the unit is clear. Default: 0.8.",
+          "maximum": 0.99,
+          "minimum": 0.5,
+          "type": "number"
+        },
+        "unit": {
+          "$ref": "#/$defs/QuestionUnit",
+          "description": "What the question is asked about."
+        }
+      },
+      "required": [
+        "question",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "QuestionLevel": {
+      "description": "The level of a custom question's findings.",
+      "enum": [
+        "review",
+        "consider",
+        "note"
+      ],
+      "type": "string"
+    },
+    "QuestionUnit": {
+      "description": "What a custom question is asked about.",
+      "oneOf": [
+        {
+          "const": "function",
+          "description": "A function or method of application code, outside tests.",
+          "type": "string"
+        },
+        {
+          "const": "file",
+          "description": "A whole file.",
+          "type": "string"
+        },
+        {
+          "const": "test",
+          "description": "A test case; needs include_tests, as the test rules do.",
+          "type": "string"
+        },
+        {
+          "const": "section",
+          "description": "A heading section of an agent instruction file or project documentation.",
+          "type": "string"
+        },
+        {
+          "const": "comment",
+          "description": "A comment or docstring of application code, with the code it is about.",
+          "type": "string"
+        },
+        {
+          "const": "hunk",
+          "description": "A changed hunk since --base, with three lines of context.",
+          "type": "string"
+        }
+      ]
+    },
     "Rules": {
       "anyOf": [
         {
           "items": {
-            "enum": [
-              "maintainability/file-organization",
-              "file-organization",
-              "file_organization",
-              "maintainability/function-simplification",
-              "function-simplification",
-              "function_simplification",
-              "maintainability/shared-logic",
-              "shared-logic",
-              "shared_logic",
-              "maintainability/hardcoded-values",
-              "hardcoded-values",
-              "hardcoded_values",
-              "security/injection",
-              "injection",
-              "security/sensitive-data",
-              "sensitive-data",
-              "sensitive_data",
-              "security/unsafe-settings",
-              "unsafe-settings",
-              "unsafe_settings",
-              "security/access-control",
-              "access-control",
-              "access_control",
-              "security/workflows",
-              "workflows",
-              "tests/value",
-              "value",
-              "test_value",
-              "tests/redundancy",
-              "redundancy",
-              "test_redundancy",
-              "tests/laws",
-              "laws",
-              "documentation/agent-context",
-              "agent-context",
-              "agent_context",
-              "documentation/large-docs",
-              "large-docs",
-              "large_docs",
-              "documentation/staleness",
-              "staleness",
-              "doc_staleness",
-              "documentation/duplication",
-              "duplication",
-              "doc_duplication",
-              "documentation/comments",
-              "comments",
-              "maintainability",
-              "security",
-              "tests",
-              "documentation",
-              "default",
-              "all"
+            "anyOf": [
+              {
+                "enum": [
+                  "maintainability/file-organization",
+                  "file-organization",
+                  "file_organization",
+                  "maintainability/function-simplification",
+                  "function-simplification",
+                  "function_simplification",
+                  "maintainability/shared-logic",
+                  "shared-logic",
+                  "shared_logic",
+                  "maintainability/hardcoded-values",
+                  "hardcoded-values",
+                  "hardcoded_values",
+                  "security/injection",
+                  "injection",
+                  "security/sensitive-data",
+                  "sensitive-data",
+                  "sensitive_data",
+                  "security/unsafe-settings",
+                  "unsafe-settings",
+                  "unsafe_settings",
+                  "security/access-control",
+                  "access-control",
+                  "access_control",
+                  "security/workflows",
+                  "workflows",
+                  "tests/value",
+                  "value",
+                  "test_value",
+                  "tests/redundancy",
+                  "redundancy",
+                  "test_redundancy",
+                  "tests/laws",
+                  "laws",
+                  "documentation/agent-context",
+                  "agent-context",
+                  "agent_context",
+                  "documentation/large-docs",
+                  "large-docs",
+                  "large_docs",
+                  "documentation/staleness",
+                  "staleness",
+                  "doc_staleness",
+                  "documentation/duplication",
+                  "duplication",
+                  "doc_duplication",
+                  "documentation/comments",
+                  "comments",
+                  "maintainability",
+                  "security",
+                  "tests",
+                  "documentation",
+                  "default",
+                  "all"
+                ]
+              },
+              {
+                "pattern": "^custom(/[a-z][a-z0-9]*(-[a-z0-9]+)*)?$"
+              }
             ],
             "type": "string"
           },
@@ -99,60 +209,67 @@
             "$ref": "#/$defs/Level"
           },
           "propertyNames": {
-            "enum": [
-              "maintainability/file-organization",
-              "file-organization",
-              "file_organization",
-              "maintainability/function-simplification",
-              "function-simplification",
-              "function_simplification",
-              "maintainability/shared-logic",
-              "shared-logic",
-              "shared_logic",
-              "maintainability/hardcoded-values",
-              "hardcoded-values",
-              "hardcoded_values",
-              "security/injection",
-              "injection",
-              "security/sensitive-data",
-              "sensitive-data",
-              "sensitive_data",
-              "security/unsafe-settings",
-              "unsafe-settings",
-              "unsafe_settings",
-              "security/access-control",
-              "access-control",
-              "access_control",
-              "security/workflows",
-              "workflows",
-              "tests/value",
-              "value",
-              "test_value",
-              "tests/redundancy",
-              "redundancy",
-              "test_redundancy",
-              "tests/laws",
-              "laws",
-              "documentation/agent-context",
-              "agent-context",
-              "agent_context",
-              "documentation/large-docs",
-              "large-docs",
-              "large_docs",
-              "documentation/staleness",
-              "staleness",
-              "doc_staleness",
-              "documentation/duplication",
-              "duplication",
-              "doc_duplication",
-              "documentation/comments",
-              "comments",
-              "maintainability",
-              "security",
-              "tests",
-              "documentation",
-              "default",
-              "all"
+            "anyOf": [
+              {
+                "enum": [
+                  "maintainability/file-organization",
+                  "file-organization",
+                  "file_organization",
+                  "maintainability/function-simplification",
+                  "function-simplification",
+                  "function_simplification",
+                  "maintainability/shared-logic",
+                  "shared-logic",
+                  "shared_logic",
+                  "maintainability/hardcoded-values",
+                  "hardcoded-values",
+                  "hardcoded_values",
+                  "security/injection",
+                  "injection",
+                  "security/sensitive-data",
+                  "sensitive-data",
+                  "sensitive_data",
+                  "security/unsafe-settings",
+                  "unsafe-settings",
+                  "unsafe_settings",
+                  "security/access-control",
+                  "access-control",
+                  "access_control",
+                  "security/workflows",
+                  "workflows",
+                  "tests/value",
+                  "value",
+                  "test_value",
+                  "tests/redundancy",
+                  "redundancy",
+                  "test_redundancy",
+                  "tests/laws",
+                  "laws",
+                  "documentation/agent-context",
+                  "agent-context",
+                  "agent_context",
+                  "documentation/large-docs",
+                  "large-docs",
+                  "large_docs",
+                  "documentation/staleness",
+                  "staleness",
+                  "doc_staleness",
+                  "documentation/duplication",
+                  "duplication",
+                  "doc_duplication",
+                  "documentation/comments",
+                  "comments",
+                  "maintainability",
+                  "security",
+                  "tests",
+                  "documentation",
+                  "default",
+                  "all"
+                ]
+              },
+              {
+                "pattern": "^custom(/[a-z][a-z0-9]*(-[a-z0-9]+)*)?$"
+              }
             ]
           },
           "type": "object"
@@ -192,60 +309,67 @@
           },
           "description": "Levels of single rules or groups in these files; `off` is not accepted (use `upload_deny`).",
           "propertyNames": {
-            "enum": [
-              "maintainability/file-organization",
-              "file-organization",
-              "file_organization",
-              "maintainability/function-simplification",
-              "function-simplification",
-              "function_simplification",
-              "maintainability/shared-logic",
-              "shared-logic",
-              "shared_logic",
-              "maintainability/hardcoded-values",
-              "hardcoded-values",
-              "hardcoded_values",
-              "security/injection",
-              "injection",
-              "security/sensitive-data",
-              "sensitive-data",
-              "sensitive_data",
-              "security/unsafe-settings",
-              "unsafe-settings",
-              "unsafe_settings",
-              "security/access-control",
-              "access-control",
-              "access_control",
-              "security/workflows",
-              "workflows",
-              "tests/value",
-              "value",
-              "test_value",
-              "tests/redundancy",
-              "redundancy",
-              "test_redundancy",
-              "tests/laws",
-              "laws",
-              "documentation/agent-context",
-              "agent-context",
-              "agent_context",
-              "documentation/large-docs",
-              "large-docs",
-              "large_docs",
-              "documentation/staleness",
-              "staleness",
-              "doc_staleness",
-              "documentation/duplication",
-              "duplication",
-              "doc_duplication",
-              "documentation/comments",
-              "comments",
-              "maintainability",
-              "security",
-              "tests",
-              "documentation",
-              "default",
-              "all"
+            "anyOf": [
+              {
+                "enum": [
+                  "maintainability/file-organization",
+                  "file-organization",
+                  "file_organization",
+                  "maintainability/function-simplification",
+                  "function-simplification",
+                  "function_simplification",
+                  "maintainability/shared-logic",
+                  "shared-logic",
+                  "shared_logic",
+                  "maintainability/hardcoded-values",
+                  "hardcoded-values",
+                  "hardcoded_values",
+                  "security/injection",
+                  "injection",
+                  "security/sensitive-data",
+                  "sensitive-data",
+                  "sensitive_data",
+                  "security/unsafe-settings",
+                  "unsafe-settings",
+                  "unsafe_settings",
+                  "security/access-control",
+                  "access-control",
+                  "access_control",
+                  "security/workflows",
+                  "workflows",
+                  "tests/value",
+                  "value",
+                  "test_value",
+                  "tests/redundancy",
+                  "redundancy",
+                  "test_redundancy",
+                  "tests/laws",
+                  "laws",
+                  "documentation/agent-context",
+                  "agent-context",
+                  "agent_context",
+                  "documentation/large-docs",
+                  "large-docs",
+                  "large_docs",
+                  "documentation/staleness",
+                  "staleness",
+                  "doc_staleness",
+                  "documentation/duplication",
+                  "duplication",
+                  "doc_duplication",
+                  "documentation/comments",
+                  "comments",
+                  "maintainability",
+                  "security",
+                  "tests",
+                  "documentation",
+                  "default",
+                  "all"
+                ]
+              },
+              {
+                "pattern": "^custom(/[a-z][a-z0-9]*(-[a-z0-9]+)*)?$"
+              }
             ]
           },
           "type": "object"
@@ -324,6 +448,13 @@
     "model": {
       "description": "Model, as the key's provider names it; a pinned version keeps results repeatable. `--model` overrides it. Default: `jev-1.13.0` with a TypeSafe key, `typesafe/jev-1.13` with an OpenRouter key, `typesafe-ai/jev` with a Vercel AI Gateway key.",
       "type": "string"
+    },
+    "question": {
+      "description": "Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/<id>.toml` holds one per file.",
+      "items": {
+        "$ref": "#/$defs/Question"
+      },
+      "type": "array"
     },
     "rules": {
       "$ref": "#/$defs/Rules",

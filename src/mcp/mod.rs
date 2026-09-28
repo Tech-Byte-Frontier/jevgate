@@ -1,14 +1,16 @@
 //! `jevgate mcp`: a Model Context Protocol server on stdin and stdout, so a
 //! coding agent can run a check, read the last report's findings and look up
 //! the rules as tools. Messages are newline-delimited JSON-RPC 2.0. A check
-//! runs as a child process, so nothing it prints reaches the protocol stream.
+//! and the rules listing run as child processes, so nothing they print
+//! reaches the protocol stream and each reads the repository's
+//! configuration, custom questions included, as the command line does.
 //! `tools` declares the tools and their schemas, `results` shapes a report
 //! for an agent, and `checking` runs a check and reports its progress.
 mod checking;
 mod results;
 mod tools;
 
-use crate::{catalog, schema::Report};
+use crate::schema::Report;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::{
@@ -101,7 +103,7 @@ impl Server {
                 self.check(arguments, (!token.is_null()).then_some(token), notify)
             }
             "jevgate_findings" => self.findings(arguments),
-            "jevgate_rules" => Ok(Outcome::structured(json!({"rules": catalog::describe()}))),
+            "jevgate_rules" => self.rules(),
             _ => return None,
         };
         Some(outcome.unwrap_or_else(|error| Outcome::failed(format!("{error:#}"))))
@@ -128,6 +130,23 @@ impl Server {
             }
         })?;
         Ok(finished.outcome(&selection, verbose))
+    }
+
+    /// Every rule and custom question, as `jevgate rules --format json` lists
+    /// them in the repository.
+    fn rules(&self) -> Result<Outcome> {
+        let output = std::process::Command::new(&self.executable)
+            .current_dir(&self.root)
+            .args(["rules", "--format=json"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .context("Cannot start jevgate rules")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        listed(&output.stdout)
     }
 
     /// Findings and verify items of the last report, ranked, optionally for
@@ -182,6 +201,12 @@ impl Outcome {
         }
         result
     }
+}
+
+/// `jevgate_rules`' result from what `jevgate rules --format json` printed.
+fn listed(stdout: &[u8]) -> Result<Outcome> {
+    let rules: Value = serde_json::from_slice(stdout).context("jevgate rules printed no JSON")?;
+    Ok(Outcome::structured(json!({"rules": rules})))
 }
 
 fn initialize(params: &Value) -> Value {
@@ -277,20 +302,19 @@ mod tests {
 
     #[test]
     fn rules_come_back_structured_and_as_the_same_json_text() {
-        let rules = exchange(
-            &server(Path::new(".")),
-            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"jevgate_rules"}}"#,
-        );
-        let result = &rules.unwrap()["result"];
+        let questions = crate::custom::parse(
+            "[[question]]\nid = \"no-body-logs\"\nquestion = \"Does this function log a request body?\"\nunit = \"function\"\n",
+        )
+        .unwrap();
+        let printed = serde_json::to_vec(&crate::catalog::describe(questions)).unwrap();
+        let result = listed(&printed).unwrap().into_value();
         assert_eq!(result["isError"], false);
         let structured = &result["structuredContent"];
-        assert!(
-            structured["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|rule| rule["id"] == "security/injection")
-        );
+        let rules = structured["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|rule| rule["id"] == "security/injection"));
+        let custom = rules.last().unwrap();
+        assert_eq!(custom["id"], "custom/no-body-logs");
+        assert_eq!(custom["custom"]["unit"], "function");
         let text: Value =
             serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(&text, structured);

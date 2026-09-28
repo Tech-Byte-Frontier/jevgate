@@ -188,6 +188,10 @@ pub struct CheckArgs {
     /// Levels for the files `[[scope]]` entries match, in configuration order.
     #[arg(skip)]
     pub path_fail_on: Vec<PathLevels>,
+    /// Every custom question the configuration defines; `rules` says which
+    /// this run asks.
+    #[arg(skip)]
+    pub questions: &'static [crate::custom::Question],
     /// The opening of the repository's README when the upload boundary
     /// permits it: what the program is and who runs it, for the question of
     /// who reads an error-detail finding's responses.
@@ -351,6 +355,18 @@ impl CheckArgs {
             .any(|r| crate::catalog::find(r).is_some_and(|rule| self.code_rules_include(rule.key)))
     }
 
+    /// The key of a rule named by its ID or key, built-in or custom.
+    fn key<'a>(&self, rule: &'a str) -> Option<&'a str> {
+        match crate::catalog::find(rule) {
+            Some(found) => Some(found.key),
+            None => self
+                .questions
+                .iter()
+                .any(|q| q.rule == rule)
+                .then_some(rule),
+        }
+    }
+
     /// Whether rule `key` judges application source.
     pub fn code_rules_include(&self, key: &str) -> bool {
         !crate::catalog::DOCUMENTATION.contains(&key) && key != crate::catalog::WORKFLOWS
@@ -388,21 +404,21 @@ impl CheckArgs {
 
     /// The gate levels of a rule, by ID or key, outside any scope.
     pub fn levels(&self, rule: &str) -> &[FailOn] {
-        crate::catalog::find(rule)
-            .and_then(|r| self.rule_fail_on.get(r.key))
+        self.key(rule)
+            .and_then(|key| self.rule_fail_on.get(key))
             .unwrap_or(&self.fail_on)
     }
 
     /// The gate levels of a rule for one file: the last scope that matches
     /// the file and addresses the rule, else [`Self::levels`].
     pub fn levels_at(&self, rule: &str, path: &std::path::Path) -> &[FailOn] {
-        crate::catalog::find(rule)
-            .and_then(|r| {
+        self.key(rule)
+            .and_then(|key| {
                 self.path_fail_on
                     .iter()
                     .rev()
                     .filter(|scope| scope.matcher.is_match(path))
-                    .find_map(|scope| scope.rules.get(r.key))
+                    .find_map(|scope| scope.rules.get(key))
             })
             .map_or_else(|| self.levels(rule), Vec::as_slice)
     }

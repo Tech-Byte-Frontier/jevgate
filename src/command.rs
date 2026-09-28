@@ -72,10 +72,11 @@ fn configured(command: JevCommand) -> Result<u8> {
         } => accept(&context, merge, reason),
         JevCommand::Rules { format } => {
             match format {
-                options::RulesFormat::Json => {
-                    say!("{}", serde_json::to_string_pretty(&catalog::describe())?)
-                }
-                options::RulesFormat::Table => say!("{}", catalog::table()),
+                options::RulesFormat::Json => say!(
+                    "{}",
+                    serde_json::to_string_pretty(&catalog::describe(context.questions))?
+                ),
+                options::RulesFormat::Table => say!("{}", catalog::table(context.questions)),
             }
             Ok(0)
         }
@@ -118,9 +119,10 @@ fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> 
             targets,
             rules,
         } => {
+            let known = context.rules();
             let mut keys = Vec::new();
             for name in &rules {
-                keys.extend(catalog::select(name).ok_or_else(|| {
+                keys.extend(catalog::select_in(&known, name).ok_or_else(|| {
                     anyhow::anyhow!(
                         "Unknown rule or group: {name}; `jevgate rules` lists the rules"
                     )
