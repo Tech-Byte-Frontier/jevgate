@@ -422,8 +422,7 @@ fn checked(spec: &Spec) -> Result<Checked, String> {
     if !question.ends_with('?') {
         return Err("`question` must be one yes/no question ending in `?`".into());
     }
-    text(&Some(question.clone()), ("question", false), QUESTION_CHARS)
-        .map_err(|problem| format!("{problem}; move detail to background or guidance"))?;
+    text(&Some(question.clone()), &QUESTION)?;
     let threshold = spec.threshold.unwrap_or(DEFAULT_THRESHOLD);
     if !THRESHOLDS.contains(&threshold) {
         return Err(format!(
@@ -436,9 +435,9 @@ fn checked(spec: &Spec) -> Result<Checked, String> {
         .map_err(|error| format!("invalid paths {:?}: {error}", spec.paths))?;
     let applies = |path: &Path| spec.paths.is_empty() || matcher.is_match(path);
     Ok(Checked {
-        background: text(&spec.background, ("background", true), TEXT_CHARS)?,
-        guidance: text(&spec.guidance, ("guidance", true), TEXT_CHARS)?,
-        next_step: text(&spec.next_step, ("next_step", false), NEXT_STEP_CHARS)?,
+        background: text(&spec.background, &BACKGROUND)?,
+        guidance: text(&spec.guidance, &GUIDANCE)?,
+        next_step: text(&spec.next_step, &NEXT_STEP)?,
         examples: examples::validate((&spec.failing, &spec.passing), applies)?,
         matcher,
         question,
@@ -458,36 +457,66 @@ pub(crate) fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// An optional text trimmed, none when empty, and at most `limit`
-/// characters, of [`printable`](characters::printable) ones only, but for
-/// the line breaks and tabs of a `multiline` field: a question's text is
-/// printed as written in terminals, CI logs and the rules table.
-fn text(
-    value: &Option<String>,
-    (field, multiline): (&str, bool),
+/// A text a person writes in a question: its key, whether it may hold line
+/// breaks and tabs, and its length at most, with what to do past it.
+struct Field {
+    name: &'static str,
+    multiline: bool,
     limit: usize,
-) -> Result<Option<String>, String> {
+    past: &'static str,
+}
+
+const QUESTION: Field = Field {
+    name: "question",
+    multiline: false,
+    limit: QUESTION_CHARS,
+    past: "; move detail to background or guidance",
+};
+const BACKGROUND: Field = Field {
+    name: "background",
+    multiline: true,
+    limit: TEXT_CHARS,
+    past: "",
+};
+const GUIDANCE: Field = Field {
+    name: "guidance",
+    ..BACKGROUND
+};
+const NEXT_STEP: Field = Field {
+    name: "next_step",
+    multiline: false,
+    limit: NEXT_STEP_CHARS,
+    past: "",
+};
+
+/// An optional text trimmed, none when empty, within its field's length,
+/// and of [`printable`](characters::printable) characters only, but for the
+/// line breaks and tabs of a multiline field: a question's text is printed
+/// as written in terminals, CI logs and the rules table.
+fn text(value: &Option<String>, field: &Field) -> Result<Option<String>, String> {
     let value = value
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string);
-    if let Some(c) = value
-        .as_deref()
-        .and_then(|v| characters::unprintable(v, multiline))
-    {
+    let Some(text) = value.as_deref() else {
+        return Ok(None);
+    };
+    let name = field.name;
+    if let Some(c) = characters::unprintable(text, field.multiline) {
         return Err(format!(
-            "`{field}` holds U+{:04X}, which a terminal acts on or hides; remove it",
+            "`{name}` holds U+{:04X}, which a terminal acts on or hides; remove it",
             u32::from(c)
         ));
     }
-    match value {
-        Some(v) if v.chars().count() > limit => Err(format!(
-            "`{field}` is {} characters; keep it within {limit}",
-            v.chars().count()
-        )),
-        other => Ok(other),
+    let length = text.chars().count();
+    if length > field.limit {
+        return Err(format!(
+            "`{name}` is {length} characters; keep it within {}{}",
+            field.limit, field.past
+        ));
     }
+    Ok(value)
 }
 
 /// A hash of everything that changes what is asked or how the answer is

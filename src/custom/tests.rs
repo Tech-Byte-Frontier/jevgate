@@ -141,7 +141,9 @@ fn a_question_holds_no_character_a_terminal_acts_on_or_hides() {
         let error = configured(&text).unwrap_err().to_string();
         assert!(
             error.starts_with("Question custom/no-body-logs in jevgate.toml: ")
-                && error.contains(problem),
+                && error.ends_with(&format!(
+                    "{problem}, which a terminal acts on or hides; remove it"
+                )),
             "{error}"
         );
     }
