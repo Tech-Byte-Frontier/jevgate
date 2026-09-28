@@ -265,8 +265,13 @@ fn record(
         let output_tokens = response::output_tokens(&body);
         receipt.metrics.input_tokens += input_tokens.unwrap_or(0);
         receipt.metrics.output_tokens += output_tokens;
+        // A name that fails validation is billed to "unknown", which has no price.
+        let model = body["model"]
+            .as_str()
+            .filter(|name| crate::model::valid_name(name))
+            .unwrap_or("unknown");
         billed = Some(Billed {
-            model: body["model"].as_str().unwrap_or_default().to_owned(),
+            model: model.to_owned(),
             input_tokens,
             output_tokens,
         });

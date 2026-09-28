@@ -218,11 +218,8 @@ pub fn saved(
         saved.provider.service().label,
         recorded.service().label
     );
-    Ok(Credential {
-        key: saved.key,
-        provider: saved.provider,
-        source: saved.description,
-    })
+    // A key saved before 0.26 was saved as TypeSafe's, whatever it was.
+    credential(saved.provider, saved.key, saved.description)
 }
 
 /// The keys set besides the one a check uses, in the order a check reads them.

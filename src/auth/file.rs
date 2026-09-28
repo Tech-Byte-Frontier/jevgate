@@ -181,6 +181,9 @@ fn provider_path(credential: &Path) -> PathBuf {
     credential.with_file_name("provider")
 }
 
+/// The most of that file read: a provider's name is a short word.
+const MAX_PROVIDER_RECORD_BYTES: u64 = 64;
+
 /// The provider recorded beside the saved credential; none when no key was
 /// saved with one, as before 0.26.
 pub fn recorded_provider(credential: &Path) -> Option<Provider> {
@@ -191,7 +194,7 @@ pub fn recorded_provider(credential: &Path) -> Option<Provider> {
     let mut name = String::new();
     fs::File::open(path)
         .ok()?
-        .take(64)
+        .take(MAX_PROVIDER_RECORD_BYTES)
         .read_to_string(&mut name)
         .ok()?;
     Provider::named(name.trim())

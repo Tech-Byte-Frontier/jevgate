@@ -42,6 +42,8 @@ const MONTHS: [&str; 12] = [
 const SECONDS_PER_DAY: u64 = 86_400;
 /// Days from 0000-03-01 to 1970-01-01 in the proleptic Gregorian calendar.
 const EPOCH_DAYS: u64 = 719_468;
+/// Days in 400 Gregorian years, after which the calendar repeats.
+const DAYS_PER_ERA: u64 = 146_097;
 
 /// An HTTP date in the form HTTP requires senders to use, as in
 /// `Sun, 06 Nov 1994 08:49:37 GMT`.
@@ -77,7 +79,7 @@ fn days_since_epoch(year: u64, month: u64, day: u64) -> u64 {
     let (era, year_of_era) = (year / 400, year % 400);
     let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - EPOCH_DAYS
+    era * DAYS_PER_ERA + day_of_era - EPOCH_DAYS
 }
 
 #[cfg(test)]

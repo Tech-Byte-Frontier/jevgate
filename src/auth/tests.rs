@@ -307,6 +307,18 @@ fn the_saved_key_must_be_of_the_provider_recorded_beside_it() {
         missing.contains("AI_GATEWAY_API_KEY is read only with --env-file .env"),
         "{missing}"
     );
+    let saved_by_0_25 = || {
+        Ok(Some(SavedKey {
+            provider: Provider::Typesafe,
+            key: key("sk-or-v1-private"),
+            description: "system credential store".into(),
+        }))
+    };
+    let refused = sources::saved(Provider::Typesafe, file, saved_by_0_25)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(refused.contains("OPENROUTER_API_KEY") && !refused.contains("private"));
 }
 
 #[test]
