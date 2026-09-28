@@ -188,36 +188,57 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
     let Some(tree) = crate::syntax::parse(path, source)? else {
         return Ok(FileUnits::default());
     };
-    if let Some(language) = super::generic::of(path) {
-        let mut file = FileUnits {
-            parsed: true,
-            generic: true,
-            ..Default::default()
-        };
-        generic::walk(language, tree.root_node(), source, &mut file);
-        file.record_errors(tree.root_node());
-        calls_by_name(&mut file.units);
-        return Ok(file);
+    let root = tree.root_node();
+    let mut file = match super::generic::of(path) {
+        Some(language) => tagged(language, root, source),
+        None => walked(path, root, source),
+    };
+    calls_by_name(&mut file.units);
+    if path.extension().is_none_or(|e| e != "rs") {
+        for unit in &mut file.units {
+            unit.passed.clear();
+        }
     }
-    let settings = super::django::settings_module(path, tree.root_node(), source);
+    Ok(file)
+}
+
+/// A file of the generic tier (`analysis::generic`): the definitions its
+/// tag query captures, and the syntax errors outside them.
+fn tagged(language: &super::generic::Language, root: Node<'_>, source: &str) -> FileUnits {
     let mut file = FileUnits {
         parsed: true,
-        django: settings || super::django::imports_django(path, tree.root_node(), source),
-        bend: bend::file(path).then(|| bend_names(path, tree.root_node(), source)),
+        generic: true,
         ..Default::default()
     };
-    walk(tree.root_node(), source, "", &mut file);
-    file.record_errors(tree.root_node());
+    generic::walk(language, root, source, &mut file);
+    file.record_errors(root);
+    file
+}
+
+/// A file of a language with an analyzer of its own: its definitions and
+/// the syntax errors outside them, then its Bend 2 aliases and Django
+/// routes, its module constants outside what the errors left out, the
+/// statements outside every unit, and a server template's code.
+fn walked(path: &Path, root: Node<'_>, source: &str) -> FileUnits {
+    let settings = super::django::settings_module(path, root, source);
+    let mut file = FileUnits {
+        parsed: true,
+        django: settings || super::django::imports_django(path, root, source),
+        bend: bend::file(path).then(|| bend_names(path, root, source)),
+        ..Default::default()
+    };
+    walk(root, source, "", &mut file);
+    file.record_errors(root);
     if let Some(names) = &file.bend {
         unaliased_calls(&mut file.units, &names.aliases);
     }
     if file.django {
-        file.routes = super::django::routes(tree.root_node(), source);
+        file.routes = super::django::routes(root, source);
         if !settings {
-            file.module_constants = super::django::module_constants(tree.root_node(), source);
+            file.module_constants = super::django::module_constants(root, source);
         }
     }
-    file.constants = super::literals::constants(tree.root_node(), source);
+    file.constants = super::literals::constants(root, source);
     if file.partial() {
         let left_out = file.left_out_code(source);
         file.constants.retain(|c| {
@@ -227,17 +248,11 @@ pub fn parse(path: &Path, source: &str) -> Result<FileUnits> {
         });
     }
     let spans: Vec<Range<usize>> = file.units.iter().map(|u| u.span.clone()).collect();
-    file.setup = setup_of(path, tree.root_node(), source, &spans, settings);
+    file.setup = setup_of(path, root, source, &spans, settings);
     if crate::components::server_template(path) {
         file.template_code = super::template_code::template_code(path, source);
     }
-    calls_by_name(&mut file.units);
-    if path.extension().is_none_or(|e| e != "rs") {
-        for unit in &mut file.units {
-            unit.passed.clear();
-        }
-    }
-    Ok(file)
+    file
 }
 
 /// The statements that run outside every unit: a framework configuration's

@@ -31,25 +31,8 @@ pub(super) fn walk(language: &Language, root: Node<'_>, source: &str, file: &mut
     let types: Vec<&Tag<'_>> = types.into_iter().filter(|t| !in_function(t)).collect();
     let holds_function = |tag: &Tag<'_>| functions.iter().any(|f| inside(tag.node, f.node));
     for function in &functions {
-        let owner = types
-            .iter()
-            .filter(|t| inside(t.node, function.node))
-            .max_by_key(|t| t.node.start_byte())
-            .map(|t| t.name)
-            .or(function.scope)
-            .map_or("", |name| text(name, source));
-        // The calls are in source order. Elixir's function head,
-        // `add(cart, item)`, is a call of the function's own name.
-        let range = function.node.byte_range();
-        let first = tags
-            .calls
-            .partition_point(|name| name.start_byte() < range.start);
-        let calls = tags.calls[first..]
-            .iter()
-            .take_while(|name| name.start_byte() < range.end)
-            .filter(|name| name.id() != function.name.id())
-            .map(|name| text(*name, source).to_string())
-            .collect();
+        let owner = owner_of(function, &types, source);
+        let calls = calls_in(function, &tags.calls, source);
         push(language, function, (owner, calls), source, file);
     }
     for tag in &types {
@@ -62,6 +45,33 @@ pub(super) fn walk(language: &Language, root: Node<'_>, source: &str, file: &mut
     }
     file.units.sort_by_key(|unit| unit.span.start);
     file.left_out.sort_by_key(|l| (l.span.start, l.span.end));
+}
+
+/// The type a function is a method of: the innermost of `types` holding
+/// it, or the one its name is written in (`Cart::add`, `M.add`); empty for
+/// a free function.
+fn owner_of<'s>(function: &Tag<'_>, types: &[&Tag<'_>], source: &'s str) -> &'s str {
+    types
+        .iter()
+        .filter(|t| inside(t.node, function.node))
+        .max_by_key(|t| t.node.start_byte())
+        .map(|t| t.name)
+        .or(function.scope)
+        .map_or("", |name| text(name, source))
+}
+
+/// The names a function calls, found by position among the query's `calls`,
+/// which are in source order. Elixir's function head, `add(cart, item)`, is
+/// a call of the function's own name, so the name itself is not one.
+fn calls_in(function: &Tag<'_>, calls: &[Node<'_>], source: &str) -> BTreeSet<String> {
+    let range = function.node.byte_range();
+    let first = calls.partition_point(|name| name.start_byte() < range.start);
+    calls[first..]
+        .iter()
+        .take_while(|name| name.start_byte() < range.end)
+        .filter(|name| name.id() != function.name.id())
+        .map(|name| text(*name, source).to_string())
+        .collect()
 }
 
 /// Whether `inner` lies within `outer` and is not `outer` itself.
