@@ -97,25 +97,46 @@ impl Session<'_> {
             })
             .collect();
         let mut pending = self.answer_from_cache(requests, &mut receipts);
-        if !pending.is_empty() && self.halted.is_none() {
-            // Asked once: a store that refused, or a dialog declined, is not
-            // asked again for every batch.
-            self.halted = self.evaluator.unavailable();
-        }
-        if let Some(error) = self.halted.as_ref().filter(|_| !pending.is_empty()) {
-            // Without a key nothing can be sent: each file fails with the
-            // reason, and `check` ends with it once.
-            for unsent in &pending {
-                receipts[unsent.index].result = Err(anyhow::anyhow!("{error:#}"));
-            }
+        if self.cannot_send(&pending, &mut receipts) {
             return receipts;
         }
+        self.hold_to_budget(&mut pending, &mut receipts);
+        if !pending.is_empty() {
+            crate::progress::sending(pending.len());
+            self.send(pending, &mut receipts);
+        }
+        receipts
+    }
+
+    /// Whether nothing can be sent, as without a key: each of `pending`
+    /// then fails with the reason, and `check` ends with it once. The
+    /// evaluator is asked once, so a store that refused, or a dialog
+    /// declined, is not asked again for every batch.
+    fn cannot_send(&mut self, pending: &[Pending<'_>], receipts: &mut [Receipt]) -> bool {
+        if pending.is_empty() {
+            return false;
+        }
+        if self.halted.is_none() {
+            self.halted = self.evaluator.unavailable();
+        }
+        let Some(error) = &self.halted else {
+            return false;
+        };
+        for unsent in pending {
+            receipts[unsent.index].result = Err(anyhow::anyhow!("{error:#}"));
+        }
+        true
+    }
+
+    /// Keep what the request budget allows of `pending`, failing the rest,
+    /// and say once on stderr that the check will end incomplete. The agent
+    /// hook answers on its own terms.
+    fn hold_to_budget(&mut self, pending: &mut Vec<Pending<'_>>, receipts: &mut [Receipt]) {
         let allowed = pending.len().min(
             self.args
                 .max_requests
                 .map_or(pending.len(), |n| n.saturating_sub(self.requests) as usize),
         );
-        // The agent hook answers on its own terms; a check says it on stderr.
         if allowed < pending.len()
             && !crate::hook::invoked()
             && !std::mem::replace(&mut self.budget_noted, true)
@@ -128,11 +149,6 @@ impl Session<'_> {
         for unsent in pending.drain(allowed..) {
             receipts[unsent.index].result = Err(anyhow::anyhow!(budget_reached(self.args)));
         }
-        if !pending.is_empty() {
-            crate::progress::sending(pending.len());
-            self.send(pending, &mut receipts);
-        }
-        receipts
     }
 
     /// Fill receipts from cached answers; return the requests still to send,
