@@ -36,8 +36,8 @@ A provider error ends with the provider's request id when it sent one (`; reques
 **`jevgate: this commit was not checked: …` or `this push was not checked: …`**
 : A [Git hook](git-hooks.md)'s check could not finish, for the reason given, and let the change through, as `on_incomplete = "pass"` does by default for `--staged` and `--pre-push`. Fix the cause (a key, credits, a configuration that loads) and check again with `jevgate check --base <the commit before>`, or set `on_incomplete = "fail"` for a hook that stops the change instead. `it used its 60 seconds (max_seconds)` means the provider did not answer in time: the answers received are cached, so the next run asks only for the rest; raise `max_seconds` for larger pushes.
 
-**`Session API request budget exhausted; restart with an explicit larger --max-requests`**
-: `max_requests` or `--max-requests` capped the run. Raise it, or check fewer files with `--base` or paths; `--dry-run` estimates what a run will ask.
+**`Request budget reached (max_requests = N in jevgate.toml); rerun to continue from the cached answers, or raise the budget`**
+: `max_requests` in jevgate.toml, or `--max-requests`, capped the run; the message names which. A flag can only lower the ceiling jevgate.toml sets, so raise `max_requests` there. The answers the run got are cached, so a rerun asks only for the rest. A check that cannot fit its budget says so on stderr before its first request, with the number it needs at least. A whole-repository check asks about one request per file, and more with opt-in rules: `--dry-run` counts the first pass, and `max_cost` bounds spend without stopping large checks.
 
 **`Another JevGate session owns latest.json`**
 : Another `check` or `--watch` is running in the same repository. Stop it first.

@@ -258,7 +258,7 @@ impl ConfigContext {
         let mut enabled = if from_file {
             configured_rules(&rules, &self.config.rules)?
         } else {
-            expand(&rules, &args.rules)?.into_iter().collect()
+            expand_enabled(&rules, &args.rules)?.into_iter().collect()
         };
         let skipped = expand(&rules, &args.skip_rules)?;
         for rule in &skipped {
@@ -365,6 +365,7 @@ impl ConfigContext {
     /// Configuration is a ceiling; CLI flags may narrow but cannot bypass upload budgets.
     fn configure_budgets(&self, args: &mut CheckArgs) -> Result<()> {
         if let Some(n) = self.config.max_requests {
+            args.max_requests_in_config = args.max_requests.is_none_or(|limit| limit >= n);
             args.max_requests = Some(args.max_requests.map_or(n, |limit| limit.min(n)));
         }
         if let Some(n) = self.config.concurrency {
@@ -481,6 +482,17 @@ fn expand(rules: &[catalog::Rule], names: &[String]) -> Result<Vec<&'static str>
     Ok(keys)
 }
 
+/// The keys of the rules that naming `names` turns on: a group's opt-in
+/// rules only when the group runs none by default ([`catalog::enable_in`]).
+fn expand_enabled(rules: &[catalog::Rule], names: &[String]) -> Result<Vec<&'static str>> {
+    let mut keys = Vec::new();
+    for name in names {
+        let selected = catalog::enable_in(rules, name).ok_or_else(|| unknown(rules, name))?;
+        keys.extend(selected);
+    }
+    Ok(keys)
+}
+
 /// Keys of `rules` that `[rules]` enables: those its list names, else the
 /// `default` group with each rule turned on or off by its most specific
 /// level.
@@ -491,12 +503,12 @@ fn configured_rules(rules: &[catalog::Rule], configured: &Rules) -> Result<BTree
         Rules::List(_) => (&default[..], None),
         Rules::Levels(levels) => (&default[..], Some(levels)),
     };
-    let mut enabled: BTreeSet<_> = expand(rules, names)?.into_iter().collect();
+    let mut enabled: BTreeSet<_> = expand_enabled(rules, names)?.into_iter().collect();
     for rule in rules {
-        match levels.and_then(|levels| most_specific(levels, rule)) {
-            Some(level) if level.off() => enabled.remove(rule.key),
-            Some(_) => enabled.insert(rule.key),
-            None => false,
+        match levels.and_then(|levels| most_specific_entry(levels, rule)) {
+            Some((_, level)) if level.off() => enabled.remove(rule.key),
+            Some((name, _)) if catalog::enables(name, rule, rules) => enabled.insert(rule.key),
+            _ => false,
         };
     }
     Ok(enabled)
@@ -537,11 +549,19 @@ fn unknown(rules: &[catalog::Rule], name: &str) -> anyhow::Error {
 /// The entry that addresses `rule` most specifically: its ID or key, its
 /// group, then `default` or `all`.
 fn most_specific<'a, T>(entries: &'a BTreeMap<String, T>, rule: &catalog::Rule) -> Option<&'a T> {
+    most_specific_entry(entries, rule).map(|(_, value)| value)
+}
+
+/// [`most_specific`] with the name it is set for.
+fn most_specific_entry<'a, T>(
+    entries: &'a BTreeMap<String, T>,
+    rule: &catalog::Rule,
+) -> Option<(&'a str, &'a T)> {
     entries
         .iter()
         .filter(|(name, _)| catalog::specificity(name, rule) > 0)
         .max_by_key(|(name, _)| catalog::specificity(name, rule))
-        .map(|(_, value)| value)
+        .map(|(name, value)| (name.as_str(), value))
 }
 
 /// The groups `jevgate init` gave a `review` level before 0.26: every group
@@ -551,8 +571,9 @@ const INIT_REVIEW_GROUPS: [&str; 2] = ["maintainability", "tests"];
 /// What to tell a user whose jevgate.toml still holds the `[rules]` lines
 /// `jevgate init` wrote before 0.26, such as `maintainability = "review"  #
 /// file-organization, …`. They keep every review of those groups failing
-/// the check and judge hardcoded values, which 0.26's measured default gate
-/// and rules leave out, and most configurations were written that way. The
+/// the check, which 0.26's measured default gate leaves out, and most
+/// configurations were written that way. (They judged hardcoded values
+/// too, until 0.32: a group's level no longer turns its opt-in rules on.) The
 /// comment listing the group's rules tells them from a level set by hand,
 /// so deleting it keeps the level without the notice.
 fn written_before_mature(text: &str) -> Option<String> {
@@ -575,13 +596,8 @@ fn written_before_mature(text: &str) -> Option<String> {
         .iter()
         .map(|group| format!("`{group} = \"review\"`"))
         .collect();
-    let hardcoded = if groups.contains(&"maintainability") {
-        ", and hardcoded values is judged"
-    } else {
-        ""
-    };
     Some(format!(
-        "jevgate.toml keeps {} as `jevgate init` wrote {them} before 0.26: every {} review fails the check{hardcoded}. Delete {them} for the default rules and gate, which fails only on rule levels measured right at least 80% of the time; to keep {them}, delete {their} and this notice stops.",
+        "jevgate.toml keeps {} as `jevgate init` wrote {them} before 0.26: every {} review fails the check. Delete {them} for the default rules and gate, which fails only on rule levels measured right at least 80% of the time; to keep {them}, delete {their} and this notice stops.",
         lines.join(" and "),
         groups.join(" and "),
     ))
@@ -700,7 +716,7 @@ mod tests {
         let notice = written_before_mature(before).unwrap();
         assert!(
             notice.starts_with(
-                "jevgate.toml keeps `maintainability = \"review\"` and `tests = \"review\"` as `jevgate init` wrote them before 0.26: every maintainability and tests review fails the check, and hardcoded values is judged. Delete them"
+                "jevgate.toml keeps `maintainability = \"review\"` and `tests = \"review\"` as `jevgate init` wrote them before 0.26: every maintainability and tests review fails the check. Delete them"
             ),
             "{notice}"
         );
@@ -751,6 +767,56 @@ mod tests {
         assert_eq!(
             args.levels("tests/value"),
             [FailOn::Review, FailOn::Uncertain]
+        );
+    }
+
+    #[test]
+    fn a_group_turns_on_the_rules_it_runs_by_default_and_an_opt_in_group_every_rule() {
+        let on = |file: &str, rules: &[&str]| configured(file, rules, &[]).unwrap().rules;
+        let maintainability = [
+            catalog::FILE_ORGANIZATION,
+            catalog::FUNCTION_SIMPLIFICATION,
+            catalog::SHARED_LOGIC,
+        ];
+        assert_eq!(on("[rules]\nmaintainability = \"consider\"\n", &[]), {
+            let mut expected = maintainability.to_vec();
+            expected.extend([catalog::TEST_VALUE, catalog::TEST_REDUNDANCY, catalog::LAWS]);
+            expected
+        });
+        assert_eq!(on("rules = [\"maintainability\"]\n", &[]), maintainability);
+        assert_eq!(on("", &["maintainability"]), maintainability);
+        for named in [
+            on(
+                "[rules]\nmaintainability = \"consider\"\n\"maintainability/hardcoded-values\" = \"report\"\n",
+                &[],
+            ),
+            on("[rules]\nall = \"report\"\n", &[]),
+            on("", &["maintainability", "hardcoded-values"]),
+            on("", &["all"]),
+        ] {
+            assert!(
+                named.iter().any(|r| r == catalog::HARDCODED_VALUES),
+                "{named:?}"
+            );
+        }
+        let security = on("[rules]\nsecurity = \"mature\"\n", &[]);
+        for rule in catalog::SECURITY
+            .into_iter()
+            .chain([catalog::ACCESS_CONTROL, catalog::WORKFLOWS])
+        {
+            assert!(security.iter().any(|r| r == rule), "{rule}: {security:?}");
+        }
+        // Skipping a group still skips every rule of it.
+        let mut args = crate::tests::args();
+        args.rules = vec!["all".into()];
+        args.skip_rules = vec!["maintainability".into()];
+        context("").unwrap().configure(&mut args).unwrap();
+        assert!(
+            args.rules
+                .iter()
+                .all(|r| !maintainability.contains(&r.as_str()) && r != catalog::HARDCODED_VALUES),
+            "{:?}",
+            args.rules
         );
     }
 

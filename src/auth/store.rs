@@ -33,16 +33,53 @@ pub trait Backend {
 }
 
 pub struct NativeBackend;
+
+/// Whether a person answers at this terminal: stdin and stderr are both one.
+fn interactive() -> bool {
+    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+}
+
 impl NativeBackend {
     fn entry(&self) -> Result<keyring::Entry> {
         // Credential providers may open system dialogs. Only Windows' Credential
         // Manager is used through this interface without an interactive terminal.
         ensure!(
-            cfg!(windows) || (std::io::stdin().is_terminal() && std::io::stderr().is_terminal()),
+            cfg!(windows) || interactive(),
             "System credential operation requires a terminal; use --storage file or TYPESAFE_API_KEY for automation"
         );
+        Self::unchecked_entry()
+    }
+
+    fn unchecked_entry() -> Result<keyring::Entry> {
         keyring::Entry::new("jevgate", "typesafe-api-key")
             .map_err(|_| anyhow::anyhow!("System credential store is unavailable or locked"))
+    }
+
+    /// The saved key from the macOS Keychain. Git hooks and coding agents'
+    /// hooks run without a terminal (Git passes a pre-push hook its refs on
+    /// stdin, and an agent its event), and a read that required one never
+    /// found the key `jevgate auth login` saved. Without a terminal the
+    /// Keychain's own dialog is turned off, so a read macOS would ask about,
+    /// such as the first by a newly upgraded binary, fails at once instead
+    /// of waiting on a dialog nobody may be watching.
+    #[cfg(target_os = "macos")]
+    fn keychain_get() -> Result<Option<Zeroizing<String>>> {
+        let asking = interactive();
+        let _quiet = if asking {
+            None
+        } else {
+            security_framework::os::macos::keychain::SecKeychain::disable_user_interaction().ok()
+        };
+        match Self::unchecked_entry()?.get_password() {
+            Ok(value) => Ok(Some(Zeroizing::new(value))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(_) if asking => bail!(
+                "Cannot read the system credential store; unlock it or run jevgate auth login"
+            ),
+            Err(_) => bail!(
+                "macOS asks before this jevgate reads the key saved by jevgate auth login, which it cannot without a terminal; run jevgate auth status in a terminal once and choose Always Allow, or set TYPESAFE_API_KEY"
+            ),
+        }
     }
 }
 impl Backend for NativeBackend {
@@ -52,9 +89,14 @@ impl Backend for NativeBackend {
             not(any(target_os = "macos", target_os = "ios", target_os = "android"))
         ))]
         return super::native_unix::get();
-        #[cfg(not(all(
-            unix,
-            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        #[cfg(target_os = "macos")]
+        return Self::keychain_get();
+        #[cfg(not(any(
+            target_os = "macos",
+            all(
+                unix,
+                not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+            )
         )))]
         match self.entry()?.get_password() {
             Ok(value) => Ok(Some(Zeroizing::new(value))),

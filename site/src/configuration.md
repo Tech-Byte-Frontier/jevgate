@@ -6,13 +6,13 @@
 upload_allow = ["src/**", "tests/**"]   # only these paths may be uploaded
 upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 include_tests = true
-max_requests = 300
+max_cost = 1.00                          # dollars a check may spend; a whole-repository check costs a few cents
 
 [rules]                                  # a level per group or rule
-maintainability = "review"               # judge every rule of the group, and fail on its reviews
+maintainability = "review"               # judge the group's default rules, and fail on their reviews
 tests = "consider"
 security = "mature"                      # opt-in group, enabled by naming it; fails only on levels measured mature
-"maintainability/hardcoded-values" = "report"   # judge but never fail; "off" skips it
+"maintainability/hardcoded-values" = "report"   # an opt-in rule runs only when named: judge but never fail; "off" skips it
 
 [[scope]]                                # levels for the files these paths match
 paths = ["scripts/**", "tools/**"]
@@ -27,13 +27,13 @@ rules = { security = "consider" }        # except these
 | `generated` | built-in names | Globs of generated files, which are skipped |
 | `tests` | built-in conventions | Globs of additional test files |
 | `context` | none | Files always sent as related evidence, like `--context` |
-| `rules` | the `default` group | A list selects rules. A table gives each group or rule a level: `review`, `consider`, `mature`, `uncertain`, `report` (judge, never fail) or `off`; a level for a group judges every rule of it, opt-in ones included |
+| `rules` | the `default` group | A list selects rules. A table gives each group or rule a level: `review`, `consider`, `mature`, `uncertain`, `report` (judge, never fail) or `off`; a level for a group judges the rules it runs by default (`maintainability` leaves out the opt-in hardcoded values, which runs only when named), and every rule of a group with none on by default, such as `security` |
 | `[[scope]]` | none | `paths` (globs), with `fail_on` for every rule and `rules` for rules or groups, as above; `off` is not accepted (use `upload_deny`). The last scope that matches a file and addresses a rule wins; flags win over scopes |
 | `fail_on` | `["mature"]` | The level for rules without their own, like `--fail-on` |
 | `include_tests` | `false` | Judge tests, like `--include-tests` |
 | `model` | the key's provider's | The model, as the key's provider names it: `jev-1.13.0` for TypeSafe, `typesafe/jev-1.13` for OpenRouter, `typesafe-ai/jev` for Vercel AI Gateway. A pinned version keeps results repeatable; a repository that sets it for one provider needs `--model` with another provider's key |
 | `cache_ttl_secs` | `3600` | Cache lifetime for an alias: a model name without an `x.y.z` version, such as `jev-latest` or `jev-1.13`. Pinned versions such as `jev-1.13.0` never expire |
-| `max_requests` | unlimited | Ceiling on API attempts per invocation |
+| `max_requests` | unlimited | Ceiling on API attempts per invocation; `--max-requests` can only lower it. A whole-repository check asks about one request per file, and more with opt-in rules, so a ceiling sized for pull requests stops it: a check that will not fit says so before its first request. Prefer `max_cost` to bound spend |
 | `max_seconds` | `60` with `--staged` and `--pre-push`, else unlimited | Ceiling on the seconds a check asks for: no request starts, and no retry waits, past it, and what is left unasked leaves the run incomplete; `--max-seconds` can only lower it |
 | `max_cost` | unlimited | Ceiling on a check's estimated spend in dollars: each request is priced from its size before it is sent, stderr says when 75% and 90% are spent, and what would pass it is left unasked, leaving the run incomplete; `--max-cost` can only lower it |
 | `on_incomplete` | `"pass"` with `--staged` and `--pre-push`, else `"fail"` | What a run that cannot finish exits with, like `--on-incomplete`: `"fail"` exits 2; `"pass"` exits 0 and says on stderr that the change was not checked, and why ([Git hooks](git-hooks.md#when-the-check-cannot-finish)) |

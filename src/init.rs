@@ -112,15 +112,19 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # OpenRouter, typesafe-ai/jev for Vercel AI Gateway.
 # model = "{model}"
 
-# Budgets for one invocation; flags can only lower them.
-# max_requests = 200
-# concurrency = 4
+# Budgets for one invocation; flags can only lower them. A check of the
+# whole repository asks about one request per file, so a request ceiling
+# sized for pull requests stops it; max_cost bounds the spend instead (a
+# whole check of a 1,000-file project costs a few cents).
+# max_cost = 1.00
+# max_seconds = 300
 
 # Unset, the default rules run and only rule levels measured right at least
 # 80% of the time on projects JevGate was never tuned on fail the check
 # ("mature"; `jevgate rules` shows them), never in a preview language; other
 # findings are reported without failing it. A group or rule ID set to a
-# level is judged, every rule of a group included, and fails the check at
+# level is judged, a group's opt-in rules only when named on their own
+# (security and documentation are opt-in whole), and fails the check at
 # exactly that level: "review", "consider" (also fails on review), "mature",
 # "uncertain", "report" (judge, never fail) or "off". A rule's own entry wins
 # over its group's. Test rules also need include_tests or --include-tests.
@@ -155,31 +159,38 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
     )
 }
 
-/// A commented `[rules]` line for one group: a level to set, and its rules,
-/// with the ones that do not run by default marked opt-in.
+/// A commented `[rules]` line for one group: a level to set, and the rules
+/// it turns on; then a line of its own for each opt-in rule of a group that
+/// runs rules by default, which the group's level leaves out.
 fn group_example(group: &str) -> String {
     let members: Vec<_> = catalog::rules()
         .into_iter()
         .filter(|r| r.group == group)
         .collect();
     let opt_in = members.iter().all(|r| !r.default_enabled);
+    let name = |r: &catalog::Rule| {
+        r.id.trim_start_matches(&format!("{group}/")[..])
+            .to_string()
+    };
     let names: Vec<String> = members
         .iter()
-        .map(|r| {
-            let name = r.id.trim_start_matches(&format!("{group}/")[..]);
-            if r.default_enabled || opt_in {
-                name.to_string()
-            } else {
-                format!("{name} (opt-in)")
-            }
-        })
+        .filter(|r| r.default_enabled || opt_in)
+        .map(name)
         .collect();
     let (level, suffix) = if opt_in {
         ("consider", " (opt-in)")
     } else {
         ("review", "")
     };
-    format!("# {group} = \"{level}\"  # {}{suffix}\n", names.join(", "))
+    let mut lines = format!("# {group} = \"{level}\"  # {}{suffix}\n", names.join(", "));
+    for rule in members.iter().filter(|r| !r.default_enabled && !opt_in) {
+        lines.push_str(&format!(
+            "# \"{}\" = \"consider\"  # {} (opt-in, only by name)\n",
+            rule.id,
+            name(rule)
+        ));
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -225,7 +236,11 @@ mod tests {
             Rules::List(_) => panic!("rules is a table of levels"),
         };
         assert!(levels(config).is_empty(), "the default rules and gate");
-        assert!(text.contains("hardcoded-values (opt-in)"), "{text}");
+        assert!(
+            text.contains("# \"maintainability/hardcoded-values\" = \"consider\"  # hardcoded-values (opt-in, only by name)\n"),
+            "{text}"
+        );
+        assert!(!text.contains("shared-logic, hardcoded-values"), "{text}");
         assert!(
             text.contains("shows them), never in a preview language;"),
             "{text}"
@@ -233,14 +248,14 @@ mod tests {
         let uncommented: Vec<&str> = text
             .lines()
             .map(|line| {
-                let example = catalog::groups()
-                    .into_iter()
-                    .any(|g| line.starts_with(&format!("# {g} = ")));
+                let example = catalog::groups().into_iter().any(|g| {
+                    line.starts_with(&format!("# {g} = ")) || line.starts_with(&format!("# \"{g}/"))
+                });
                 if example { &line[2..] } else { line }
             })
             .collect();
         let config: Config = toml::from_str(&uncommented.join("\n")).unwrap();
-        assert_eq!(levels(config).len(), catalog::groups().len());
+        assert_eq!(levels(config).len(), catalog::groups().len() + 1);
         let example: String = text
             .lines()
             .skip_while(|line| *line != "# [[question]]")

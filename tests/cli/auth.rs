@@ -11,6 +11,18 @@ fn absent_credentials_produce_operational_failure_with_atomic_report() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
+    // One line says why, not one per file, and nothing else is printed.
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr.matches("No API key configured").count(),
+        1,
+        "{stderr}"
+    );
+    assert!(
+        stderr.starts_with("jevgate: No API key configured."),
+        "{stderr}"
+    );
     let report = project.snapshot().unwrap();
     assert_eq!(report["complete"], false);
     assert_eq!(report["files"][0]["status"], "error");

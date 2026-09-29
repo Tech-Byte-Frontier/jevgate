@@ -67,6 +67,10 @@ schemars = "=1.2.2"
 libc = "=0.2.189"
 signal-hook = { version = "=0.4.4", default-features = false }
 
+# Keychain reads without a terminal turn macOS's dialog off (`auth::store`).
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "=3.7.0", default-features = false }
+
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
 secret-service = { version = "=5.2.0", features = ["rt-async-io-crypto-rust"] }
 zbus = "=5.19.0"

@@ -74,6 +74,10 @@ impl Evaluator for Watched<'_> {
         self.inner.begin_review();
     }
 
+    fn unavailable(&mut self) -> Option<anyhow::Error> {
+        self.inner.unavailable()
+    }
+
     fn evaluate(&mut self, request: &Value) -> Result<Value> {
         self.watch.sent.fetch_add(1, Ordering::Relaxed);
         let result = self.inner.evaluate(request);

@@ -77,16 +77,17 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: St
     let (custom, notes): (Vec<_>, Vec<_>) = of(Strength::Note)
         .into_iter()
         .partition(|(_, f)| crate::catalog::custom(&f.rule));
+    let gate = Gate(report.gate.is_some());
     if !review.is_empty() {
         let heading = format!("Review ({}):", review.len());
-        emit_section(out, &heading, BOLD_RED, &review, style)?;
+        emit_section(out, (&heading, BOLD_RED), &review, gate, style)?;
     }
     if !consider.is_empty() {
-        emit_considers(out, &consider, verbose, style)?;
+        emit_considers(out, &consider, verbose, gate, style)?;
     }
     if !custom.is_empty() {
         let heading = format!("Notes from custom questions ({}):", custom.len());
-        emit_section(out, &heading, BOLD, &custom, style)?;
+        emit_section(out, (&heading, BOLD), &custom, gate, style)?;
     }
     if notes.is_empty() {
         return Ok(());
@@ -100,8 +101,13 @@ fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: St
         return Ok(());
     }
     let heading = format!("Notes ({}, optional):", notes.len());
-    emit_section(out, &heading, BOLD, &notes, style)
+    emit_section(out, (&heading, BOLD), &notes, gate, style)
 }
+
+/// Whether the run evaluated the gate: a finding of a run that did not, as
+/// one left incomplete, would fail it rather than failing it.
+#[derive(Clone, Copy)]
+struct Gate(bool);
 
 /// The top considers (all with `verbose`), under a heading that says how
 /// many there are and which are shown.
@@ -109,6 +115,7 @@ fn emit_considers(
     out: &mut impl Write,
     consider: &[(&Path, &Finding)],
     verbose: bool,
+    gate: Gate,
     style: Style,
 ) -> Result<()> {
     let shown = if verbose {
@@ -127,7 +134,13 @@ fn emit_considers(
         String::new()
     };
     let heading = format!("Consider ({}{more}):", consider.len());
-    emit_section(out, &heading, BOLD_YELLOW, &consider[..shown], style)
+    emit_section(
+        out,
+        (&heading, BOLD_YELLOW),
+        &consider[..shown],
+        gate,
+        style,
+    )
 }
 
 /// What the change does to the checks around the code, one line each: the
@@ -155,17 +168,17 @@ fn emit_guards(out: &mut impl Write, report: &Report, verbose: bool, style: Styl
     Ok(())
 }
 
-/// A blank line, a heading, then its findings.
+/// A blank line, a heading in its color, then its findings.
 fn emit_section(
     out: &mut impl Write,
-    heading: &str,
-    code: &str,
+    (heading, code): (&str, &str),
     findings: &[(&Path, &Finding)],
+    gate: Gate,
     style: Style,
 ) -> Result<()> {
     writeln!(out, "\n{}", style.paint(code, heading))?;
     for (path, finding) in findings {
-        emit_finding(out, path, finding, style)?;
+        emit_finding(out, path, finding, gate, style)?;
     }
     Ok(())
 }
@@ -349,7 +362,13 @@ fn emit_context_load(out: &mut impl Write, load: &crate::docs::load::ContextLoad
 /// `path:line [rule] message` and how often such findings were right, then
 /// the next step; the location is bold, the rule and the share right dim,
 /// and a finding that fails the gate says so in red.
-fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Style) -> Result<()> {
+fn emit_finding(
+    out: &mut impl Write,
+    path: &Path,
+    finding: &Finding,
+    Gate(evaluated): Gate,
+    style: Style,
+) -> Result<()> {
     let location = format!("{}:{}", path.display(), finding.line);
     let accepted = match (&finding.suppressed, finding.baselined) {
         (_, true) => " (baselined)".to_string(),
@@ -358,7 +377,12 @@ fn emit_finding(out: &mut impl Write, path: &Path, finding: &Finding, style: Sty
     };
     let rule = format!("[{}]{accepted}", finding.rule);
     let fails = if finding.fails_gate() {
-        format!("{} ", style.paint(RED, "(fails the gate)"))
+        let label = if evaluated {
+            "(fails the gate)"
+        } else {
+            "(would fail the gate)"
+        };
+        format!("{} ", style.paint(RED, label))
     } else {
         String::new()
     };
@@ -419,6 +443,7 @@ mod tests {
             &mut out,
             Path::new("src/a.rs"),
             &finding(Strength::Review),
+            Gate(true),
             style,
         )
         .unwrap();
