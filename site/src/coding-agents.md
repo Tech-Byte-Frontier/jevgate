@@ -18,7 +18,9 @@ is right, or say why the code should stay as it is.
 |---|---|
 | 0 | The gate passed; `consider` findings, and reviews from rules still being measured, may still be worth fixing |
 | 1 | The gate failed: act on the findings listed |
-| 2 | The run could not finish (no key, provider rejection, request budget); report it, don't treat it as a pass |
+| 2 | The run could not finish (no key, provider rejection, a budget); report it, don't treat it as a pass |
+
+A [Git hook](git-hooks.md) stops an agent's `git commit` or `git push` the same way, and ends what it prints with what to do: fix the findings, never bypass the hook with `--no-verify`, an allow comment or the baseline, and tell the person when a finding looks wrong.
 
 ## Set up an agent in one command
 
