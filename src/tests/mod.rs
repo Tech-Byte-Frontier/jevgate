@@ -212,6 +212,7 @@ pub(super) fn session<'a>(
         budget: token_budget::TokenBudget::default(),
         observed: (0, 0),
         answered: Default::default(),
+        spend: options.max_cost.map(crate::requests::Spend::new),
     }
 }
 

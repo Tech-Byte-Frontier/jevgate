@@ -333,7 +333,7 @@ fn run(
     let mut session = check::session(&args, &context, &store, &mut evaluator);
     check::judge(&mut session, &inputs, previous.as_ref(), &mut report)?;
     if !report.complete {
-        bail!(incomplete(&report));
+        bail!(report.incomplete_reason());
     }
     let accepted_now = match args.turn_start() {
         Some(_) => accepted_now(&context.root, &report),
@@ -363,7 +363,7 @@ fn configuration_at(root: &Path, start: &str) -> Result<Config> {
 /// person.
 fn accepted_now(root: &Path, report: &Report) -> BTreeSet<String> {
     let mut now = report.clone();
-    crate::suppress::apply(root, &mut now, &BTreeSet::new());
+    crate::suppress::apply(root, &mut now, &BTreeSet::new(), None);
     let _ = crate::baseline::apply(root, &mut now, None);
     let then = report.files.iter().flat_map(|f| &f.findings);
     now.files
@@ -384,7 +384,7 @@ fn arguments(context: &ConfigContext, scope: Scope) -> Result<CheckArgs> {
     args.paths = scope.paths;
     if let Some((base, now)) = scope.trees {
         args.base = Some(base);
-        args.worktree_snapshot = Some(now);
+        args.now = crate::revision::Now::Snapshot(now);
     }
     Ok(args)
 }
@@ -402,25 +402,6 @@ fn open_store(root: &Path, until: Instant) -> Result<storage::Store> {
             ),
             Err(error) => return Err(error),
         }
-    }
-}
-
-/// Why an incomplete check could not judge everything: the run's first
-/// error, else the first failed file's and how many failed alike.
-fn incomplete(report: &Report) -> String {
-    if let Some(error) = report.errors.first() {
-        return error.clone();
-    }
-    let failed: Vec<&str> = report
-        .files
-        .iter()
-        .filter(|f| f.status == Status::Error)
-        .filter_map(|f| f.error.as_deref())
-        .collect();
-    match failed.first() {
-        Some(first) if failed.len() > 1 => format!("{first} ({} files)", failed.len()),
-        Some(first) => (*first).to_string(),
-        None => "the check did not finish".into(),
     }
 }
 

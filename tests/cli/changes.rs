@@ -152,7 +152,7 @@ fn base_reads_the_repository_git_dir_names() {
 /// A path as a person would give it to Git. The tests' temporary directories
 /// are canonical, which on Windows is the verbatim form `\\?\C:\…`, and Git for
 /// Windows reads a `GIT_DIR` in that form as "not a git repository".
-fn plain(path: &std::path::Path) -> std::path::PathBuf {
+pub(super) fn plain(path: &std::path::Path) -> std::path::PathBuf {
     let text = path.to_string_lossy();
     match text.strip_prefix(r"\\?\") {
         Some(rest) if !rest.starts_with(r"UNC\") => std::path::PathBuf::from(rest),

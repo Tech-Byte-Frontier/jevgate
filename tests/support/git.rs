@@ -33,10 +33,11 @@ pub fn isolate(command: &mut Command) -> &mut Command {
     command
 }
 
-/// Run Git in `dir`, isolated, with a fixed identity and no signing, and
-/// return what it printed.
-pub fn run(dir: &Path, args: &[&str]) -> String {
-    let output = isolate(&mut Command::new("git"))
+/// Git in `dir`, isolated, with a fixed identity and no signing, for a test
+/// that sets more of its environment or reads how it failed.
+pub fn command(dir: &Path) -> Command {
+    let mut command = Command::new("git");
+    isolate(&mut command)
         .args([
             "-c",
             "user.name=JevGate test",
@@ -45,10 +46,14 @@ pub fn run(dir: &Path, args: &[&str]) -> String {
             "-c",
             "commit.gpgsign=false",
         ])
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
+        .current_dir(dir);
+    command
+}
+
+/// Run Git in `dir`, isolated, with a fixed identity and no signing, and
+/// return what it printed.
+pub fn run(dir: &Path, args: &[&str]) -> String {
+    let output = command(dir).args(args).output().unwrap();
     assert!(
         output.status.success(),
         "{}",

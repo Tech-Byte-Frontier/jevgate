@@ -37,6 +37,41 @@ pub enum ColorChoice {
     Never,
 }
 
+/// What a run that could not finish exits with.
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum OnIncomplete {
+    /// Exit 0, saying on stderr that the change was not checked, and why
+    Pass,
+    /// Exit 2
+    Fail,
+}
+
+/// The Git hook a check runs for: `--staged` before a commit, `--pre-push`
+/// before a push.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Moment {
+    Commit,
+    Push,
+}
+
+impl Moment {
+    /// What the hook holds back while the check runs: "commit", "push".
+    pub fn noun(self) -> &'static str {
+        match self {
+            Self::Commit => "commit",
+            Self::Push => "push",
+        }
+    }
+}
+
+/// Seconds a `--staged` or `--pre-push` check asks for at most, unless
+/// `--max-seconds` or `max_seconds` says otherwise: a commit or a push waits
+/// on it, and a provider that stops answering held a run of 100 requests
+/// for 8 minutes before it ended incomplete.
+pub const HOOK_SECONDS: u64 = 60;
+
 /// Results that fail the check. Consider also fails on review findings.
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 pub enum FailOn {
@@ -130,16 +165,49 @@ pub struct CheckArgs {
     /// are listed in the report. The revision must exist locally: in CI,
     /// check out with full history (for example `fetch-depth: 0`). When no
     /// supported file changed, the run is complete and exits 0.
-    #[arg(long, value_name = "REVISION", help_heading = SCOPE)]
+    #[arg(long, value_name = "REVISION", group = "change", help_heading = SCOPE)]
     pub base: Option<String>,
-    /// With --base, judge each changed file whole, not only what the change touches
-    #[arg(long, requires = "base", help_heading = SCOPE)]
+    /// Review only what is staged: the change a commit records, for a pre-commit hook
+    ///
+    /// Compares the index with HEAD, and never reads untracked files; in a
+    /// hook, the index Git is committing, which for `commit -a` or `git commit
+    /// PATHS` is a temporary one. The files the change touched are read as
+    /// staged, so a file staged in part with `git add -p` is judged as it will
+    /// be committed; other files read as evidence come from disk. A commit
+    /// that concludes a merge is judged for how the person resolved it, not
+    /// for the merged branch's changes. Only what the change touches is asked
+    /// about and reported, as with --base. When
+    /// the run cannot finish, the commit goes through and JevGate says so
+    /// (--on-incomplete), within 60 seconds by default (--max-seconds).
+    #[arg(long, group = "change", help_heading = SCOPE)]
+    pub staged: bool,
+    /// Review what a push sends, for a pre-push hook: the refs Git passes it on stdin
+    ///
+    /// Each pushed commit is compared with the last commit on its first-parent
+    /// line that a remote already has: a branch pushed before with its last
+    /// push, a new or rebased branch with where it leaves the remote's
+    /// history. Files are read as committed, not as the working tree holds
+    /// them. Under pre-commit or prek, the ref they pass (PRE_COMMIT_TO_REF)
+    /// is read instead; run on a terminal, the current branch. A ref none of
+    /// whose history is on a remote is not checked, and a line says so. When
+    /// the run cannot finish, the push goes through and JevGate says so
+    /// (--on-incomplete), within 60 seconds by default (--max-seconds).
+    #[arg(long, group = "change", help_heading = SCOPE)]
+    pub pre_push: bool,
+    /// With --base, --staged or --pre-push, judge each changed file whole, not only what the change touches
+    #[arg(long, requires = "change", help_heading = SCOPE)]
     pub whole_files: bool,
-    /// Set by the agent hook: a snapshot of the working tree (a Git tree). The
-    /// change is then `base`, the turn's snapshot, to this one, with no merge
-    /// base: the fork point of a snapshot and HEAD is HEAD itself.
+    /// What the change runs to from `base`: the working tree with --base, the
+    /// index with --staged, a pushed commit with --pre-push, or, set by the
+    /// agent hook, a snapshot of the working tree (a Git tree). A snapshot
+    /// and a commit are compared with `base` as it is, with no merge base:
+    /// the fork point of a snapshot and HEAD is HEAD itself.
     #[arg(skip)]
-    pub worktree_snapshot: Option<String>,
+    pub now: crate::revision::Now,
+    /// With --staged or --pre-push, the files the change touched as Git
+    /// holds them; they are judged as read here, not from disk.
+    #[arg(skip)]
+    pub recorded: Option<crate::revision::Recorded>,
     /// Also judge tests: test value, redundancy, and shared logic among tests
     ///
     /// Without it, test files are judged only for file organization. Test
@@ -195,9 +263,20 @@ pub struct CheckArgs {
     /// group, for example `security=consider`; the most specific target wins.
     /// Flags replace `fail_on` and `[rules]` levels from jevgate.toml for the
     /// rules they address. Notes and baselined findings never fail the gate.
-    /// An incomplete run exits 2 regardless of the gate.
+    /// An incomplete run exits 2 regardless of the gate, unless --on-incomplete
+    /// passes it.
     #[arg(long = "fail-on", value_name = "[TARGET=]LEVEL", value_parser = fail_on_spec, help_heading = RULES)]
     pub fail_on_specs: Vec<FailOnSpec>,
+    /// When the run cannot finish: pass (exit 0) or fail (exit 2) [default: pass with --staged and --pre-push, else fail]
+    ///
+    /// A run that could not judge everything, for want of a key, after an
+    /// HTTP 402, with a provider that stopped answering or at a budget, fails
+    /// with exit 2 by default, so CI never passes on partial evidence. With
+    /// --staged and --pre-push it passes by default, so an outage never holds
+    /// a commit or a push; stderr then says the change was not checked, and
+    /// why. Also set by `on_incomplete` in jevgate.toml.
+    #[arg(long, value_enum, value_name = "WHEN", help_heading = RULES)]
+    pub on_incomplete: Option<OnIncomplete>,
     /// The resolved levels for rules without their own: from --fail-on, else configuration.
     #[arg(skip)]
     pub fail_on: Vec<FailOn>,
@@ -263,6 +342,22 @@ pub struct CheckArgs {
     /// ceiling this flag can only lower.
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000), help_heading = BUDGETS)]
     pub max_requests: Option<u32>,
+    /// Stop asking after this many seconds; what is left unasked leaves the run incomplete [default: 60 with --staged and --pre-push]
+    ///
+    /// No request starts, and no retry or pause runs, past it, and an attempt
+    /// under way gets only the time left. The answers received are kept in
+    /// the cache, so a rerun asks only for the rest. `max_seconds` in
+    /// jevgate.toml is a ceiling this flag can only lower.
+    #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=86400), help_heading = BUDGETS)]
+    pub max_seconds: Option<u64>,
+    /// Stop asking before the estimated spend passes this many dollars; what is left unasked leaves the run incomplete
+    ///
+    /// Each request is priced from its size before it is sent, at the model's
+    /// price, and stderr says when 75% and 90% of the budget are spent.
+    /// Answers from the cache cost nothing. `max_cost` in jevgate.toml is a
+    /// ceiling this flag can only lower.
+    #[arg(long, value_name = "DOLLARS", value_parser = dollars, help_heading = BUDGETS)]
+    pub max_cost: Option<f64>,
     /// Maximum simultaneous requests, at most 6; a higher value is lowered to 6 [default: 6, or 3 with a gateway's key]
     ///
     /// The default follows the key: 6 with a TypeSafe key, 3 with an
@@ -351,6 +446,14 @@ fn concurrency(value: &str) -> Result<u32, String> {
     }
 }
 
+/// `--max-cost`: a positive number of dollars.
+pub(crate) fn dollars(value: &str) -> Result<f64, String> {
+    match value.trim_start_matches('$').parse::<f64>() {
+        Ok(usd) if usd.is_finite() && usd > 0.0 => Ok(usd),
+        _ => Err("Use a positive number of dollars, for example: --max-cost 0.50".into()),
+    }
+}
+
 fn source_extension(value: &str) -> Result<String, String> {
     if value.is_empty() || !value.bytes().all(|c| c.is_ascii_alphanumeric()) {
         return Err("Use an extension without a dot, for example: --source-extension zig".into());
@@ -422,9 +525,59 @@ impl CheckArgs {
     }
 
     /// The snapshot of the working tree an agent's turn began with, in the
-    /// agent hook's checks of a turn: `base`, when `worktree_snapshot` is set.
+    /// agent hook's checks of a turn: `base`, when the change runs to a
+    /// snapshot.
     pub fn turn_start(&self) -> Option<&str> {
-        self.worktree_snapshot.as_ref().and(self.base.as_deref())
+        matches!(self.now, crate::revision::Now::Snapshot(_))
+            .then_some(self.base.as_deref())
+            .flatten()
+    }
+
+    /// The Git hook this check runs for, if any.
+    pub fn moment(&self) -> Option<Moment> {
+        match (self.staged, self.pre_push) {
+            (true, _) => Some(Moment::Commit),
+            (_, true) => Some(Moment::Push),
+            _ => None,
+        }
+    }
+
+    /// Whether a run that cannot finish passes: `--on-incomplete`, else
+    /// `on_incomplete`, else for a commit or a push.
+    pub fn passes_incomplete(&self) -> bool {
+        let default = match self.moment() {
+            Some(_) => OnIncomplete::Pass,
+            None => OnIncomplete::Fail,
+        };
+        self.on_incomplete.unwrap_or(default) == OnIncomplete::Pass
+    }
+
+    /// The text of the file at `path` as this check judges it: from Git when
+    /// the change runs to the index or a pushed commit and touched the file,
+    /// else from disk, as `inventory::read_source` reads it.
+    pub fn read(&self, path: &std::path::Path, limit: u64) -> anyhow::Result<String> {
+        match self.recorded.as_ref().and_then(|r| r.read(path, limit)) {
+            Some(read) => read,
+            None => crate::inventory::read_source(path, limit),
+        }
+    }
+
+    /// The size of the file at `path` as this check judges it; none when it
+    /// cannot be read.
+    pub fn size(&self, path: &std::path::Path) -> Option<u64> {
+        match self.recorded.as_ref().and_then(|r| r.size(path)) {
+            Some(size) => Some(size),
+            None => std::fs::symlink_metadata(path).ok().map(|m| m.len()),
+        }
+    }
+
+    /// Whether the file at `path`, as this check judges it, is a regular
+    /// file: not a link, a directory or a submodule.
+    pub fn regular_file(&self, path: &std::path::Path) -> bool {
+        match self.recorded.as_ref().and_then(|r| r.regular(path)) {
+            Some(regular) => regular,
+            None => std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()),
+        }
     }
 
     /// Whether any documentation rule is selected, so instruction files are found.

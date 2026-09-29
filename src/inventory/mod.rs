@@ -186,17 +186,13 @@ fn source_paths(
 ) -> Result<Vec<(PathBuf, String)>> {
     let classifier = discovery::Classifier::new(&context.config)?;
     let mut paths = Vec::new();
-    for entry in walker(&context.root) {
-        let entry = entry.context("Failed while discovering Jev scope")?;
-        let path = entry.path();
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
+    let mut consider = |path: &Path| -> Result<()> {
         let relative = &discovery::relative(path, &context.root)?;
         // A server template counts only for its inline scripts and the code
         // that reads client data.
         let template = crate::components::server_template(relative)
-            && std::fs::read_to_string(path)
+            && args
+                .read(path, LOCAL_PARSE_MAX)
                 .is_ok_and(|text| crate::components::judged(relative, &text));
         if (discovery::source(relative, &args.source_extension) || template)
             && selected(relative)
@@ -205,9 +201,39 @@ fn source_paths(
         {
             paths.push((path.to_path_buf(), classifier.role(relative).to_string()));
         }
+        Ok(())
+    };
+    for entry in walker(&context.root) {
+        let entry = entry.context("Failed while discovering Jev scope")?;
+        if entry.file_type().is_some_and(|t| t.is_file()) {
+            consider(entry.path())?;
+        }
+    }
+    for path in only_in_git(args, context) {
+        consider(&path)?;
     }
     paths.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(paths)
+}
+
+/// Files the change touched that Git holds and the working tree no longer
+/// does, which the walk cannot find: a file staged and then deleted, or
+/// deleted since the pushed commit. Paths inside the directories a check
+/// never reads stay out, as the walk leaves them.
+fn only_in_git(args: &CheckArgs, context: &ConfigContext) -> Vec<PathBuf> {
+    let Some(recorded) = &args.recorded else {
+        return Vec::new();
+    };
+    recorded
+        .paths()
+        .filter(|relative| {
+            !relative.components().any(|part| {
+                discovery::SKIPPED_DIRS.contains(&part.as_os_str().to_str().unwrap_or_default())
+            })
+        })
+        .map(|relative| context.root.join(relative))
+        .filter(|path| std::fs::symlink_metadata(path).is_err())
+        .collect()
 }
 
 /// SQL files for the access-control rule and workflows for the workflow rule.
@@ -302,17 +328,21 @@ fn load(
         return Ok(recast(result, "vendored", relative));
     }
     let copied = |source: &str| copied_now((&path, relative), &role, source, args, context);
-    if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
+    if args
+        .size(&path)
+        .is_some_and(|size| size > args.max_file_bytes)
+    {
         // A copied library or build output is excluded whatever its size.
-        let copied = read_source(&path, LOCAL_PARSE_MAX)
+        let copied = args
+            .read(&path, LOCAL_PARSE_MAX)
             .ok()
             .and_then(|source| copied(&source));
         return Ok(match copied {
             Some(kind) => recast(result, kind, relative),
-            None => over_read_cap(result, relative, &path, args.max_file_bytes)?,
+            None => over_read_cap(result, relative, &path, args)?,
         });
     }
-    match read_source(&path, args.max_file_bytes) {
+    match args.read(&path, args.max_file_bytes) {
         Ok(source) => Ok(match copied(&source) {
             Some(kind) => recast(result, kind, relative),
             None => source_input(result, source, (&path, relative), args, context, extra),
@@ -504,13 +534,16 @@ fn error_input(mut result: FileResult, error: impl ToString) -> Input {
 
 const LOCAL_PARSE_MAX: u64 = 1_048_576;
 
+/// A file larger than `--max-file-bytes`, as `args` reads it: parsed
+/// locally when it is at most 1 MiB, and never sent.
 fn over_read_cap(
     mut result: FileResult,
     relative: &std::path::Path,
     path: &std::path::Path,
-    cap: u64,
+    args: &CheckArgs,
 ) -> Result<Input> {
-    let parsed = match read_source(path, LOCAL_PARSE_MAX) {
+    let cap = args.max_file_bytes;
+    let parsed = match args.read(path, LOCAL_PARSE_MAX) {
         Ok(source) => Some(source),
         Err(error) => {
             let message = error.to_string();
@@ -520,11 +553,10 @@ fn over_read_cap(
             None
         }
     };
-    let len = parsed.as_ref().map(String::len).unwrap_or_else(|| {
-        std::fs::symlink_metadata(path)
-            .map(|metadata| metadata.len() as usize)
-            .unwrap_or(0)
-    });
+    let len = parsed
+        .as_ref()
+        .map(String::len)
+        .unwrap_or_else(|| args.size(path).unwrap_or(0) as usize);
     if let Some(source) = &parsed {
         result.source_hash = hash(source.as_bytes());
         result.content_identity = super::locations::identity(relative, source);
@@ -564,6 +596,11 @@ pub(super) fn read_source(path: &std::path::Path, limit: u64) -> Result<String> 
         bytes.len() as u64 <= limit,
         "File grew beyond --max-file-bytes"
     );
+    text_of(bytes)
+}
+
+/// A source file's bytes as text: never with NUL bytes, and UTF-8.
+pub(crate) fn text_of(bytes: Vec<u8>) -> Result<String> {
     ensure!(!bytes.contains(&0), "Source contains binary NUL bytes");
     String::from_utf8(bytes).context("Source is not UTF-8")
 }

@@ -8,11 +8,11 @@
 //! always says so. What each event does is in `events`.
 mod agents;
 mod events;
-mod outage;
+pub(crate) mod outage;
 mod review;
 #[cfg(test)]
 mod tests;
-mod text;
+pub(crate) mod text;
 mod turn;
 
 pub use agents::Agent;

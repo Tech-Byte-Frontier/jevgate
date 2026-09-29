@@ -221,19 +221,24 @@ pub(crate) fn through(provider: crate::provider::Provider) -> String {
 const SHORT_COMMIT: usize = 7;
 
 /// With a base revision, what the check judged since it: ` · changed lines
-/// since 1a2b3c4` or ` · whole files changed since 1a2b3c4`.
+/// since 1a2b3c4` or ` · whole files changed since 1a2b3c4`; ` · staged
+/// lines since 1a2b3c4` for the index, and ` · changed lines from 1a2b3c4
+/// to 9f8e7d6` for a pushed commit.
 fn since(report: &Report) -> String {
     let Some(base) = &report.base_revision else {
         return String::new();
     };
-    let judged = match report.scope {
-        Scope::ChangedLines => "changed lines",
-        Scope::WholeFiles => "whole files changed",
+    let short = |id: &str| id.get(..SHORT_COMMIT).unwrap_or(id).to_string();
+    let judged = match (report.scope, report.staged) {
+        (Scope::ChangedLines, false) => "changed lines",
+        (Scope::WholeFiles, false) => "whole files changed",
+        (Scope::ChangedLines, true) => "staged lines",
+        (Scope::WholeFiles, true) => "whole files staged",
     };
-    format!(
-        " · {judged} since {}",
-        base.get(..SHORT_COMMIT).unwrap_or(base)
-    )
+    match &report.pushed_revision {
+        Some(pushed) => format!(" · {judged} from {} to {}", short(base), short(pushed)),
+        None => format!(" · {judged} since {}", short(base)),
+    }
 }
 
 /// Every finding with its file's path, highest rank first.

@@ -498,7 +498,14 @@ fn answered(received: &Received) -> Reply {
 fn an_exchange_sends_the_bearer_key_and_keeps_only_a_checked_request_id() {
     let (provider, endpoint) =
         mock(|received| answered(received).header(REQUEST_ID, "req_01J9-abc"));
-    let answer = send(&agent(ATTEMPT_TIMEOUT), &endpoint, "test-key", &question()).unwrap();
+    let answer = send(
+        &agent(ATTEMPT_TIMEOUT),
+        &endpoint,
+        "test-key",
+        &question(),
+        None,
+    )
+    .unwrap();
     assert_eq!(answer["request_id"], "req_01J9-abc");
     assert!(crate::response::validate(&answer, &question()).is_ok());
     let received = &provider.received()[0];
@@ -513,7 +520,7 @@ fn an_exchange_sends_the_bearer_key_and_keeps_only_a_checked_request_id() {
         body["id"] = json!("gen-dec-1789738314-X5e5");
         Reply::json(200, &body)
     });
-    let answer = send(&agent(ATTEMPT_TIMEOUT), &openrouter, "k", &question()).unwrap();
+    let answer = send(&agent(ATTEMPT_TIMEOUT), &openrouter, "k", &question(), None).unwrap();
     assert_eq!(
         answer["request_id"], "gen-dec-1789738314-X5e5",
         "a response's own id stands in"
@@ -523,7 +530,7 @@ fn an_exchange_sends_the_bearer_key_and_keeps_only_a_checked_request_id() {
         body["request_id"] = json!("not an id \u{1b}[31m<script>\nline2");
         Reply::json(200, &body)
     });
-    let answer = send(&agent(ATTEMPT_TIMEOUT), &forged, "k", &question()).unwrap();
+    let answer = send(&agent(ATTEMPT_TIMEOUT), &forged, "k", &question(), None).unwrap();
     assert!(
         answer.get("request_id").is_none(),
         "a request_id the body sends itself is not an id that was checked"
@@ -552,7 +559,7 @@ fn queued(agent: &ureq::Agent, endpoint: &Endpoint) -> Outcome {
         &[&request],
         1,
         &|_| Ok(()),
-        |request| send(agent, endpoint, "k", request),
+        |request| send(agent, endpoint, "k", request, None),
         &mut |_, outcome| last = Some(outcome),
     );
     last.unwrap()
@@ -612,7 +619,7 @@ fn a_gateway_answering_503_to_the_first_sends_of_every_request_completes() {
         &batch,
         crate::provider::GATEWAY_CONCURRENCY as usize,
         &|_| Ok(()),
-        |request| send(&agent, &endpoint, "sk-or-v1-test", request),
+        |request| send(&agent, &endpoint, "sk-or-v1-test", request, None),
         &mut |_, outcome| outcomes.push(outcome),
     );
     assert_eq!(outcomes.len(), requests.len());
@@ -636,7 +643,7 @@ fn a_failure_names_its_request_id_and_invalid_fields_but_never_the_provider_text
             "msg": "private text", "type": "missing", "input": "private input"}]});
         Reply::json(422, &detail).header(REQUEST_ID, "req_9")
     });
-    let error = send(&agent(ATTEMPT_TIMEOUT), &endpoint, "k", &question()).unwrap_err();
+    let error = send(&agent(ATTEMPT_TIMEOUT), &endpoint, "k", &question(), None).unwrap_err();
     assert_eq!(
         error.to_string(),
         "TypeSafe HTTP 422 (invalid request: body.questions.q.criteria missing); request was not retried; request id req_9"

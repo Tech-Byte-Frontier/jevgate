@@ -3,13 +3,16 @@
 //! accepts that finding as the baseline does. RULE is a rule ID, name, key or group,
 //! and the reason is required: without one the comment is ignored and the
 //! finding says so.
-use crate::{catalog, schema::Report};
+use crate::{catalog, revision::Recorded, schema::Report};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
 };
 
 const MARKER: &str = "jevgate:";
+/// The most of a file Git holds that is read for its comments: as much as
+/// a check reads of any file.
+const READ_BYTES: u64 = 1_048_576;
 
 /// What one `jevgate: allow(…)` comment names and why.
 #[derive(Debug, PartialEq)]
@@ -19,11 +22,20 @@ struct Allow {
 }
 
 /// Mark the findings an allow comment names, but for comments on the
-/// `ignored` lines (a file and a 1-based line), which accept nothing. Files
-/// that cannot be read keep their findings.
-pub fn apply(root: &Path, report: &mut Report, ignored: &BTreeSet<(PathBuf, usize)>) {
+/// `ignored` lines (a file and a 1-based line), which accept nothing. Each
+/// file is read as the check judged it: from disk, or as Git holds a file
+/// a `--staged` or `--pre-push` change touched (`recorded`), whose lines
+/// the findings name. Files that cannot be read keep their findings.
+pub fn apply(
+    root: &Path,
+    report: &mut Report,
+    ignored: &BTreeSet<(PathBuf, usize)>,
+    recorded: Option<&Recorded>,
+) {
     for file in report.files.iter_mut().filter(|f| !f.findings.is_empty()) {
-        let Ok(text) = std::fs::read_to_string(root.join(&file.path)) else {
+        let path = root.join(&file.path);
+        let read = recorded.and_then(|r| r.read(&path, READ_BYTES));
+        let Ok(text) = read.unwrap_or_else(|| Ok(std::fs::read_to_string(&path)?)) else {
             continue;
         };
         let lines: Vec<&str> = text.lines().collect();

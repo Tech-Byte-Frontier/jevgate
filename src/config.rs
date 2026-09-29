@@ -27,6 +27,12 @@ pub struct Config {
     pub rules: Rules,
     /// Ceiling on API attempts per invocation; flags can only lower it. Default: unlimited.
     pub max_requests: Option<u32>,
+    /// Ceiling on the seconds a check asks for; what is left unasked leaves the run incomplete. Flags can only lower it. Default: 60 with `--staged` and `--pre-push`, else unlimited.
+    pub max_seconds: Option<u64>,
+    /// Ceiling on a check's estimated spend in dollars; what is left unasked leaves the run incomplete. Flags can only lower it. Default: unlimited.
+    pub max_cost: Option<f64>,
+    /// What a run that cannot finish exits with, like `--on-incomplete`: `pass` (exit 0, saying so on stderr) or `fail` (exit 2). Default: `pass` with `--staged` and `--pre-push`, else `fail`.
+    pub on_incomplete: Option<crate::options::OnIncomplete>,
     /// Most simultaneous requests; flags can only lower it. JevGate sends at most 6 at once, so a higher value means 6. Default: 6 with a TypeSafe key, 3 with an OpenRouter or Vercel AI Gateway key.
     pub concurrency: Option<u32>,
     /// Files larger than this are reported as needs-context, never truncated. Default: 262144.
@@ -373,8 +379,22 @@ impl ConfigContext {
         if let Some(n) = self.config.max_context_bytes {
             args.max_context_bytes = args.max_context_bytes.min(n);
         }
+        if let Some(n) = self.config.max_seconds {
+            args.max_seconds = Some(args.max_seconds.map_or(n, |limit| limit.min(n)));
+        }
+        if args.moment().is_some() {
+            args.max_seconds = args.max_seconds.or(Some(crate::options::HOOK_SECONDS));
+        }
+        if let Some(usd) = self.config.max_cost {
+            args.max_cost = Some(args.max_cost.map_or(usd, |limit| limit.min(usd)));
+        }
+        args.on_incomplete = args.on_incomplete.or(self.config.on_incomplete);
         ensure!(
-            args.max_requests != Some(0) && args.max_file_bytes > 0 && args.max_context_bytes > 0,
+            args.max_requests != Some(0)
+                && args.max_file_bytes > 0
+                && args.max_context_bytes > 0
+                && args.max_seconds != Some(0)
+                && args.max_cost.is_none_or(|usd| usd.is_finite() && usd > 0.0),
             "Budgets must be positive"
         );
         Ok(())

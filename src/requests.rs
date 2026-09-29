@@ -5,7 +5,7 @@ mod lookup;
 
 pub(super) use lookup::{Answered, cached, question_count, unanswered};
 
-use crate::{evaluate::Session, response, schema};
+use crate::{evaluate::Session, options::CheckArgs, response, schema};
 use anyhow::{Result, ensure};
 use lookup::Lookup;
 use serde_json::Value;
@@ -179,13 +179,21 @@ impl Session<'_> {
     /// Upload `pending` through the evaluator, rechecking each source first,
     /// and record every outcome in its receipt.
     fn send(&mut self, pending: Vec<Pending<'_>>, receipts: &mut [Receipt]) {
-        let root = &self.context.root;
-        let max_bytes = self.args.max_context_bytes.max(self.args.max_file_bytes);
+        let (args, root) = (self.args, &self.context.root);
+        let (spend, budget) = (self.spend.as_ref(), &self.budget);
         let before = |request: &Value| {
             crate::cancellation::check()?;
             // A queued upload must recheck the current bytes even when its
             // source was already verified while preparing the batch.
-            require_paths(root, max_bytes, request, &mut SourceHashes::new())
+            require_paths(args, root, request, &mut SourceHashes::new())?;
+            match spend {
+                Some(spend) => spend.charge(args, request, || {
+                    let tokens = budget.tokens_of(&provider_request(request)) as u64;
+                    crate::model::usd(args.model(), tokens)
+                        .unwrap_or(tokens as f64 * crate::model::INPUT_USD_PER_MILLION / 1e6)
+                }),
+                None => Ok(()),
+            }
         };
         let (sent, mut lookups): (Vec<_>, Vec<_>) = pending
             .into_iter()
@@ -219,6 +227,70 @@ impl Session<'_> {
                 }
             },
         );
+    }
+}
+
+/// A dollar budget, `--max-cost`: each request is priced from its size
+/// before it is first sent, at the model's price (an alias's at Jev 1.13's,
+/// which the gateways charge too), and none is sent that would pass it.
+pub struct Spend {
+    budget: f64,
+    spent: std::sync::Mutex<Spent>,
+}
+
+/// What the requests a check sent are estimated to cost.
+#[derive(Default)]
+struct Spent {
+    usd: f64,
+    /// The requests priced, by address: a retry sends the same request, and
+    /// is not priced again.
+    priced: std::collections::BTreeSet<usize>,
+    /// The share of the budget last said to be spent, in percent.
+    noticed: u8,
+}
+
+/// Shares of the budget stderr says are spent, in percent, highest first.
+const SPEND_NOTICES: [u8; 2] = [90, 75];
+
+impl Spend {
+    pub fn new(budget: f64) -> Self {
+        Self {
+            budget,
+            spent: Default::default(),
+        }
+    }
+
+    /// Price `request` at `usd` the first time it is sent, or refuse it when
+    /// that would pass the budget; say on stderr when the spend first
+    /// passes 75% and 90% of it.
+    fn charge(&self, args: &CheckArgs, request: &Value, usd: impl FnOnce() -> f64) -> Result<()> {
+        let mut spent = self.spent.lock().unwrap();
+        let address = std::ptr::from_ref(request) as usize;
+        if spent.priced.contains(&address) {
+            return Ok(());
+        }
+        let cost = usd();
+        ensure!(
+            spent.usd + cost <= self.budget,
+            "{} request not sent: it would pass the ${:.2} budget (max_cost)",
+            args.provider.service().label,
+            self.budget
+        );
+        spent.usd += cost;
+        spent.priced.insert(address);
+        let share = spent.usd / self.budget * 100.0;
+        if let Some(notice) = SPEND_NOTICES
+            .into_iter()
+            .find(|&notice| share >= f64::from(notice) && spent.noticed < notice)
+        {
+            spent.noticed = notice;
+            note!(
+                "jevgate: {notice}% of the ${:.2} budget spent (about ${:.4})",
+                self.budget,
+                spent.usd
+            );
+        }
+        Ok(())
     }
 }
 
@@ -346,22 +418,19 @@ pub(super) fn require_current(
     request: &Value,
     hashes: &mut SourceHashes,
 ) -> Result<()> {
-    require_paths(
-        &session.context.root,
-        session
-            .args
-            .max_context_bytes
-            .max(session.args.max_file_bytes),
-        request,
-        hashes,
-    )
+    require_paths(session.args, &session.context.root, request, hashes)
 }
+
+/// Stop when a file `request` holds no longer reads as it did when the
+/// request was built, as `args` reads it: from disk, or as Git holds a
+/// file a `--staged` or `--pre-push` change touched.
 fn require_paths(
+    args: &CheckArgs,
     root: &std::path::Path,
-    max_bytes: u64,
     request: &Value,
     hashes: &mut SourceHashes,
 ) -> Result<()> {
+    let max_bytes = args.max_context_bytes.max(args.max_file_bytes);
     for file in request["jevgate"]["sources"]
         .as_array()
         .into_iter()
@@ -372,7 +441,7 @@ fn require_paths(
                 hashes
                     .entry(path.into())
                     .or_insert_with(|| {
-                        crate::inventory::read_source(&root.join(path), max_bytes)
+                        args.read(&root.join(path), max_bytes)
                             .ok()
                             .map(|s| schema::hash(s.as_bytes()))
                     })

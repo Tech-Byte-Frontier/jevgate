@@ -314,6 +314,14 @@ pub struct Report {
     pub quick: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_revision: Option<String>,
+    /// With `--staged`: the change runs from `base_revision` to the index,
+    /// not to the working tree.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub staged: bool,
+    /// With `--pre-push`: the pushed commit the change runs to from
+    /// `base_revision`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pushed_revision: Option<String>,
     #[serde(default)]
     pub deleted_files: Vec<PathBuf>,
     #[serde(default)]
@@ -392,6 +400,25 @@ pub struct Report {
 }
 
 impl Report {
+    /// Why an incomplete run could not judge everything: its first error,
+    /// else the first failed file's and how many failed alike.
+    pub fn incomplete_reason(&self) -> String {
+        if let Some(error) = self.errors.first() {
+            return error.clone();
+        }
+        let failed: Vec<&str> = self
+            .files
+            .iter()
+            .filter(|f| f.status == Status::Error)
+            .filter_map(|f| f.error.as_deref())
+            .collect();
+        match failed.first() {
+            Some(first) if failed.len() > 1 => format!("{first} ({} files)", failed.len()),
+            Some(first) => (*first).to_string(),
+            None => "the check did not finish".into(),
+        }
+    }
+
     pub fn update_status(&mut self) {
         let selected: Vec<&FileResult> = self
             .files

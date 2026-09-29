@@ -187,11 +187,14 @@ impl Client {
         })
     }
 
-    /// Give up on a retry, or a pause another request's failure asked for,
-    /// that would end past `deadline`: the agent hook answers by then, and
-    /// a provider asking for 30 s would otherwise hold every edit for its
-    /// whole budget (29.8 s after an edit measured against a 503 asking
-    /// for `retry-after-ms: 30000`). The failure is then the answer.
+    /// Send nothing past `deadline`: no request starts, and no retry or
+    /// pause another request's failure asked for runs, past it, and an
+    /// attempt under way gets only the time left. The agent hook answers by
+    /// then, and a provider asking for 30 s would otherwise hold every edit
+    /// for its whole budget (29.8 s after an edit measured against a 503
+    /// asking for `retry-after-ms: 30000`); `check --max-seconds` stops
+    /// there, as a commit or a push waits on it. The failure is then the
+    /// answer.
     pub fn until(mut self, deadline: Instant) -> Self {
         self.access.deadline = Some(deadline);
         self
@@ -226,7 +229,8 @@ impl Evaluator for Client {
         let agent = self.agent.clone();
         self.credential()?;
         let key = self.key.as_ref().unwrap().key.expose();
-        let result = send(&agent, &self.endpoint, key, request);
+        let timeout = self.access.attempt_timeout()?;
+        let result = send(&agent, &self.endpoint, key, request, timeout);
         self.access.observe(&result);
         result
     }
@@ -258,12 +262,12 @@ impl Evaluator for Client {
             }
         }
         let key = self.key.as_ref().unwrap().key.expose();
-        let endpoint = &self.endpoint;
+        let (endpoint, access) = (&self.endpoint, &self.access);
         self.access.evaluate_queue(
             requests,
             concurrency,
             before,
-            |request| send(&agent, endpoint, key, request),
+            |request| send(&agent, endpoint, key, request, access.attempt_timeout()?),
             completed,
         );
     }
@@ -408,6 +412,19 @@ impl ProviderAccess {
             .is_some_and(|deadline| Instant::now() + pause >= deadline)
     }
 
+    /// The time left for the next attempt when the deadline comes before
+    /// [`ATTEMPT_TIMEOUT`] would; none when the client's own timeout ends
+    /// first. An error once the deadline has passed, and nothing is sent.
+    fn attempt_timeout(&self) -> Result<Option<Duration>> {
+        let Some(deadline) = self.deadline else {
+            return Ok(None);
+        };
+        match deadline.checked_duration_since(Instant::now()) {
+            Some(left) if !left.is_zero() => Ok((left < ATTEMPT_TIMEOUT).then_some(left)),
+            _ => Err(out_of_time(self.service)),
+        }
+    }
+
     /// Take the next start time, `interval` after the one before, and sleep until it.
     fn pace(&self) {
         let start = {
@@ -506,6 +523,9 @@ impl ProviderAccess {
                 {
                     return Outcome::skipped(error);
                 }
+                if self.past_deadline(Duration::ZERO) {
+                    return Outcome::skipped(out_of_time(self.service));
+                }
                 let started_ms = queue_start.elapsed().as_millis() as u64;
                 let start = std::time::Instant::now();
                 let (result, retries) = self.send_with_retries(*index, request, before, &send);
@@ -516,6 +536,14 @@ impl ProviderAccess {
             completed,
         );
     }
+}
+
+/// The error of a request not sent because the check's time ran out.
+fn out_of_time(service: &Service) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{} request not sent: the check ran out of time",
+        service.label
+    )
 }
 
 /// The pause and the attempt limit for a failure worth retrying: rate limits,
@@ -577,14 +605,24 @@ fn request_body(request: &Value) -> Result<Vec<u8>> {
     )?)
 }
 
-/// Send one request and return the provider's answer, with the provider's
-/// request id under `request_id`: TypeSafe's `x-typesafe-request-id` header,
-/// else the response's own `id`, which OpenRouter sends.
-fn send(agent: &ureq::Agent, endpoint: &Endpoint, key: &str, request: &Value) -> Result<Value> {
+/// Send one request, giving up at the agent's timeout or after `timeout`
+/// when given, and return the provider's answer, with the provider's
+/// request id under `request_id`: TypeSafe's `x-typesafe-request-id`
+/// header, else the response's own `id`, which OpenRouter sends.
+fn send(
+    agent: &ureq::Agent,
+    endpoint: &Endpoint,
+    key: &str,
+    request: &Value,
+    timeout: Option<Duration>,
+) -> Result<Value> {
     let service = endpoint.service;
     let body = request_body(request)?;
-    let response = agent
-        .post(endpoint.systemone())
+    let mut post = agent.post(endpoint.systemone());
+    if let Some(timeout) = timeout {
+        post = post.config().timeout_global(Some(timeout)).build();
+    }
+    let response = post
         .header("Authorization", format!("Bearer {key}"))
         .header(
             "User-Agent",

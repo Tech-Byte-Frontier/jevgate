@@ -424,7 +424,7 @@ pub(super) fn failed_user(what: &str, why: &str) -> String {
 
 /// Why a check the hook ran while waiting out a provider failure could not
 /// finish: it asked nothing, and the cache did not hold every answer.
-pub(super) fn waiting(outage: &super::outage::Outage) -> String {
+pub(crate) fn waiting(outage: &super::outage::Outage) -> String {
     let minutes = outage.minutes_left();
     format!(
         "the provider failed a few minutes ago ({}), so JevGate asks it again in {} and uses only cached answers until then, which did not cover this",

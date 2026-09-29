@@ -1,7 +1,10 @@
 //! What a change against a Git revision holds: the changed and deleted
-//! files, and the lines of each file the change touched; and snapshots of
+//! files, and the lines of each file the change touched, up to the working
+//! tree, the index being committed or a commit being pushed; snapshots of
 //! the working tree for the agent hook's turns, whose changes are read
-//! between two snapshots. Git never executes external diff helpers.
+//! between two snapshots; the files a change touched as Git holds them
+//! (`recorded`); and what a push sends (`push`). Git never executes
+//! external diff helpers.
 use crate::options::CheckArgs;
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
@@ -15,15 +18,43 @@ use std::{
 
 pub struct Changes {
     pub revision: String,
-    /// The snapshot the change runs to, from the agent hook; none for the
-    /// working tree.
-    now: Option<String>,
+    /// What the change runs to.
+    now: Now,
     /// Current path -> previous path; None denotes a new or untracked file.
     pub paths: BTreeMap<PathBuf, Option<PathBuf>>,
     pub deleted: Vec<PathBuf>,
     /// The lines changed in each judged file that existed at the revision,
     /// once read by [`Changes::with_lines`].
     pub lines: BTreeMap<PathBuf, Lines>,
+}
+
+/// What a change runs to from its base revision.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Now {
+    /// The working tree, untracked files included: `check --base`.
+    #[default]
+    WorkingTree,
+    /// A snapshot of the working tree the agent hook took (a Git tree). Its
+    /// files are read from disk, which held them a moment before.
+    Snapshot(String),
+    /// The index a commit records: `check --staged`. In a hook it is the one
+    /// `GIT_INDEX_FILE` names, a temporary index for `commit -a` or a commit
+    /// of named paths.
+    Index,
+    /// A commit being pushed: `check --pre-push`.
+    Commit(String),
+}
+
+impl Now {
+    /// The sides a diff from `base` to this compares: the working tree, the
+    /// index (`--cached`), or a snapshot or commit.
+    fn sides<'a>(&'a self, base: &'a str) -> Vec<&'a str> {
+        match self {
+            Self::WorkingTree => vec![base],
+            Self::Index => vec!["--cached", base],
+            Self::Snapshot(id) | Self::Commit(id) => vec![base, id],
+        }
+    }
 }
 
 /// The lines of one file a change touched: those it added or modified, and
@@ -266,43 +297,87 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
 
 type ChangedPaths = (BTreeMap<PathBuf, Option<PathBuf>>, Vec<PathBuf>);
 
-/// Changed paths between the diff's `sides` (a revision and the working
-/// tree, or two snapshots), each with its previous path (none when added),
-/// and deleted paths, relative to the root: a `jevgate.toml` in a
-/// subdirectory of a Git repository sees the paths below it, as `ls-files`
-/// does. Renames keep their source; conflicts stop the review.
-fn tracked_changes(root: &Path, sides: &[&str]) -> Result<ChangedPaths> {
+/// One file of a diff between two sides, from its raw entry.
+struct DiffEntry {
+    /// Git's status letter: `A`dded, `M`odified, `D`eleted, `R`enamed,
+    /// `T`ype changed.
+    status: u8,
+    /// Where the file ends up; for a deleted file, where it was.
+    path: PathBuf,
+    /// Where it was before a rename; else its path.
+    previous: PathBuf,
+    /// Its mode and object on the side the diff runs to.
+    mode: String,
+    id: String,
+}
+
+/// The files that differ between the diff's `sides` (a revision and the
+/// working tree, the index or a commit, or two snapshots), relative to the
+/// root: a `jevgate.toml` in a subdirectory of a Git repository sees the
+/// paths below it, as `ls-files` does. Each raw entry is `:<old mode> <new
+/// mode> <old object> <new object> <status>`, then the path, and for a
+/// rename its new path after the old. Renames keep their source; conflicts
+/// stop the review.
+fn diff_entries(root: &Path, sides: &[&str]) -> Result<Vec<DiffEntry>> {
     let mut args = vec![
         "diff",
         "--no-ext-diff",
         "--no-textconv",
         "--find-renames",
         "--relative",
-        "--name-status",
+        "--raw",
+        "--no-abbrev",
         "-z",
     ];
     args.extend_from_slice(sides);
     args.push("--");
     let bytes = git(root, &args)?;
     let mut fields = bytes.split(|b| *b == 0).filter(|s| !s.is_empty());
+    let mut entries = Vec::new();
+    while let Some(header) = fields.next() {
+        let header = std::str::from_utf8(header)?;
+        let parts: Vec<&str> = header.trim_start_matches(':').split(' ').collect();
+        let [_, mode, _, id, status] = parts[..] else {
+            bail!("Git printed an unexpected diff entry: {header}");
+        };
+        let previous = git_path(&mut fields, "Missing Git path")?;
+        let path = if status.starts_with(['R', 'C']) {
+            git_path(&mut fields, "Missing Git rename target")?
+        } else {
+            previous.clone()
+        };
+        let Some(&status) = status.as_bytes().first() else {
+            bail!("Git printed an unexpected diff entry: {header}");
+        };
+        ensure!(
+            status != b'U',
+            "Resolve Git conflict in {} before reviewing",
+            path.display()
+        );
+        entries.push(DiffEntry {
+            status,
+            path,
+            previous,
+            mode: mode.to_string(),
+            id: id.to_string(),
+        });
+    }
+    Ok(entries)
+}
+
+/// Changed paths between the diff's `sides`, each with its previous path
+/// (none when added), and deleted paths.
+fn tracked_changes(root: &Path, sides: &[&str]) -> Result<ChangedPaths> {
     let mut paths = BTreeMap::new();
     let mut deleted = Vec::new();
-    while let Some(status) = fields.next() {
-        let old = git_path(&mut fields, "Missing Git path")?;
-        match status.first() {
-            Some(b'R') => {
-                let new = git_path(&mut fields, "Missing Git rename target")?;
-                paths.insert(new, Some(old));
-            }
-            Some(b'D') => deleted.push(old),
-            Some(b'A') => {
-                paths.insert(old, None);
-            }
-            Some(b'U') => {
-                anyhow::bail!("Resolve Git conflict in {} before reviewing", old.display())
+    for entry in diff_entries(root, sides)? {
+        match entry.status {
+            b'D' => deleted.push(entry.path),
+            b'A' => {
+                paths.insert(entry.path, None);
             }
             _ => {
-                paths.insert(old.clone(), Some(old));
+                paths.insert(entry.path, Some(entry.previous));
             }
         }
     }
@@ -655,16 +730,32 @@ pub(crate) fn blobs(
     paths: &[&Path],
     limit: u64,
 ) -> Result<BTreeMap<PathBuf, String>> {
-    use std::io::Write;
     // The batch protocol reads one object name per line.
     let paths: Vec<&Path> = paths
         .iter()
         .copied()
         .filter(|p| !p.to_string_lossy().contains(['\n', '\r']))
         .collect();
-    let mut texts = BTreeMap::new();
-    if paths.is_empty() {
-        return Ok(texts);
+    let names: Vec<String> = paths
+        .iter()
+        .map(|p| format!("{revision}:./{}", p.to_string_lossy().replace('\\', "/")))
+        .collect();
+    let answers = cat_batch(root, &names, limit)?;
+    Ok(paths
+        .into_iter()
+        .zip(answers)
+        .filter_map(|(path, answer)| Some((path.to_path_buf(), answer.text()?)))
+        .collect())
+}
+
+/// What `git cat-file --batch` answers for each of `names`, in order: an
+/// object ID, or a revision and a path (`<rev>:./<path>`). One Git process
+/// reads them all, and keeps the bytes of objects of at most `limit` bytes.
+fn cat_batch(root: &Path, names: &[String], limit: u64) -> Result<Vec<Batched>> {
+    use std::io::Write;
+    let mut answers = Vec::new();
+    if names.is_empty() {
+        return Ok(answers);
     }
     let mut child = git_command(root, &["cat-file", "--batch"])
         .stdin(Stdio::piped())
@@ -672,36 +763,46 @@ pub(crate) fn blobs(
         .stderr(Stdio::null())
         .spawn()
         .context("Cannot run Git")?;
-    let names: String = paths
-        .iter()
-        .map(|p| format!("{revision}:./{}\n", p.to_string_lossy().replace('\\', "/")))
-        .collect();
+    let input: String = names.iter().map(|name| format!("{name}\n")).collect();
     let mut stdin = child.stdin.take().context("Git has no stdin")?;
     // Written on a thread, so Git never waits on a full output pipe.
-    let writer = std::thread::spawn(move || stdin.write_all(names.as_bytes()));
+    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
     let mut out = BufReader::new(child.stdout.take().context("Git has no stdout")?);
-    for path in paths {
+    for _ in names {
         match batched(&mut out, limit)? {
-            Batched::Text(text) => {
-                texts.insert(path.to_path_buf(), text);
-            }
-            Batched::Other => {}
             Batched::End => break,
+            answer => answers.push(answer),
         }
     }
     let _ = writer.join();
     let _ = child.wait();
-    Ok(texts)
+    Ok(answers)
 }
 
 /// One answer of `git cat-file --batch`.
 enum Batched {
-    /// A blob of at most the limit's bytes of UTF-8 without NUL bytes.
-    Text(String),
-    /// A missing path, or an object read past as too large or not text.
-    Other,
+    /// An object of `size` bytes, with its bytes when there are at most the
+    /// limit's.
+    Blob { size: u64, bytes: Option<Vec<u8>> },
+    /// A path the revision lacks, or an object the repository lacks.
+    Missing,
     /// Git printed nothing more.
     End,
+}
+
+impl Batched {
+    /// The object's text: kept, UTF-8 and without NUL bytes.
+    fn text(self) -> Option<String> {
+        let Self::Blob {
+            bytes: Some(bytes), ..
+        } = self
+        else {
+            return None;
+        };
+        String::from_utf8(bytes)
+            .ok()
+            .filter(|text| !text.contains('\0'))
+    }
 }
 
 /// The next answer `out`, the output of `git cat-file --batch`, holds:
@@ -714,7 +815,7 @@ fn batched(out: &mut impl BufRead, limit: u64) -> Result<Batched> {
     }
     let header = header.trim_end();
     if header.ends_with(" missing") {
-        return Ok(Batched::Other);
+        return Ok(Batched::Missing);
     }
     let size: u64 = header
         .rsplit(' ')
@@ -729,9 +830,9 @@ fn batched(out: &mut impl BufRead, limit: u64) -> Result<Batched> {
         content.read_to_end(&mut bytes)?;
     }
     out.read_exact(&mut [0])?;
-    Ok(match String::from_utf8(bytes) {
-        Ok(text) if size <= limit && !text.contains('\0') => Batched::Text(text),
-        _ => Batched::Other,
+    Ok(Batched::Blob {
+        size,
+        bytes: (size <= limit).then_some(bytes),
     })
 }
 
@@ -747,12 +848,14 @@ pub fn untracked(root: &Path) -> Result<Vec<PathBuf>> {
 
 impl Changes {
     /// The changes a check with a base reviews: since the fork point of
-    /// `--base` and HEAD, or, from the agent hook, between two snapshots.
+    /// `--base` and HEAD; from HEAD to the index with `--staged`; from the
+    /// commit a remote has to the one pushed with `--pre-push`; or, from
+    /// the agent hook, between two snapshots.
     pub fn of_check(root: &Path, args: &CheckArgs) -> Option<Result<Self>> {
         let base = args.base.as_deref()?;
-        Some(match args.worktree_snapshot.as_deref() {
-            Some(now) => Self::between(root, base, now),
-            None => Self::load(root, base),
+        Some(match &args.now {
+            Now::WorkingTree => Self::load(root, base),
+            now => Self::between(root, base, now.clone()),
         })
     }
 
@@ -764,36 +867,41 @@ impl Changes {
         }
         Ok(Self {
             revision,
-            now: None,
+            now: Now::WorkingTree,
             paths,
             deleted,
             lines: BTreeMap::new(),
         })
     }
 
-    /// From snapshot `base` to snapshot `now`: a file untracked in both is
-    /// new only when it did not exist at `base`.
-    fn between(root: &Path, base: &str, now: &str) -> Result<Self> {
+    /// From `base`, a commit or snapshot, to what `now` holds; untracked
+    /// files are left out. Between two snapshots, a file untracked in both
+    /// is new only when it did not exist at `base`.
+    fn between(root: &Path, base: &str, now: Now) -> Result<Self> {
+        let named = match &now {
+            Now::Snapshot(id) | Now::Commit(id) => is_object_id(id),
+            Now::Index | Now::WorkingTree => true,
+        };
         ensure!(
-            is_object_id(base) && is_object_id(now),
-            "A working-tree snapshot must be a Git object ID"
+            is_object_id(base) && named,
+            "A change's revisions must be Git object IDs"
         );
-        let (paths, deleted) = tracked_changes(root, &[base, now])?;
-        Ok(Self {
+        let mut changes = Self {
             revision: base.to_owned(),
-            now: Some(now.to_owned()),
-            paths,
-            deleted,
+            now,
+            paths: BTreeMap::new(),
+            deleted: Vec::new(),
             lines: BTreeMap::new(),
-        })
+        };
+        (changes.paths, changes.deleted) = tracked_changes(root, &changes.sides())?;
+        Ok(changes)
     }
 
-    /// The two sides a diff of this change compares: the revision and the
-    /// working tree, or the turn's two snapshots.
+    /// The sides a diff of this change compares: the revision and the
+    /// working tree, the index (`--cached`), the pushed commit, or the
+    /// turn's second snapshot.
     pub(crate) fn sides(&self) -> Vec<&str> {
-        std::iter::once(self.revision.as_str())
-            .chain(self.now.as_deref())
-            .collect()
+        self.now.sides(&self.revision)
     }
 
     /// The same changes with the lines each of the `judged` files changed,
@@ -872,7 +980,35 @@ impl Changes {
     }
 }
 
+/// What `--staged` compares the index with: HEAD, or before the first
+/// commit the empty tree, from which every staged file is new. A commit
+/// that concludes a merge is compared with HEAD and the merged commit
+/// merged as Git merges them, conflict markers and all, so it judges how
+/// the person resolved the merge, not the merged branch's commits as the
+/// commit's own.
+pub fn staged_base(root: &Path) -> Result<String> {
+    ensure!(
+        index_file(root).is_some(),
+        "--staged reads the Git index; run it inside a Git work tree"
+    );
+    let revision = |name: &str| {
+        git(root, &["rev-parse", "--verify", "--quiet", name])
+            .ok()
+            .and_then(|id| object_id(&id).ok())
+    };
+    let Some(head) = revision("HEAD^{commit}") else {
+        // The tree of nothing, in the repository's own hash.
+        return object_id(&git(root, &["hash-object", "-t", "tree", "--stdin"])?);
+    };
+    let merged =
+        revision("MERGE_HEAD^{commit}").and_then(|merging| push::merged(root, &head, &merging));
+    Ok(merged.unwrap_or(head))
+}
+
+pub mod push;
+mod recorded;
 mod snapshot;
+pub use recorded::Recorded;
 pub use snapshot::snapshot;
 
 #[cfg(test)]

@@ -1,16 +1,49 @@
-# pre-commit (https://pre-commit.com) hooks. Both review the staged changes
-# (`--base HEAD`) and need TYPESAFE_API_KEY or a key saved by `jevgate auth login`.
+# pre-commit (https://pre-commit.com) and prek hooks. They need
+# TYPESAFE_API_KEY (or OPENROUTER_API_KEY, AI_GATEWAY_API_KEY) or a key saved by
+# `jevgate auth login`. When JevGate cannot finish (no key, an outage, 60
+# seconds gone), the commit or push goes ahead and it says so; `verbose` makes
+# pre-commit print that even though the hook passed.
+#
+# The push hooks judge what each push sends; install that hook type too, with
+# `pre-commit install --hook-type pre-push` or
+# `default_install_hook_types: [pre-commit, pre-push]` in your config.
 - id: jevgate
   name: JevGate
-  description: Review staged changes with JevGate, built from source by pre-commit (needs a Rust toolchain)
-  entry: jevgate check --base HEAD
+  description: Judge what is staged before each commit, with jevgate built from source by pre-commit (needs a Rust toolchain)
+  entry: jevgate check --staged
   language: rust
   pass_filenames: false
   require_serial: true
+  verbose: true
+  stages: [pre-commit]
+  minimum_pre_commit_version: "3.2.0"
 - id: jevgate-system
   name: JevGate
-  description: Review staged changes with the jevgate already on PATH (Homebrew, install.sh or cargo)
-  entry: jevgate check --base HEAD
+  description: Judge what is staged before each commit, with the jevgate already on PATH (Homebrew, install.sh, npm or cargo)
+  entry: jevgate check --staged
   language: system
   pass_filenames: false
   require_serial: true
+  verbose: true
+  stages: [pre-commit]
+  minimum_pre_commit_version: "3.2.0"
+- id: jevgate-push
+  name: JevGate
+  description: Judge what each push sends, with jevgate built from source by pre-commit (needs a Rust toolchain)
+  entry: jevgate check --pre-push
+  language: rust
+  pass_filenames: false
+  require_serial: true
+  verbose: true
+  stages: [pre-push]
+  minimum_pre_commit_version: "3.2.0"
+- id: jevgate-push-system
+  name: JevGate
+  description: Judge what each push sends, with the jevgate already on PATH (Homebrew, install.sh, npm or cargo)
+  entry: jevgate check --pre-push
+  language: system
+  pass_filenames: false
+  require_serial: true
+  verbose: true
+  stages: [pre-push]
+  minimum_pre_commit_version: "3.2.0"

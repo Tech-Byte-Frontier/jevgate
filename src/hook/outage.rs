@@ -1,10 +1,11 @@
-//! A provider that stops answering must not hold the agent at every event.
-//! A hook's check watches what the provider does, and when it fails in a way
-//! that passes with time (a timeout, a refused or dropped connection, a rate
-//! limit or a server error), the checks of the next few minutes use only
-//! the answers already cached: measured against a provider that stopped
-//! answering, every edit otherwise waited 29.8 s and every stop 41 to 50 s,
-//! the hook's whole budget, for as long as the outage lasted.
+//! A provider that stops answering must not hold the agent at every event,
+//! nor every commit or push. A hook's check, and a Git hook's (`check
+//! --staged` or `--pre-push`), watches what the provider does, and when it
+//! fails in a way that passes with time (a timeout, a refused or dropped
+//! connection, a rate limit or a server error), the checks of the next few
+//! minutes use only the answers already cached: measured against a provider
+//! that stopped answering, every edit otherwise waited 29.8 s and every stop
+//! 41 to 50 s, the hook's whole budget, for as long as the outage lasted.
 use super::turn;
 use crate::{
     schema,
@@ -31,7 +32,7 @@ const FILE: &str = "outage.json";
 /// What the provider did during one check: requests sent and answered, and
 /// the last failure worth waiting out.
 #[derive(Default)]
-pub(super) struct Watch {
+pub(crate) struct Watch {
     sent: AtomicUsize,
     answered: AtomicUsize,
     failure: Mutex<Option<String>>,
@@ -63,7 +64,7 @@ impl Watch {
 }
 
 /// An evaluator whose answers `watch` sees.
-pub(super) struct Watched<'a> {
+pub(crate) struct Watched<'a> {
     pub inner: Box<dyn Evaluator + Send>,
     pub watch: &'a Watch,
 }
@@ -102,7 +103,7 @@ impl Evaluator for Watched<'_> {
 
 /// While the hook waits a failure out: no request is sent, so only cached
 /// answers count, and each other request fails at once with `0`.
-pub(super) struct Waiting(pub String);
+pub(crate) struct Waiting(pub String);
 
 impl Evaluator for Waiting {
     fn evaluate(&mut self, _: &Value) -> Result<Value> {
@@ -112,7 +113,7 @@ impl Evaluator for Waiting {
 
 /// A provider failure the hook's checks wait out, in `.jevgate/turns/`.
 #[derive(Serialize, Deserialize)]
-pub(super) struct Outage {
+pub(crate) struct Outage {
     /// When it was met, in seconds since the Unix epoch.
     pub at: u64,
     pub reason: String,
@@ -133,14 +134,14 @@ fn file(root: &Path) -> PathBuf {
 }
 
 /// The failure the hook still waits out in the repository at `root`.
-pub(super) fn current(root: &Path) -> Option<Outage> {
+pub(crate) fn current(root: &Path) -> Option<Outage> {
     let text = crate::inventory::read_source(&file(root), turn::MAX_BYTES).ok()?;
     let outage: Outage = serde_json::from_str(&text).ok()?;
     (schema::now() < outage.at + WAIT_SECS).then_some(outage)
 }
 
 /// Wait out `reason`, a failure met now.
-pub(super) fn record(root: &Path, reason: &str) {
+pub(crate) fn record(root: &Path, reason: &str) {
     let outage = Outage {
         at: schema::now(),
         reason: reason.to_string(),
@@ -155,6 +156,6 @@ pub(super) fn record(root: &Path, reason: &str) {
 }
 
 /// The provider answered: nothing is waited out.
-pub(super) fn clear(root: &Path) {
+pub(crate) fn clear(root: &Path) {
     let _ = std::fs::remove_file(file(root));
 }
