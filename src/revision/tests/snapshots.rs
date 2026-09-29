@@ -94,7 +94,7 @@ fn a_file_larger_than_a_snapshot_holds_is_recorded_by_a_stand_in() {
     assert!(!stored(&project, id.trim()), "Git never copied it");
     project.write("dump.sql", &format!("{large}y"));
     let after = snapshot_of(&project, &project.0);
-    let changes = Changes::between(&project.0, &before, &after).unwrap();
+    let changes = Changes::between(&project.0, &before, Now::Snapshot(after.clone())).unwrap();
     assert_eq!(
         changes.paths.keys().collect::<Vec<_>>(),
         [Path::new("dump.sql")],
@@ -187,7 +187,7 @@ fn changes_between_two_snapshots_follow_the_working_tree() {
     project.write("new.rs", "fn new() {}\n");
     project.write("trace.log", "trace\n");
     let after = snapshot_of(&project, &project.0);
-    let changes = Changes::between(&project.0, &before, &after).unwrap();
+    let changes = Changes::between(&project.0, &before, Now::Snapshot(after.clone())).unwrap();
     let path = |name: &str| PathBuf::from(name);
     assert_eq!(
         changes.paths,
@@ -201,7 +201,7 @@ fn changes_between_two_snapshots_follow_the_working_tree() {
     );
     assert_eq!(changes.deleted, [path("gone.rs")]);
     assert_eq!(changes.revision, before);
-    assert!(Changes::between(&project.0, "HEAD", &after).is_err());
+    assert!(Changes::between(&project.0, "HEAD", Now::Snapshot(after.clone())).is_err());
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn lines_between_two_snapshots_are_the_ones_the_turn_changed() {
     project.write("scratch.rs", &LIB.replace("two", "dos"));
     let after = snapshot_of(&project, &project.0);
     let judged = ["src/lib.rs", "scratch.rs"].map(Path::new);
-    let changes = Changes::between(&project.0, &before, &after)
+    let changes = Changes::between(&project.0, &before, Now::Snapshot(after.clone()))
         .unwrap()
         .with_lines(&project.0, judged)
         .unwrap();
@@ -246,7 +246,7 @@ fn snapshots_of_a_root_below_the_git_top_level_are_compared_relative_to_it() {
     project.write("app/new.rs", "fn new() {}\n");
     project.write("other.rs", "fn other() { 1 }\n");
     let after = snapshot_of(&project, &root);
-    let changes = Changes::between(&root, &before, &after)
+    let changes = Changes::between(&root, &before, Now::Snapshot(after.clone()))
         .unwrap()
         .with_lines(&root, [Path::new("lib.rs")])
         .unwrap();

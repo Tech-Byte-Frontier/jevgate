@@ -37,6 +37,7 @@ mod docs;
 mod evaluate;
 mod file_kind;
 mod gate;
+mod git_hooks;
 mod github;
 mod gitlab;
 mod guards;

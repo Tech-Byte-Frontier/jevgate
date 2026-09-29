@@ -100,9 +100,9 @@ pub enum JevCommand {
         #[command(subcommand)]
         action: Option<RulesAction>,
     },
-    /// Write a commented jevgate.toml, or set up a coding agent's hooks (offline)
+    /// Write a commented jevgate.toml, or set up a coding agent's hooks or a Git hook (offline)
     ///
-    /// Without --agent: limits uploads to the detected source and test
+    /// Without --agent or --git-hook: limits uploads to the detected source and test
     /// directories and to agent instruction files, denies credential files,
     /// and lists every rule group with its gate level. Review the file before
     /// the first paid check.
@@ -118,10 +118,15 @@ pub enum JevCommand {
     /// included) stops it with nothing written. It then runs the `jevgate` on
     /// your PATH, which the agent will run, and warns when that one cannot
     /// answer the hooks.
+    ///
+    /// With --git-hook: writes `.git/hooks/pre-push` (`jevgate check
+    /// --pre-push`) or `.git/hooks/pre-commit` (`jevgate check --staged`),
+    /// never over a hook JevGate did not write. When JevGate cannot finish or
+    /// is not installed, the hook lets the push or commit through and says so.
     #[command(after_long_help = INIT_EXAMPLES)]
     Init {
         /// Replace an existing jevgate.toml
-        #[arg(long, conflicts_with = "agents")]
+        #[arg(long, conflicts_with = "target")]
         force: bool,
         #[command(flatten)]
         setup: crate::setup::AgentSetup,
@@ -213,8 +218,9 @@ Workflow:
   jevgate rules propose                     Propose custom questions from AGENTS.md and other instruction files
   jevgate rules add NAME                    Add a measured custom question from the gallery
 
-For agents and CI:
+For agents, Git hooks and CI:
   jevgate init --agent claude                        Hooks for Claude Code (also codex, cursor, gemini, opencode)
+  jevgate init --git-hook pre-push                   A Git hook that judges what each push sends
   jevgate check --base origin/main                   Only what changed since a revision
   jevgate check --base origin/main --format json     The full report, raw probabilities included
   jevgate check --base origin/main --format github   Annotations and a job summary on GitHub
@@ -223,9 +229,11 @@ For agents and CI:
   jevgate rules test                                 Custom questions against their examples
 
 Exit codes:
-  0      Gate passed, or no supported file changed since --base
+  0      Gate passed, or no supported file changed since --base; also a run that could not
+         finish when --on-incomplete passes it, as it does by default with --staged and
+         --pre-push, saying so on stderr
   1      Gate failed
-  2      Run incomplete (no key, provider rejection, request budget reached), invalid
+  2      Run incomplete (no key, provider rejection, a budget reached), invalid
          configuration or invalid usage
   128+N  Interrupted by signal N
   `jevgate hook` always exits 0: agents read 2 as a block, so its JSON reply says what happened
@@ -258,6 +266,8 @@ Examples:
   jevgate check src/billing --verbose              One directory, with notes and per-file detail
   jevgate check --base origin/main --format json   Only what changed, machine-readable
   jevgate check --base origin/main --whole-files   Every unit of each changed file
+  jevgate check --staged                           What a commit records, for a pre-commit hook
+  jevgate check --pre-push                         What a push sends, for a pre-push hook
   jevgate check --rule default --rule security     Add the opt-in security group
   jevgate check --rule documentation               Agent instruction files, project docs and code comments
   jevgate check --rule comments                    Only code comments: repeated code, filler, narrated edits
@@ -267,10 +277,15 @@ Examples:
   jevgate check --fail-on review --fail-on security=consider
   jevgate check --dry-run --show-requests          Exactly what would be uploaded, offline
   jevgate check --cache-only                       Replay cached answers; never contact the provider
+  jevgate check --max-seconds 30 --max-cost 0.10   Stop asking after 30 s or 10 cents; incomplete then
+  jevgate check --on-incomplete pass               Exit 0 when the run cannot finish, saying so on stderr
 
 Reading the JSON report (--format json or .jevgate/latest.json):
-  complete           false when any selected file was not judged; the exit code is then 2
+  complete           false when any selected file was not judged; the exit code is then 2,
+                     or 0 when --on-incomplete passes it
   scope              whole-files, or changed-lines when --base judged what changed
+  staged             true when --staged judged the index; pushed_revision: the
+                     commit --pre-push judged, from base_revision
   gate               passed, reasons, new_findings, baselined_findings
   fail_on            the gate levels; fail_on_mature says what `mature` stands for
   files[].status     clear, note, consider, review, uncertain, needs-context,
@@ -324,6 +339,9 @@ Examples:
   jevgate init --agent codex,gemini --project   This repository's Codex and Gemini CLI hooks
   jevgate init --agent cursor --dry-run         What would change, without writing
   jevgate init --agent claude --remove          Take out what JevGate wrote
+  jevgate init --git-hook pre-push              A Git hook: judge what each push sends
+  jevgate init --git-hook pre-commit            A Git hook: judge what each commit records
+  jevgate init --git-hook pre-push --remove     Take the Git hook out again
 
 Files, for your user and with --project:
   claude     ~/.claude/settings.json, rules/jevgate.md       .claude/settings.json, .claude/rules/jevgate.md

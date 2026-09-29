@@ -2,6 +2,7 @@
 //! project helper is here.
 mod auth;
 mod changes;
+mod commit;
 mod convention;
 mod gallery;
 mod gateway;

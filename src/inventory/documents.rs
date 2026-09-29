@@ -90,10 +90,13 @@ pub(super) fn load_document(
     path: &std::path::Path,
 ) -> Result<Input> {
     let mut result = pending_result(relative, role, args, &[]);
-    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.len() > args.max_file_bytes) {
-        return over_read_cap(result, relative, path, args.max_file_bytes);
+    if args
+        .size(path)
+        .is_some_and(|size| size > args.max_file_bytes)
+    {
+        return over_read_cap(result, relative, path, args);
     }
-    Ok(match read_source(path, args.max_file_bytes) {
+    Ok(match args.read(path, args.max_file_bytes) {
         Ok(source) => {
             result.source_hash = hash(source.as_bytes());
             result.content_identity = result.source_hash.clone();

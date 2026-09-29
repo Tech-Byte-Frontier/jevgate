@@ -31,7 +31,7 @@ pub(super) fn add_texts(
             && boundary.permits(&relative)
             && crate::context::ensure_visible_path(&relative).is_ok()
             && classifier.role(&relative) != "generated"
-            && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file());
+            && args.regular_file(&path);
         let existing = inputs.iter().position(|i| i.result.path == relative);
         if !wanted || existing.is_some_and(|at| !set_aside(&inputs[at])) {
             continue;

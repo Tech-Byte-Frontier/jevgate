@@ -35,9 +35,16 @@ pub fn schema() -> Value {
 fn bound_budgets(properties: &mut Value) {
     properties["concurrency"]["minimum"] = json!(1);
     properties["concurrency"]["maximum"] = json!(MAX_CONCURRENCY);
-    for budget in ["max_requests", "max_file_bytes", "max_context_bytes"] {
+    for budget in [
+        "max_requests",
+        "max_file_bytes",
+        "max_context_bytes",
+        "max_seconds",
+    ] {
         properties[budget]["minimum"] = json!(1);
     }
+    properties["max_seconds"]["maximum"] = json!(86_400);
+    properties["max_cost"]["exclusiveMinimum"] = json!(0);
 }
 
 /// The gate levels `fail_on` and `[[scope]]` accept, and with `off` the

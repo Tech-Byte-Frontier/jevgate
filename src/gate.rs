@@ -156,7 +156,7 @@ pub fn settle(root: &Path, report: &mut Report, args: &CheckArgs) -> Result<()> 
         Some(_) => crate::guards::added_allows(&report.guards),
         None => Default::default(),
     };
-    crate::suppress::apply(root, report, &ignored);
+    crate::suppress::apply(root, report, &ignored, args.recorded.as_ref());
     crate::baseline::apply(root, report, turn_start)?;
     evaluate(report, args);
     Ok(())

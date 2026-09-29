@@ -1,9 +1,12 @@
 //! Changes against a Git revision: the lines and removals a patch holds,
 //! the files and lines `Changes` reads from Git, and blobs read from a
 //! tree. Snapshots of the working tree, and the changes read between two
-//! of them, are in `snapshots`.
+//! of them, are in `snapshots`; files read from the index or a commit in
+//! `recorded`; and what a push sends in `push`.
 use super::*;
 use crate::tests::Project;
+mod push;
+mod recorded;
 mod snapshots;
 
 fn lines(changed: &[(usize, usize)], removed: &[Removal]) -> Lines {

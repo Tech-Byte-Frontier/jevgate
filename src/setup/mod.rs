@@ -28,7 +28,7 @@ use std::{
 /// A file larger than this is not an agent's settings or instructions.
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
-/// `jevgate init`'s arguments for coding agents.
+/// `jevgate init`'s arguments for coding agents and Git hooks.
 #[derive(clap::Args, Debug, Default)]
 pub struct AgentSetup {
     /// Set up a coding agent instead of writing jevgate.toml (repeatable, or comma-separated)
@@ -40,20 +40,32 @@ pub struct AgentSetup {
         long = "agent",
         value_enum,
         value_name = "AGENT",
-        value_delimiter = ','
+        value_delimiter = ',',
+        group = "target"
     )]
     pub agents: Vec<Target>,
+    /// Write a Git hook that runs JevGate before each push or commit, instead of jevgate.toml
+    ///
+    /// `pre-push` runs `jevgate check --pre-push`, which judges what each push
+    /// sends; `pre-commit` runs `jevgate check --staged`, which judges what
+    /// each commit records. A push is the cheaper moment: it runs once for
+    /// the commits it sends. The hook goes where Git reads hooks
+    /// (`.git/hooks`), never over one JevGate did not write; when a hook
+    /// manager keeps the repository's hooks (husky, lefthook, pre-commit),
+    /// it says what to add there instead.
+    #[arg(long, value_enum, value_name = "HOOK", group = "target")]
+    pub git_hook: Option<crate::git_hooks::install::GitHook>,
     /// With --agent: write the repository's agent files, for everyone who works in it
     ///
     /// They go at the top of the Git work tree: `.claude/`, `.codex/`,
     /// `.gemini/`, `.cursor/`, `.opencode/`, AGENTS.md and GEMINI.md.
     #[arg(long, requires = "agents")]
     pub project: bool,
-    /// With --agent: take out the hooks and text JevGate wrote, and nothing else
-    #[arg(long, requires = "agents")]
+    /// With --agent or --git-hook: take out the hooks and text JevGate wrote, and nothing else
+    #[arg(long, requires = "target")]
     pub remove: bool,
-    /// With --agent: print what would change, and write nothing
-    #[arg(long, requires = "agents")]
+    /// With --agent or --git-hook: print what would change, and write nothing
+    #[arg(long, requires = "target")]
     pub dry_run: bool,
 }
 

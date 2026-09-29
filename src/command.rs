@@ -5,9 +5,9 @@
 use crate::{
     auth, baseline, cancellation, catalog, config,
     config::ConfigContext,
-    hook, init, manual, mcp,
-    options::{self, JevCommand},
-    output, revision, server, setup,
+    git_hooks, hook, init, manual, mcp,
+    options::{self, CheckArgs, JevCommand},
+    output, server, setup,
 };
 use anyhow::Result;
 
@@ -16,10 +16,14 @@ pub fn run(command: JevCommand) -> Result<u8> {
         JevCommand::Auth { command } => auth::run(command),
         JevCommand::Completions { shell } => manual::completions(shell).map(|()| 0),
         JevCommand::Man { command } => manual::man(command.as_deref()).map(|()| 0),
-        JevCommand::Init { setup, .. } if !setup.agents.is_empty() => setup::run(&setup),
-        JevCommand::Init { force, .. } => init(force),
+        JevCommand::Init { force, setup } => match setup.git_hook {
+            Some(hook) => git_hooks::install::run(hook, setup.remove, setup.dry_run),
+            None if !setup.agents.is_empty() => setup::run(&setup),
+            None => init(force),
+        },
         JevCommand::Mcp => mcp::run().map(|()| 0),
         JevCommand::Hook(args) => hook::run(&args),
+        JevCommand::Check(args) => check(*args),
         JevCommand::Rules {
             action: Some(options::RulesAction::Add { names, force }),
             ..
@@ -50,10 +54,39 @@ fn init(force: bool) -> Result<u8> {
     Ok(0)
 }
 
+/// `check`. When a run that cannot finish passes (`--on-incomplete`, and
+/// by default for `--staged` and `--pre-push`), so does one that fails
+/// before it can judge anything, such as on a configuration that does not
+/// load, saying loudly that the change was not checked.
+fn check(mut args: CheckArgs) -> Result<u8> {
+    crate::check::validate(&args)?;
+    // One offer for the whole invocation, which checks each pushed ref.
+    let _skip = args
+        .moment()
+        .filter(|_| !args.dry_run)
+        .and_then(git_hooks::offer_skip);
+    let result = (|| {
+        let context =
+            ConfigContext::discover(args.config.as_deref(), args.question_directory.as_deref())?;
+        crate::check::configure(&mut args, &context)?;
+        if args.pre_push {
+            return crate::check::pre_push(&mut args, &context);
+        }
+        crate::check::resolve_change(&mut args, &context.root)?;
+        crate::check::run(&args, &context)
+    })();
+    match result {
+        Err(error) if args.passes_incomplete() && cancellation::signal().is_none() => {
+            git_hooks::not_checked(&args, &format!("{error:#}"));
+            Ok(0)
+        }
+        other => other,
+    }
+}
+
 /// The commands that read the repository's configuration.
 fn configured(command: JevCommand) -> Result<u8> {
     let (file, questions) = match &command {
-        JevCommand::Check(args) => (args.config.clone(), args.question_directory.clone()),
         JevCommand::Rules {
             action: Some(options::RulesAction::Test(args)),
             ..
@@ -68,18 +101,12 @@ fn configured(command: JevCommand) -> Result<u8> {
         | JevCommand::Man { .. }
         | JevCommand::Mcp
         | JevCommand::Hook(_)
+        | JevCommand::Check(_)
         | JevCommand::Rules {
             action: Some(options::RulesAction::Add { .. }),
             ..
         } => {
             unreachable!("handled before repository configuration")
-        }
-        JevCommand::Check(mut args) => {
-            crate::check::configure(&mut args, &context)?;
-            if let Some(base) = &args.base {
-                args.base = Some(revision::resolve(&context.root, base)?);
-            }
-            crate::check::run(&args, &context)
         }
         JevCommand::Baseline {
             action: Some(action),
@@ -105,22 +132,25 @@ fn configured(command: JevCommand) -> Result<u8> {
         JevCommand::Rules {
             format,
             action: None,
-        } => {
-            match format {
-                options::RulesFormat::Json => say!(
-                    "{}",
-                    serde_json::to_string_pretty(&catalog::describe(context.questions))?
-                ),
-                options::RulesFormat::Table => say!("{}", catalog::table(context.questions)),
-            }
-            Ok(0)
-        }
+        } => rules(&context, format),
         JevCommand::Serve { port } => {
             cancellation::install()?;
             server::run(&context.root, port)?;
             Ok(0)
         }
     }
+}
+
+/// `rules`: every rule and custom question, as a table or JSON.
+fn rules(context: &ConfigContext, format: options::RulesFormat) -> Result<u8> {
+    match format {
+        options::RulesFormat::Json => say!(
+            "{}",
+            serde_json::to_string_pretty(&catalog::describe(context.questions))?
+        ),
+        options::RulesFormat::Table => say!("{}", catalog::table(context.questions)),
+    }
+    Ok(0)
 }
 
 /// `baseline`: accept the last check's findings.

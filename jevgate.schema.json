@@ -31,6 +31,21 @@
         }
       ]
     },
+    "OnIncomplete": {
+      "description": "What a run that could not finish exits with.",
+      "oneOf": [
+        {
+          "const": "pass",
+          "description": "Exit 0, saying on stderr that the change was not checked, and why",
+          "type": "string"
+        },
+        {
+          "const": "fail",
+          "description": "Exit 2",
+          "type": "string"
+        }
+      ]
+    },
     "Question": {
       "additionalProperties": false,
       "description": "A question as a configuration writes it.",
@@ -485,6 +500,11 @@
       "minimum": 1,
       "type": "integer"
     },
+    "max_cost": {
+      "description": "Ceiling on a check's estimated spend in dollars; what is left unasked leaves the run incomplete. Flags can only lower it. Default: unlimited.",
+      "exclusiveMinimum": 0,
+      "type": "number"
+    },
     "max_file_bytes": {
       "description": "Files larger than this are reported as needs-context, never truncated. Default: 262144.",
       "minimum": 1,
@@ -495,9 +515,19 @@
       "minimum": 1,
       "type": "integer"
     },
+    "max_seconds": {
+      "description": "Ceiling on the seconds a check asks for; what is left unasked leaves the run incomplete. Flags can only lower it. Default: 60 with `--staged` and `--pre-push`, else unlimited.",
+      "maximum": 86400,
+      "minimum": 1,
+      "type": "integer"
+    },
     "model": {
       "description": "Model, as the key's provider names it; a pinned version keeps results repeatable. `--model` overrides it. Default: `jev-1.13.0` with a TypeSafe key, `typesafe/jev-1.13` with an OpenRouter key, `typesafe-ai/jev` with a Vercel AI Gateway key.",
       "type": "string"
+    },
+    "on_incomplete": {
+      "$ref": "#/$defs/OnIncomplete",
+      "description": "What a run that cannot finish exits with, like `--on-incomplete`: `pass` (exit 0, saying so on stderr) or `fail` (exit 2). Default: `pass` with `--staged` and `--pre-push`, else `fail`."
     },
     "question": {
       "description": "Custom questions: a yes/no question per convention, asked of each unit it names, whose yes is a finding. `.jevgate/questions/` holds one per file, named by its id.",

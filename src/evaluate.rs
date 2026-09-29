@@ -24,6 +24,8 @@ pub struct Session<'a> {
     pub observed: (u64, u64),
     /// The questions this invocation answered, by state.
     pub answered: crate::requests::Answered,
+    /// With `--max-cost`, what the requests sent are estimated to cost.
+    pub spend: Option<crate::requests::Spend>,
 }
 
 pub struct SnapshotContext<'a> {
@@ -85,6 +87,11 @@ fn empty_report(args: &CheckArgs, current: &SnapshotContext<'_>, files: Vec<File
     Report {
         quick: args.quick,
         base_revision: args.base.clone(),
+        staged: args.now == crate::revision::Now::Index,
+        pushed_revision: match &args.now {
+            crate::revision::Now::Commit(commit) => Some(commit.clone()),
+            _ => None,
+        },
         deleted_files: Vec::new(),
         scope: if args.changed_lines() {
             schema::Scope::ChangedLines
@@ -540,12 +547,13 @@ impl Session<'_> {
             hashes
                 .entry(path.clone())
                 .or_insert_with(|| {
-                    super::inventory::read_source(
-                        &self.context.root.join(path),
-                        self.args.max_context_bytes.max(self.args.max_file_bytes),
-                    )
-                    .ok()
-                    .map(|s| schema::hash(s.as_bytes()))
+                    self.args
+                        .read(
+                            &self.context.root.join(path),
+                            self.args.max_context_bytes.max(self.args.max_file_bytes),
+                        )
+                        .ok()
+                        .map(|s| schema::hash(s.as_bytes()))
                 })
                 .as_deref()
                 == Some(expected)
