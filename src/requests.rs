@@ -97,17 +97,39 @@ impl Session<'_> {
             })
             .collect();
         let mut pending = self.answer_from_cache(requests, &mut receipts);
+        if !pending.is_empty() && self.halted.is_none() {
+            // Asked once: a store that refused, or a dialog declined, is not
+            // asked again for every batch.
+            self.halted = self.evaluator.unavailable();
+        }
+        if let Some(error) = self.halted.as_ref().filter(|_| !pending.is_empty()) {
+            // Without a key nothing can be sent: each file fails with the
+            // reason, and `check` ends with it once.
+            for unsent in &pending {
+                receipts[unsent.index].result = Err(anyhow::anyhow!("{error:#}"));
+            }
+            return receipts;
+        }
         let allowed = pending.len().min(
             self.args
                 .max_requests
                 .map_or(pending.len(), |n| n.saturating_sub(self.requests) as usize),
         );
+        // The agent hook answers on its own terms; a check says it on stderr.
+        if allowed < pending.len()
+            && !crate::hook::invoked()
+            && !std::mem::replace(&mut self.budget_noted, true)
+        {
+            note!(
+                "jevgate: {}",
+                budget_short(self.args, self.requests as usize + pending.len())
+            );
+        }
         for unsent in pending.drain(allowed..) {
-            receipts[unsent.index].result = Err(anyhow::anyhow!(
-                "Session API request budget exhausted; restart with an explicit larger --max-requests"
-            ));
+            receipts[unsent.index].result = Err(anyhow::anyhow!(budget_reached(self.args)));
         }
         if !pending.is_empty() {
+            crate::progress::sending(pending.len());
             self.send(pending, &mut receipts);
         }
         receipts
@@ -213,6 +235,7 @@ impl Session<'_> {
             self.args.concurrency() as usize,
             &before,
             &mut |at, outcome| {
+                crate::progress::answered();
                 let (index, lookup) = &mut lookups[at];
                 *requests_count += u32::from(outcome.attempted);
                 let receipt = &mut receipts[*index];
@@ -231,6 +254,41 @@ impl Session<'_> {
             },
         );
     }
+}
+
+/// The request budget and where it is set: `--max-requests` only lowers
+/// the ceiling jevgate.toml sets, so raising the flag cannot help then.
+fn budget_limit(args: &CheckArgs) -> String {
+    let limit = args.max_requests.unwrap_or_default();
+    if args.max_requests_in_config {
+        format!("max_requests = {limit} in jevgate.toml")
+    } else {
+        format!("--max-requests {limit}")
+    }
+}
+
+/// Why a request was not sent: the run reached its request budget. The
+/// answers it got are cached, so a rerun asks only for the rest.
+fn budget_reached(args: &CheckArgs) -> String {
+    format!(
+        "Request budget reached ({}); rerun to continue from the cached answers, or raise the budget",
+        budget_limit(args)
+    )
+}
+
+/// Said once, before the first request the budget holds back is dropped:
+/// that the check will end incomplete, with at least `needed` requests
+/// planned, and what finishes it.
+fn budget_short(args: &CheckArgs, needed: usize) -> String {
+    let raise = if args.max_requests_in_config {
+        "raise max_requests in jevgate.toml"
+    } else {
+        "pass a larger --max-requests"
+    };
+    format!(
+        "this check needs at least {needed} requests, more than {} allows, so it will end incomplete. The answers it gets are cached and a rerun continues from them; {raise} to finish in one run.",
+        budget_limit(args)
+    )
 }
 
 /// Record one outcome of sending `sent`, the unanswered questions of `lookup`'s

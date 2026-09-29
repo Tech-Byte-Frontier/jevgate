@@ -213,6 +213,8 @@ pub(super) fn session<'a>(
         observed: (0, 0),
         answered: Default::default(),
         spend: options.max_cost.map(crate::requests::Spend::new),
+        halted: None,
+        budget_noted: false,
     }
 }
 
@@ -425,6 +427,34 @@ fn malformed_response_and_exhausted_budget_never_pass() {
             .iter()
             .all(|f| f.status == schema::Status::Error)
     );
+}
+
+#[test]
+fn a_file_the_budget_left_unasked_names_the_budget_where_it_is_set() {
+    let project = two_files();
+    for (in_config, named) in [
+        (true, "(max_requests = 1 in jevgate.toml)"),
+        (false, "(--max-requests 1)"),
+    ] {
+        let mut options = args();
+        options.max_requests = Some(1);
+        options.max_requests_in_config = in_config;
+        options.refresh = true;
+        let report = run(&project, &options, &mut Mock::default());
+        let unasked: Vec<&str> = report
+            .files
+            .iter()
+            .filter_map(|f| f.error.as_deref())
+            .collect();
+        assert_eq!(unasked.len(), 1, "{unasked:?}");
+        assert!(
+            unasked[0].starts_with(&format!(
+                "Request budget reached {named}; rerun to continue"
+            )),
+            "{}",
+            unasked[0]
+        );
+    }
 }
 
 #[test]

@@ -339,6 +339,44 @@ pub fn select_in(rules: &[Rule], name: &str) -> Option<Vec<&'static str>> {
     (!selected.is_empty()).then_some(selected)
 }
 
+/// The keys of the rules among `rules` that naming `name` turns on: as
+/// [`select_in`], but a group turns on only the rules it runs by default
+/// when it has any, so an opt-in rule of a default group (hardcoded values)
+/// runs only when its own name or `all` asks for it. A group with none, such
+/// as `security`, turns on every rule of it. Before 0.32 a level for
+/// `maintainability` turned hardcoded values on: a configuration written for
+/// 0.8 that way asked 1,846 requests of a 950-file project where its three
+/// default rules needed 943, for a rule right 17% of the time.
+pub fn enable_in(rules: &[Rule], name: &str) -> Option<Vec<&'static str>> {
+    let selected = select_in(rules, name)?;
+    Some(
+        selected
+            .into_iter()
+            .filter(|key| {
+                rules
+                    .iter()
+                    .find(|r| r.key == *key)
+                    .is_none_or(|rule| enabled_by(name, rule, rules))
+            })
+            .collect(),
+    )
+}
+
+/// Whether naming `name`, which addresses `rule`, turns it on: always,
+/// except for an opt-in rule named by a group that runs rules by default.
+fn enabled_by(name: &str, rule: &Rule, rules: &[Rule]) -> bool {
+    rule.default_enabled
+        || name != rule.group
+        || !rules
+            .iter()
+            .any(|other| other.group == rule.group && other.default_enabled)
+}
+
+/// Whether a level set for `name` turns `rule` on, as [`enable_in`] does.
+pub fn enables(name: &str, rule: &Rule, rules: &[Rule]) -> bool {
+    specificity(name, rule) > 0 && enabled_by(name, rule, rules)
+}
+
 /// The built-in rules, then the custom questions in the order they are
 /// defined.
 pub fn with_custom(questions: &'static [crate::custom::Question]) -> Vec<Rule> {
@@ -466,7 +504,7 @@ pub fn table(questions: &'static [crate::custom::Question]) -> String {
         crate::maturity::MIN_LABELS
     ));
     lines.push(format!(
-        "Groups: {}, {DEFAULT_GROUP} (every rule marked yes or tests), {ALL_GROUP}.",
+        "Groups: {}, {DEFAULT_GROUP} (every rule marked yes or tests), {ALL_GROUP}. A group turns on its rules marked yes or tests, or every rule of it when it has none (security, documentation); an opt-in rule of another group runs when named, or with {ALL_GROUP}.",
         groups.join(", ")
     ));
     lines.push("Select with --rule and --skip-rule, or [rules] in jevgate.toml; `tests` rules need --include-tests. --fail-on and [rules] levels replace the default gate.".into());

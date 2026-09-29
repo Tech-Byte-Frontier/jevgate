@@ -244,7 +244,10 @@ pub struct CheckArgs {
     ///
     /// Groups: maintainability, tests, security, documentation, custom (the
     /// custom questions; one is `custom/<id>`), default (every rule on by
-    /// default) and all. Naming any rule replaces the configured
+    /// default) and all. A group selects the rules it runs by default, or
+    /// every rule of it when it runs none by default (security,
+    /// documentation), so hardcoded values runs only when named or with
+    /// `all`. Naming any rule replaces the configured
     /// selection, so add `--rule default` to keep the defaults. Test rules also
     /// need --include-tests. `jevgate rules` lists every rule.
     #[arg(long = "rule", value_name = "RULE", help_heading = RULES)]
@@ -342,6 +345,10 @@ pub struct CheckArgs {
     /// ceiling this flag can only lower.
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1000000), help_heading = BUDGETS)]
     pub max_requests: Option<u32>,
+    /// Whether `max_requests` is the ceiling jevgate.toml sets, which a flag
+    /// cannot raise, rather than `--max-requests`.
+    #[arg(skip)]
+    pub max_requests_in_config: bool,
     /// Stop asking after this many seconds; what is left unasked leaves the run incomplete [default: 60 with --staged and --pre-push]
     ///
     /// No request starts, and no retry or pause runs, past it, and an attempt

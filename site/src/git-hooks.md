@@ -38,7 +38,7 @@ jevgate: it goes ahead unchecked, as on_incomplete is "pass"; set on_incomplete 
 
 ## Recipes
 
-The hooks need JevGate 0.31.0 or later on the PATH (or built by pre-commit), and a key: `jevgate auth login` saves one, or set `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY` or `AI_GATEWAY_API_KEY`.
+The hooks need JevGate 0.31.0 or later on the PATH (or built by pre-commit), and a key: `jevgate auth login` saves one, or set `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY` or `AI_GATEWAY_API_KEY`. On macOS a hook reads the saved key from the Keychain since 0.32.0 (0.31.0 needed a terminal, which a hook lacks). After an upgrade macOS asks once whether the new `jevgate` may read it: a hook cannot answer, so run `jevgate auth status` in a terminal and choose Always Allow.
 
 ### pre-commit and prek
 

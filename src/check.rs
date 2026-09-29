@@ -7,7 +7,7 @@ use crate::{
     hook::outage,
     html_report, inventory,
     options::{CheckArgs, Format},
-    output,
+    output, progress,
     revision::{self, Now, Recorded, push},
     schema, storage, token_budget, transport, watch,
 };
@@ -124,6 +124,8 @@ pub fn session<'a>(
         observed: (0, 0),
         answered: Default::default(),
         spend: args.max_cost.map(crate::requests::Spend::new),
+        halted: None,
+        budget_noted: false,
     }
 }
 
@@ -253,6 +255,8 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
     validate(args)?;
     cancellation::install()?;
     unasked(args);
+    let progress =
+        progress::start(progress::wanted() && !args.watch && args.output_format() != Format::Jsonl);
     let scope = inventory::scope(args, context)?;
     let inputs = inventory::collect(args, context, &scope)?;
     let store = if args.dry_run {
@@ -263,6 +267,7 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
     let (previous, mut report) = first_snapshot(args, context, &inputs);
     if args.dry_run {
         evaluate::preview_guards(&mut report, args, context, &scope);
+        drop(progress);
         output::emit(&report, args)?;
         return Ok(0);
     }
@@ -287,6 +292,12 @@ pub fn run(args: &CheckArgs, context: &ConfigContext) -> Result<u8> {
     };
     let mut session = session(args, context, &store, &mut evaluator);
     judge(&mut session, &inputs, previous.as_ref(), &mut report)?;
+    drop(progress);
+    if let Some(error) = session.halted.take().filter(|_| !args.watch) {
+        // No request could be sent, as without a key: say why once, not
+        // once per file. The report keeps each file's error.
+        return Err(error);
+    }
     if args.moment().is_some() && waiting.is_none() {
         remember_outage(&context.root, &report, &watch);
     }

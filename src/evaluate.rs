@@ -26,7 +26,15 @@ pub struct Session<'a> {
     pub answered: crate::requests::Answered,
     /// With `--max-cost`, what the requests sent are estimated to cost.
     pub spend: Option<crate::requests::Spend>,
+    /// Why nothing could be sent, such as a missing key: every request
+    /// after it fails with it unsent, and `check` ends with it alone.
+    pub halted: Option<anyhow::Error>,
+    /// Whether stderr has said the request budget will stop this check.
+    pub budget_noted: bool,
 }
+
+/// A round of follow-up requests, planned from the answers so far.
+type FollowUps = fn(&crate::units::Plan, &[FileResult]) -> Vec<crate::units::Planned>;
 
 pub struct SnapshotContext<'a> {
     pub root: &'a std::path::Path,
@@ -288,17 +296,22 @@ fn cached_purpose(
 impl Session<'_> {
     pub fn evaluate(&mut self, inputs: &[Input], report: &mut Report) -> Result<()> {
         self.evaluator.begin_review();
+        // A watcher's next snapshot looks for a key again.
+        self.halted = None;
         self.publish(report)?;
         let (purpose, mut views) = self.schedule_files(inputs, report);
         if !purpose.is_empty() {
+            crate::progress::phase("asking what test files hold");
             self.resolve_purposes(inputs, report, purpose, &mut views)?;
         }
+        crate::progress::phase("planning");
         let mut plan =
             crate::units::plan(inputs, &views, self.args, &self.budget, &self.context.root);
         record_plan(&plan, report);
         for &owner in plan.files.keys() {
             report.files[owner].cached = true;
         }
+        crate::progress::phase("first pass");
         let first: Vec<_> = plan.requests.iter().map(Task::unit).collect();
         let oversized = self.dispatch(report, first, |file, asked, body| {
             crate::units::record(file, &asked, body)
@@ -311,27 +324,29 @@ impl Session<'_> {
         // locate follow-ups then point split findings at a block, and a
         // located value is asked what it is. Each depends on the answers
         // before it.
-        for follow_up in [
-            crate::units::doc_checks,
-            crate::units::traces,
-            crate::units::rechecks,
-            crate::units::settles,
-            crate::units::kinds,
-            crate::units::parts,
-            crate::units::locates,
-            crate::units::value_kinds,
+        for (phase, follow_up) in [
+            ("checking documents", crate::units::doc_checks as FollowUps),
+            ("tracing values", crate::units::traces),
+            ("rechecking undecided units", crate::units::rechecks),
+            ("settling security checks", crate::units::settles),
+            ("asking what outlines are", crate::units::kinds),
+            ("asking about file parts", crate::units::parts),
+            ("locating findings", crate::units::locates),
+            ("asking what values are", crate::units::value_kinds),
         ] {
             let tasks: Vec<_> = follow_up(&plan, &report.files)
                 .iter()
                 .map(Task::unit)
                 .collect();
             if !tasks.is_empty() {
+                crate::progress::phase(phase);
                 let oversized = self.dispatch(report, tasks, |file, asked, body| {
                     crate::units::record(file, &asked, body)
                 })?;
                 unsent_units(&mut plan, report, oversized);
             }
         }
+        crate::progress::phase("composing findings");
         compose_files(&plan, report);
         self.guard(&plan, report);
         self.calibrate()?;

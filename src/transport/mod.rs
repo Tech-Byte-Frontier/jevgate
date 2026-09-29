@@ -50,6 +50,13 @@ pub trait Evaluator {
 
     fn evaluate(&mut self, request: &Value) -> Result<Value>;
 
+    /// Why no request can be sent at all, such as a missing key; asked
+    /// before a batch that needs the provider, so a check stops with it
+    /// once instead of failing every file with it.
+    fn unavailable(&mut self) -> Option<anyhow::Error> {
+        None
+    }
+
     fn evaluate_batch(&mut self, requests: &[&Value]) -> Vec<Result<Value>> {
         requests
             .iter()
@@ -217,6 +224,10 @@ impl Client {
 }
 
 impl Evaluator for Client {
+    fn unavailable(&mut self) -> Option<anyhow::Error> {
+        self.credential().err()
+    }
+
     fn begin_review(&mut self) {
         if self.access.reset() {
             // A rejected credential may have been replaced between snapshots.

@@ -3,6 +3,7 @@
 macro_rules! say {
     ($($arg:tt)*) => {{
         use std::io::Write as _;
+        let _paused = crate::progress::pause();
         let _ = writeln!(std::io::stdout(), $($arg)*);
     }};
 }
@@ -11,6 +12,7 @@ macro_rules! say {
 macro_rules! note {
     ($($arg:tt)*) => {{
         use std::io::Write as _;
+        let _paused = crate::progress::pause();
         let _ = writeln!(std::io::stderr(), $($arg)*);
     }};
 }
@@ -55,6 +57,7 @@ mod options;
 mod output;
 mod packages;
 mod policy;
+mod progress;
 mod provider;
 mod provider_error;
 mod requests;
