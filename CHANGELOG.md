@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-29
+
 A whole-repository check now finishes where it stopped halfway, says what it is doing while it runs, and fails at once, in one line, without a key. Measured on a 950-file TypeScript and Python project whose jevgate.toml, written for 0.8, set `maintainability = "consider"`, `max_requests = 1000` and `concurrency = 4`: 0.31.0 planned 1,126 first-pass requests, spent its 1,000 on them in 70 silent seconds and left 377 files unchecked, advising a larger `--max-requests`, which could not raise the ceiling jevgate.toml set; this version asks 930 requests in 73 seconds from an empty cache, drawing a status line all along, and finishes ($0.05). A rerun from the cache takes 2 seconds.
 
 ### Checks of the whole repository
@@ -460,7 +462,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.25.0...v0.30.0
 [0.25.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.1...v0.25.0
