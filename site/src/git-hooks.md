@@ -28,13 +28,13 @@ and commit jevgate-baseline.json. Coding agents: fix the findings; never bypass 
 A hook must not trap the change it guards. When the check cannot finish, for want of a key, after an HTTP 402, with a provider that stopped answering, or at a budget, the push or commit goes ahead, and the last lines of the output say it was not checked, and why:
 
 ```text
-jevgate: this push was not checked: TypeSafe HTTP 402 (credits exhausted); add credits at https://app.typesafe.ai, then rerun the review.
+jevgate: this push was not checked: TypeSafe HTTP 402 (credits exhausted; add credits or turn on auto-refill at https://console.typesafe.ai); request was not retried.
 jevgate: it goes ahead unchecked, as on_incomplete is "pass"; set on_incomplete = "fail" in jevgate.toml to stop it instead.
 ```
 
 - **`on_incomplete`** decides: `"pass"` by default with `--staged` and `--pre-push`, `"fail"` (exit 2) for every other check, so CI never passes on partial evidence. Set `on_incomplete = "fail"` in `jevgate.toml`, or pass `--on-incomplete fail`, for a hook that stops the change instead. A configuration that does not load, or a Git failure, lets the change through the same way.
 - **Budgets:** a hook's check asks for at most 60 seconds (`max_seconds` or `--max-seconds` changes it). No request starts past it, and an attempt under way gets only the time left, so a provider that stops answering holds a push for a minute at most, where a run of 100 requests otherwise waits out its retries for 8 minutes. The answers received are kept, so the next run asks only for the rest. After a provider failure that passes with time (an overload, a timeout, a dropped connection), the hooks' checks of the next five minutes ask nothing and use only cached answers, as [the agent hook](coding-agents.md#in-the-agents-loop-jevgate-hook) does, so an outage holds one push, not each one. `max_cost` or `--max-cost` stops the asking before the estimated spend passes a number of dollars, and says when 75% and 90% of it are spent.
-- **Enter:** on a terminal, a check that has run for a second offers to skip itself. Enter lets the push or commit through, and a line says it was not checked. It is offered only when a person reads the output as it comes: a coding agent's shell reads it through a pipe, and so does pre-commit, which prints a hook's output when the hook ends; lefthook runs hooks in its own pseudo-terminal, where Enter does not reach them.
+- **Enter:** on a terminal, a check that has run for a second offers to skip itself. Enter lets the push or commit through, and a line says it was not checked. It is offered only when a person reads the output as it comes: a coding agent's shell reads it through a pipe, and so does pre-commit, which prints a hook's output when the hook ends. lefthook runs a job in a pseudo-terminal of its own, where the offer shows but Enter does not reach it, unless the job has `use_stdin: true`, as the pre-push recipe below does, or `interactive: true`.
 
 ## Recipes
 

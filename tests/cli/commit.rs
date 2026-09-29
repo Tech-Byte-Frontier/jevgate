@@ -130,7 +130,9 @@ fn staged_reads_the_index_git_commits_from() {
     // which Git names to the pre-commit hook in GIT_INDEX_FILE.
     let project = Project::committed();
     std::fs::write(project.0.join("lib.rs"), LONG_RS).unwrap();
-    let index = project.0.join(".git/next-index");
+    // Named as Git names it to a hook: Git for Windows cannot lock an
+    // index named in the verbatim form a canonical path has.
+    let index = super::changes::plain(&project.0.join(".git/next-index"));
     std::fs::copy(project.0.join(".git/index"), &index).unwrap();
     let staged = git::command(&project.0)
         .env("GIT_INDEX_FILE", &index)
