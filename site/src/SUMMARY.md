@@ -12,6 +12,7 @@
 # Using JevGate
 
 - [Continuous integration](ci.md)
+- [Git hooks](git-hooks.md)
 - [Coding agents](coding-agents.md)
 - [Configuration](configuration.md)
 - [Custom questions](custom-questions.md)

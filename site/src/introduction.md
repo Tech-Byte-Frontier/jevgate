@@ -23,7 +23,8 @@ Consider (2):
 - [Install](install.md) and follow the [quick start](quick-start.md): a dry run shows exactly what would be uploaded, free and offline.
 - [What it finds](what-it-finds.md) and the [rules reference](reference/rules.md) describe every rule and the question it asks, and each rule's page shows findings it got wrong.
 - [Accuracy](accuracy.md) gives how often each rule was right on projects JevGate was never tuned on, and how that is measured.
-- [Continuous integration](ci.md) sets JevGate up on pull requests with the GitHub Action, pre-commit or any other CI.
+- [Continuous integration](ci.md) sets JevGate up on pull requests with the GitHub Action or any other CI.
+- [Git hooks](git-hooks.md) run the same gate before each push or commit, and let the change through, saying so, when JevGate cannot finish.
 - [How it works](how-it-works.md) explains the evidence units and how code, not a chat model, turns answers into findings.
 
 JevGate is open source under MIT or Apache-2.0: [source, issues and releases on GitHub](https://github.com/Tech-Byte-Frontier/jevgate).

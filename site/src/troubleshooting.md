@@ -33,6 +33,9 @@ Exit code 2 means the run could not finish, or the configuration or command line
 
 A provider error ends with the provider's request id when it sent one (`; request id req_…`); quote it to the provider's support. The report also keeps the id of the request behind each answer (`files[].judgments[].request_id`).
 
+**`jevgate: this commit was not checked: …` or `this push was not checked: …`**
+: A [Git hook](git-hooks.md)'s check could not finish, for the reason given, and let the change through, as `on_incomplete = "pass"` does by default for `--staged` and `--pre-push`. Fix the cause (a key, credits, a configuration that loads) and check again with `jevgate check --base <the commit before>`, or set `on_incomplete = "fail"` for a hook that stops the change instead. `it used its 60 seconds (max_seconds)` means the provider did not answer in time: the answers received are cached, so the next run asks only for the rest; raise `max_seconds` for larger pushes.
+
 **`Session API request budget exhausted; restart with an explicit larger --max-requests`**
 : `max_requests` or `--max-requests` capped the run. Raise it, or check fewer files with `--base` or paths; `--dry-run` estimates what a run will ask.
 
