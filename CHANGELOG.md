@@ -4,6 +4,10 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-28
+
+0.31.0 brings the gate to the roadmap's third moment, the commit: Git hooks judge what a push sends or a commit records, read from Git, and a check that cannot finish lets the change through and says so. Releases now stage the npm package for the maintainer's approval.
+
 ### The commit moment
 
 A Git hook runs the gate before each push or commit, on what the push sends or the commit records, read from Git and not from the working tree. A check that cannot finish lets the change through and says so, where it held a commit until its retries ran out, and `jevgate init --git-hook` writes the hook. On the last commits of 83 corpus projects, a check like the push of that commit took 1.0 s at the median, 5.6 s at the 95th percentile and 8.4 s at most, uncached, for $0.097 in all; the default gate stopped 12 of them, all on function-simplification reviews, 8 in the maintainer's own repositories. pre-commit, prek, lefthook, husky and the hook `init` writes each ran end to end in a scratch repository: a review stopped the commit and the push, and an HTTP 402 let both through with the notice.
@@ -444,7 +448,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.25.0...v0.30.0
 [0.25.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.24.0...v0.24.1
