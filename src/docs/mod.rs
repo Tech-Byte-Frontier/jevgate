@@ -9,6 +9,7 @@ pub mod markdown;
 pub mod overlap;
 pub mod project;
 pub mod references;
+mod spans;
 
 use anyhow::Result;
 use std::{
