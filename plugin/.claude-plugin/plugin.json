@@ -1,7 +1,7 @@
 {
   "name": "jevgate",
   "displayName": "JevGate",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "description": "JevGate in the agent's loop: checks each edit and the end of each turn, keeps Claude working while findings fail the gate, and adds JevGate's MCP tools and a skill for acting on findings. Runs the jevgate command, 0.27 or later, which you install separately.",
   "author": {
     "name": "Tech Byte Frontier",
