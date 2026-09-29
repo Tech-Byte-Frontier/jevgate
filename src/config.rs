@@ -474,21 +474,23 @@ impl Levels {
 /// Keys of `rules` named by rule IDs, names, keys or groups; an unknown
 /// name is an error.
 fn expand(rules: &[catalog::Rule], names: &[String]) -> Result<Vec<&'static str>> {
-    let mut keys = Vec::new();
-    for name in names {
-        let selected = catalog::select_in(rules, name).ok_or_else(|| unknown(rules, name))?;
-        keys.extend(selected);
-    }
-    Ok(keys)
+    expand_with(rules, names, catalog::select_in)
 }
 
 /// The keys of the rules that naming `names` turns on: a group's opt-in
 /// rules only when the group runs none by default ([`catalog::enable_in`]).
 fn expand_enabled(rules: &[catalog::Rule], names: &[String]) -> Result<Vec<&'static str>> {
+    expand_with(rules, names, catalog::enable_in)
+}
+
+fn expand_with(
+    rules: &[catalog::Rule],
+    names: &[String],
+    select: fn(&[catalog::Rule], &str) -> Option<Vec<&'static str>>,
+) -> Result<Vec<&'static str>> {
     let mut keys = Vec::new();
     for name in names {
-        let selected = catalog::enable_in(rules, name).ok_or_else(|| unknown(rules, name))?;
-        keys.extend(selected);
+        keys.extend(select(rules, name).ok_or_else(|| unknown(rules, name))?);
     }
     Ok(keys)
 }
