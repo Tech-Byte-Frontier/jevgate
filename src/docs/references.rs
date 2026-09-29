@@ -3,6 +3,7 @@
 //! check; they never decide one: outputs, local files and examples are named
 //! too.
 use super::history::History;
+use super::spans::{code_spans, file_span, line_spans, split_fences};
 use std::{
     collections::BTreeSet,
     path::{Component, Path, PathBuf},
@@ -377,84 +378,6 @@ fn normal(path: &Path) -> PathBuf {
     out
 }
 
-/// Interpreted-text roles whose target is a file: reStructuredText's
-/// `:file:` and `:download:`, and the same roles written the MyST way.
-const PATH_ROLES: &[&str] = &["file", "download", "doc"];
-
-/// The lines outside fenced code blocks, and the fenced lines, of `text`.
-fn split_fences(text: &str) -> (Vec<&str>, Vec<&str>) {
-    let (mut prose, mut code) = (Vec::new(), Vec::new());
-    let mut fence: Option<&str> = None;
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        if let Some(open) = fence {
-            if trimmed.starts_with(open) {
-                fence = None;
-            } else {
-                code.push(line);
-            }
-        } else if let Some(open) = ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f)) {
-            fence = Some(open);
-        } else {
-            prose.push(line);
-        }
-    }
-    (prose, code)
-}
-
-/// Inline code spans of one line, each with the text before it.
-fn line_spans(line: &str) -> Vec<(&str, &str)> {
-    let mut out = Vec::new();
-    let mut rest = line;
-    let mut offset = 0;
-    while let Some(open) = rest.find('`') {
-        let run = rest[open..].chars().take_while(|&c| c == '`').count();
-        let body = &rest[open + run..];
-        let fence = "`".repeat(run);
-        // The closing run has the same length as the opening one.
-        let close = body.match_indices(&fence).find(|(i, _)| {
-            !body[i + run..].starts_with('`') && (*i == 0 || !body[..*i].ends_with('`'))
-        });
-        let Some((close, _)) = close else { break };
-        out.push((&line[..offset + open], &body[..close]));
-        let consumed = open + run + close + run;
-        offset += consumed;
-        rest = &rest[consumed..];
-    }
-    out
-}
-
-/// The role an interpreted-text span is written with, such as `attr` in
-/// `:py:attr:` or `{file}`, from the text before the span.
-fn role(before: &str) -> Option<&str> {
-    if let Some(inner) = before.strip_suffix('}') {
-        let start = inner.rfind('{')?;
-        return Some(&inner[start + 1..]);
-    }
-    let inner = before.strip_suffix(':')?;
-    let start = inner
-        .char_indices()
-        .rfind(|&(_, c)| !(c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '_'))
-        .map_or(0, |(i, c)| i + c.len_utf8());
-    let name = inner[start..].strip_prefix(':')?;
-    (!name.is_empty()).then(|| name.rsplit(':').next().unwrap_or(name))
-}
-
-/// Inline code spans without whitespace, outside code blocks. A span written
-/// with a role names what the role says: `:attr:` and `:class:` name code,
-/// only `:file:` and its kind name files.
-fn code_spans(text: &str) -> Vec<String> {
-    split_fences(text)
-        .0
-        .into_iter()
-        .flat_map(line_spans)
-        .filter(|(before, _)| role(before).is_none_or(|r| PATH_ROLES.contains(&r)))
-        .map(|(_, span)| span.trim())
-        .filter(|span| !span.is_empty() && !span.contains(char::is_whitespace))
-        .map(str::to_string)
-        .collect()
-}
-
 /// Paths the section writes out: the file a code block is titled with, such
 /// as `filename="app/api/chat.ts"`, or the one path named by the paragraph
 /// that introduces a code block. A tutorial shows the reader's own files this
@@ -504,7 +427,7 @@ fn introduced(lines: &[&str], open: usize, top: &BTreeSet<&str>) -> Option<Strin
         named.extend(
             line_spans(lines[j])
                 .into_iter()
-                .filter(|(before, _)| role(before).is_none_or(|r| PATH_ROLES.contains(&r)))
+                .filter(|(before, _)| file_span(before))
                 .filter_map(|(_, span)| path_like(span, top)),
         );
     }
