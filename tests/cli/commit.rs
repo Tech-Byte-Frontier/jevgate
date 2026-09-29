@@ -553,3 +553,44 @@ fn a_provider_failure_is_waited_out_by_the_next_commits() {
         stderr(&next)
     );
 }
+
+#[test]
+fn a_push_of_several_refs_checks_each_distinct_change_once() {
+    let project = Project::committed();
+    let _remote = pushed_long(&project);
+    git(&project, &["checkout", "-q", "--", "lib.rs"]);
+    git(&project, &["checkout", "-qb", "other", "main"]);
+    std::fs::write(
+        project.0.join("other.rs"),
+        JUDGED_RS.replace("fn f(", "fn o("),
+    )
+    .unwrap();
+    git(&project, &["add", "other.rs"]);
+    git(&project, &["commit", "-qm", "other"]);
+    let id = |revision: &str| {
+        git::run(&project.0, &["rev-parse", revision])
+            .trim()
+            .to_string()
+    };
+    let lines = format!(
+        "refs/heads/feature {feature} refs/heads/feature {zero}\nrefs/heads/copy {feature} refs/heads/copy {zero}\nrefs/heads/other {other} refs/heads/other {zero}\nrefs/heads/main {main} refs/heads/main {main}\n",
+        feature = id("feature"),
+        other = id("other"),
+        main = id("main"),
+        zero = "0".repeat(40),
+    );
+    let provider = reviewing();
+    let output = fed(
+        project
+            .asking(&provider, "key")
+            .args(["check", "--pre-push"]),
+        &lines,
+    );
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{said}{}", stderr(&output));
+    assert_eq!(
+        said.matches("JevGate: ").count(),
+        2,
+        "feature once for its two names, other once, main not at all: {said}"
+    );
+}
