@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: Tech-Byte-Frontier/jevgate-action@2112ce86b0db012a6b8917d6fb21c6d878d6db55 # v1.0.0
+      - uses: Tech-Byte-Frontier/jevgate-action@49d157bab6187e52175c27ed1c89464d48488350 # v1.2.0
         with:
           api-key: ${{ secrets.TYPESAFE_API_KEY }}
           args: --rule all --include-tests
