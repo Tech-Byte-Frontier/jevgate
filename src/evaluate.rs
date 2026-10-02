@@ -319,20 +319,16 @@ impl Session<'_> {
         unsent_units(&mut plan, report, oversized);
         // Traces judge where a security concern's values come from; rechecks
         // settle uncertain units; a security check still undecided is asked
-        // where its URL comes from or its output goes, and an outline its kind;
-        // a long file left without a finding is asked about its parts;
-        // locate follow-ups then point split findings at a block, and a
-        // located value is asked what it is. Each depends on the answers
-        // before it.
+        // where its URL comes from or its output goes, and a document or
+        // comment its kind; locate follow-ups then point split reviews at a
+        // block. Each depends on the answers before it.
         for (phase, follow_up) in [
             ("checking documents", crate::units::doc_checks as FollowUps),
             ("tracing values", crate::units::traces),
             ("rechecking undecided units", crate::units::rechecks),
             ("settling security checks", crate::units::settles),
-            ("asking what outlines are", crate::units::kinds),
-            ("asking about file parts", crate::units::parts),
+            ("asking what documents are", crate::units::kinds),
             ("locating findings", crate::units::locates),
-            ("asking what values are", crate::units::value_kinds),
         ] {
             let tasks: Vec<_> = follow_up(&plan, &report.files)
                 .iter()
@@ -719,6 +715,7 @@ fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
         file.status = composed.status;
     }
     crate::units::grouping::group_repeats(&mut report.files);
+    crate::units::compose::one_level(&mut report.files);
 }
 
 fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {

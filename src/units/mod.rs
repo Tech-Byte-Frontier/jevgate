@@ -38,7 +38,7 @@ pub use answers::{Asked, record};
 pub(crate) use custom::{KEY_PREFIX as CUSTOM_KEY_PREFIX, MAX_UNITS as MAX_CUSTOM_UNITS, examples};
 pub(crate) use evidence::pack_runs;
 use evidence::{FileContext, compact, identity, pack, request, unique_ids};
-pub use follow_ups::{doc_checks, kinds, locates, parts, rechecks, settles, traces, value_kinds};
+pub use follow_ups::{doc_checks, kinds, locates, rechecks, settles, traces};
 pub use guards::{Steering, weaker_answer, weaker_request};
 use plan::Scope;
 pub use plan::plan;
@@ -66,26 +66,6 @@ pub enum Presence {
     TooSmall,
     /// The unit alone exceeds the provider limit, so it was not sent.
     NeedsContext,
-}
-
-#[derive(Clone, Debug)]
-pub struct GroupInfo {
-    pub id: String,
-    pub names: Vec<String>,
-    pub locations: Vec<Location>,
-}
-
-/// A candidate part of a long file and the follow-up that asks whether it
-/// does a job of its own, sent only when the outline raised no finding.
-#[derive(Clone, Debug)]
-pub struct Part {
-    /// The ids its answers are recorded under, from `outline::PART_QUESTIONS`.
-    pub questions: (&'static str, &'static str),
-    pub names: Vec<String>,
-    pub locations: Vec<Location>,
-    /// The lines of its members.
-    pub lines: usize,
-    pub follow_up: FollowUp,
 }
 
 /// A top-level block of a function body, offered when locating a split.
@@ -188,42 +168,12 @@ pub enum Detail {
         /// split question raises a review or consider.
         locate: Option<FollowUp>,
     },
-    Outline {
-        /// A test file's cases rather than application members.
-        tests: bool,
-        groups: Vec<GroupInfo>,
-        /// How many members the outline lists.
-        members: usize,
-        /// The section rules of a Bend 2 file (`# ----`, `# === Title ===`):
-        /// the parts its author laid it out in. Zero for other languages.
-        sections: usize,
-        /// What kind of file it is, asked after a recheck that stays undecided.
-        kind: Option<FollowUp>,
-        /// The candidate parts of a long application file, each asked
-        /// whether it does a job of its own once the outline stays without
-        /// a finding.
-        parts: Vec<Part>,
-    },
-    Pair {
-        differences: Vec<crate::analysis::clones::Difference>,
-        /// Both copies sit in one test case: the remedy is a table of cases,
-        /// not a shared implementation.
-        within_test: bool,
-        /// The owning copy is test code: shared steps belong in a fixture or helper.
-        in_tests: bool,
-        /// Every copy is inside a test case, where spelling out each case is idiomatic.
-        in_cases: bool,
-    },
+    /// A file's outline: a test file's cases, or an application's members.
+    Outline { tests: bool },
+    /// A group of repeated snippets, its first site owned by the file.
+    Pair,
     /// A function and the literal values it uses.
-    Values {
-        values: Vec<String>,
-        /// Its distinct values, whose ids `v0`, `v1`, ... the locate follow-up
-        /// chooses among; that follow-up is sent only after a review or consider.
-        choices: Vec<String>,
-        /// Whether each choice's text is not written exactly once in the file.
-        repeated: Vec<bool>,
-        locate: Option<FollowUp>,
-    },
+    Values { values: Vec<String> },
     /// A comment of application code and the unit it documents or sits in.
     Comment {
         /// The name of that unit, or `top-level code`: a finding lists the
@@ -236,12 +186,7 @@ pub enum Detail {
         kind: Option<FollowUp>,
     },
     /// A file's module-level constants and the literal values they hold.
-    Constants {
-        values: Vec<String>,
-        /// Which constant a review or consider is about, asked after it;
-        /// its options are the unit's locations, one per constant, in order.
-        locate: Option<FollowUp>,
-    },
+    Constants { values: Vec<String> },
     /// A security unit: its statements as sites for locating a finding, and
     /// the trace follow-up sent when presence is not clear.
     Security {
@@ -370,13 +315,7 @@ impl UnitPlan {
     /// given after the first pass was asked.
     fn follow_ups(&self) -> impl Iterator<Item = &FollowUp> {
         let planned: Vec<&FollowUp> = match &self.detail {
-            Detail::Function { locate, .. }
-            | Detail::Values { locate, .. }
-            | Detail::Constants { locate, .. } => locate.iter().collect(),
-            Detail::Outline { kind, parts, .. } => kind
-                .iter()
-                .chain(parts.iter().map(|part| &part.follow_up))
-                .collect(),
+            Detail::Function { locate, .. } => locate.iter().collect(),
             Detail::Comment { kind, .. } => kind.iter().collect(),
             Detail::Security {
                 trace,
@@ -393,7 +332,10 @@ impl UnitPlan {
                 check.iter().chain(settle).collect()
             }
             Detail::Test { confirm } | Detail::TestPair { confirm, .. } => confirm.iter().collect(),
-            Detail::Pair { .. }
+            Detail::Pair
+            | Detail::Outline { .. }
+            | Detail::Values { .. }
+            | Detail::Constants { .. }
             | Detail::Plan { .. }
             | Detail::Section { .. }
             | Detail::Handler { .. }
@@ -432,7 +374,6 @@ impl UnitPlan {
                 blocks.clear();
                 *locate = None;
             }
-            Detail::Values { locate, .. } => *locate = None,
             Detail::Security {
                 trace,
                 settles,

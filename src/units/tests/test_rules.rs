@@ -28,13 +28,13 @@ fn test_rules_need_include_tests_and_summarize_over_tested_subjects() {
     );
     let redundancy = &file.dimensions["test_redundancy"];
     assert_eq!(redundancy.units.judged, 3);
-    assert_eq!(redundancy.status, Status::Consider);
+    assert_eq!(redundancy.status, Status::Review);
     let over = file
         .findings
         .iter()
         .find(|f| f.message.contains("3 tests of `total` overlap"))
         .unwrap();
-    assert_eq!(over.strength, Strength::Consider);
+    assert_eq!(composed(over), Strength::Consider);
     assert_eq!(over.locations.len(), 3);
     let redundancy: Vec<&str> = file
         .findings
@@ -75,7 +75,7 @@ fn an_undecided_test_pair_is_asked_again_with_the_body_of_its_subject() {
     assert!(eval.stages.contains(&"recheck".to_string()));
     assert_eq!(
         report.files[0].dimensions["test_redundancy"].status,
-        Status::Consider
+        Status::Review
     );
 }
 
@@ -165,7 +165,7 @@ fn an_undecided_test_is_asked_again_with_its_subjects_and_setup() {
     eval.overrides = vec![("own_logic", noul_at(0.5))];
     eval.recheck_overrides = vec![("mock_only", noul_at(0.95))];
     let file = test_value(&run(&project, &options, &mut eval));
-    assert_eq!(file.findings[0].strength, Strength::Review);
+    assert_eq!(composed(&file.findings[0]), Strength::Review);
     assert!(
         file.findings[0]
             .message
@@ -270,11 +270,11 @@ fn ruby_pairs_are_a_review_only_when_neither_test_checks_something_the_other_doe
             .find(|f| f.path.ends_with("invoice_spec.rb"))
             .unwrap()
             .clone();
-        file.findings[0].strength
+        file.findings.first().map(composed)
     };
-    assert_eq!(strength(0.05, false), Strength::Review);
-    // Lowered to a consider, a lone pair is a note.
-    assert_eq!(strength(0.3, true), Strength::Note);
+    assert_eq!(strength(0.05, false), Some(Strength::Review));
+    // Lowered to a consider, a lone pair is a note, which is not reported.
+    assert_eq!(strength(0.3, true), None);
 }
 
 /// Two pairs of tests of `total`, each alike within and unlike the other.
@@ -291,13 +291,9 @@ fn overlapping_tests_are_grouped_only_when_their_pairs_connect_them() {
             .map(|f| f.message.clone())
             .collect::<Vec<_>>()
     };
+    // Two lone pairs are two notes, which are not reported, and no group.
     let disjoint = redundancy(TWO_PAIRS);
-    assert_eq!(disjoint.len(), 2, "two pairs and no group: {disjoint:?}");
-    assert!(
-        disjoint
-            .iter()
-            .all(|m| !m.contains("tests of `total` overlap"))
-    );
+    assert!(disjoint.is_empty(), "{disjoint:?}");
     let chained = redundancy(TESTS);
     assert!(
         chained
@@ -369,7 +365,7 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
             .findings
             .iter()
             .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
-            .map(|f| f.strength)
+            .map(composed)
             .max()
     };
     assert_eq!(strengths(&options, 0.95, 0.95), Some(Strength::Review));
@@ -389,24 +385,18 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
             .findings
             .iter()
             .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
-            .all(|f| f.strength != Strength::Review)
+            .all(|f| composed(f) != Strength::Review)
     );
     assert_eq!(strengths(&options, 0.69, 0.95), Some(Strength::Consider));
     assert_eq!(strengths(&options, 0.95, 0.05), Some(Strength::Consider));
-    // Different inputs whose outcomes clearly differ are a note.
+    // Different inputs whose outcomes clearly differ are a note, which is
+    // not reported.
     let mut eval = scripted(2);
     eval.overrides = vec![
         ("overlap", spread(0.0, 0.9, 0.1)),
         ("same_outcome", noul_at(0.05)),
     ];
-    let report = run(&project, &options, &mut eval);
-    assert!(
-        report.files[0]
-            .findings
-            .iter()
-            .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
-            .all(|f| f.strength == Strength::Note)
-    );
+    assert_eq!(strengths_of(&project, &options, &mut eval), None);
     // Tests that read the same apart from their names stay a review.
     let twins = "fn total(values: &[i32]) -> i32 {\n    values.iter().sum()\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn when_empty() {\n        let values = vec![1, 2];\n        assert_eq!(total(&values), 3);\n    }\n\n    #[test]\n    fn when_full() {\n        let values = vec![1, 2];\n        assert_eq!(total(&values), 3);\n    }\n}\n";
     let (project, options) = tests_project(&[("lib.rs", twins)], catalog::TEST_REDUNDANCY);
@@ -417,19 +407,28 @@ fn a_redundant_pair_is_a_review_only_when_both_tests_share_input_and_outcome() {
         ("same_outcome", noul_at(0.95)),
     ];
     let report = run(&project, &options, &mut eval);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Review);
+    assert_eq!(composed(&report.files[0].findings[0]), Strength::Review);
     // A space inside a string can be what the tests differ in: not a
     // review, and a lone pair below one is a note.
     let spaced = twins.replacen("vec![1, 2]", "vec![1,2]", 1);
     let (project, options) = tests_project(&[("lib.rs", &spaced)], catalog::TEST_REDUNDANCY);
-    let report = run(&project, &options, &mut eval);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    assert_eq!(strengths_of(&project, &options, &mut eval), None);
     // Without a crate for parameterized tests, merging them is only a note.
     let (project, options) = project_with(&[("lib.rs", &spaced)], &[catalog::TEST_REDUNDANCY]);
     let mut options = options;
     options.include_tests = true;
-    let report = run(&project, &options, &mut eval);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    assert_eq!(strengths_of(&project, &options, &mut eval), None);
+}
+
+/// The highest composed level of a run's redundancy findings.
+fn strengths_of(project: &Project, options: &CheckArgs, eval: &mut Scripted) -> Option<Strength> {
+    let report = run(project, options, eval);
+    report.files[0]
+        .findings
+        .iter()
+        .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
+        .map(composed)
+        .max()
 }
 
 #[test]
@@ -446,18 +445,27 @@ fn copies_inside_tests_a_redundancy_finding_names_are_reported_once() {
     );
     let (project, mut options) = tests_project(&[("lib.rs", &source)], catalog::TEST_REDUNDANCY);
     options.rules.push(catalog::SHARED_LOGIC.into());
-    let mut eval = scripted(2);
-    eval.overrides = vec![
-        ("overlap", spread(0.0, 0.9, 0.1)),
-        ("required", noul_at(0.05)),
-    ];
-    let report = run(&project, &options, &mut eval);
-    let rules: Vec<&str> = report.files[0]
-        .findings
-        .iter()
-        .map(|f| f.rule.as_str())
-        .collect();
-    assert_eq!(rules, [catalog::id(catalog::TEST_REDUNDANCY)], "{rules:?}");
+    let rules = |distinct: f64, options: &CheckArgs| {
+        let mut eval = scripted(2);
+        eval.overrides = vec![
+            ("overlap", spread(0.0, 0.05, 0.95)),
+            ("distinct", noul_at(distinct)),
+        ];
+        let report = run(&project, options, &mut eval);
+        report.files[0]
+            .findings
+            .iter()
+            .map(|f| f.rule.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        rules(0.05, &options),
+        [catalog::id(catalog::TEST_REDUNDANCY)]
+    );
+    // Lowered to a note, the pair is not reported, so shared logic reports
+    // the copies.
+    options.refresh = true;
+    assert_eq!(rules(0.9, &options), [catalog::id(catalog::SHARED_LOGIC)]);
 }
 
 #[test]
@@ -496,20 +504,22 @@ fn an_internal_details_consider_is_confirmed_by_what_its_assertions_read() {
         options.refresh = true;
         report.files[0].dimensions["test_value"].clone()
     };
-    // Spies on the program's own helpers keep the consider.
+    // Spies on the program's own helpers keep the consider, reported as a
+    // review.
     let own = judged(choice_of("own_calls", &reads));
-    assert_eq!(own.units.consider, 3, "{}", own.decision_basis);
+    assert_eq!(own.units.review, 3, "{}", own.decision_basis);
     // State the program shows or acts on next is what a caller observes.
     let state = judged(choice_of("state", &reads));
     assert_eq!(state.units.clear, 3, "{}", state.decision_basis);
-    // Leaning toward what a caller observes, without reaching it: a note.
+    // Leaning toward what a caller observes, without reaching it: a note,
+    // which is not reported.
     let mut split: serde_json::Map<String, Value> =
         reads.iter().map(|k| (k.to_string(), json!(0.0))).collect();
     split.insert("state".into(), json!(0.6));
     split.insert("stored".into(), json!(0.4));
     let leaning =
         judged(json!({"type":"choice","choice":"state","confidence":0.5,"probabilities":split}));
-    assert_eq!(leaning.units.note, 3, "{}", leaning.decision_basis);
+    assert_eq!(leaning.units.clear, 3, "{}", leaning.decision_basis);
 }
 
 #[test]
@@ -538,7 +548,7 @@ fn a_test_that_reaches_past_visibility_keeps_its_internal_details_consider() {
     let report = run(&project, &options, &mut eval);
     let dimension = &report.files[0].dimensions["test_value"];
     assert_eq!(
-        (dimension.units.consider, dimension.units.clear),
+        (dimension.units.review, dimension.units.clear),
         (1, 2),
         "{}",
         dimension.decision_basis

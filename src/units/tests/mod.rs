@@ -385,11 +385,8 @@ fn grouped_primary(files: &mut [crate::schema::FileResult]) -> crate::schema::Fi
     files[1].findings[0].clone()
 }
 
-/// The first finding of the first file after a run.
-fn first_finding(
-    project: &Project,
-    options: &CheckArgs,
-    evaluator: &mut impl crate::transport::Evaluator,
-) -> crate::schema::Finding {
-    run(project, options, evaluator).files[0].findings[0].clone()
+/// The level a finding's questions composed: one level reports every
+/// finding as a review and keeps this level for the default gate.
+fn composed(finding: &crate::schema::Finding) -> Strength {
+    finding.measured_as.unwrap_or(finding.strength)
 }

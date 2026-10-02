@@ -76,7 +76,7 @@ fn an_unchecked_redirect_target_is_an_open_redirect_review() {
         .find(|f| f.path == std::path::Path::new("middleware.ts"))
         .unwrap();
     let finding = &file.findings[0];
-    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(composed(finding), Strength::Review);
     assert_eq!(finding.category.as_deref(), Some("CWE-601 open redirect"));
     assert!(finding.message.contains("a URL it redirects clients to"));
     assert!(finding.action.contains("paths on this site"));
@@ -99,7 +99,7 @@ fn a_parameter_only_redirect_is_a_note_until_callers_show_another_party() {
         .iter()
         .find(|f| f.path == std::path::Path::new("lib/navigation.ts"))
         .unwrap();
-    assert_eq!(file.findings[0].strength, Strength::Note);
+    assert!(file.findings.is_empty(), "a note, which is not reported");
 }
 
 #[test]
@@ -178,12 +178,16 @@ fn only_questions_about_values_carry_the_framework_role() {
             .map(|key| key.split_once('_').unwrap().1)
             .collect()
     };
-    assert_eq!(asked(false), ["split"], "how code reads needs no role");
+    assert_eq!(
+        asked(false),
+        ["look", "split"],
+        "how code reads needs no role"
+    );
     let with_role = asked(true);
-    for question in ["environment", "special", "interpreted", "weakened"] {
+    for question in ["values", "interpreted", "weakened"] {
         assert!(with_role.contains(&question), "{question}: {with_role:?}");
     }
-    assert!(!with_role.contains(&"split"));
+    assert!(!with_role.contains(&"split") && !with_role.contains(&"look"));
 }
 
 const PORTAL: &str = "'use server';\n\nimport { redirect } from 'next/navigation';\n\nexport async function goToSection(section: string) {\n  redirect(`/account/${section}?tab=billing`);\n}\n";
@@ -225,7 +229,7 @@ fn an_undecided_redirect_is_settled_by_where_its_target_comes_from() {
     );
     // A target its caller gives is a note, as a found one would be; one a
     // request carries stays open.
-    for (chosen, status) in [("given", Status::Note), ("outside", Status::Uncertain)] {
+    for (chosen, status) in [("given", Status::Clear), ("outside", Status::Uncertain)] {
         options.refresh = true;
         assert_eq!(
             settled_redirect(&project, &options, chosen),
@@ -236,15 +240,15 @@ fn an_undecided_redirect_is_settled_by_where_its_target_comes_from() {
 }
 
 #[test]
-fn a_url_note_clears_when_the_request_leaves_from_the_browser() {
+fn an_undecided_url_check_is_settled_by_where_the_request_leaves_from() {
     let search = "'use client';\n\nexport function Search({ endpoint }: { endpoint: string }) {\n  async function run(term: string) {\n    const response = await fetch(`${endpoint}?q=${encodeURIComponent(term)}`);\n    return response.json();\n  }\n  return <input onChange={(event) => run(event.target.value)} />;\n}\n";
     let (project, mut options) = next_project(&[("components/search.tsx", search)]);
     options.rules = vec![catalog::INJECTION.into()];
-    let findings = |runs_in: &str, options: &CheckArgs| {
+    let settled = |runs_in: &str, options: &CheckArgs| {
         let mut eval = scripted(0);
         eval.overrides = vec![
             ("resource", noul_at(0.95)),
-            ("url", noul_at(0.6)),
+            ("url", noul_at(0.4)),
             ("origin", spread(0.0, 0.9, 0.1)),
             (
                 "runs_in",
@@ -261,9 +265,18 @@ fn a_url_note_clears_when_the_request_leaves_from_the_browser() {
             .iter()
             .find(|f| f.path == std::path::Path::new("components/search.tsx"))
             .unwrap();
-        file.findings.iter().map(|f| f.strength).collect::<Vec<_>>()
+        (
+            file.dimensions[catalog::INJECTION].status.clone(),
+            file.findings.len(),
+            report
+                .stages
+                .get("settle")
+                .map_or(0, |stage| stage.successful_requests),
+        )
     };
-    assert!(findings("browser", &options).is_empty());
+    // A request that leaves from the browser clears the check; from the
+    // server, a URL its caller gives is a note, which is not reported.
+    assert_eq!(settled("browser", &options), (Status::Clear, 0, 2));
     options.refresh = true;
-    assert_eq!(findings("server", &options), [Strength::Note]);
+    assert_eq!(settled("server", &options), (Status::Clear, 0, 2));
 }

@@ -14,6 +14,10 @@ mod guards;
 mod protocol;
 mod session;
 
+/// A custom question about every function, which `reviewing` answers yes.
+const BODY_LOGS: &str =
+    "question = \"Does this function write a request body to a log?\"\nunit = \"function\"\n";
+
 /// A Git repository with `lib.rs` committed, judged for function
 /// simplification only: a long `lib.rs` is a review that fails the gate
 /// with answers at level 2, a short one a note.
@@ -186,7 +190,7 @@ fn long_kotlin_function(name: &str) -> String {
 }
 
 #[test]
-fn an_edit_to_a_preview_language_s_file_is_checked_and_its_findings_never_block() {
+fn an_edit_to_a_preview_language_s_file_is_checked_and_its_findings_never_fail_the_gate() {
     let project = repository();
     let host = reviewing();
     send(&project, &host, prompt("add pricing"));
@@ -199,18 +203,34 @@ fn an_edit_to_a_preview_language_s_file_is_checked_and_its_findings_never_block(
     );
     assert!(
         text.contains(" Not yet measured in Kotlin. Next: ")
-            && text.ends_with("None of them blocks the end of the turn."),
+            && text.ends_with(
+                "Each one blocks the end of the turn until it is fixed or dismissed with a reason."
+            ),
         "{text}"
     );
+    // Verified once like every new review, though Kotlin is in preview: its
+    // reviews do not fail the default gate.
+    let stopped = send(&project, &host, stop(false));
+    assert_eq!(stopped["decision"], "block", "{stopped}");
     assert!(
-        send(&project, &host, stop(false)).get("decision").is_none(),
-        "Kotlin is in preview: its reviews do not fail the default gate"
+        !stopped["reason"]
+            .as_str()
+            .unwrap()
+            .contains("(fails the gate)"),
+        "{stopped}"
     );
-    // The same review in Rust fails it and keeps the agent working.
+    // The same review in Rust fails it.
     send(&project, &host, prompt("port it"));
     project.write("lib.rs", &long_function("spread"));
     send(&project, &host, edit(&project, "lib.rs"));
-    assert_eq!(send(&project, &host, stop(false))["decision"], "block");
+    let ported = send(&project, &host, stop(false));
+    assert!(
+        ported["reason"]
+            .as_str()
+            .unwrap()
+            .contains("lib.rs:1 review maintainability/function-simplification (fails the gate): "),
+        "{ported}"
+    );
 }
 
 #[test]
@@ -237,7 +257,7 @@ fn code_the_parser_could_not_read_is_named_and_a_blocked_turn_is_not_called_fixe
     let stopped = send(&project, &host, stop(true));
     assert!(stopped.get("decision").is_none(), "{stopped}");
     assert!(
-        message(&stopped).starts_with("JevGate: no finding of this turn fails the gate now, but some of the code it changed was not reviewed. JevGate did not review 1 file this turn changed: lib.rs (f at line 2 was left out"),
+        message(&stopped).starts_with("JevGate: no finding of this turn is open now, but some of the code it changed was not reviewed. JevGate did not review 1 file this turn changed: lib.rs (f at line 2 was left out"),
         "{stopped}"
     );
 }
@@ -344,57 +364,10 @@ fn a_turn_is_judged_on_what_it_changed_not_on_the_rest_of_its_files() {
 }
 
 #[test]
-fn only_findings_that_fail_the_gate_block_the_end_of_a_turn() {
-    // Answered "Yes" at 0.6, a long function is a function-simplification
-    // consider: reported, but not failing the default gate, which fails only
-    // on levels measured right on projects JevGate was never tuned on.
-    let host = host(|| {
-        Box::new(Mock {
-            level: 4,
-            ..Default::default()
-        })
-    });
-    let project = repository();
-    send(&project, &host, prompt("refactor"));
-    project.write("lib.rs", &long_function("f"));
-    let edited = send(&project, &host, edit(&project, "lib.rs"));
-    assert!(
-        context(&edited)
-            .contains("\n- lib.rs:1 consider maintainability/function-simplification: "),
-        "{edited}"
-    );
-    let stopped = send(&project, &host, stop(false));
-    assert!(stopped.get("decision").is_none(), "{stopped}");
-    assert!(
-        message(&stopped).starts_with(
-            "JevGate: 1 consider in this turn's changes doesn't fail the quality gate."
-        ),
-        "{stopped}"
-    );
-    // A level set in jevgate.toml fails it, from the turn after the edit.
-    project.write(
-        "jevgate.toml",
-        "rules = [\"function-simplification\"]\nfail_on = [\"consider\"]\n",
-    );
-    send(&project, &host, prompt("again"));
-    project.write(
-        "lib.rs",
-        &long_function("f").replace("spread + 1", "spread + 2"),
-    );
-    let edited = send(&project, &host, edit(&project, "lib.rs"));
-    assert!(
-        context(&edited)
-            .contains(" consider maintainability/function-simplification (fails the gate): "),
-        "{edited}"
-    );
-    assert_eq!(send(&project, &host, stop(false))["decision"], "block");
-}
-
-#[test]
-fn a_review_the_gate_still_measures_is_context_and_never_blocks() {
-    // The hook blocks on how the check's gate counted a finding, not on its
-    // level: the default gate reports a hardcoded-values review as still
-    // being measured, and the report the hook's check published says so.
+fn a_new_review_blocks_until_it_is_fixed_or_dismissed_with_a_reason() {
+    // The default gate still measures hardcoded values: their reviews do
+    // not fail it, and each blocks the end of the turn once until the agent
+    // has looked.
     let project = repository();
     project.write("jevgate.toml", "rules = [\"hardcoded-values\"]\n");
     project.commit_all();
@@ -408,18 +381,84 @@ fn a_review_the_gate_still_measures_is_context_and_never_blocks() {
         "{edited}"
     );
     assert!(
+        context(&edited).ends_with(
+            "\nEach one blocks the end of the turn until it is fixed or dismissed with a reason."
+        ),
+        "{edited}"
+    );
+    let blocked = send(&project, &host, stop(false));
+    assert_eq!(blocked["decision"], "block", "{blocked}");
+    let reason = blocked["reason"].as_str().unwrap();
+    assert!(
+        reason.starts_with("JevGate blocked the end of this turn (1 of at most 3): 1 finding in code changed this turn is not fixed or dismissed.\n- lib.rs:1 review maintainability/hardcoded-values: "),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("dismiss it with `jevgate baseline mark wrong|intended|later PATH:LINE`, which the person audits with `jevgate baseline stats`."),
+        "{reason}"
+    );
+    assert_eq!(
+        message(&blocked),
+        "JevGate: 1 finding in this turn's changes is not fixed or dismissed; the agent is asked to fix or dismiss it with a reason (block 1 of 3)."
+    );
+    let checked = crate::storage::read_latest(&project.0).unwrap();
+    assert_eq!(
+        checked.files[0].findings[0].gate,
+        Some(crate::schema::Gating::Measuring)
+    );
+    // Dismissed with a reason, it counts at once and never blocks again.
+    let dismissed = crate::baseline::mark(
+        &project.0,
+        crate::options::Disposition::Intended,
+        &["lib.rs:1".into()],
+        &[],
+    );
+    assert_eq!(dismissed.unwrap(), 1);
+    let stopped = send(&project, &host, stop(true));
+    assert!(stopped.get("decision").is_none(), "{stopped}");
+    assert!(
+        message(&stopped).starts_with("JevGate: the findings that blocked this turn are fixed or dismissed. JevGate: the agent dismissed 1 finding in this turn's changes (lib.rs:1 maintainability/hardcoded-values as intended); `jevgate baseline stats` counts dismissals by rule and reason."),
+        "{stopped}"
+    );
+    assert!(
+        message(&stopped).contains("this turn edits jevgate-baseline.json"),
+        "the person is told of the edit: {stopped}"
+    );
+    send(&project, &host, prompt("rename f"));
+    project.write("lib.rs", &region.replace("fn f(", "fn g("));
+    assert_eq!(send(&project, &host, stop(false)), json!({}));
+}
+
+#[test]
+fn a_finding_at_the_report_level_is_context_and_never_blocks() {
+    let project = repository();
+    project.write(
+        "jevgate.toml",
+        "[rules]\n\"maintainability/hardcoded-values\" = \"report\"\n",
+    );
+    project.commit_all();
+    let host = reviewing();
+    send(&project, &host, prompt("add a region"));
+    let region = format!("const REGION: &str = \"eu-west-1\";\n{}", function("f"));
+    project.write("lib.rs", &region);
+    let edited = send(&project, &host, edit(&project, "lib.rs"));
+    assert!(
+        context(&edited).starts_with("JevGate reviewed lib.rs after this edit: 1 finding, none fails the quality gate.\n- lib.rs:1 review maintainability/hardcoded-values (optional): "),
+        "{edited}"
+    );
+    assert!(
         context(&edited).ends_with("\nNone of them blocks the end of the turn."),
         "{edited}"
     );
     let stopped = send(&project, &host, stop(false));
     assert_eq!(
         stopped,
-        json!({"systemMessage": "JevGate: 1 review in this turn's changes doesn't fail the quality gate. `jevgate check --base HEAD` lists them."})
+        json!({"systemMessage": "JevGate: 1 finding in this turn's changes is optional here. `jevgate check --base HEAD` lists them."})
     );
     let checked = crate::storage::read_latest(&project.0).unwrap();
     assert_eq!(
         checked.files[0].findings[0].gate,
-        Some(crate::schema::Gating::Measuring)
+        Some(crate::schema::Gating::Advisory)
     );
 }
 
@@ -428,10 +467,11 @@ fn undecided_units_block_a_stop_where_the_gate_fails_on_them() {
     let project = repository();
     project.write(
         "jevgate.toml",
-        "rules = [\"function-simplification\"]\nfail_on = [\"mature\", \"uncertain\"]\n",
+        "rules = [\"custom\"]\nfail_on = [\"mature\", \"uncertain\"]\n",
     );
-    project.git(&["commit", "-qam", "fail on undecided results"]);
-    // Answers split between the scale's ends leave a function undecided.
+    project.write(".jevgate/questions/body-logs.toml", BODY_LOGS);
+    project.commit_all();
+    // A yes at 0.5, below the question's threshold, leaves it undecided.
     let split = host(|| {
         Box::new(Mock {
             level: 3,
@@ -442,14 +482,14 @@ fn undecided_units_block_a_stop_where_the_gate_fails_on_them() {
     project.write("lib.rs", &long_function("f"));
     let edited = send(&project, &split, edit(&project, "lib.rs"));
     assert!(
-        context(&edited).contains("1 undecided unit fails the quality gate, which fails on undecided results here:\n- lib.rs:1 undecided maintainability/function-simplification (fails the gate): `f`:"),
+        context(&edited).contains("1 undecided unit fails the quality gate, which fails on undecided results here:\n- lib.rs:1 undecided custom/body-logs (fails the gate): `f`:"),
         "{edited}"
     );
     let blocked = send(&project, &split, stop(false));
     assert_eq!(blocked["decision"], "block", "{blocked}");
     let reason = blocked["reason"].as_str().unwrap();
     assert!(
-        reason.starts_with("JevGate blocked the end of this turn (1 of at most 3): 1 undecided unit in code changed this turn fails the quality gate.\n- lib.rs:1 undecided maintainability/function-simplification (fails the gate): `f`:"),
+        reason.starts_with("JevGate blocked the end of this turn (1 of at most 3): 1 undecided unit in code changed this turn fails the quality gate.\n- lib.rs:1 undecided custom/body-logs (fails the gate): `f`:"),
         "{reason}"
     );
     assert!(
@@ -469,7 +509,7 @@ fn undecided_units_block_a_stop_where_the_gate_fails_on_them() {
         "{unchanged}"
     );
     // The default gate never fails on undecided results.
-    project.write("jevgate.toml", "rules = [\"function-simplification\"]\n");
+    project.write("jevgate.toml", "rules = [\"custom\"]\n");
     project.git(&["commit", "-qam", "the default gate"]);
     send(&project, &split, prompt("again"));
     project.write("lib.rs", &long_function("g"));
@@ -486,7 +526,7 @@ fn a_stop_blocks_until_the_findings_are_fixed() {
     assert_eq!(blocked["decision"], "block");
     let reason = blocked["reason"].as_str().unwrap();
     assert!(
-        reason.starts_with("JevGate blocked the end of this turn (1 of at most 3): 1 finding in code changed this turn fails the quality gate.\n- lib.rs:1 review "),
+        reason.starts_with("JevGate blocked the end of this turn (1 of at most 3): 1 finding in code changed this turn is not fixed or dismissed.\n- lib.rs:1 review "),
         "{reason}"
     );
     assert!(reason.ends_with("JevGate does not block again when nothing changed."));
@@ -497,7 +537,7 @@ fn a_stop_blocks_until_the_findings_are_fixed() {
     assert!(fixed.get("decision").is_none(), "{fixed}");
     assert_eq!(
         message(&fixed),
-        "JevGate: the findings that blocked this turn are fixed."
+        "JevGate: the findings that blocked this turn are fixed or dismissed."
     );
     assert_eq!(
         send(&project, &host, stop(false)),
@@ -565,7 +605,7 @@ fn a_turn_is_blocked_three_times_at_most() {
     let reply = send(&project, &host, stop(true));
     assert!(reply.get("decision").is_none(), "{reply}");
     assert!(
-        message(&reply).starts_with("JevGate blocked this turn 3 times and lets the agent finish; 1 finding still fails the quality gate."),
+        message(&reply).starts_with("JevGate blocked this turn 3 times and lets the agent finish; 1 finding is still not fixed or dismissed."),
         "{reply}"
     );
 }
@@ -625,7 +665,7 @@ fn nothing_changed_after_a_block_lets_the_agent_finish() {
     assert!(reply.get("decision").is_none(), "{reply}");
     assert!(
         message(&reply).starts_with(
-            "JevGate lets the agent finish: nothing changed after its last block, and 1 finding still fails the quality gate."
+            "JevGate lets the agent finish: nothing changed after its last block, and 1 finding is still not fixed or dismissed."
         ),
         "{reply}"
     );
@@ -773,7 +813,7 @@ fn a_turn_whose_stop_could_not_be_checked_is_checked_with_the_next() {
     let blocked = send(&project, &reviewing(), stop(false));
     assert!(
         blocked["reason"].as_str().unwrap_or_default().starts_with(
-            "JevGate blocked the end of this turn (1 of at most 3): 1 finding in code changed since JevGate last checked fails the quality gate.\n- lib.rs:1 review "
+            "JevGate blocked the end of this turn (1 of at most 3): 1 finding in code changed since JevGate last checked is not fixed or dismissed.\n- lib.rs:1 review "
         ),
         "the last turn's function is judged: {blocked}"
     );

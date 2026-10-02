@@ -4,6 +4,33 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+Findings have one level, `review`, and the maintainability rules ask broad look-here questions whose flags the person or coding agent reading them verifies: fix the code, or dismiss the finding with a reason, and a dismissed finding is not raised again while its code is unchanged. On a 32-file sample of a game backend and its web client, the look-here questions flagged the three functions and six of the nine repeats a reviewer wanted changed, where 0.32's questions flagged none of them.
+
+### One level
+
+- Every finding is reported as a `review`. A consider is reported as a review, and a note is not reported, except a custom question's at `note`, whose findings are listed but never fail the gate or keep an agent working. The JSON report keeps the level a finding's measured questions composed as `measured_as`, which the default gate and `precision` read, and findings no longer carry `values`, the candidate values a hardcoded-value finding listed. The agent text lists one `Review` section: every finding that fails the gate, then the top ten others.
+- `consider` as a gate level fails on the same findings as `review`, and `jevgate init` suggests `review`.
+- Settle follow-ups are no longer asked for notes, which are not reported.
+
+### Look-here questions
+
+- File organization asks one question of a file's outline: whether it does several separate kinds of work that a maintainer could keep in separate files, or for a test file, whether it tests several separate subjects. Its recheck, kind-of-file question, candidate parts and caps are gone.
+- Shared logic finds repeats as renamed statement windows and as runs of at least 12 tokens, three of them words, repeated in two to twelve places with local names made alike, and asks one question of up to six sites of each repeat: whether they repeat the same logic. The same-steps Score, its 0.90 consider threshold and the caps on short and test copies are gone.
+- Hardcoded values asks one question of each function's values and one of a file's module-level constants. The value rechecks, the locate, naming and environment follow-ups and the grouping of identities across files are gone.
+- Function simplification keeps its split and flatten Scores, whose reviews stay measured and fail the gate by default, and asks every other function whether it could be made noticeably simpler to read or change.
+- A look-here question flags at 0.70. Its findings say `Not yet measured.` and never fail the default gate. The maturity table no longer lists the questions they replaced: file organization, shared logic, hardcoded values and function-simplification considers.
+- TypeScript and JavaScript class fields that hold functions, such as `handleChange = (event) => { … }` or `search = debounce(async (term) => { … }, 300)`, are methods of their class.
+
+### Agents verify and dismiss
+
+- `jevgate baseline mark wrong|intended|later PATH:LINE` accepts a finding of the last check with its reason when it names the finding by `PATH:LINE` or fingerprint, writing the baseline if there is none; a path or directory still marks only findings already accepted. `baseline stats` counts the reasons for a person to audit.
+- The agent hook keeps the agent working at the end of a turn until each new finding is fixed or dismissed with a reason, whether or not it fails the gate: at most three times a turn, and not again when nothing changed. A finding dismissed through `baseline mark` counts at once and never blocks again while its code is unchanged; an allow comment or a baseline entry without a reason still counts from the next turn. Findings of a rule at the `report` level, and a custom question's at `note`, are marked `(optional)` and never block. The person reads each dismissal when the turn ends.
+- The instructions `jevgate init --agent` writes, the plugin's skill, the MCP server's instructions and the Git hooks' stop message tell agents to fix each finding or dismiss it with a reason, and never to bypass a check with `--no-verify` or an allow comment. Run `jevgate init --agent` again to replace an earlier version's instructions, which tell agents never to touch the baseline.
+
+### Upgrading
+
+- The first check after upgrading asks every function pack again, since packs no longer carry their functions' literal values, and every look-here question once; the other answers stay cached.
+
 ## [0.32.0] - 2026-09-29
 
 A whole-repository check now finishes where it stopped halfway, says what it is doing while it runs, and fails at once, in one line, without a key. Measured on a 950-file TypeScript and Python project whose jevgate.toml, written for 0.8, set `maintainability = "consider"`, `max_requests = 1000` and `concurrency = 4`: 0.31.0 planned 1,126 first-pass requests, spent its 1,000 on them in 70 silent seconds and left 377 files unchecked, advising a larger `--max-requests`, which could not raise the ceiling jevgate.toml set; this version asks 930 requests in 73 seconds from an empty cache, drawing a status line all along, and finishes ($0.05). A rerun from the cache takes 2 seconds.

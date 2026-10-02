@@ -4,15 +4,15 @@
 //! out and the instructions loaded at session start; with `--verbose`, every
 //! note and each file's answers.
 use super::{
-    BOLD, BOLD_GREEN, BOLD_RED, BOLD_YELLOW, CYAN, DIM, GUARDS_HEADING, RED, Style, claim, count,
-    failing_first, headline, label, left_out, left_out_line, measuring, reasons,
+    BOLD, BOLD_GREEN, BOLD_RED, CYAN, DIM, GUARDS_HEADING, RED, Style, claim, count, failing_first,
+    headline, label, left_out, left_out_line, measuring, reasons,
 };
-use crate::schema::{FileResult, Finding, Report, Scope, Status, Strength};
+use crate::schema::{FileResult, Finding, Report, Scope, Status};
 use anyhow::Result;
 use std::{collections::BTreeMap, io::Write, path::Path};
 
 /// Consider findings shown by default; `--verbose` shows all.
-const TOP_CONSIDER: usize = 10;
+const TOP_REVIEWS: usize = 10;
 /// Guards shown by default; `--verbose` shows all.
 const TOP_GUARDS: usize = 10;
 /// Units left out over syntax errors shown by default; `--verbose` shows all.
@@ -59,89 +59,34 @@ fn emit_header(out: &mut impl Write, report: &Report, style: Style) -> Result<()
     Ok(())
 }
 
-/// Every review, then the top considers (all with `verbose`), those that
-/// fail the gate first, then the notes of custom questions: a team keeps a
-/// question a note while it tries it, so each is a yes to read, not code
-/// that reads well. Other notes are listed only with `verbose`; otherwise
-/// just counted.
+/// One level: every finding is a review, those that fail the gate first.
+/// All that fail it are listed, then the top ten others by rank; `verbose`
+/// lists every one.
 fn emit_findings(out: &mut impl Write, report: &Report, verbose: bool, style: Style) -> Result<()> {
     let findings = failing_first(report);
-    let of = |strength: Strength| -> Vec<(&Path, &Finding)> {
-        findings
-            .iter()
-            .filter(|(_, f)| f.strength == strength)
-            .copied()
-            .collect()
+    if findings.is_empty() {
+        return Ok(());
+    }
+    let failing = findings.iter().filter(|(_, f)| f.fails_gate()).count();
+    let shown = if verbose {
+        findings.len()
+    } else {
+        findings.len().min(failing + TOP_REVIEWS)
     };
-    let (review, consider) = (of(Strength::Review), of(Strength::Consider));
-    let (custom, notes): (Vec<_>, Vec<_>) = of(Strength::Note)
-        .into_iter()
-        .partition(|(_, f)| crate::catalog::custom(&f.rule));
+    let more = if findings.len() > shown {
+        format!(", top {shown}, those that fail the gate first; --verbose shows all")
+    } else {
+        String::new()
+    };
+    let heading = format!("Review ({}{more}):", findings.len());
     let gate = Gate(report.gate.is_some());
-    if !review.is_empty() {
-        let heading = format!("Review ({}):", review.len());
-        emit_section(out, (&heading, BOLD_RED), &review, gate, style)?;
-    }
-    if !consider.is_empty() {
-        emit_considers(out, &consider, verbose, gate, style)?;
-    }
-    if !custom.is_empty() {
-        let heading = format!("Notes from custom questions ({}):", custom.len());
-        emit_section(out, (&heading, BOLD), &custom, gate, style)?;
-    }
-    if notes.is_empty() {
-        return Ok(());
-    }
-    if !verbose {
-        writeln!(
-            out,
-            "\n{} on code that reads well as it is; --verbose shows them.",
-            count(notes.len(), "optional note")
-        )?;
-        return Ok(());
-    }
-    let heading = format!("Notes ({}, optional):", notes.len());
-    emit_section(out, (&heading, BOLD), &notes, gate, style)
+    emit_section(out, (&heading, BOLD_RED), &findings[..shown], gate, style)
 }
 
 /// Whether the run evaluated the gate: a finding of a run that did not, as
 /// one left incomplete, would fail it rather than failing it.
 #[derive(Clone, Copy)]
 struct Gate(bool);
-
-/// The top considers (all with `verbose`), under a heading that says how
-/// many there are and which are shown.
-fn emit_considers(
-    out: &mut impl Write,
-    consider: &[(&Path, &Finding)],
-    verbose: bool,
-    gate: Gate,
-    style: Style,
-) -> Result<()> {
-    let shown = if verbose {
-        consider.len()
-    } else {
-        TOP_CONSIDER.min(consider.len())
-    };
-    let more = if consider.len() > shown {
-        let order = if consider.iter().any(|(_, f)| f.fails_gate()) {
-            ", those that fail the gate first"
-        } else {
-            ""
-        };
-        format!(", top {shown}{order}; --verbose shows all")
-    } else {
-        String::new()
-    };
-    let heading = format!("Consider ({}{more}):", consider.len());
-    emit_section(
-        out,
-        (&heading, BOLD_YELLOW),
-        &consider[..shown],
-        gate,
-        style,
-    )
-}
 
 /// What the change does to the checks around the code, one line each: the
 /// first ten, or all with `verbose`.
@@ -435,7 +380,7 @@ fn emit_file(out: &mut impl Write, file: &FileResult) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{options::ColorChoice, tests::finding};
+    use crate::{options::ColorChoice, schema::Strength, tests::finding};
 
     fn line(style: Style) -> String {
         let mut out = Vec::new();

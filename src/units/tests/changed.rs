@@ -185,27 +185,36 @@ fn a_copy_pair_is_asked_when_either_copy_changed() {
     let team = super::duplicates::LOAD
         .replace("load_user", "load_team")
         .replace("\"name\"", "\"title\"");
-    let file = |copy: &str, tail: &str, edited: bool| {
-        let text = format!("{copy}\n{}", function(tail));
+    // Tails that are no copies of each other, edited beside the copies.
+    let file = |copy: &str, tail: String, edited: bool| {
+        let text = format!("{copy}\n{tail}");
         if edited {
             text.replace("doubled + 1", "doubled + 2")
+                .replace("positive += 1", "positive += 2")
         } else {
             text
         }
     };
+    let other = crate::tests::other_function;
     let project = Project::new();
-    project.write("a.rs", &file(super::duplicates::LOAD, "tail_a", false));
-    project.write("b.rs", &file(&team, "tail_b", false));
+    project.write(
+        "a.rs",
+        &file(super::duplicates::LOAD, function("tail_a"), false),
+    );
+    project.write("b.rs", &file(&team, other("tail_b"), false));
     project.commit_all();
     // Both files change beside their copies: the pair is not asked.
-    project.write("a.rs", &file(super::duplicates::LOAD, "tail_a", true));
-    project.write("b.rs", &file(&team, "tail_b", true));
+    project.write(
+        "a.rs",
+        &file(super::duplicates::LOAD, function("tail_a"), true),
+    );
+    project.write("b.rs", &file(&team, other("tail_b"), true));
     let options = since("HEAD", &[catalog::SHARED_LOGIC]);
     let (_, plan) = planned(&project, &options);
     assert!(stages(&plan).is_empty(), "{:?}", stages(&plan));
     // One copy changes: the pair is asked, by the file that owns it.
     let changed = team.replace("anonymous", "nobody");
-    project.write("b.rs", &file(&changed, "tail_b", true));
+    project.write("b.rs", &file(&changed, other("tail_b"), true));
     let (_, plan) = planned(&project, &options);
     assert_eq!(stages(&plan), ["duplicate-pair"]);
     assert_eq!(file_plan(&plan, "a.rs").units.len(), 1);

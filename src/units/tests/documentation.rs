@@ -26,16 +26,17 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
         .find(|f| f.path == std::path::Path::new("AGENTS.md"))
         .unwrap();
     let dimension = &file.dimensions[catalog::AGENT_CONTEXT];
+    // One level: the capped consider counts as a review, and the note as clear.
     assert_eq!(
         (
             dimension.units.judged,
-            dimension.units.consider,
-            dimension.units.note
+            dimension.units.review,
+            dimension.units.clear
         ),
-        (3, 1, 1)
+        (3, 1, 2)
     );
     let stack = &file.findings[0];
-    assert_eq!(stack.strength, Strength::Consider, "capped below review");
+    assert_eq!(composed(stack), Strength::Consider, "capped below review");
     assert_eq!(
         (stack.rule.as_str(), stack.line),
         ("documentation/agent-context", 1)
@@ -46,15 +47,8 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
         stack.message
     );
     assert_eq!(stack.concern_probability, 1.0);
-    assert_eq!(file.findings[1].symbol.as_deref(), Some("Web"));
-    assert!(
-        file.findings[1]
-            .message
-            .contains("applies only to work in `web/`"),
-        "{}",
-        file.findings[1].message
-    );
-    assert!(file.findings[1].action.starts_with("Optional: move it"));
+    // The `web/` section's scope is a note, which one level does not report.
+    assert_eq!(file.findings.len(), 1, "{:?}", file.findings);
     let load = report.context_load.as_ref().unwrap();
     assert!(load.harnesses.iter().any(|h| h.harness == "Codex"));
     // A section of fewer than 15 tokens costs a session too little for a
@@ -67,13 +61,14 @@ fn instruction_sections_are_at_most_consider_and_name_their_harnesses() {
     )];
     options.refresh = true;
     let report = run(&project, &options, &mut eval);
-    let release = report
-        .files
-        .iter()
-        .flat_map(|f| &f.findings)
-        .find(|f| f.symbol.as_deref() == Some("Release"))
-        .unwrap();
-    assert_eq!(release.strength, Strength::Note, "{}", release.message);
+    assert!(
+        !report
+            .files
+            .iter()
+            .flat_map(|f| &f.findings)
+            .any(|f| f.symbol.as_deref() == Some("Release")),
+        "a note, which one level does not report"
+    );
 }
 
 #[test]
@@ -115,7 +110,7 @@ fn stale_sections_and_repeated_sections_are_checked_after_the_first_pass() {
         readme
             .findings
             .iter()
-            .all(|f| f.strength == Strength::Consider)
+            .all(|f| composed(f) == Strength::Consider)
     );
 }
 
@@ -185,7 +180,7 @@ fn finished_plans_in_one_directory_are_one_finding_named_by_the_directory() {
         plan_file("docs/other/d.md"),
     ];
     let primary = grouped_primary(&mut files);
-    assert_eq!(primary.strength, Strength::Consider);
+    assert_eq!(composed(&primary), Strength::Consider);
     assert!(
         primary.message.ends_with(
             "The other 2 plans in `docs/plans` are finished too: `docs/plans/b.md`, `docs/plans/c.md`."
@@ -194,6 +189,7 @@ fn finished_plans_in_one_directory_are_one_finding_named_by_the_directory() {
         primary.message
     );
     assert_eq!(primary.locations.len(), 3);
+    // Grouping lowers the others to notes, which one level then drops.
     for member in [&files[0], &files[2]] {
         assert_eq!(member.findings[0].strength, Strength::Note);
         assert_eq!(member.dimensions["doc_staleness"].units.note, 1);
@@ -245,7 +241,7 @@ fn a_section_repeated_in_several_documents_is_one_finding() {
     ];
     files[4].findings[0].category = Some("conflict".into());
     let primary = grouped_primary(&mut files);
-    assert_eq!(primary.strength, Strength::Consider);
+    assert_eq!(composed(&primary), Strength::Consider);
     assert!(
         primary
             .message
@@ -348,7 +344,7 @@ fn package_readmes_are_not_paired_and_a_family_is_asked_against_its_head() {
     assert_eq!(judged, 2, "two members against their head, not three pairs");
     let considers: Vec<_> = findings
         .iter()
-        .filter(|f| f.strength == Strength::Consider)
+        .filter(|f| composed(f) == Strength::Consider)
         .collect();
     assert_eq!(considers.len(), 1, "{findings:?}");
     let message = &considers[0].message;
@@ -402,15 +398,9 @@ fn a_section_repeating_most_of_another_is_a_note_that_never_claims_all() {
         ("a_covers", spread(0.05, 0.45, 0.5)),
         ("subject", noul_at(0.95)),
     ]);
-    assert_eq!(dimension.units.note, 1, "{}", dimension.decision_basis);
-    assert_eq!(findings[0].strength, Strength::Note);
-    assert!(
-        findings[0]
-            .message
-            .starts_with("Section `Setup` states most or all of what section `Getting started`"),
-        "{}",
-        findings[0].message
-    );
+    // A note, which one level counts as clear and does not report.
+    assert_eq!(dimension.units.clear, 1, "{}", dimension.decision_basis);
+    assert!(findings.is_empty(), "{findings:?}");
 }
 
 #[test]
@@ -419,16 +409,9 @@ fn a_disagreement_that_leads_is_a_note_and_detail_is_no_disagreement() {
         ("conflict", spread(0.1, 0.3, 0.6)),
         ("subject", noul_at(0.95)),
     ]);
-    assert_eq!(dimension.units.note, 1, "{}", dimension.decision_basis);
-    assert_eq!(findings[0].category.as_deref(), Some("conflict"));
-    assert!(
-        findings[0]
-            .message
-            .contains("may give different values or instructions for the same thing."),
-        "{}",
-        findings[0].message
-    );
-    assert_eq!(findings[0].concern_probability, 0.6);
+    // A note, which one level counts as clear and does not report.
+    assert_eq!(dimension.units.clear, 1, "{}", dimension.decision_basis);
+    assert!(findings.is_empty(), "{findings:?}");
     // Differing only in detail is acceptable, like agreeing.
     let (dimension, findings) = pair_answered(vec![("conflict", spread(0.2, 0.7, 0.1))]);
     assert_eq!(dimension.units.clear, 1, "{}", dimension.decision_basis);
@@ -450,7 +433,7 @@ fn different_subjects_settle_undecided_repetition_but_not_a_decided_one() {
         ("a_covers", spread(0.0, 0.05, 0.95)),
         ("subject", noul_at(0.05)),
     ]);
-    assert_eq!(dimension.units.consider, 1, "{}", dimension.decision_basis);
+    assert_eq!(dimension.units.review, 1, "{}", dimension.decision_basis);
     assert!(findings[0].message.contains("states everything"));
 }
 
@@ -472,14 +455,14 @@ fn a_relation_that_rules_out_repetition_settles_only_undecided_checks() {
         same(),
         ("relation", choice_of("repeats", &RELATIONS)),
     ]);
-    assert_eq!(dimension.units.note, 1, "{}", dimension.decision_basis);
-    assert!(findings[0].message.contains("may give different values"));
+    assert_eq!(dimension.units.clear, 1, "{}", dimension.decision_basis);
+    assert!(findings.is_empty(), "a note, not reported");
     let (dimension, _) = pair_answered(vec![
         ("a_covers", spread(0.0, 0.05, 0.95)),
         same(),
         ("relation", choice_of("different", &RELATIONS)),
     ]);
-    assert_eq!(dimension.units.consider, 1, "{}", dimension.decision_basis);
+    assert_eq!(dimension.units.review, 1, "{}", dimension.decision_basis);
 }
 
 /// The agent-context dimension of a one-section `AGENTS.md` answered with
@@ -567,7 +550,7 @@ fn an_undecided_instruction_section_settles_by_its_kind() {
         vec![("s0_generic", undecided())],
         choice_of("generic", &SECTION_KINDS),
     );
-    assert_eq!(raised.units.consider, 1, "{}", raised.decision_basis);
+    assert_eq!(raised.units.review, 1, "{}", raised.decision_basis);
     assert!(
         findings[0]
             .message
@@ -581,7 +564,7 @@ fn an_undecided_instruction_section_settles_by_its_kind() {
         vec![("s0_describes", noul_at(0.95))],
         choice_of("instructions", &SECTION_KINDS),
     );
-    assert_eq!(decided.units.consider, 1, "{}", decided.decision_basis);
+    assert_eq!(decided.units.review, 1, "{}", decided.decision_basis);
 }
 
 const DOCUMENT_KINDS: [&str; 7] = [
@@ -642,7 +625,7 @@ fn an_undecided_large_document_is_asked_its_kind() {
     assert_eq!(dimension.units.clear, 1, "{}", dimension.decision_basis);
     let collection = large_doc(torn(), choice_of("collection", &DOCUMENT_KINDS));
     assert_eq!(collection.findings.len(), 1);
-    assert_eq!(collection.findings[0].strength, Strength::Consider);
+    assert_eq!(composed(&collection.findings[0]), Strength::Consider);
     assert!(
         collection.findings[0]
             .message
@@ -664,7 +647,7 @@ fn an_undecided_large_document_is_asked_its_kind() {
     );
     let kept = large_doc(found(), choice_of("collection", &DOCUMENT_KINDS));
     assert_eq!(kept.findings.len(), 1);
-    assert_eq!(kept.findings[0].strength, Strength::Consider);
+    assert_eq!(composed(&kept.findings[0]), Strength::Consider);
     // A split that clears is not asked its kind.
     let decided = large_doc(
         spread(0.9, 0.1, 0.0),
@@ -707,7 +690,7 @@ fn an_undecided_stale_section_settles_by_what_it_treats_the_name_as() {
     assert_eq!(open.units.uncertain, 1, "{}", open.decision_basis);
     // A decided check is never moved.
     let decided = stale_answered(noul_at(0.95), choice_of("example", &ROLES));
-    assert_eq!(decided.units.consider, 1, "{}", decided.decision_basis);
+    assert_eq!(decided.units.review, 1, "{}", decided.decision_basis);
 }
 
 #[test]

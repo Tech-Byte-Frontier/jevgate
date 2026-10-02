@@ -44,9 +44,9 @@ impl SettleFiles {
 pub(in crate::units) enum SettleWhen {
     /// An uncertain unit whose checks stay undecided.
     Undecided,
-    /// Also a consider or note that rests on its undecided checks: a note
-    /// that a client component's fetch "places a parameter into a URL it
-    /// requests" only puzzled readers.
+    /// Also a consider that rests on its undecided checks: a finding that a
+    /// client component's fetch "places a parameter into a URL it requests"
+    /// only puzzled readers.
     UndecidedOrFinding,
     /// Any unit whose checks are not clear, and it clears a check that found
     /// a concern too: a PHP page joins into HTML the body its included file

@@ -134,8 +134,9 @@ impl<'a> FileContext<'a> {
     }
 }
 
-/// Freshness hashes and the stage stay in local metadata; only model, state
-/// and questions are uploaded.
+/// Freshness hashes, the stage and the look-here questions, which are sent
+/// in their validated order (`requests::validated_order`), stay in local
+/// metadata; only model, state and questions are uploaded.
 pub(super) fn request(
     model: &str,
     stage: &str,
@@ -153,12 +154,21 @@ pub(super) fn request(
         .iter()
         .map(|(path, hash)| json!({"path": path, "source_hash": hash}))
         .collect();
-    let request = json!({
+    let mut request = json!({
         "model": model,
         "state": state,
         "questions": questions,
         "jevgate": {"stage": stage, "sources": sources},
     });
+    let look: Vec<&str> = asked
+        .questions
+        .iter()
+        .filter(|q| q.question == super::outcome::LOOK)
+        .map(|q| q.key.as_str())
+        .collect();
+    if !look.is_empty() {
+        request["jevgate"]["validated_order"] = json!(look);
+    }
     (request, asked)
 }
 

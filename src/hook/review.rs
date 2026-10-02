@@ -5,6 +5,9 @@
 //! and `jevgate: allow` comments as they were when the turn began: accepting
 //! a finding or loosening the gate is the person's decision, so the agent's
 //! edits to them count from the next turn, and the person is told of each.
+//! The exception is a finding the agent dismissed with a reason through
+//! `jevgate baseline mark`, which counts at once and which the person
+//! audits with `baseline stats`.
 use super::outage::{Waiting, Watch, Watched};
 use crate::{
     check,
@@ -12,9 +15,9 @@ use crate::{
     guards::{self, Guard},
     init::CONFIG_FILE,
     inventory,
-    options::{CheckArgs, Format},
+    options::{CheckArgs, Disposition, Format},
     revision,
-    schema::{Finding, Report, Status, Strength},
+    schema::{Finding, Gating, Report, Status, Strength},
     storage,
     transport::Evaluator,
 };
@@ -114,6 +117,23 @@ impl Flagged {
     pub fn fails(&self) -> bool {
         self.finding.fails_gate()
     }
+
+    /// Whether it keeps the agent working until it is fixed or dismissed:
+    /// every finding the gate fails on or still measures, so a look-here
+    /// review is verified once. A rule the person set to `none` and a custom
+    /// question tried as a note stay optional.
+    pub fn blocks(&self) -> bool {
+        matches!(self.finding.gate, Some(Gating::Fails | Gating::Measuring))
+    }
+}
+
+/// A finding the agent dismissed with a reason during the turn.
+#[derive(Clone, Debug)]
+pub(super) struct Dismissed {
+    pub path: PathBuf,
+    pub line: usize,
+    pub rule: String,
+    pub reason: Disposition,
 }
 
 /// A changed file of code the check did not judge, and why: it reads as
@@ -170,12 +190,14 @@ impl Undecided {
     }
 }
 
-/// What one hook check found: the findings the agent may act on, the units
-/// left undecided that fail the gate, what the change does to the checks
-/// around the code, and the files it did not judge.
+/// What one hook check found: the findings the agent may act on, those it
+/// dismissed this turn, the units left undecided that fail the gate, what
+/// the change does to the checks around the code, and the files it did not
+/// judge.
 #[derive(Debug, Default)]
 pub(super) struct Checked {
     pub flagged: Vec<Flagged>,
+    pub dismissed: Vec<Dismissed>,
     pub undecided: Vec<Undecided>,
     pub guards: Vec<Guard>,
     pub unreviewed: Vec<Unreviewed>,
@@ -335,16 +357,40 @@ fn run(
     if !report.complete {
         bail!(report.incomplete_reason());
     }
-    let accepted_now = match args.turn_start() {
-        Some(_) => accepted_now(&context.root, &report),
-        None => BTreeSet::new(),
+    let (accepted_now, dismissed) = match args.turn_start() {
+        Some(start) => (
+            accepted_now(&context.root, &report),
+            dismissed(&context.root, &report, start),
+        ),
+        None => (BTreeSet::new(), Vec::new()),
     };
     Ok(Checked {
         flagged: flag(&report, &accepted_now),
+        dismissed,
         undecided: undecided(&report, &args),
         guards: std::mem::take(&mut report.guards),
         unreviewed: unreviewed(&report, &args),
     })
+}
+
+/// The findings of `report` the agent dismissed with a reason since the
+/// turn began at `start`, which the report's gate already accepts.
+fn dismissed(root: &Path, report: &Report, start: &str) -> Vec<Dismissed> {
+    let reasons = crate::baseline::dismissed_since(root, start).unwrap_or_default();
+    report
+        .files
+        .iter()
+        .flat_map(|file| file.findings.iter().map(move |f| (file, f)))
+        .filter(|(_, f)| f.baselined)
+        .filter_map(|(file, f)| {
+            Some(Dismissed {
+                path: file.path.clone(),
+                line: f.line,
+                rule: f.rule.clone(),
+                reason: *reasons.get(&f.fingerprint)?,
+            })
+        })
+        .collect()
 }
 
 /// jevgate.toml as it was in Git tree `start`, the turn's start; the
@@ -358,8 +404,9 @@ fn configuration_at(root: &Path, start: &str) -> Result<Config> {
 }
 
 /// The fingerprints of the findings the baseline and allow comments accept
-/// now, though not when the turn began: the turn's own edits accepted them.
-/// A baseline the turn left unreadable accepts nothing; its guard tells the
+/// now, though not when the turn began nor by a dismissal with a reason:
+/// the turn's own edits accepted them, which count from the next turn. A
+/// baseline the turn left unreadable accepts nothing; its guard tells the
 /// person.
 fn accepted_now(root: &Path, report: &Report) -> BTreeSet<String> {
     let mut now = report.clone();
@@ -496,8 +543,9 @@ fn undecided(report: &Report, args: &CheckArgs) -> Vec<Undecided> {
 }
 
 /// The findings the agent may act on: not notes and not accepted (as the
-/// turn began, within a turn), those that fail the gate first, then reviews,
-/// then by rank; `accepted_now` are those the turn's own edits accepted.
+/// turn began or dismissed since, within a turn), those that fail the gate
+/// first, then by rank; `accepted_now` are those the turn's own edits
+/// accepted.
 fn flag(report: &Report, accepted_now: &BTreeSet<String>) -> Vec<Flagged> {
     let mut flagged: Vec<Flagged> = report
         .files
@@ -516,7 +564,6 @@ fn flag(report: &Report, accepted_now: &BTreeSet<String>) -> Vec<Flagged> {
     flagged.sort_by(|a, b| {
         b.fails()
             .cmp(&a.fails())
-            .then(b.finding.strength.cmp(&a.finding.strength))
             .then(b.finding.rank.total_cmp(&a.finding.rank))
     });
     flagged

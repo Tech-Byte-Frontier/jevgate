@@ -31,14 +31,18 @@ pub fn exit_code(report: &Report) -> u8 {
 }
 
 /// Record each finding's measured precision and how the gate counts it, then
-/// decide the gate for a complete run. Both read the maturity table, once
-/// every level is final: grouping across files turns some findings into
-/// notes. A finding in a preview language carries its language's own labels.
+/// decide the gate for a complete run. Both read the maturity table at the
+/// level a finding's questions composed (`measured_as`), once every level is
+/// final: grouping across files turns some findings into notes. A finding of
+/// a look-here question has no labels yet. A finding in a preview language
+/// carries its language's own labels.
 pub fn evaluate(report: &mut Report, args: &CheckArgs) {
     for file in &mut report.files {
         for finding in &mut file.findings {
-            finding.precision =
-                crate::maturity::precision_at(&file.path, &finding.rule, finding.strength);
+            finding.precision = match finding.measured_as {
+                Some(level) => crate::maturity::precision_at(&file.path, &finding.rule, level),
+                None => Some(crate::maturity::Labels::default()),
+            };
             finding.preview =
                 crate::maturity::preview_language(&file.path, &finding.rule).map(str::to_string);
             finding.gate = gating(finding, &file.path, args);
@@ -67,24 +71,29 @@ pub fn evaluate(report: &mut Report, args: &CheckArgs) {
 }
 
 /// How the gate counts a finding in `path`, at its rule's levels for that
-/// path: none for notes and accepted findings. Consider counts every finding
-/// and review only reviews; `mature` counts the rule's mature levels (a
-/// custom question's own level), and a finding it leaves out is still being
-/// measured. A preview language's findings are measured in that language
-/// apart from the ten supported ones, so `mature` counts none of them.
+/// path: none for accepted findings and notes, such as a custom question's
+/// at `note`, which is listed but never fails the gate. With one level, review and
+/// consider count every finding; `mature` counts a finding whose questions
+/// composed one of the rule's mature levels (a custom question's own
+/// level), and a finding it leaves out, such as a look-here question's, is
+/// still being measured. A preview language's findings are measured in that
+/// language apart from the ten supported ones, so `mature` counts none of them.
 fn gating(finding: &Finding, path: &Path, args: &CheckArgs) -> Option<Gating> {
-    if finding.accepted() || finding.strength == Strength::Note {
+    if finding.accepted()
+        || finding.strength == Strength::Note
+        || finding.measured_as == Some(Strength::Note)
+    {
         return None;
     }
     let levels = args.levels_at(&finding.rule, path);
     let mature = levels.contains(&FailOn::Mature);
     let counted = levels.contains(&FailOn::Consider)
-        || (finding.strength == Strength::Review && levels.contains(&FailOn::Review))
+        || levels.contains(&FailOn::Review)
         || (mature
             && crate::maturity::preview_language(path, &finding.rule).is_none()
-            && args
-                .mature_levels(&finding.rule)
-                .contains(&finding.strength));
+            && finding
+                .measured_as
+                .is_some_and(|level| args.mature_levels(&finding.rule).contains(&level)));
     Some(if counted {
         Gating::Fails
     } else if mature {
@@ -98,17 +107,9 @@ fn gating(finding: &Finding, path: &Path, args: &CheckArgs) -> Option<Gating> {
 /// results of a rule whose level includes `uncertain`.
 fn failures(report: &Report, new: &[&Finding], args: &CheckArgs) -> Vec<String> {
     let mut reasons = Vec::new();
-    let failing: Vec<_> = new.iter().filter(|f| f.fails_gate()).collect();
-    let review = failing
-        .iter()
-        .filter(|f| f.strength == Strength::Review)
-        .count();
-    let consider = failing.len() - review;
-    if review > 0 {
-        reasons.push(crate::output::count(review, "new review finding"));
-    }
-    if consider > 0 {
-        reasons.push(crate::output::count(consider, "new consider finding"));
+    let failing = new.iter().filter(|f| f.fails_gate()).count();
+    if failing > 0 {
+        reasons.push(crate::output::count(failing, "new review finding"));
     }
     let undecided = undecided_files(report, args).count();
     if undecided > 0 {
@@ -147,9 +148,10 @@ pub(crate) fn undecided_files<'r>(
 
 /// Apply the baseline, allow comments and the gate policy to a settled
 /// report. Within an agent's turn, the baseline and allow comments accept
-/// findings as they did when the turn began: accepting a finding is the
-/// person's call, so what the agent wrote accepts nothing until the person
-/// has seen it (the report's guards list it).
+/// findings as they did when the turn began, and a finding the agent
+/// dismissed with a reason (`baseline mark`) at once: accepting a finding
+/// otherwise is the person's call, so what else the agent wrote accepts
+/// nothing until the person has seen it (the report's guards list it).
 pub fn settle(root: &Path, report: &mut Report, args: &CheckArgs) -> Result<()> {
     let turn_start = args.turn_start();
     let ignored = match turn_start {

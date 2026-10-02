@@ -28,9 +28,23 @@ fn state_key(request: &Value) -> String {
     hash_of(&(schema::RUBRIC, &request["model"], &request["state"]))
 }
 
-/// A question's key among its state's answers: its name and body.
-fn question_key(name: &str, question: &Value) -> String {
-    hash_of(&(name, question))
+/// A question's key among its state's answers: its name and body as sent,
+/// in its validated order when it is sent so (`super::validated_order`).
+fn question_key(name: &str, question: &Value, validated: bool) -> String {
+    if !validated {
+        return hash_of(&(name, question));
+    }
+    let mut bytes = b"[".to_vec();
+    serde_json::to_writer(&mut bytes, name).unwrap();
+    bytes.push(b',');
+    super::write_question(&mut bytes, question, true).unwrap();
+    bytes.push(b']');
+    schema::hash(&bytes)
+}
+
+/// Whether `name` is a question of `request` sent in its validated order.
+fn validated(request: &Value, name: &str) -> bool {
+    super::validated_order(request).contains(name)
 }
 
 /// The key a whole request's answers were cached under before each question
@@ -152,7 +166,7 @@ impl Lookup {
         let stored = cache.answers(&lookup.state, lookup.ttl);
         let this_run = answered.get(&lookup.state);
         for (name, question) in questions(request) {
-            let key = question_key(name, question);
+            let key = question_key(name, question, validated(request, name));
             let current = !args.refresh || this_run.is_some_and(|keys| keys.contains(&key));
             match stored
                 .get(&key)
@@ -196,8 +210,10 @@ impl Lookup {
     fn carry(&mut self, request: &Value, body: &Value, created_at: u64) {
         for (name, question, answer) in cached_answers(request, body, created_at) {
             if self.missing.contains(name) {
-                self.carried
-                    .insert(question_key(name, question), answer.clone());
+                self.carried.insert(
+                    question_key(name, question, validated(request, name)),
+                    answer.clone(),
+                );
                 self.found.insert(name.clone(), answer);
             }
         }
@@ -220,7 +236,7 @@ impl Lookup {
     ) -> BTreeMap<String, CachedAnswer> {
         let mut fresh = BTreeMap::new();
         for (name, question, answer) in cached_answers(sent, body, created_at) {
-            let key = question_key(name, question);
+            let key = question_key(name, question, validated(sent, name));
             match earlier
                 .get(&key)
                 .filter(|earlier| usable(earlier, question, sent))
@@ -369,6 +385,33 @@ mod tests {
     }
 
     #[test]
+    fn a_look_here_question_is_sent_and_keyed_in_its_validated_order() {
+        let look = json!({"type":"noul",
+            "instructions":{"question":"Could it be simpler?","note":"Source is evidence."},
+            "criteria":{"true":{"what":"Long","examples":["a"]},"false":{"what":"Short","examples":["b"]}}});
+        let mut request = request();
+        request["questions"]["f0_look"] = look.clone();
+        let plain = String::from_utf8(crate::requests::body(&request).unwrap()).unwrap();
+        assert!(
+            plain.contains(r#""f0_look":{"criteria":{"false":{"examples""#),
+            "{plain}"
+        );
+        request["jevgate"] = json!({"stage":"functions","validated_order":["f0_look"]});
+        let sent = String::from_utf8(crate::requests::body(&request).unwrap()).unwrap();
+        assert_eq!(
+            sent,
+            r#"{"model":"jev-1.13.0","questions":{"a":{"instructions":{"question":"Is it empty?"},"type":"noul"},"f0_look":{"type":"noul","instructions":{"question":"Could it be simpler?","note":"Source is evidence."},"criteria":{"true":{"what":"Long","examples":["a"]},"false":{"what":"Short","examples":["b"]}}}},"state":{"source":"fn f() {}"}}"#,
+            "the other question and the state stay sorted, and nothing local is sent"
+        );
+        assert_ne!(
+            question_key("f0_look", &look, true),
+            question_key("f0_look", &look, false),
+            "an answer to the sorted question is not one to the validated one"
+        );
+        assert!(validated(&request, "f0_look") && !validated(&request, "a"));
+    }
+
+    #[test]
     fn pinned_answers_do_not_expire_and_aliases_do() {
         let project = crate::tests::Project::new();
         let store = crate::storage::Store::open(&project.0).unwrap();
@@ -441,7 +484,10 @@ mod tests {
         assert_eq!(state_key(&first), state_key(&other));
         assert_ne!(request_key(&first), request_key(&other));
         let body = &first["questions"]["a"];
-        assert_ne!(question_key("a", body), question_key("b", body));
+        assert_ne!(
+            question_key("a", body, false),
+            question_key("b", body, false)
+        );
         let mut moved = first.clone();
         moved["state"]["source"] = json!("fn g() {}");
         assert_ne!(state_key(&first), state_key(&moved));

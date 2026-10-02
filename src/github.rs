@@ -109,7 +109,7 @@ fn summary(report: &Report, shown: &[(&Path, &Finding)]) -> String {
         ));
     }
     if shown.is_empty() {
-        text.push_str("No new review or consider findings.\n\n");
+        text.push_str("No new findings.\n\n");
     } else {
         text.push_str(&findings_table(shown));
         if let Some(line) = output::measuring(report) {
@@ -191,36 +191,27 @@ mod tests {
     };
 
     #[test]
-    fn a_review_that_does_not_fail_is_annotated_before_higher_ranked_considers() {
+    fn a_failing_review_is_annotated_before_higher_ranked_ones_still_being_measured() {
         use crate::tests::finding_of;
-        let ranked = |rule: &str, strength: Strength, rank: f64| Finding {
-            rank,
-            ..finding_of(rule, strength)
+        // Look-here findings, not yet measured, outrank the failing one.
+        let looked = (0..11).map(|_| Finding {
+            rank: 0.9,
+            measured_as: None,
+            ..finding_of("maintainability/shared-logic", Strength::Review)
+        });
+        let failing = Finding {
+            rank: 0.1,
+            ..finding_of("maintainability/function-simplification", Strength::Review)
         };
-        let considers =
-            (0..11).map(|_| ranked("maintainability/shared-logic", Strength::Consider, 0.9));
-        let measured = ranked("maintainability/shared-logic", Strength::Review, 0.5);
-        let failing = ranked(
-            "maintainability/function-simplification",
-            Strength::Review,
-            0.1,
-        );
-        let report = crate::tests::gated(
-            considers.chain([measured, failing]).collect(),
-            &crate::tests::args(),
-        );
-        let order: Vec<(Strength, bool)> = output::failing_first(&report)
+        let report = crate::tests::gated(looked.chain([failing]).collect(), &crate::tests::args());
+        let order: Vec<(f64, bool)> = output::failing_first(&report)
             .iter()
-            .map(|(_, f)| (f.strength, f.fails_gate()))
+            .map(|(_, f)| (f.rank, f.fails_gate()))
             .collect();
         assert_eq!(
-            order[..3],
-            [
-                (Strength::Review, true),
-                (Strength::Review, false),
-                (Strength::Consider, false)
-            ],
-            "the review still being measured is the first warning, not the twelfth"
+            order[..2],
+            [(0.1, true), (0.9, false)],
+            "the failing review is the first annotation, not the twelfth"
         );
     }
 
@@ -230,7 +221,7 @@ mod tests {
         let line = annotation(Path::new("src/a,b.rs"), &review);
         assert_eq!(
             line,
-            "::error file=src/a%2Cb.rs,line=12,endLine=20,title=JevGate review [maintainability/shared-logic]::Copies: 50%25 alike,%0Asee `b` Right 54%25 of the time (85 labels).%0A→ Share one | implementation"
+            "::error file=src/a%2Cb.rs,line=12,endLine=20,title=JevGate review [maintainability/shared-logic]::Copies: 50%25 alike,%0Asee `b` Not yet measured.%0A→ Share one | implementation"
         );
         assert!(!line.contains('\n'));
         let consider = annotation(Path::new("x.rs"), &finding(Strength::Consider));
@@ -243,7 +234,7 @@ mod tests {
         let line = annotation(Path::new("x.rs"), &review);
         assert!(line.starts_with("::warning file=x.rs,"), "{line}");
         assert!(
-            line.ends_with("(85 labels).%0A→ Share one | implementation%0ADoes not fail the gate: by default only rules and levels right at least 80%25 of the time over at least 20 labels on projects JevGate was never tuned on fail it."),
+            line.ends_with("Not yet measured.%0A→ Share one | implementation%0ADoes not fail the gate: by default only rules and levels right at least 80%25 of the time over at least 20 labels on projects JevGate was never tuned on fail it."),
             "{line}"
         );
     }
@@ -289,13 +280,10 @@ mod tests {
             rows[1].starts_with("| **review** | `src/a.rs:12`"),
             "{text}"
         );
-        assert!(rows[1].contains(
-            "50% alike, see `b` Right 54% of the time (85 labels). → Share one \\| implementation"
-        ));
         assert!(
-            rows[2].contains("Right 59% of the time (129 labels)."),
-            "{text}"
+            rows[1].contains("50% alike, see `b` Not yet measured. → Share one \\| implementation")
         );
+        assert!(rows[2].contains("Not yet measured."), "{text}");
         assert!(rows[2].starts_with("| consider |"));
     }
 

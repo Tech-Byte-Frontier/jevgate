@@ -252,7 +252,7 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
         reason.contains("\n20 more findings not shown; .jevgate/latest.json holds every finding")
     );
     assert!(
-        reason.contains("\nFix them, then finish. If a finding is mistaken, keep the code"),
+        reason.contains("\nEach one is a place worth a look: read the code there and fix it when it is right; when it is mistaken, intended or right but left for later, dismiss it with `jevgate baseline mark"),
         "{reason}"
     );
     let short = text::after_edit(
@@ -286,18 +286,34 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
     assert!(full.chars().count() < 8_000, "{}", full.len());
     assert!(
         full.contains("more findings not shown")
-            && full.ends_with("as they were when the turn began."),
+            && full.ends_with(
+                "except a finding dismissed with a reason through `jevgate baseline mark`."
+            ),
         "{full}"
     );
     let flagged = Flagged {
         path: PathBuf::from("src/a,b.rs"),
-        finding: crate::tests::finding(Strength::Consider),
+        finding: crate::schema::Finding {
+            gate: Some(crate::schema::Gating::Measuring),
+            ..crate::tests::reported("maintainability/shared-logic", Strength::Consider)
+        },
         accepted_this_turn: false,
     };
     let file = [PathBuf::from("src/a,b.rs")];
     assert_eq!(
         text::after_edit(&file, (std::slice::from_ref(&flagged), &[]), &[], &[], &[]).unwrap(),
-        "JevGate reviewed src/a,b.rs after this edit: 1 finding, none fails the quality gate.\n- src/a,b.rs:12 consider maintainability/shared-logic: Copies: 50% alike, see `b`. Next: Share one | implementation.\nNone of them blocks the end of the turn."
+        "JevGate reviewed src/a,b.rs after this edit: 1 finding, none fails the quality gate.\n- src/a,b.rs:12 review maintainability/shared-logic: Copies: 50% alike, see `b`. Next: Share one | implementation.\nEach one blocks the end of the turn until it is fixed or dismissed with a reason."
+    );
+    let optional = Flagged {
+        finding: crate::schema::Finding {
+            gate: Some(crate::schema::Gating::Advisory),
+            ..flagged.finding.clone()
+        },
+        ..flagged.clone()
+    };
+    assert_eq!(
+        text::after_edit(&file, (&[optional], &[]), &[], &[], &[]).unwrap(),
+        "JevGate reviewed src/a,b.rs after this edit: 1 finding, none fails the quality gate.\n- src/a,b.rs:12 review maintainability/shared-logic (optional): Copies: 50% alike, see `b`. Next: Share one | implementation.\nNone of them blocks the end of the turn."
     );
     assert_eq!(
         text::after_edit(&file, (&[], &failing(2, 3)), &[], &[], &[]).unwrap(),
@@ -305,7 +321,7 @@ fn a_reply_lists_ten_findings_one_line_each_in_under_8000_characters() {
     );
     let both = text::after_edit(&file, (&[flagged], &failing(1, 3)), &[], &[], &[]).unwrap();
     assert!(both.starts_with("JevGate reviewed src/a,b.rs after this edit: 1 new finding, none fails the quality gate.\n- "), "{both}");
-    assert!(both.ends_with("\n1 finding reported earlier this turn remains (1 fails the quality gate).\nFindings that fail the gate block the end of the turn until they are fixed; the others are optional."), "{both}");
+    assert!(both.ends_with("\n1 finding reported earlier this turn remains (1 fails the quality gate).\nEach one blocks the end of the turn until it is fixed or dismissed with a reason."), "{both}");
     assert_eq!(text::after_edit(&file, (&[], &[]), &[], &[], &[]), None);
 }
 
@@ -318,7 +334,7 @@ fn measured(rule: &str, strength: Strength, words: usize) -> Flagged {
             message: "word ".repeat(words),
             gate: Some(crate::schema::Gating::Fails),
             precision: crate::maturity::precision(rule, strength),
-            ..crate::tests::finding_of(rule, strength)
+            ..crate::tests::reported(rule, strength)
         },
         accepted_this_turn: false,
     }

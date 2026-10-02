@@ -10,14 +10,14 @@ max_cost = 1.00                          # dollars a check may spend; a whole-re
 
 [rules]                                  # a level per group or rule
 maintainability = "review"               # judge the group's default rules, and fail on their reviews
-tests = "consider"
+tests = "review"
 security = "mature"                      # opt-in group, enabled by naming it; fails only on levels measured mature
 "maintainability/hardcoded-values" = "report"   # an opt-in rule runs only when named: judge but never fail; "off" skips it
 
 [[scope]]                                # levels for the files these paths match
 paths = ["scripts/**", "tools/**"]
 fail_on = ["report"]                     # every rule: judge, never fail
-rules = { security = "consider" }        # except these
+rules = { security = "review" }          # except these
 ```
 
 | Key | Default | Meaning |
@@ -27,7 +27,7 @@ rules = { security = "consider" }        # except these
 | `generated` | built-in names | Globs of generated files, which are skipped |
 | `tests` | built-in conventions | Globs of additional test files |
 | `context` | none | Files always sent as related evidence, like `--context` |
-| `rules` | the `default` group | A list selects rules. A table gives each group or rule a level: `review`, `consider`, `mature`, `uncertain`, `report` (judge, never fail) or `off`; a level for a group judges the rules it runs by default (`maintainability` leaves out the opt-in hardcoded values, which runs only when named), and every rule of a group with none on by default, such as `security` |
+| `rules` | the `default` group | A list selects rules. A table gives each group or rule a level: `review` (every new finding), `mature`, `uncertain`, `report` (judge, never fail) or `off`, and `consider`, the same as `review`; a level for a group judges the rules it runs by default (`maintainability` leaves out the opt-in hardcoded values, which runs only when named), and every rule of a group with none on by default, such as `security` |
 | `[[scope]]` | none | `paths` (globs), with `fail_on` for every rule and `rules` for rules or groups, as above; `off` is not accepted (use `upload_deny`). The last scope that matches a file and addresses a rule wins; flags win over scopes |
 | `fail_on` | `["mature"]` | The level for rules without their own, like `--fail-on` |
 | `include_tests` | `false` | Judge tests, like `--include-tests` |
@@ -46,9 +46,9 @@ Rules are named by ID (`maintainability/shared-logic`), key (`shared_logic`) or 
 
 ## What fails the check by default
 
-The default level, `mature`, fails the check only on the rules and levels measured *mature*: their findings were right at least 80% of the time on projects JevGate was never tuned on, over at least 20 findings labeled from the code. Today those are function-simplification reviews (20 of 23 right) and, when the documentation rules run, agent-context considers (22 of 24). A finding in a [preview language](languages.md#support-levels), such as Kotlin or Swift, never fails it: those languages' rules and levels are measured apart, and none is mature yet. A [custom question](custom-questions.md) fails it at its own level, since its author chose that level and JevGate cannot measure a team's question on other projects. Every other finding is reported and marked as still being measured, without failing the check. `jevgate rules` shows each rule's levels that fail by default and how often its reviews and considers were right, and [accuracy](accuracy.md) gives every rule and level's labels and how they are made.
+The default level, `mature`, fails the check only on the rules and levels measured *mature*: their findings were right at least 80% of the time on projects JevGate was never tuned on, over at least 20 findings labeled from the code. Every finding is reported as a review, and the level read here is the one its measured questions composed. Today those are function-simplification split reviews (20 of 23 right) and, when the documentation rules run, agent-context findings composed as considers (22 of 24). Look-here findings are not yet measured. A finding in a [preview language](languages.md#support-levels), such as Kotlin or Swift, never fails it: those languages' rules and levels are measured apart, and none is mature yet. A [custom question](custom-questions.md) fails it at its own level, since its author chose that level and JevGate cannot measure a team's question on other projects. Every other finding is reported and marked as still being measured, without failing the check. `jevgate rules` shows each rule's levels that fail by default and how often they were right, and [accuracy](accuracy.md) gives every rule and level's labels and how they are made.
 
-Any level you set replaces the default exactly as it says, for the rules and paths it addresses: `fail_on = ["review"]` (or `--fail-on review`) fails on every review, as releases before 0.26 did; `--fail-on security=consider` sets one group and leaves the others at `mature`; `mature` itself can be set, such as for one group after a stricter `fail_on`. A later release can mark more levels mature as labels accumulate, or fewer; set `fail_on` to keep a fixed policy. Undecided answers never fail the check under `mature`.
+Any level you set replaces the default exactly as it says, for the rules and paths it addresses: `fail_on = ["review"]` (or `--fail-on review`) fails on every new finding; `--fail-on security=review` sets one group and leaves the others at `mature`; `mature` itself can be set, such as for one group after a stricter `fail_on`. A later release can mark more levels mature as labels accumulate, or fewer; set `fail_on` to keep a fixed policy. Undecided answers never fail the check under `mature`.
 
 A `jevgate.toml` written by `jevgate init` before 0.26 sets `maintainability = "review"` and `tests = "review"`: those lines keep every review of the two groups failing the check, and judge hardcoded values. Delete them for the default rules and gate. While they are there with the comments `init` wrote after them, every command that reads `jevgate.toml` says so on stderr; to keep the levels, delete the comments.
 

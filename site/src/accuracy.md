@@ -1,6 +1,6 @@
 # Accuracy
 
-How often JevGate's findings are right, from findings labeled by reading the code on projects JevGate was never tuned on. These numbers decide what fails the check by default: a rule's reviews or considers fail it once at least 80% of them were right on those projects, over at least 20 labels (the `mature` level in [configuration](configuration.md#what-fails-the-check-by-default)).
+How often JevGate's findings are right, from findings labeled by reading the code on projects JevGate was never tuned on. These numbers decide what fails the check by default: every finding is reported as a review, and the level a rule's measured questions composed for it (a review or a consider) fails the check once at least 80% of that level's findings were right on those projects, over at least 20 labels (the `mature` level in [configuration](configuration.md#what-fails-the-check-by-default)). Look-here findings (file organization, shared logic, hardcoded values, and function simplification beyond its split reviews) flag a place for a person or coding agent to verify; they are not yet measured and never fail the check by default.
 
 ## By rule and level
 
@@ -13,19 +13,18 @@ The table is the ten supported languages'. A finding in a [preview language](lan
 ## How it is measured
 
 - **The corpus.** Open-source projects of many kinds, from web frameworks and command-line tools to intentionally vulnerable applications, plus the maintainer's own applications, each pinned at a commit. JevGate runs every rule on each of them.
-- **Labels.** Each review and consider is labeled by reading the code it points at, and the code around it, by the maintainer or by a coding agent following a written labeling guide. Notes are optional by design and are not labeled. A label is kept by the finding's fingerprint (its rule, file and unit), so it carries over to later versions while the finding stands.
+- **Labels.** Each review and consider is labeled by reading the code it points at, and the code around it, by the maintainer or by a coding agent following a written labeling guide. Notes are not reported and are not labeled. A label is kept by the finding's fingerprint (its rule, file and unit), so it carries over to later versions while the finding stands.
 - **What counts as right.** Right: the claim is true of the code, and acting on it is an improvement a competent maintainer of that kind of project would accept; for a consider, true and worth a look is enough. Wrong: the claim is false (the value is bound, the copies do different work, the test checks real behavior), or acting on it would be wrong or pointless there (an idiom the framework requires, generated code, a design documented beside it). Debatable: competent maintainers would disagree. The shares count a debatable label as not right; counted as right of right and wrong, leaving debatable labels out, they would be higher.
 - **Unseen and tuned projects.** The unseen projects are 11 held out from the start and 14 added later, none used to tune the rules (listed below). The tuned projects are the other labeled projects, without Bend 2 code, which the table leaves out. Only unseen numbers decide what fails the check.
 - **Examples.** The wrong findings on the rule pages come from open-source projects used for tuning only: explaining why an unseen project's findings were wrong would be tuning on it.
 
 ## A third set: 27 public projects
 
-After this release's table was measured, function simplification ran alone on 27 public projects JevGate had never run, three per supported language except Bend 2 (from xh, requests and axios to Dapper, Puma and HikariCP), chosen by language, size and price before any was run. The test asked whether considers on long functions could be a third mature level, with the rule fixed before any finding was read: 80 or more lines (or 50 or more with a split answer's top level of at least 0.55) had to be right at least 75% of the time on these projects and 80% on all unseen ones. Seven labeling agents labeled 311 findings with one brief and the labeling guide, seeing neither the band nor the probabilities.
+After this release's table was measured, function simplification ran alone on 27 public projects JevGate had never run, three per supported language except Bend 2 (from xh, requests and axios to Dapper, Puma and HikariCP), chosen by language, size and price before any was run. Seven labeling agents labeled 311 findings with one brief and the labeling guide, seeing neither the length of their functions nor the probabilities.
 
 - **Function-simplification reviews held: right 80 of 93 times (86%)** on functions of 50 lines or more, against 20 of 23 in the table; the 21 reviews on shorter functions were not labeled. This supports failing the check on them by default.
-- **Considers did not.** On functions of 80 lines or more they were right 81 of 132 times (61%), and 68% pooled with the earlier unseen projects; outside both bands, 6 of 30 sampled considers were right. The whole consider level on these projects was right about 42% of the time, against the table's 67%, which leans on the maintainer's own repositories (78% right there, 65% on public projects): read a function-simplification consider's share as an upper bound.
 
-These labels are not in the table: the reviews and considers labeled were chosen by the length of their functions, not drawn from all findings.
+These labels are not in the table: the reviews labeled were chosen by the length of their functions, not drawn from all findings.
 
 ## Why tuned numbers are higher
 

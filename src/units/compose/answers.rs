@@ -52,12 +52,6 @@ pub(super) fn resolved<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outco
         let merged = test_value_answers(unit, judgments);
         let outcome = leaning_test(unit, judgments, unit_outcome(unit, &merged));
         return (outcome, merged);
-    } else if unit.rule == catalog::FILE_ORGANIZATION {
-        // Each candidate part's answers, asked of a long file once its
-        // outline raised no finding, sit beside the answers it rests on.
-        let (_, mut merged) = rechecked(unit, judgments);
-        merged.extend(answers(judgments, &unit.id, Pass::Locate));
-        merged
     } else if unit.rule == catalog::TEST_REDUNDANCY {
         // Whether each test checks something the other does not, asked of a
         // pair that reached a review, sits beside its answers.
@@ -92,7 +86,7 @@ pub(super) fn leaning_test(unit: &UnitPlan, judgments: &[Judgment], outcome: Out
 
 /// The pass of the follow-ups whose questions sit beside the first answers
 /// under their own ids: document section and pair checks, the kind of a
-/// large document, and benign-kind value checks.
+/// large document, and the rechecks of instruction sections and workflows.
 pub(super) fn beside(rule: &str) -> Option<Pass> {
     if [
         catalog::DOC_STALENESS,
@@ -102,13 +96,7 @@ pub(super) fn beside(rule: &str) -> Option<Pass> {
     .contains(&rule)
     {
         Some(Pass::Trace)
-    } else if [
-        catalog::HARDCODED_VALUES,
-        catalog::AGENT_CONTEXT,
-        catalog::WORKFLOWS,
-    ]
-    .contains(&rule)
-    {
+    } else if [catalog::AGENT_CONTEXT, catalog::WORKFLOWS].contains(&rule) {
         Some(Pass::Recheck)
     } else {
         None
@@ -168,15 +156,7 @@ pub(super) fn test_value_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment])
 pub(super) fn rechecked<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> (Outcome, Answers<'a>) {
     let first = answers(judgments, &unit.id, Pass::First);
     let outcome = unit_outcome(unit, &first);
-    let mut recheck = answers(judgments, &unit.id, Pass::Recheck);
-    if unit.rule == catalog::FILE_ORGANIZATION {
-        // The kind is asked apart from the recheck and read beside its split,
-        // or beside the first split of a file too long for a recheck.
-        if unit.recheck.is_none() {
-            recheck.extend(first.iter().map(|(q, a)| (*q, *a)));
-        }
-        recheck.extend(answers(judgments, &unit.id, Pass::Trace));
-    }
+    let recheck = answers(judgments, &unit.id, Pass::Recheck);
     if open(unit, &first, outcome) && !recheck.is_empty() {
         let second = unit_outcome(unit, &recheck);
         if second.decisive() {

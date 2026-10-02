@@ -7,7 +7,10 @@
 use super::{Access, Detail, UnitPlan, questions};
 use crate::{
     catalog,
-    policy::{LEADING_PROBABILITY, LOCATION_PROBABILITY, REVIEW_PROBABILITY, probability_at_least},
+    policy::{
+        LEADING_PROBABILITY, LOCATION_PROBABILITY, LOOK_PROBABILITY, REVIEW_PROBABILITY,
+        probability_at_least,
+    },
     schema::Answer,
 };
 use std::collections::BTreeMap;
@@ -33,10 +36,7 @@ pub(super) use exposure::{
 pub(super) use injection::{
     QUERIED, RESOURCE_CHECKS, confirmable, harmless, injection_outcome, origin_outcome,
 };
-pub(super) use maintainability::{
-    PartAnswers, benign_key, function_outcome, organization_outcome, separable_part, several_kind,
-    shared_outcome, value_signals, values_outcome,
-};
+pub(super) use maintainability::function_outcome;
 use pairs::doc_pair_outcome;
 pub(super) use pairs::{disagreement, pair_signals, repeated};
 pub(super) use security::{checks, choice_mass, settled_checks, workflows_outcome};
@@ -73,6 +73,32 @@ impl Outcome {
 
 pub(super) fn at_least(value: f64) -> bool {
     probability_at_least(value, REVIEW_PROBABILITY)
+}
+
+/// The id of a unit's look-here question.
+pub(in crate::units) const LOOK: &str = "look";
+
+/// Whether a rule asks only look-here questions: its findings point a coding
+/// agent at a unit to verify, and are not yet measured.
+pub(in crate::units) fn looks(rule: &str) -> bool {
+    [
+        catalog::FILE_ORGANIZATION,
+        catalog::SHARED_LOGIC,
+        catalog::HARDCODED_VALUES,
+    ]
+    .contains(&rule)
+}
+
+/// A look-here answer: a review at the look probability, otherwise clear.
+/// There is no middle: the agent verifies what it flags.
+pub(in crate::units) fn look(answer: &Answer) -> Outcome {
+    match answer {
+        Answer::Noul { noul } if probability_at_least(*noul, LOOK_PROBABILITY) => {
+            Outcome::Review(*noul)
+        }
+        Answer::Noul { .. } => Outcome::Clear,
+        _ => Outcome::Missing,
+    }
 }
 
 pub(super) fn levels(answer: &Answer) -> Option<[f64; 3]> {
@@ -131,7 +157,6 @@ pub(super) fn torn(answer: &Answer) -> bool {
 pub(super) fn open(unit: &UnitPlan, answers: &Answers<'_>, outcome: Outcome) -> bool {
     let benefit_questions: &[&str] = match unit.rule {
         catalog::FUNCTION_SIMPLIFICATION => &["split", "flatten"],
-        catalog::FILE_ORGANIZATION => &["split"],
         catalog::COMMENTS => &["restates", "verbose"],
         _ => &[],
     };
@@ -224,14 +249,6 @@ pub(super) fn weighed_by_kind(
     }
 }
 
-/// Each candidate part's answers, in part order.
-pub(super) fn part_answers<'a>(get: &impl Fn(&str) -> Option<&'a Answer>) -> Vec<PartAnswers<'a>> {
-    super::outline::PART_QUESTIONS
-        .iter()
-        .map(|(own, role)| (get(own), get(role)))
-        .collect()
-}
-
 pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
     let outcome = rule_outcome(unit, answers).unwrap_or(Outcome::Missing);
     in_examples(unit, outcome)
@@ -247,23 +264,13 @@ fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
         catalog::FUNCTION_SIMPLIFICATION => {
             function_outcome(get("split"), get("flatten"), unit.lines)
         }
-        // Who calls a group is evidence in the outline, not a gate: a module
-        // with one caller still helps a reader find a feature of a large file.
-        // A test file's layout is advice, one level lower.
-        catalog::FILE_ORGANIZATION => {
-            let parts = part_answers(&get);
-            organization_outcome(get("split"), get("kind"), &parts).map(|outcome| {
-                if matches!(unit.detail, Detail::Outline { tests: true, .. }) {
-                    lowered(outcome)
-                } else {
-                    outcome
-                }
-            })
+        // File organization, shared logic and hardcoded values ask one
+        // look-here question per unit; a coding agent verifies its flags.
+        catalog::FILE_ORGANIZATION | catalog::SHARED_LOGIC | catalog::HARDCODED_VALUES => {
+            get(LOOK).map(look)
         }
-        catalog::SHARED_LOGIC => shared_outcome(get("required"), get("same"), unit),
         catalog::TEST_VALUE => test_value_outcome(&get),
         catalog::TEST_REDUNDANCY => test_pair_outcome(&get, &unit.detail),
-        catalog::HARDCODED_VALUES => values_outcome(&get, &unit.detail),
         // "Slightly" says the comment adds only detail: a note, as a benefit.
         catalog::LAWS => get("states")
             .map(benefit)
@@ -448,31 +455,5 @@ pub(super) fn lean(answer: &Answer) -> f64 {
     match answer {
         Answer::Noul { noul } => *noul,
         _ => levels(answer).map_or(0.0, |[_, middle, top]| middle + top),
-    }
-}
-
-/// An undecided answer after its follow-up: clear when the check finds only
-/// acceptable kinds; otherwise a note when it leans toward the concern (a
-/// medium-confidence flag that never fails the gate), else still uncertain.
-/// Without a follow-up answer (`settle` false) it stays as it was, so the
-/// follow-up is asked first.
-pub(super) fn settled(
-    outcome: Outcome,
-    answer: &Answer,
-    check: Option<&Answer>,
-    settle: bool,
-) -> Outcome {
-    let Outcome::Uncertain(p) = outcome else {
-        return outcome;
-    };
-    if !settle {
-        return outcome;
-    }
-    if matches!(check.map(noul), Some(Outcome::Review(_))) {
-        Outcome::Clear
-    } else if probability_at_least(lean(answer), LEADING_PROBABILITY) {
-        Outcome::Note(lean(answer))
-    } else {
-        Outcome::Uncertain(p)
     }
 }

@@ -149,6 +149,7 @@ mod tests {
         Finding {
             rule: "maintainability/shared-logic".into(),
             strength: Strength::Review,
+            measured_as: Some(Strength::Review),
             line: 1,
             message: String::new(),
             action: String::new(),
@@ -158,7 +159,6 @@ mod tests {
             locations: Vec::new(),
             quote: None,
             category: None,
-            values: Vec::new(),
             fingerprint: fingerprint.into(),
             rank: 1.0,
             baselined: false,

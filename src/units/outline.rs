@@ -1,9 +1,13 @@
 //! File organization: an outline of member signatures, sizes and groups,
-//! without bodies. A test file's members are its test cases and the support
-//! code they share.
+//! without bodies, asked one look-here question: whether the file does
+//! several separate kinds of work a maintainer could keep apart. A test
+//! file's members are its test cases and the support code they share. The
+//! split Score, the kind of file and its candidate parts once decided these
+//! findings; on files labeled for splitting, the look-here question flagged
+//! 6 of 9 against 5 of 54 kept.
 use super::{
-    Asked, Detail, FileContext, FilePlan, GroupInfo, Part, Planned, Presence, Questions, UnitPlan,
-    identity, questions,
+    Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, identity, outcome::LOOK,
+    questions,
 };
 use crate::{
     analysis::{
@@ -30,23 +34,6 @@ pub const MIN_FILE_LINES: usize = 100;
 /// the 13 right ones were on files of 313 member lines or more.
 pub const MIN_BEND_FILE_LINES: usize = 300;
 
-/// Files shorter than this are not asked about their parts: the labeled
-/// splits of files the outline cleared were all on files of 400 lines or more.
-const PART_FILE_LINES: usize = 400;
-/// A part shorter than this is not asked about: of four parts of 80 to 99
-/// lines found doing a job of their own, two were worth moving.
-const PART_LINES: usize = 100;
-/// The question ids of each candidate part's follow-up, in part order: a
-/// part's answers are recorded beside the outline's own.
-pub(super) const PART_QUESTIONS: [(&str, &str); groups::MAX_GROUPS] = [
-    ("part1_own", "part1_role"),
-    ("part2_own", "part2_role"),
-    ("part3_own", "part3_role"),
-    ("part4_own", "part4_role"),
-    ("part5_own", "part5_role"),
-    ("part6_own", "part6_role"),
-];
-
 /// One listed member: its name, its lines and the state sent for it.
 struct Member {
     name: String,
@@ -72,123 +59,7 @@ pub(super) fn plan(
         .map(|g| g.members.iter().map(|m| position[m]).collect())
         .collect();
     let listed = member_state(file, units, members, callers);
-    let source = application_source(file.source, units, members);
-    let parts = plan_parts(file, parsed, members);
-    plan_outline(
-        file,
-        false,
-        listed,
-        sets,
-        Beyond { source, parts },
-        out,
-        requests,
-    );
-}
-
-/// The candidate parts of a long application file, each with the follow-up
-/// that asks whether it does a job of its own: at least `PART_LINES` lines
-/// and at most three quarters of the members' lines, since moving most of a
-/// file moves the file rather than splitting it.
-fn plan_parts(file: &FileContext<'_>, parsed: &FileUnits, members: &[usize]) -> Vec<Part> {
-    if file.source.lines().count() < PART_FILE_LINES
-        || crate::analysis::bend::file(file.path)
-        || tooling(file.path)
-    {
-        return Vec::new();
-    }
-    let units = &parsed.units;
-    let total: usize = members.iter().map(|&m| units[m].lines()).sum();
-    groups::parts(units, members, &parsed.imports)
-        .into_iter()
-        .filter(|part| {
-            let lines: usize = part.iter().map(|&m| units[m].lines()).sum();
-            lines >= PART_LINES
-                && lines * 4 <= total * 3
-                && !part.iter().any(|&m| units[m].short_name == "main")
-        })
-        .zip(PART_QUESTIONS)
-        .filter_map(|(part, ids)| {
-            let (request, asked) = part_request(file, units, members, &part, ids);
-            file.budget.fits(&request).then(|| Part {
-                questions: ids,
-                names: part.iter().map(|&m| units[m].name.clone()).collect(),
-                locations: part
-                    .iter()
-                    .map(|&m| file.location(units[m].line, units[m].end_line, Some(&units[m].name)))
-                    .collect(),
-                lines: part.iter().map(|&m| units[m].lines()).sum(),
-                follow_up: (request, asked).into(),
-            })
-        })
-        .collect()
-}
-
-/// Benchmarks, examples, scripts and documentation tooling: a script runs
-/// its steps top to bottom and a benchmark or experiment is often pinned by
-/// hash, so their parts read as stages of one job. On the corpus, 5 part
-/// findings in `benchmarks`, `scripts` and `docs` directories were all
-/// wrong, and so was the one part holding a script's `main`.
-fn tooling(path: &std::path::Path) -> bool {
-    crate::analysis::clones::benchmark_code(path)
-        || crate::analysis::clones::example_code(path)
-        || path.parent().is_some_and(|dir| {
-            dir.iter().any(|part| {
-                matches!(
-                    part.to_string_lossy().to_ascii_lowercase().as_str(),
-                    "scripts" | "script" | "docs" | "doc"
-                )
-            })
-        })
-}
-
-/// A part's members with their source, and the file's other members by
-/// signature: the part itself, not the whole file, is judged.
-fn part_request(
-    file: &FileContext<'_>,
-    units: &[Unit],
-    members: &[usize],
-    part: &[usize],
-    (own, role): (&'static str, &'static str),
-) -> (Value, Asked) {
-    let mut questions = Questions::default();
-    let own_job = questions::outline_part_own();
-    questions.ask(
-        "own".into(),
-        own_job,
-        ID,
-        FILE_ORGANIZATION,
-        own,
-        Pass::Locate,
-    );
-    let kind = questions::outline_part_role();
-    questions.ask(
-        "role".into(),
-        kind,
-        ID,
-        FILE_ORGANIZATION,
-        role,
-        Pass::Locate,
-    );
-    let lines: Vec<&str> = file.source.lines().collect();
-    let source: Vec<String> = part
-        .iter()
-        .map(|&m| lines[units[m].line - 1..units[m].end_line.min(lines.len())].join("\n"))
-        .collect();
-    let rest: Vec<Value> = members
-        .iter()
-        .filter(|m| !part.contains(m))
-        .map(|&m| json!({"name": units[m].name, "signature": units[m].signature}))
-        .collect();
-    let mut state = json!({
-        "file": file.plain_state(),
-        "part": {
-            "members": part.iter().map(|&m| &units[m].name).collect::<Vec<_>>(),
-            "source": source.join("\n"),
-        },
-        "rest": rest,
-    });
-    state["file"]["lines"] = json!(lines.len());
-    file.request("parts", state, questions)
+    plan_outline(file, false, listed, sets, out, requests);
 }
 
 /// A test file's cases, with their suites and subjects, and the helpers,
@@ -246,43 +117,40 @@ pub(super) fn plan_tests(
         )
         .collect();
     let sets = groups::test_groups(cases, &support);
-    let beyond = Beyond {
-        source: file.source.to_string(),
-        parts: Vec::new(),
-    };
-    plan_outline(file, true, listed, sets, beyond, out, requests);
+    plan_outline(file, true, listed, sets, out, requests);
 }
 
-/// What an outline's follow-ups send beyond it: the file's source for the
-/// recheck and the kind, and the candidate parts of a long application file.
-struct Beyond {
-    source: String,
-    parts: Vec<Part>,
-}
-
-/// The outline unit and its request; `sets` are groups of positions in `listed`.
+/// The outline unit and its request, which asks the look-here question;
+/// `sets` are groups of positions in `listed`, sent as evidence.
 fn plan_outline(
     file: &FileContext<'_>,
     tests: bool,
     listed: Vec<Member>,
     sets: Vec<Vec<usize>>,
-    Beyond { source, parts }: Beyond,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
-    let ids: Vec<String> = (1..=sets.len()).map(|i| format!("G{i}")).collect();
-    let outline = Outline {
-        tests,
-        lines: file.source.lines().count(),
-        members: listed.iter().map(|m| m.state.clone()).collect(),
-        groups: ids
-            .iter()
-            .zip(&sets)
-            .map(|(id, set)| json!({"id": id, "members": set.iter().map(|&p| &listed[p].name).collect::<Vec<_>>()}))
-            .collect(),
-        ids: ids.clone(),
-    };
-    let (request, asked) = outline.request(file, Ask::First);
+    let groups: Vec<Value> = sets
+        .iter()
+        .enumerate()
+        .map(|(i, set)| json!({"id": format!("G{}", i + 1), "members": set.iter().map(|&p| &listed[p].name).collect::<Vec<_>>()}))
+        .collect();
+    let mut questions = Questions::default();
+    questions.ask(
+        LOOK.into(),
+        questions::outline_look(tests),
+        ID,
+        FILE_ORGANIZATION,
+        LOOK,
+        Pass::First,
+    );
+    let mut state = json!({
+        "file": file.plain_state(),
+        "members": listed.iter().map(|m| &m.state).collect::<Vec<_>>(),
+        "groups": groups,
+    });
+    state["file"]["lines"] = json!(file.source.lines().count());
+    let (request, asked) = file.request("outline", state, questions);
     let fits = file.budget.fits_structured(&request);
     // A short file is read in one pass; splitting it is not a maintainability gain.
     let floor = if crate::analysis::bend::file(file.path) {
@@ -291,7 +159,6 @@ fn plan_outline(
         MIN_FILE_LINES
     };
     let small = member_code_lines(file.source, &listed) < floor;
-    let judged = fits && !small;
     let first = listed.iter().map(|m| m.line).min().unwrap_or(1);
     let last = listed.iter().map(|m| m.end_line).max().unwrap_or(first);
     let names: Vec<&str> = listed.iter().map(|m| m.name.as_str()).collect();
@@ -310,45 +177,10 @@ fn plan_outline(
         quote: None,
         lines: file.source.lines().count(),
         identity: identity(&names),
-        detail: Detail::Outline {
-            tests,
-            members: listed.len(),
-            sections: if crate::analysis::bend::file(file.path) {
-                crate::analysis::bend::section_rules(file.source)
-            } else {
-                0
-            },
-            // A file too long to send whole is asked its kind from the
-            // outline alone, so its undecided split is not left open.
-            kind: [Some(source.clone()), None]
-                .into_iter()
-                .filter(|_| judged)
-                .map(|source| outline.request(file, Ask::Kind(source)))
-                .find(|(request, _)| file.budget.fits(request))
-                .map(Into::into),
-            parts: if judged { parts } else { Vec::new() },
-            groups: ids
-                .into_iter()
-                .zip(&sets)
-                .map(|(id, set)| GroupInfo {
-                    id,
-                    names: set.iter().map(|&p| listed[p].name.clone()).collect(),
-                    locations: set
-                        .iter()
-                        .map(|&p| {
-                            let m = &listed[p];
-                            file.location(m.line, m.end_line, Some(&m.name))
-                        })
-                        .collect(),
-                })
-                .collect(),
-        },
-        recheck: judged
-            .then(|| outline.request(file, Ask::Recheck(source.clone())))
-            .filter(|(request, _)| file.budget.fits(request))
-            .map(Into::into),
+        detail: Detail::Outline { tests },
+        recheck: None,
     });
-    if judged {
+    if fits && !small {
         requests.push(Planned {
             owner: file.owner,
             request,
@@ -358,79 +190,6 @@ fn plan_outline(
 }
 
 const ID: &str = "outline";
-
-/// The uploaded outline: members, their groups, and the group IDs as options.
-struct Outline {
-    tests: bool,
-    lines: usize,
-    members: Vec<Value>,
-    groups: Vec<Value>,
-    ids: Vec<String>,
-}
-
-/// The requests about one outline, in the order they may be asked.
-enum Ask {
-    /// Signatures only.
-    First,
-    /// The split again with the file's application source.
-    Recheck(String),
-    /// What kind of file it is, asked only when the recheck stays undecided,
-    /// or the first answer when the file is too long for a recheck; with the
-    /// file's source when it fits.
-    Kind(Option<String>),
-}
-
-impl Outline {
-    fn request(&self, file: &FileContext<'_>, ask: Ask) -> (Value, Asked) {
-        let mut questions = Questions::default();
-        let (pass, stage, source) = match ask {
-            Ask::First => (Pass::First, "outline", None),
-            Ask::Recheck(source) => (Pass::Recheck, "recheck", Some(source)),
-            Ask::Kind(source) => (Pass::Trace, "trace", source),
-        };
-        if pass == Pass::Trace {
-            // A separate request, so the kind never moves the split answers.
-            questions.ask(
-                "kind".into(),
-                questions::outline_kind(self.tests),
-                ID,
-                FILE_ORGANIZATION,
-                "kind",
-                pass,
-            );
-        } else {
-            questions.ask(
-                "split".into(),
-                questions::outline_split(self.tests, source.is_some()),
-                ID,
-                FILE_ORGANIZATION,
-                "split",
-                pass,
-            );
-            if self.ids.len() > 1 {
-                // Speculative location: consumed only when the split Score raises a finding.
-                questions.ask(
-                    "module".into(),
-                    questions::outline_module(self.tests, &self.ids),
-                    ID,
-                    FILE_ORGANIZATION,
-                    "module",
-                    pass,
-                );
-            }
-        }
-        let mut state = json!({
-            "file": file.plain_state(),
-            "members": self.members,
-            "groups": self.groups,
-        });
-        state["file"]["lines"] = json!(self.lines);
-        if let Some(source) = source {
-            state["file"]["source"] = json!(source);
-        }
-        file.request(stage, state, questions)
-    }
-}
 
 /// Each member's name, kind, size, signature, doc line, calls to other
 /// members, and a few files that import this one and call it.
@@ -505,19 +264,4 @@ fn member_code_lines(source: &str, listed: &[Member]) -> usize {
         .enumerate()
         .filter(|(i, line)| covered.contains(&(i + 1)) && !line.trim().is_empty())
         .count()
-}
-
-/// The file without the lines of units that are not members, such as tests.
-fn application_source(source: &str, units: &[Unit], members: &[usize]) -> String {
-    let excluded: Vec<(usize, usize)> = (0..units.len())
-        .filter(|i| !members.contains(i))
-        .map(|i| (units[i].line, units[i].end_line))
-        .collect();
-    source
-        .lines()
-        .enumerate()
-        .filter(|(i, _)| !excluded.iter().any(|&(a, b)| (a..=b).contains(&(i + 1))))
-        .map(|(_, line)| line)
-        .collect::<Vec<_>>()
-        .join("\n")
 }

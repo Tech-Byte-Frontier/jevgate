@@ -5,7 +5,7 @@
 //! headline in `headline`.
 use crate::{
     options::{CheckArgs, ColorChoice, Format},
-    schema::{Finding, Gating, LeftOut, Report, Status, Strength},
+    schema::{Finding, Gating, LeftOut, Report, Status},
 };
 use anyhow::Result;
 use std::{
@@ -44,7 +44,6 @@ const RED: &str = "31";
 const CYAN: &str = "36";
 const BOLD_RED: &str = "1;31";
 const BOLD_GREEN: &str = "1;32";
-const BOLD_YELLOW: &str = "1;33";
 
 /// ANSI styles for agent output, or plain text.
 #[derive(Clone, Copy)]
@@ -149,25 +148,20 @@ pub(crate) fn ranked(report: &Report) -> Vec<(&Path, &Finding)> {
     findings
 }
 
-/// Every finding with its file's path: those that fail the gate first, then
-/// the rest by level, reviews first, each highest rank first. A capped list
-/// never leaves out a failure for a finding that only warns, nor a review
-/// still being measured for a higher-ranked consider. GitHub shows 10
-/// warning annotations a step: in whole-repository runs of 94 corpus
-/// projects with the default rules, 267 of 424 such reviews fell past the
-/// tenth when ranked with considers, and 109 with reviews first, all in the
-/// 10 projects holding more than ten of them.
+/// Every finding with its file's path: those that fail the gate first, each
+/// part highest rank first. A capped list never leaves out a failure for a
+/// finding that only warns: GitHub shows 10 warning annotations a step.
 pub(crate) fn failing_first(report: &Report) -> Vec<(&Path, &Finding)> {
     let mut findings = ranked(report);
     // A stable sort keeps the rank order within each part.
-    findings.sort_by_key(|(_, f)| (!f.fails_gate(), std::cmp::Reverse(f.strength)));
+    findings.sort_by_key(|(_, f)| !f.fails_gate());
     findings
 }
 
 /// Why reviews did not fail the gate: their rules and levels are still
 /// being measured, or their files' languages are in preview. Each reason
-/// comes with the considers beside its reviews and how to make every review
-/// fail the gate; none when no review is left out either way.
+/// says how to make every review fail the gate; none when no review is left
+/// out either way.
 pub(crate) fn measuring(report: &Report) -> Option<String> {
     let (preview, measured): (Vec<_>, Vec<_>) = report
         .files
@@ -179,11 +173,11 @@ pub(crate) fn measuring(report: &Report) -> Option<String> {
         })
         .filter(|(_, f)| f.gate == Some(Gating::Measuring))
         .partition(|(path, f)| crate::maturity::preview_language(path, &f.rule).is_some());
-    let measured = reviews_and_considers(&measured).map(|findings| format!(
+    let measured = reviews(&measured).map(|findings| format!(
         "{findings} did not fail the gate: by default only rules and levels right at least {}% of the time on projects JevGate was never tuned on fail it, and theirs are still being measured. `jevgate rules` shows each one's precision; `--fail-on review` makes every review fail the gate.",
         crate::maturity::MIN_PERCENT_RIGHT
     ));
-    let preview = reviews_and_considers(&preview).map(|findings| {
+    let preview = reviews(&preview).map(|findings| {
         let mut languages: Vec<String> = preview
             .iter()
             .filter_map(|(path, f)| crate::maturity::preview_language(path, &f.rule))
@@ -204,24 +198,9 @@ pub(crate) fn measuring(report: &Report) -> Option<String> {
     (!reasons.is_empty()).then(|| reasons.join("\n\n"))
 }
 
-/// "2 reviews and 1 consider" of `findings`; none without a review, which
-/// alone would have failed the default gate.
-fn reviews_and_considers(findings: &[(&Path, &Finding)]) -> Option<String> {
-    let of = |strength: Strength| {
-        findings
-            .iter()
-            .filter(|(_, f)| f.strength == strength)
-            .count()
-    };
-    let (reviews, considers) = (of(Strength::Review), of(Strength::Consider));
-    (reviews > 0).then(|| match considers {
-        0 => count(reviews, "review"),
-        _ => format!(
-            "{} and {}",
-            count(reviews, "review"),
-            count(considers, "consider")
-        ),
-    })
+/// "2 reviews" of `findings`; none without one.
+fn reviews(findings: &[(&Path, &Finding)]) -> Option<String> {
+    (!findings.is_empty()).then(|| count(findings.len(), "review"))
 }
 
 /// Why a finding in `path` still being measured does not fail the gate:

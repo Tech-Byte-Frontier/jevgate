@@ -125,9 +125,10 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # findings are reported without failing it. A group or rule ID set to a
 # level is judged, a group's opt-in rules only when named on their own
 # (security and documentation are opt-in whole), and fails the check at
-# exactly that level: "review", "consider" (also fails on review), "mature",
-# "uncertain", "report" (judge, never fail) or "off". A rule's own entry wins
-# over its group's. Test rules also need include_tests or --include-tests.
+# that level: "review" (every new finding), "mature", "uncertain", "report"
+# (judge, never fail) or "off"; "consider" is the same as "review". A rule's
+# own entry wins over its group's. Test rules also need include_tests or
+# --include-tests.
 [rules]
 {rules}
 # Levels for the files some paths match, such as report-only tooling. The last
@@ -146,7 +147,7 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # guidance = "Logging the method, path, request id or status is fine."
 # unit = "function"  # function, file, test, section, comment, or hunk (with --base)
 # paths = ["src/api/**"]
-# level = "review"  # review, consider or note
+# level = "review"  # review, or note to list its findings without failing
 # [[question.failing]]  # code that breaks the rule; `jevgate rules test` asks it
 # path = "src/api/orders.py"
 # code = "def create(req):\n    log.info(req.body)\n"
@@ -177,15 +178,11 @@ fn group_example(group: &str) -> String {
         .filter(|r| r.default_enabled || opt_in)
         .map(name)
         .collect();
-    let (level, suffix) = if opt_in {
-        ("consider", " (opt-in)")
-    } else {
-        ("review", "")
-    };
-    let mut lines = format!("# {group} = \"{level}\"  # {}{suffix}\n", names.join(", "));
+    let suffix = if opt_in { " (opt-in)" } else { "" };
+    let mut lines = format!("# {group} = \"review\"  # {}{suffix}\n", names.join(", "));
     for rule in members.iter().filter(|r| !r.default_enabled && !opt_in) {
         lines.push_str(&format!(
-            "# \"{}\" = \"consider\"  # {} (opt-in, only by name)\n",
+            "# \"{}\" = \"review\"  # {} (opt-in, only by name)\n",
             rule.id,
             name(rule)
         ));
@@ -237,7 +234,7 @@ mod tests {
         };
         assert!(levels(config).is_empty(), "the default rules and gate");
         assert!(
-            text.contains("# \"maintainability/hardcoded-values\" = \"consider\"  # hardcoded-values (opt-in, only by name)\n"),
+            text.contains("# \"maintainability/hardcoded-values\" = \"review\"  # hardcoded-values (opt-in, only by name)\n"),
             "{text}"
         );
         assert!(!text.contains("shared-logic, hardcoded-values"), "{text}");

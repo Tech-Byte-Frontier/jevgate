@@ -239,7 +239,8 @@ mod tests {
         );
         assert_eq!(
             results[0]["properties"]["precision"],
-            json!({"right": 46, "labeled": 85})
+            json!({"right": 0, "labeled": 0}),
+            "a look-here question is not yet measured"
         );
         assert_eq!(results[0]["properties"]["probability"], 0.9);
         let first = &results[0];
@@ -251,9 +252,12 @@ mod tests {
         assert_eq!(region["region"]["startLine"], 12);
         assert_eq!(region["region"]["endLine"], 20);
         assert!(first.get("relatedLocations").is_none());
-        assert!(first["message"]["text"].as_str().unwrap().ends_with(
-            "Right 54% of the time (85 labels).\n\nNext step: Share one | implementation"
-        ));
+        assert!(
+            first["message"]["text"]
+                .as_str()
+                .unwrap()
+                .ends_with("Not yet measured.\n\nNext step: Share one | implementation")
+        );
         assert!(first["partialFingerprints"]["jevgateFingerprint/v1"].is_string());
     }
 

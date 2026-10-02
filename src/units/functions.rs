@@ -1,8 +1,9 @@
 //! Function simplification: per function, a Score on whether splitting would
 //! help a reader and, only where the parser finds deep nesting or a long
-//! branch chain, a Score on whether flattening would help, asked in the
-//! function packs every rule shares (`packs`). A split finding is then
-//! located with one Choice among the body's blocks.
+//! branch chain, a Score on whether flattening would help, whose reviews the
+//! default gate measures, and the look-here question on whether it could be
+//! simpler, asked in the function packs every rule shares (`packs`). A split
+//! review is then located with one Choice among the body's blocks.
 use super::{
     Asked, Block, Detail, FileContext, FilePlan, Presence, Questions, Scope, UnitPlan, compact,
     identity,
@@ -69,8 +70,10 @@ pub(super) fn plan(
 }
 
 /// The split Score about `functions[index]` and, where its nesting is deep
-/// (`nested`), the flatten Score; a recheck's split question points at the
-/// callee signatures sent beside it.
+/// (`nested`), the flatten Score, whose reviews the default gate measures;
+/// in the first pass, the look-here question, which flags the rest for a
+/// coding agent to verify. A recheck's split question points at the callee
+/// signatures sent beside it.
 pub(super) fn ask(questions: &mut Questions, index: usize, id: &str, nested: bool, pass: Pass) {
     let path = format!("functions[{index}].source");
     let mut asked = vec![(
@@ -79,6 +82,9 @@ pub(super) fn ask(questions: &mut Questions, index: usize, id: &str, nested: boo
     )];
     if nested {
         asked.push(("flatten", questions::function_flatten(&path)));
+    }
+    if pass == Pass::First {
+        asked.push((super::outcome::LOOK, questions::function_look(&path)));
     }
     for (question, body) in asked {
         questions.ask(

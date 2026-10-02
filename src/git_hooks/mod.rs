@@ -50,12 +50,13 @@ pub fn not_checked(args: &CheckArgs, why: &str) {
 
 /// What a person reads after a report whose gate stopped a commit or a
 /// push, and a coding agent that ran `git commit` or `git push` reads as
-/// its next step: fix the findings. Accepting one stays with people, as in
-/// the agent hook, and the hook is never bypassed.
+/// its next step: fix each finding, or dismiss it with a reason, as in the
+/// agent hook. Accepting findings wholesale stays with people, and the hook
+/// is never bypassed.
 pub fn stopped(moment: Moment) -> String {
     let noun = moment.noun();
     format!(
-        "\nJevGate stopped this {noun}: fix the findings above and {noun} again. A person who judges a finding acceptable can add a `jevgate: allow(RULE) reason` comment on its line, or run `jevgate baseline --merge` and commit jevgate-baseline.json. Coding agents: fix the findings; never bypass this check with --no-verify, an allow comment or the baseline, and if a finding looks wrong, tell the person."
+        "\nJevGate stopped this {noun}: fix the findings above and {noun} again. A person who judges a finding acceptable can add a `jevgate: allow(RULE) reason` comment on its line, or run `jevgate baseline --merge` and commit jevgate-baseline.json. Coding agents: fix each finding, or dismiss one that is mistaken, intended or left for later with `jevgate baseline mark wrong|intended|later PATH:LINE` and commit jevgate-baseline.json with the change, which the person audits with `jevgate baseline stats`; never bypass this check with --no-verify or an allow comment."
     )
 }
 

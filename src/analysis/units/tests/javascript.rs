@@ -85,6 +85,25 @@ fn functions_assigned_to_properties_are_methods_of_their_object() {
     );
 }
 
+#[test]
+fn class_fields_holding_functions_are_methods_of_their_class() {
+    let source = "export class Search extends Component {\n  state = { term: '' }\n  private readonly limit = 10\n  handleChange = (event) => {\n    this.setState({ term: event.target.value })\n  }\n  static create = function () {\n    return new Search()\n  }\n  search = debounce(async (term: string) => {\n    await fetchResults(term)\n  }, 300)\n  render() {\n    return <input onChange={this.handleChange} />\n  }\n}\n";
+    let units = assert_named(
+        "search.tsx",
+        source,
+        &[
+            ("Search::handleChange", 4),
+            ("Search::create", 7),
+            ("Search::search", 10),
+            ("Search::render", 13),
+        ],
+    );
+    assert!(units[2].calls.contains("fetchResults"));
+    let store =
+        "class Store {\n  #items = []\n  add = (item) => {\n    this.#items.push(item)\n  }\n}\n";
+    assert_named("store.js", store, &[("Store::add", 3)]);
+}
+
 /// The units `source` parses to, after checking their names and lines.
 fn assert_named(path: &str, source: &str, expected: &[(&str, usize)]) -> Vec<Unit> {
     let units = parse(Path::new(path), source).unwrap().units;

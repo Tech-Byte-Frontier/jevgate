@@ -45,7 +45,7 @@ Each language is supported or in preview. The ten languages with analyzers of th
 | React | JSX components and hooks as functions; text shown as a JSX child is not treated as markup injection |
 | RSpec, Minitest | Examples with the groups they are declared in, the `before` hooks and the `let`/`subject` definitions they read, and the helpers they call from support files such as `spec/support` and `test_helper.rb` |
 | Sinatra and other Ruby DSLs | Methods of classes and modules (`def`, `def self.`, `class << self`, `define_method`); blocks passed at class or file level as units named by their call (`get('/invoices')`); constants as hardcoded values |
-| Monorepos and examples | Copies are compared within a package and across packages linked by a local dependency, not across separate example apps, templates or variants of one example (`examples/login/raw` and `examples/login/sdk`); copies inside example code are notes; directories below a JVM source root (`src/main/java/com/example/demo`) are packages, not examples |
+| Monorepos and examples | Copies are compared within a package and across packages linked by a local dependency, not across separate example apps, templates or variants of one example (`examples/login/raw` and `examples/login/sdk`); copies inside example code are notes, which are not reported; directories below a JVM source root (`src/main/java/com/example/demo`) are packages, not examples |
 | Go packages | A file's package is its directory: the files of its package and the packages its imports name are its callers and callees, so an injection is judged with the handlers that call its query helper |
 | Java classes | Methods and constructors belong to their class, interface, enum constant or record; `static` fields are constants; `equals` and `hashCode` overrides, constructors storing fields and setters given literals are boilerplate or data, never copies; initial capacities and a number a method returns whole are not values to name; a class of the same package counts as imported |
 | Spring MVC | A MockMvc or RestTemplate test request reaches the controller method whose `@GetMapping`, `@PostMapping` or `@RequestMapping` route serves it, so the test is judged with that method as its code under test |
@@ -59,46 +59,25 @@ Other files, such as Zig, are listed as skipped with the reason and never fail t
 
 ## Support levels
 
-| Language | Level | Unseen projects | Reviews right | Considers right |
-|---|---|---:|---:|---:|
-| Rust | supported | 7 | 69% (37 of 54) | 66% (124 of 188) |
-| Python | supported | 4 | 51% (18 of 35) | 54% (42 of 78) |
-| Go | supported | 3 | 8 of 10 | 58% (23 of 40) |
-| TypeScript | supported | 4 | 2 of 4 | 70% (14 of 20) |
-| PHP | supported | 2 | 1 of 6 | 10 of 16 |
-| Java | supported | 2 | 1 of 3 | 4 of 10 |
-| JavaScript | supported | 3 | 1 of 1 | 0 of 4 |
-| C#, Ruby, Bend 2 | supported | none | not measured | not measured |
-| C | preview | 4 | 64% (16 of 25) | 44% (15 of 34) |
-| C++ | preview | 6 | 58% (23 of 40) | 42% (22 of 52) |
-| Kotlin | preview | 3 | 8 of 9 | 9 of 11 |
-| Swift | preview | 5 | 82% (28 of 34) | 70% (44 of 63) |
-| Bash | preview | 8 | 45% (29 of 64) | 62% (56 of 90) |
-| Dart | preview | 3 | 8 of 12 | 13 of 16 |
-| Scala | preview | 4 | 3 of 5 | 43% (9 of 21) |
-| Elixir | preview | 5 | 5 of 6 | 10 of 13 |
-| Lua | preview | 4 | 90% (19 of 21) | 51% (19 of 37) |
+| Language | Level | Function-simplification split reviews right | Comment considers right |
+|---|---|---:|---:|
+| Rust, Python, Go, TypeScript, PHP, Java, JavaScript, C#, Ruby, Bend 2 | supported | 87% (20 of 23), pooled | 54% (39 of 72), pooled |
+| C | preview | 10 of 11 | 0 of 8 |
+| C++ | preview | 11 of 11 | 1 of 6 |
+| Kotlin | preview | 1 of 1 | 1 of 2 |
+| Swift | preview | 10 of 10 | 4 of 4 |
+| Bash | preview | 89% (25 of 28) | 79% (22 of 28) |
+| Dart | preview | 5 of 5 | 2 of 4 |
+| Scala | preview | 2 of 3 | 3 of 5 |
+| Elixir | preview | – | – |
+| Lua | preview | 11 of 12 | 1 of 10 |
 
-A finding is right when a person reading the code agrees with it; a debatable one counts as not right. A percentage is shown from 20 labels on. The counts are for the four rules every language gets: function simplification, file organization, shared logic and comments.
+A finding is right when a person reading the code agrees with it; a debatable one counts as not right. A percentage is shown from 20 labels on. These are the levels of the four rules every language gets whose questions the labels measured: function simplification's split reviews and comment considers. File organization, shared logic and the rest of function simplification ask look-here questions, which are not yet measured in any language.
 
-- The supported languages' counts are 0.25.0's reviews and considers on the 25 projects JevGate was never tuned on (11 held out, 14 fresh), each labeled by hand from the code, with 0.28's shared-logic threshold applied, as [accuracy](accuracy.md) counts them. Those projects hold no C#, Ruby or Bend 2 finding of these rules, so those three rest on the projects used for tuning.
-- The preview languages' counts are 0.30's first run of the same four rules on 37 well-known projects chosen for them and never used for tuning, with all 598 of its findings labeled by hand. Shared-logic considers are counted as that threshold reports them too, fitted on the supported languages: of the 104 that run reported, it makes 40 notes, 31 of them not right, and the other 64 were right 26 times, where all 104 were right 35 times. A language's projects are the ones holding a labeled finding in its files: dio's Flutter runners count for C++ and Swift, and leveldb's C++ headers, which that run read as C, count for C.
+- The supported languages' counts are pooled over the 25 projects JevGate was never tuned on (11 held out, 14 fresh), each finding labeled by hand from the code, as [accuracy](accuracy.md) counts them.
+- The preview languages' counts are 0.30's first run of these rules on 37 well-known projects chosen for them and never used for tuning, with all of its findings labeled by hand. A language's projects are the ones holding a labeled finding in its files: dio's Flutter runners count for C++ and Swift, and leveldb's C++ headers, which that run read as C, count for C.
 
-Maturity is judged per rule and level, which the pooled rows hide:
-
-| Preview language | Function simplification | Shared logic | Comments | File organization |
-|---|---|---|---|---|
-| C | 10 of 11 · 13 of 19 | 6 of 14 · 2 of 6 | – · 0 of 8 | – · 0 of 1 |
-| C++ | 11 of 11 · 19 of 37 | 12 of 29 · 1 of 6 | – · 1 of 6 | – · 1 of 3 |
-| Kotlin | 1 of 1 · 6 of 7 | 6 of 7 · 2 of 2 | – · 1 of 2 | 1 of 1 · – |
-| Swift | 10 of 10 · 22 of 30 | 17 of 23 · 16 of 27 | – · 4 of 4 | 1 of 1 · 2 of 2 |
-| Bash | 25 of 28 · 34 of 50 | 4 of 34 · 0 of 10 | – · 22 of 28 | 0 of 2 · 0 of 2 |
-| Dart | 5 of 5 · 9 of 10 | 3 of 7 · 1 of 1 | – · 2 of 4 | – · 1 of 1 |
-| Scala | 2 of 3 · 5 of 11 | 1 of 2 · 1 of 2 | – · 3 of 5 | – · 0 of 3 |
-| Elixir | – · 7 of 8 | 4 of 5 · 3 of 5 | – | 1 of 1 · – |
-| Lua | 11 of 12 · 18 of 22 | 8 of 9 · 0 of 5 | – · 1 of 10 | – |
-
-Each cell is reviews right, then considers right, and each finding in a preview language carries its own cell: a Kotlin function-simplification review says "Not yet measured in Kotlin.", a Swift function-simplification consider "Right 73% of the time in Swift (30 labels).". No preview language has two projects that meet the bar. The closest are Bash's function-simplification reviews, 25 of 28 over three projects (nvm 7 of 7, pi-hole 9 of 9, setup-ipsec-vpn 9 of 12) with none reaching 20 on its own; pi-hole's Bash comment considers (20 of 25) and Rectangle's Swift shared-logic reviews (17 of 21) meet the bar on one project each. Pooled over projects, Bash's function-simplification reviews and Lua's function-simplification considers (18 of 22) are above 80% over at least 20 labels.
+Each finding in a preview language carries its own count: a Kotlin function-simplification review says "Not yet measured in Kotlin.", a Bash one "Right 89% of the time in Bash (28 labels).". No preview language has two projects that meet the bar. The closest are Bash's function-simplification reviews, 25 of 28 over three projects (nvm 7 of 7, pi-hole 9 of 9, setup-ipsec-vpn 9 of 12) with none reaching 20 on its own; pi-hole's Bash comment considers (20 of 25) meet the bar on one project. Pooled over projects, Bash's function-simplification reviews are above 80% over at least 20 labels.
 
 The measurement's labels led to fixes that change findings on some of these projects, which count as tuned for those rules from now on: Bash copies pair across scripts only through `source` (setup-ipsec-vpn, tmux-resurrect), Flutter's platform runners are generated code (dio), C++ headers named `.h` are read as C++ (leveldb), C and C++ tests are found by name (beanstalkd, json11) and Kotest's `…Spec` classes only in test directories (kotlinconf-app), a comment of Lua language server annotations is not prose (nvim-cmp, which-key), and C++ members behind pointers and references, operators, Swift computed properties and Kotlin `init` blocks and accessors are units. The counts above are the run before these fixes.
 

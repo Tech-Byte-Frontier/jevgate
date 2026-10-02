@@ -12,7 +12,10 @@ use anyhow::{Result, ensure};
 use billing::Billed;
 use lookup::Lookup;
 use serde_json::Value;
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 pub(super) type SourceHashes = BTreeMap<String, Option<String>>;
 
@@ -25,6 +28,100 @@ pub(super) fn provider_request(request: &Value) -> std::borrow::Cow<'_, Value> {
     let mut copy = request.clone();
     copy.as_object_mut().unwrap().remove("jevgate");
     std::borrow::Cow::Owned(copy)
+}
+
+/// The order the keys of a question sent in its validated order are
+/// written in, where it names them; other keys follow, sorted.
+const VALIDATED_ORDER: [&str; 9] = [
+    "type",
+    "instructions",
+    "question",
+    "note",
+    "criteria",
+    "true",
+    "false",
+    "what",
+    "examples",
+];
+
+/// The questions of `request` sent with their keys in the order their
+/// threshold was chosen on, `what` before `examples`, rather than sorted:
+/// the look-here questions, named under `jevgate.validated_order`. Sent
+/// sorted, `examples` first, a look-here answer about each of 15 functions
+/// fell by up to 0.10, and below 0.70 for four a reviewer flagged.
+pub(super) fn validated_order(request: &Value) -> BTreeSet<&str> {
+    request["jevgate"]["validated_order"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect()
+}
+
+/// Compact JSON of `question`, its keys in [`VALIDATED_ORDER`] when
+/// `validated`, else sorted as every other value is written.
+pub(super) fn write_question(
+    out: &mut Vec<u8>,
+    question: &Value,
+    validated: bool,
+) -> serde_json::Result<()> {
+    let Some(fields) = question.as_object().filter(|_| validated) else {
+        return serde_json::to_writer(out, question);
+    };
+    let rank = |key: &str| {
+        VALIDATED_ORDER
+            .iter()
+            .position(|k| *k == key)
+            .unwrap_or(VALIDATED_ORDER.len())
+    };
+    let mut keys: Vec<&String> = fields.keys().collect();
+    keys.sort_by_key(|key| rank(key));
+    out.push(b'{');
+    for (i, key) in keys.into_iter().enumerate() {
+        if i > 0 {
+            out.push(b',');
+        }
+        serde_json::to_writer(&mut *out, key)?;
+        out.push(b':');
+        write_question(out, &fields[key], validated)?;
+    }
+    out.push(b'}');
+    Ok(())
+}
+
+/// The body sent for `request`: compact JSON of its provider copy, each
+/// question named in `jevgate.validated_order` in its validated order.
+pub(crate) fn body(request: &Value) -> serde_json::Result<Vec<u8>> {
+    let validated = validated_order(request);
+    let provider = provider_request(request);
+    let Some(fields) = provider.as_object().filter(|_| !validated.is_empty()) else {
+        return serde_json::to_vec(provider.as_ref());
+    };
+    let mut out = vec![b'{'];
+    for (i, (key, value)) in fields.iter().enumerate() {
+        if i > 0 {
+            out.push(b',');
+        }
+        serde_json::to_writer(&mut out, key)?;
+        out.push(b':');
+        match value.as_object().filter(|_| key == "questions") {
+            Some(questions) => {
+                out.push(b'{');
+                for (j, (name, question)) in questions.iter().enumerate() {
+                    if j > 0 {
+                        out.push(b',');
+                    }
+                    serde_json::to_writer(&mut out, name)?;
+                    out.push(b':');
+                    write_question(&mut out, question, validated.contains(name.as_str()))?;
+                }
+                out.push(b'}');
+            }
+            None => serde_json::to_writer(&mut out, value)?,
+        }
+    }
+    out.push(b'}');
+    Ok(out)
 }
 
 pub(super) fn evidence_bytes(request: &Value) -> u64 {

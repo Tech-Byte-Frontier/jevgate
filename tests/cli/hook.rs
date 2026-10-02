@@ -164,6 +164,6 @@ fn the_binary_blocks_a_turn_through_the_provider_until_its_finding_is_fixed() {
     assert!(fixed.get("decision").is_none(), "{fixed}");
     assert_eq!(
         fixed["systemMessage"],
-        "JevGate: the findings that blocked this turn are fixed."
+        "JevGate: the findings that blocked this turn are fixed or dismissed."
     );
 }

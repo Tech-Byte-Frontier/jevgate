@@ -182,6 +182,9 @@ pub(super) fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUni
         "lexical_declaration" | "variable_declaration" => {
             declared_functions(node, source, owner, file);
         }
+        "public_field_definition" | "field_definition" => {
+            field_function(node, source, owner, file);
+        }
         "struct_item"
         | "enum_item"
         | "trait_item"
@@ -370,6 +373,35 @@ fn declared_functions(node: Node<'_>, source: &str, owner: &str, file: &mut File
         };
         push(definition, &name, owner, Kind::Function, source, file);
     }
+}
+
+/// A class field that holds a function, as components and services bind
+/// their handlers: `handleChange = (event) => { … }`, or one a call wraps,
+/// as `search = debounce(async (term) => { … }, 300)`, is a method named by
+/// its field. A field holding anything else is no unit.
+fn field_function(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
+    let name = node
+        .child_by_field_name("name")
+        .or_else(|| node.child_by_field_name("property"));
+    let (Some(name), Some(value)) = (name, node.child_by_field_name("value")) else {
+        return;
+    };
+    let Some(function) = callback(value, 2) else {
+        return;
+    };
+    let definition = Definition {
+        outer: node,
+        node: value,
+        body: function.child_by_field_name("body"),
+    };
+    push(
+        definition,
+        text(name, source),
+        owner,
+        Kind::Method,
+        source,
+        file,
+    );
 }
 
 /// A function a module assigns to an object's property, as CommonJS modules

@@ -196,6 +196,6 @@ fn a_convention_proposed_from_agents_md_and_accepted_gates_a_pull_request_and_a_
     assert!(passed.get("decision").is_none(), "{passed}");
     assert_eq!(
         passed["systemMessage"],
-        "JevGate: the findings that blocked this turn are fixed."
+        "JevGate: the findings that blocked this turn are fixed or dismissed."
     );
 }

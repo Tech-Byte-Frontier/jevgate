@@ -54,8 +54,8 @@ fn flatten_is_asked_only_for_deep_nesting_and_can_raise_a_finding_alone() {
     );
     options.refresh = true;
     let report = run(&project, &options, &mut scripted(1));
-    assert_eq!(report.files[0].status, Status::Note);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    assert_eq!(report.files[0].status, Status::Clear, "no note is reported");
+    assert!(report.files[0].findings.is_empty());
     assert_eq!(crate::gate::exit_code(&report), 0);
 }
 
@@ -111,23 +111,27 @@ fn uncertain_units_get_one_recheck_that_replaces_them_only_when_decisive() {
     );
     let file = &report.files[0];
     let dimension = &file.dimensions["function_simplification"];
-    assert_eq!((dimension.units.review, dimension.units.uncertain), (1, 1));
+    // The helper's split stays undecided, and its look-here answer clears it.
+    assert_eq!(
+        (
+            dimension.units.review,
+            dimension.units.clear,
+            dimension.units.uncertain
+        ),
+        (1, 1, 0)
+    );
     let reviewed: Vec<_> = file.findings.iter().map(|f| f.symbol.as_deref()).collect();
     assert_eq!(
         reviewed,
         [Some("caller")],
         "the decisive recheck replaced it"
     );
+    assert_eq!(file.findings[0].measured_as, Some(Strength::Review));
     options.refresh = true;
     let mut still = scripted(3);
     let report = run(&project, &options, &mut still);
-    assert_eq!(report.files[0].status, Status::Uncertain);
+    assert_eq!(report.files[0].status, Status::Clear);
     assert!(report.files[0].findings.is_empty());
-    // An undecided recheck leaves the first answer in place, so the caller's
-    // open question is quoted as the first pass asked it.
-    let undecided = &report.files[0].dimensions["function_simplification"].undecided;
-    let caller = undecided.iter().find(|u| u.unit == "caller").unwrap();
-    assert_eq!(caller.open[0].pass, crate::schema::Pass::First);
 }
 
 #[test]
@@ -151,15 +155,15 @@ fn a_torn_note_gets_the_recheck_and_takes_its_decisive_answer() {
     eval.recheck_level = Some(2);
     let report = run(&project, &options, &mut eval);
     let file = &report.files[0];
-    let strengths: Vec<_> = file
+    let reported: Vec<_> = file
         .findings
         .iter()
-        .map(|f| (f.symbol.as_deref(), f.strength))
+        .map(|f| (f.symbol.as_deref(), f.measured_as))
         .collect();
-    assert!(strengths.contains(&(Some("caller"), Strength::Review)));
-    assert!(
-        strengths.contains(&(Some("helper"), Strength::Note)),
-        "no callees, so no recheck"
+    assert_eq!(
+        reported,
+        [(Some("caller"), Some(Strength::Review))],
+        "the helper has no callees, so no recheck, and its note is not reported"
     );
     options.refresh = true;
     let mut eval = scripted(0);
@@ -173,32 +177,42 @@ fn a_torn_note_gets_the_recheck_and_takes_its_decisive_answer() {
 }
 
 #[test]
-fn a_function_clears_when_the_split_level_is_ruled_out() {
+fn below_a_split_review_the_look_question_flags_or_clears_a_function() {
     let project = Project::new();
     project.write("lib.rs", &long_function("borderline"));
     let mut options = args();
     options.refresh = true;
     only(&mut options, catalog::FUNCTION_SIMPLIFICATION);
-    let status = |split: Value| {
+    let finding = |split: Value, look: f64| {
         let mut eval = scripted(0);
         eval.overrides.push(("split", split));
-        run(&project, &options, &mut eval).files[0].status.clone()
+        eval.overrides
+            .push(("look", json!({"type":"noul","noul":look})));
+        let report = run(&project, &options, &mut eval);
+        report.files[0].findings.first().cloned()
     };
-    assert_eq!(status(spread(0.5, 0.35, 0.15)), Status::Clear);
-    assert_eq!(status(spread(0.1, 0.3, 0.6)), Status::Consider);
-    project.write("lib.rs", &function("short"));
-    assert_eq!(
-        status(spread(0.1, 0.3, 0.6)),
-        Status::Note,
-        "a function of twenty lines or fewer reads in one look"
-    );
-    project.write("lib.rs", &long_function("borderline"));
-    assert_eq!(
-        status(spread(0.1, 0.5, 0.4)),
-        Status::Note,
-        "the middle level says the function reads well as it is"
-    );
-    assert_eq!(status(spread(0.35, 0.05, 0.6)), Status::Uncertain);
+    // A split consider, note or undecided split raises nothing on its own.
+    for split in [
+        spread(0.1, 0.3, 0.6),
+        spread(0.1, 0.5, 0.4),
+        spread(0.35, 0.05, 0.6),
+    ] {
+        assert!(finding(split.clone(), 0.2).is_none(), "{split}");
+        let flagged = finding(split, 0.85).unwrap();
+        assert_eq!(
+            (flagged.strength, flagged.measured_as),
+            (Strength::Review, None)
+        );
+        assert!(
+            flagged.message.contains("could likely be made simpler"),
+            "{}",
+            flagged.message
+        );
+    }
+    // A split review stays the measured review the default gate counts.
+    let review = finding(spread(0.0, 0.1, 0.9), 0.2).unwrap();
+    assert_eq!(review.measured_as, Some(Strength::Review));
+    assert!(review.message.contains("mixes separate jobs"));
 }
 
 #[test]
@@ -236,4 +250,56 @@ fn bend_proofs_are_not_asked_to_be_split() {
         .map(|f| f["name"].as_str().unwrap())
         .collect();
     assert_eq!(asked, ["count"], "the law's proof and a lemma are left out");
+}
+
+#[test]
+fn look_here_questions_are_named_to_be_sent_in_their_validated_order() {
+    let project = Project::new();
+    project.write(
+        "lib.rs",
+        &long_function("f").replace("total * 2", "total * 86400"),
+    );
+    let mut options = args();
+    options.rules = vec![
+        catalog::FUNCTION_SIMPLIFICATION.into(),
+        catalog::HARDCODED_VALUES.into(),
+    ];
+    let (_, plan) = planned(&project, &options);
+    let request = first_request(&plan, "functions");
+    assert_eq!(
+        request["jevgate"]["validated_order"],
+        json!(["f0_look", "f0_values"]),
+        "the split Score keeps the order its levels were measured in"
+    );
+}
+
+#[test]
+fn a_split_recheck_short_of_a_review_leaves_the_function_to_its_look_here_answer() {
+    let project = Project::new();
+    project.write(
+        "lib.rs",
+        &format!(
+            "{}{}",
+            function("helper"),
+            function("caller").replace(
+                "let doubled = total * 2;",
+                "let doubled = helper(&[total]);"
+            )
+        ),
+    );
+    let mut options = args();
+    options.rules = vec![catalog::FUNCTION_SIMPLIFICATION.into()];
+    let mut eval = scripted(0);
+    eval.overrides = vec![("split", spread(0.4, 0.2, 0.4)), ("look", noul_at(0.95))];
+    // The caller's recheck clears its split: its answers replace the first
+    // pass's, the look-here answer among them.
+    eval.recheck_overrides = vec![("split", spread(0.95, 0.05, 0.0))];
+    let report = run(&project, &options, &mut eval);
+    assert_eq!(report.stages["recheck"].successful_requests, 1);
+    let flagged: Vec<_> = report.files[0]
+        .findings
+        .iter()
+        .map(|f| (f.symbol.as_deref(), f.measured_as))
+        .collect();
+    assert_eq!(flagged, [(Some("helper"), None), (Some("caller"), None)]);
 }

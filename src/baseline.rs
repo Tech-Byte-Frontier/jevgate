@@ -69,24 +69,48 @@ pub(crate) fn parses(text: &str) -> bool {
 }
 
 /// Mark findings whose fingerprints the baseline accepted: the committed
-/// one, or the one in Git tree `as_of` when given.
+/// one, or, within an agent's turn, the one in Git tree `as_of`, the turn's
+/// start, and the entries the turn added that dismiss a finding with a
+/// reason (see [`dismissed_since`]).
 pub fn apply(root: &Path, report: &mut Report, as_of: Option<&str>) -> Result<()> {
-    let baseline = match as_of {
-        Some(tree) => baseline_in(root, tree)?,
-        None => read_baseline(root)?,
+    let accepted: BTreeSet<String> = match as_of {
+        Some(tree) => {
+            let then = baseline_in(root, tree)?.map_or_else(Vec::new, |b| b.findings);
+            let dismissed = dismissed_since(root, tree).unwrap_or_default();
+            then.into_iter()
+                .map(|f| f.fingerprint)
+                .chain(dismissed.into_keys())
+                .collect()
+        }
+        None => read_baseline(root)?
+            .map_or_else(Vec::new, |b| b.findings)
+            .into_iter()
+            .map(|f| f.fingerprint)
+            .collect(),
     };
-    let Some(baseline) = baseline else {
-        return Ok(());
-    };
-    let accepted: BTreeSet<&str> = baseline
-        .findings
-        .iter()
-        .map(|f| f.fingerprint.as_str())
-        .collect();
     for finding in report.files.iter_mut().flat_map(|f| &mut f.findings) {
-        finding.baselined = accepted.contains(finding.fingerprint.as_str());
+        finding.baselined = accepted.contains(&finding.fingerprint);
     }
     Ok(())
+}
+
+/// The findings the baseline dismisses with a reason that its version in Git
+/// tree `since` did not accept, by fingerprint: what an agent dismissed with
+/// `baseline mark` during a turn that began at `since`. Accepting a finding
+/// is otherwise the person's call, so an entry without a reason counts from
+/// the next turn; a person audits the reasons with `baseline stats`.
+pub fn dismissed_since(root: &Path, since: &str) -> Result<BTreeMap<String, Disposition>> {
+    let held: BTreeSet<String> = baseline_in(root, since)?
+        .map_or_else(Vec::new, |b| b.findings)
+        .into_iter()
+        .map(|f| f.fingerprint)
+        .collect();
+    Ok(read_baseline(root)?
+        .map_or_else(Vec::new, |b| b.findings)
+        .into_iter()
+        .filter(|f| !held.contains(&f.fingerprint))
+        .filter_map(|f| Some((f.fingerprint, f.reason?)))
+        .collect())
 }
 
 /// What `jevgate baseline` wrote: the file, the findings it accepted from the
@@ -217,37 +241,65 @@ fn save_baseline(root: &Path, baseline: &Baseline) -> Result<std::path::PathBuf>
     Ok(path)
 }
 
-/// Record `reason` on the accepted findings a target names and whose rule is
-/// among `rules` (every rule when empty); returns how many were marked.
-/// A target is a path or directory, `PATH:LINE`, or a fingerprint prefix of
-/// at least 8 characters.
+/// Record `reason` on the findings a target names whose rule is among
+/// `rules` (every rule when empty); returns how many were marked. A target
+/// is a path or directory, `PATH:LINE`, or a fingerprint prefix of at least
+/// 8 characters. Accepted findings are marked; a finding of the last check
+/// that the baseline does not hold yet is accepted with the reason when a
+/// target names it by `PATH:LINE` or fingerprint: a coding agent dismisses
+/// what its hook reported this way. A path or directory accepts nothing new,
+/// so no finding is dismissed unread.
 pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]) -> Result<usize> {
-    let mut baseline = read_baseline(root)?
-        .with_context(|| format!("No {BASELINE_FILE}; run jevgate baseline first"))?;
+    let mut baseline = read_baseline(root)?.unwrap_or_else(|| Baseline {
+        version: 1,
+        created_at: crate::schema::now(),
+        findings: Vec::new(),
+    });
+    let selected = |rule: &str| {
+        let key = match crate::catalog::find(rule) {
+            Some(found) => Some(found.key),
+            None => crate::catalog::custom(rule).then_some(rule),
+        };
+        rules.is_empty() || key.is_some_and(|key| rules.contains(&key))
+    };
     let mut marked = 0;
     for finding in &mut baseline.findings {
-        let rule = match crate::catalog::find(&finding.rule) {
-            Some(found) => Some(found.key),
-            None => crate::catalog::custom(&finding.rule).then_some(finding.rule.as_str()),
-        };
-        if (rules.is_empty() || rule.is_some_and(|key| rules.contains(&key)))
-            && targets.iter().any(|t| names(t, finding))
-        {
+        if selected(&finding.rule) && targets.iter().any(|t| names(t, finding, true)) {
             finding.reason = Some(reason);
             marked += 1;
         }
     }
+    if let Ok(report) = crate::storage::read_latest(root) {
+        let held: BTreeSet<String> = baseline
+            .findings
+            .iter()
+            .map(|f| f.fingerprint.clone())
+            .collect();
+        let mut dismissed: Vec<Accepted> = to_accept(&report, Some(reason))
+            .into_iter()
+            .filter(|f| !held.contains(&f.fingerprint) && selected(&f.rule))
+            .filter(|f| targets.iter().any(|t| names(t, f, false)))
+            .collect();
+        dismissed.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
+        dismissed.dedup_by(|a, b| a.fingerprint == b.fingerprint);
+        marked += dismissed.len();
+        baseline.findings.extend(dismissed);
+        baseline
+            .findings
+            .sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
+    }
     ensure!(
         marked > 0,
-        "No accepted finding matches {}",
+        "No finding of the last check or {BASELINE_FILE} matches {}",
         targets.join(", ")
     );
     save_baseline(root, &baseline)?;
     Ok(marked)
 }
 
-/// Whether a `mark` target names an accepted finding.
-fn names(target: &str, finding: &Accepted) -> bool {
+/// Whether a `mark` target names a finding: by fingerprint prefix or
+/// `PATH:LINE`, or with `paths`, by a path or directory holding it.
+fn names(target: &str, finding: &Accepted, paths: bool) -> bool {
     const FINGERPRINT_PREFIX: usize = 8;
     if target.len() >= FINGERPRINT_PREFIX && finding.fingerprint.starts_with(target) {
         return true;
@@ -258,7 +310,7 @@ fn names(target: &str, finding: &Accepted) -> bool {
         return finding.path == Path::new(path) && finding.line == Some(line);
     }
     let target = Path::new(target.trim_end_matches('/'));
-    finding.path.starts_with(target)
+    paths && finding.path.starts_with(target)
 }
 
 /// Accepted findings of one rule by reason.

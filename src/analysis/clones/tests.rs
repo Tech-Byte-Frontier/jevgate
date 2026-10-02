@@ -5,13 +5,6 @@ fn pairs_between(a: (&str, &str), b: (&str, &str)) -> usize {
     run(&[(a.0, a.1, true), (b.0, b.1, true)]).pairs.len()
 }
 
-/// The renamed names and values of the one pair between two selected files.
-fn differences_between(a: (&str, &str), b: (&str, &str)) -> Vec<Difference> {
-    let found = run(&[(a.0, a.1, true), (b.0, b.1, true)]);
-    assert_eq!(found.pairs.len(), 1);
-    found.pairs[0].differences.clone()
-}
-
 fn run(files: &[(&str, &str, bool)]) -> Candidates {
     let units: Vec<_> = files
         .iter()
@@ -177,14 +170,6 @@ fn renamed_copies_match_across_files_with_statement_aligned_quotes() {
     );
     assert!(pair.a.quote.ends_with("Ok(User { name })"));
     assert_eq!((pair.a.start_line, pair.a.end_line), (2, 5));
-    assert!(pair.differences.contains(&Difference {
-        a: "text".into(),
-        b: "body".into()
-    }));
-    assert!(pair.differences.contains(&Difference {
-        a: "name".into(),
-        b: "title".into()
-    }));
     assert_eq!(pair.occurrences, 2);
 }
 
@@ -306,10 +291,7 @@ fn walks_copying_the_work_they_do_at_each_node_are_candidates() {
     // Both walks collect the bound identifiers the same way; each calling
     // itself is the same step, so their own names are no difference.
     let copy = BOUND.replace("bound", "assigned");
-    assert_eq!(
-        differences_between(("ruby.rs", BOUND), ("python.rs", &copy)),
-        []
-    );
+    assert_eq!(pairs_between(("ruby.rs", BOUND), ("python.rs", &copy)), 1);
     // A walk that does its work in the loop, around its recursion.
     let visit = |name: &str, first: &str| {
         format!(
@@ -417,11 +399,10 @@ fn bare_calls_in_methods_of_the_same_name_call_another_function() {
         store("JsonStore", "json", "dump"),
         store("YamlStore", "yaml", "safe_dump"),
     );
-    let renamed = Difference {
-        a: "dump".into(),
-        b: "safe_dump".into(),
-    };
-    assert!(differences_between(("json_store.py", &a), ("yaml_store.py", &b)).contains(&renamed));
+    assert_eq!(
+        pairs_between(("json_store.py", &a), ("yaml_store.py", &b)),
+        1
+    );
     // A Rust method calling a function of another module by its own name.
     let cache = |owner: &str, name: &str| {
         format!(
@@ -429,11 +410,7 @@ fn bare_calls_in_methods_of_the_same_name_call_another_function() {
         )
     };
     let (a, b) = (cache("Cache", "get"), cache("Mirror", "fetch"));
-    let renamed = Difference {
-        a: "get".into(),
-        b: "fetch".into(),
-    };
-    assert!(differences_between(("cache.rs", &a), ("mirror.rs", &b)).contains(&renamed));
+    assert_eq!(pairs_between(("cache.rs", &a), ("mirror.rs", &b)), 1);
 }
 
 #[test]
@@ -457,7 +434,17 @@ fn go_functions_sharing_only_error_checks_and_cleanups_are_not_copies() {
             "go notify(record.ID, s.events)",
         ),
     );
-    assert_eq!(pairs_between(("auth.go", &a), ("dial.go", &b)), 0);
+    // The error checks and the deferred rollback make no copy; the repeated
+    // line that opens the transaction is a run for the look-here question.
+    let found = run(&[("auth.go", &a, true), ("dial.go", &b, true)]);
+    assert!(
+        found
+            .pairs
+            .iter()
+            .all(|p| !p.a.quote.contains("err != nil") && !p.a.quote.contains("defer")),
+        "{:?}",
+        found.pairs.iter().map(|p| &p.a.quote).collect::<Vec<_>>()
+    );
     // With more work between them, the error checks do not hide a copy.
     let (a, b) = (
         a.replace("\trecord, err", "\tlog.Printf(\"loading one stored record by its identifier\")\n\tmetrics.Count(\"store.find\", 1)\n\trecord, err"),
@@ -530,16 +517,15 @@ fn variants_of_one_example_are_not_compared() {
 }
 
 #[test]
-fn inconsistent_renaming_and_short_windows_are_rejected() {
+fn short_windows_are_rejected_and_inconsistent_renaming_is_left_to_runs() {
     // `text` becomes two different names on the other side.
     let inconsistent = LOAD
         .replace("let text", "let body")
         .replace("from_str(&text)", "from_str(&other)");
-    assert!(
-        run(&[("a.rs", LOAD, true), ("b.rs", &inconsistent, true)])
-            .pairs
-            .is_empty()
-    );
+    // No statement window pairs them, but runs abstract every local name:
+    // the copy is one candidate the look-here question weighs.
+    let found = run(&[("a.rs", LOAD, true), ("b.rs", &inconsistent, true)]);
+    assert_eq!(found.pairs.len(), 1);
     let short = "fn a(x: i32) -> i32 {\n    let y = x + 1;\n    y * 2\n}\nfn b(x: i32) -> i32 {\n    let y = x + 1;\n    y * 2\n}\n";
     assert!(run(&[("s.rs", short, true)]).pairs.is_empty());
     // A docstring is not a statement: two statements stay too few.
@@ -565,7 +551,15 @@ fn a_short_idiom_inside_a_larger_copy_forms_its_own_group() {
         (Path::new("a.rs"), Path::new("b.rs"))
     );
     assert!(largest.copies.is_empty(), "{:?}", largest.copies);
-    assert_eq!(found.pairs.len(), 2);
+    // The shared head is a group of its own, among runs inside the copy.
+    assert!(
+        found
+            .pairs
+            .iter()
+            .any(|p| p.a.path != p.b.path
+                && [&p.a, &p.b].iter().any(|s| s.path == Path::new("c.rs"))),
+        "the head is shared with c.rs"
+    );
 }
 
 #[test]
@@ -657,14 +651,7 @@ fn copies_pair_within_a_generic_language_s_family_only() {
         )
     };
     let (a, b) = (kotlin("openTotal", "2"), kotlin("closedTotal", "3"));
-    let differences = differences_between(("a/Open.kt", &a), ("a/Closed.kt", &b));
-    assert_eq!(
-        differences,
-        [Difference {
-            a: "3".into(),
-            b: "2".into()
-        }]
-    );
+    assert_eq!(pairs_between(("a/Open.kt", &a), ("a/Closed.kt", &b)), 1);
     // The same statements in C, C++ and Java: C and C++ are one family.
     let body = "    int total = 0;\n    for (int i = 0; i < count; i++) {\n        total += prices[i] * weights[i] - discounts[i];\n    }\n    printf(\"%d items weigh %d in all\", count, total);\n    return total + count * shipping;\n";
     let c = format!("int sum(int *prices, int *weights, int count) {{\n{body}}}\n");
@@ -719,7 +706,6 @@ fn copies_of_the_generic_tier_take_only_the_places_the_other_languages_leave() {
         Pair {
             a: site.clone(),
             b: site,
-            differences: Vec::new(),
             size,
             occurrences: 2,
             copies: Vec::new(),

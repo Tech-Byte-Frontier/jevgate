@@ -192,36 +192,19 @@ fn a_php_shell_check_is_settled_by_what_its_command_lines_hold() {
 }
 
 #[test]
-fn a_php_path_choice_is_asked_when_a_leaning_check_made_the_page_a_note() {
+fn a_php_page_a_leaning_check_made_a_note_is_not_settled() {
     // The markup check leans toward a concern with parameters as the
-    // origin, a note; once its Choice clears it, the undecided path check
-    // is left, and its own Choice is asked in the same settle round.
+    // origin: a note, which is not reported, so no Choice is asked.
     let nouls = [("interpreted", 0.9), ("markup", 0.7), ("path", 0.3)];
-    let parameters = spread(0.1, 0.8, 0.1);
-    let (status, _, settles) = php_page(
+    let (status, message, settles) = php_page(
         &nouls,
-        parameters.clone(),
+        spread(0.1, 0.8, 0.1),
         vec![
             ("markup_parts", choice_of("built", &MARKUP_PARTS)),
             ("path_parts", choice_of("fixed", &PATH_PARTS)),
         ],
     );
-    assert_eq!((status, settles), (Status::Clear, 2));
-    let (status, message, _) = php_page(
-        &nouls,
-        parameters,
-        vec![
-            ("markup_parts", choice_of("parameter", &MARKUP_PARTS)),
-            ("path_parts", choice_of("fixed", &PATH_PARTS)),
-        ],
-    );
-    assert_eq!(status, Status::Note);
-    let message = message.unwrap();
-    assert!(
-        message
-            .starts_with("Top-level code places a value whose origin it does not show into markup"),
-        "a page script has no parameters: {message}"
-    );
+    assert_eq!((status, message, settles), (Status::Clear, None, 0));
 }
 
 #[test]

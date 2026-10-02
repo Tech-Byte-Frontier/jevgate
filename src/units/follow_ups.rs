@@ -1,13 +1,12 @@
 //! Follow-up requests that recorded answers call for: traces of security
-//! units, rechecks of undecided units, the kind of an outline still undecided,
-//! the parts of a long file without a finding and locating split findings.
+//! units, rechecks of undecided units, the kind of a document or comment
+//! still undecided and locating split findings.
 use super::{Detail, FollowUp, Plan, Planned, UnitPlan, compose};
 use crate::schema::{FileResult, Judgment, Status};
 use std::collections::BTreeSet;
 
-/// One locate follow-up per function whose split raised a review or consider,
-/// per hardcoded-value function raised to a review or consider, per redundant
-/// test pair raised to a review, per test that asserts internal details, per
+/// One locate follow-up per function whose split raised a review, per
+/// redundant test pair raised to a review, per test that asserts internal details, per
 /// injection consider that rests on its parameters, per injection finding
 /// that rests on a path, markup, a redirect, SQL, a command or code, per
 /// weak-settings finding that rests on unescaped HTML and per logging
@@ -42,36 +41,12 @@ pub fn locates(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
         files,
         compose::unlocated_units,
         |unit| match &unit.detail {
-            Detail::Function { locate, .. }
-            | Detail::Document { locate, .. }
-            | Detail::Values { locate, .. }
-            | Detail::Constants { locate, .. } => locate.as_ref(),
+            Detail::Function { locate, .. } | Detail::Document { locate, .. } => locate.as_ref(),
             Detail::TestPair { confirm, .. } | Detail::Test { confirm } => confirm.as_ref(),
             Detail::Security { confirms, .. } => confirms.values.as_ref(),
             _ => None,
         },
     ));
-    planned
-}
-
-/// One question per hardcoded-value consider resting on a value's name
-/// whose value its file writes again: what that value is. It needs the
-/// value the locate named, so it follows the locates.
-pub fn value_kinds(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
-    let mut planned = Vec::new();
-    for (&owner, file_plan) in &plan.files {
-        let file = &files[owner];
-        if file.status == Status::Error {
-            continue;
-        }
-        for (request, asked) in compose::unkinded_values(file_plan, &file.judgments) {
-            planned.push(Planned {
-                owner,
-                request,
-                asked,
-            });
-        }
-    }
     planned
 }
 
@@ -144,39 +119,18 @@ pub fn settles(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     planned
 }
 
-/// One kind question per outline whose recheck stayed undecided, per large
-/// document whose split stayed undecided, per section pair or stale section
-/// whose checks stayed undecided, and per comment still undecided.
+/// One kind question per large document whose split stayed undecided, per
+/// section pair or stale section whose checks stayed undecided, and per
+/// comment still undecided.
 pub fn kinds(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
     follow_ups(plan, files, compose::unkinded_units, |unit| {
         match &unit.detail {
-            Detail::Outline { kind, .. } | Detail::Document { kind, .. } => kind.as_ref(),
+            Detail::Document { kind, .. } => kind.as_ref(),
             Detail::DocPair { settle, .. } | Detail::Stale { settle, .. } => settle.as_ref(),
             Detail::Comment { kind, .. } => kind.as_ref(),
             _ => None,
         }
     })
-}
-
-/// Whether each candidate part of a long file does a job of its own, asked
-/// once the file's outline, its recheck and its kind raised no finding.
-pub fn parts(plan: &Plan, files: &[FileResult]) -> Vec<Planned> {
-    let mut planned = Vec::new();
-    for (&owner, file_plan) in &plan.files {
-        let file = &files[owner];
-        if file.status == Status::Error {
-            continue;
-        }
-        let selected = compose::unparted_units(file_plan, &file.judgments);
-        for unit in &file_plan.units {
-            if let Detail::Outline { parts, .. } = &unit.detail
-                && selected.contains(&unit.id)
-            {
-                planned.extend(parts.iter().map(|part| part.follow_up.planned(owner)));
-            }
-        }
-    }
-    planned
 }
 
 /// The planned follow-up of every selected unit, skipping failed files.

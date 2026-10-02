@@ -144,7 +144,16 @@ pub struct SourceRange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule: String,
+    /// The level reported: one level, `review`, a place worth a look that a
+    /// coding agent fixes or dismisses with a reason. Reports before 0.33
+    /// also held `consider` and `note`.
     pub strength: Strength,
+    /// The level its rule's questions composed, which the default gate and
+    /// the measured precision read: `review` or `consider` (reported as a
+    /// review), `note` for a custom question at that level, or none for a
+    /// look-here question, whose findings are not yet measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_as: Option<Strength>,
     pub line: usize,
     pub message: String,
     pub action: String,
@@ -160,9 +169,6 @@ pub struct Finding {
     /// The weakness a security finding names, such as "CWE-89 SQL injection".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
-    /// Literal values of a hardcoded-value unit, used to group repeats across files.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub values: Vec<String>,
     /// Rule, path, unit and normalized evidence; stable across unrelated edits.
     pub fingerprint: String,
     /// Probability times the log of the lines involved; orders findings.

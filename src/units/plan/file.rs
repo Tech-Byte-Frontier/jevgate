@@ -107,16 +107,7 @@ pub(super) fn plan_file(
     packs::send(&context, asks, &mut file, requests);
     if shared.enabled(catalog::SHARED_LOGIC) && (view.application || view.tests) {
         file.rules.insert(catalog::SHARED_LOGIC, 0);
-        let pairs = &shared.pairs;
-        duplicates::plan(
-            &context,
-            pairs,
-            &shared.cases,
-            &lines,
-            &shared.hashes,
-            &mut file,
-            requests,
-        );
+        duplicates::plan(&context, &shared.pairs, &shared.hashes, &mut file, requests);
     }
     if shared.enabled(catalog::LAWS)
         && view.application

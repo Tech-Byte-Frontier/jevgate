@@ -65,8 +65,8 @@ pub fn rules() -> Vec<Rule> {
             version: rule_version(FILE_ORGANIZATION),
             scope: "application and test files with two or more members and 100 or more lines of member code",
             unit: "file outline: member signatures and sizes, callers that import the file, and groups; a test file lists its cases with their suites and subjects; no bodies",
-            inspection: "Would moving some members into a separate module (or tests into a separate test file) make the file easier to navigate and maintain?",
-            acceptable_example: "One algorithm, one type and its helpers, one feature, or the tests of one subject",
+            inspection: "Does the file do several separate kinds of work, or test several unrelated modules, that a maintainer could keep in separate files?",
+            acceptable_example: "One feature, type, resource, screen or job and its helpers, even when it is long",
             requires_tests: false,
         },
         Rule {
@@ -77,7 +77,7 @@ pub fn rules() -> Vec<Rule> {
             version: rule_version(FUNCTION_SIMPLIFICATION),
             scope: "functions and methods with bodies of five or more lines",
             unit: "one function's source",
-            inspection: "Would splitting the function into named functions make it easier to understand? For control flow nested four deep or four-branch chains: would flattening it help?",
+            inspection: "Could the function be made noticeably simpler to read or change: is it long, deeply nested or repetitive, or does it mix separate jobs? Would splitting it into named functions, or flattening control flow nested four deep, make it easier to understand?",
             acceptable_example: "One job whose steps belong together or already call named functions",
             requires_tests: false,
         },
@@ -88,9 +88,9 @@ pub fn rules() -> Vec<Rule> {
             key: SHARED_LOGIC,
             version: rule_version(SHARED_LOGIC),
             scope: "renamed or exact copies of two or more statements across selected files and explicit context",
-            unit: "one representative pair per clone group, with its renamed names and values",
-            inspection: "Do the two sites perform the same steps for the same purpose, so one shared implementation would serve both?",
-            acceptable_example: "Different work that only looks alike, or repetition the behavior requires",
+            unit: "up to six sites of one repeated run of statements or tokens, each with its path and function",
+            inspection: "Do repeated snippets express the same rule, lookup or sequence of steps, so that a maintainer should keep it in one place?",
+            acceptable_example: "Calls every user of an API writes the same way, complementary operations, and code that must stay separate",
             requires_tests: false,
         },
         Rule {
@@ -103,9 +103,9 @@ pub fn rules() -> Vec<Rule> {
             key: HARDCODED_VALUES,
             version: rule_version(HARDCODED_VALUES),
             scope: "application functions and module constants that use literal values other than 0, 1, 2 or one-character strings",
-            unit: "one function's source with its literal values, or a file's module-level constants",
-            inspection: "Does a value fixed in code change between deployments, need a descriptive name, or special-case one identity?",
-            acceptable_example: "Messages, formats, protocol names and values whose meaning the code around them makes clear",
+            unit: "one function's source, or a file's module-level constants with their values",
+            inspection: "Does a function or constant fix a value a maintainer should look at: one that singles out a record, place or user, differs between environments, is likely to change, or is an unexplained number?",
+            acceptable_example: "Messages, keys, formats, small counts, and values a name or the code around them explains",
             requires_tests: false,
         },
         Rule {
@@ -420,18 +420,10 @@ pub fn id(key: &str) -> &str {
 }
 
 /// The thresholds and floors findings are decided with, as the report and
-/// `jevgate rules --format json` record them; a threshold measured for one
-/// question is named by its rule, question and level.
+/// `jevgate rules --format json` record them.
 pub fn policy() -> BTreeMap<String, f64> {
     use crate::policy::REVIEW_PROBABILITY;
-    let calibrated = crate::policy::CALIBRATED.iter().map(|entry| {
-        let level = crate::output::label(&entry.level);
-        (
-            format!("{}_{}_{level}_probability", entry.rule, entry.question),
-            entry.threshold,
-        )
-    });
-    let mut policy = BTreeMap::from([
+    BTreeMap::from([
         ("review_probability".into(), REVIEW_PROBABILITY),
         ("clear_probability".into(), REVIEW_PROBABILITY),
         ("consider_probability".into(), REVIEW_PROBABILITY),
@@ -443,6 +435,7 @@ pub fn policy() -> BTreeMap<String, f64> {
             "location_probability".into(),
             crate::policy::LOCATION_PROBABILITY,
         ),
+        ("look_probability".into(), crate::policy::LOOK_PROBABILITY),
         (
             "min_body_lines".into(),
             crate::analysis::units::MIN_BODY_LINES as f64,
@@ -454,6 +447,10 @@ pub fn policy() -> BTreeMap<String, f64> {
         (
             "min_clone_statements".into(),
             crate::analysis::clones::MIN_CLONE_STATEMENTS as f64,
+        ),
+        (
+            "min_repeat_tokens".into(),
+            crate::analysis::clones::RUN_TOKENS as f64,
         ),
         (
             "min_file_lines".into(),
@@ -471,9 +468,7 @@ pub fn policy() -> BTreeMap<String, f64> {
             "long_branch_chain".into(),
             crate::analysis::nesting::LONG_CHAIN as f64,
         ),
-    ]);
-    policy.extend(calibrated);
-    policy
+    ])
 }
 
 /// One line per rule: ID, whether it runs by default, whether it needs
@@ -498,7 +493,7 @@ pub fn table(questions: &'static [crate::custom::Question]) -> String {
     }
     lines.push(String::new());
     lines.push(format!(
-        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected, and a custom question fails it at its own level. The rest, and every finding in a preview language such as Kotlin, are reported without failing it until they measure up. REVIEWS RIGHT and CONSIDERS RIGHT: the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
+        "BLOCKS: the levels that fail the check by default, right at least {}% of the time over at least {} labeled findings on projects JevGate was never tuned on; an opt-in rule's levels fail it once the rule is selected, and a custom question fails it at its own level. The rest, and every finding in a preview language such as Kotlin, are reported without failing it until they measure up. Every finding is reported as a review; REVIEWS RIGHT and CONSIDERS RIGHT: for the level its measured questions composed, the share of labeled findings right on those projects, a debatable one counting as not right, or below {} labels how many were right of those labeled; - for a look-here question's findings, not yet measured; tests/laws is labeled only on Bend 2 projects, which these numbers leave out.",
         crate::maturity::MIN_PERCENT_RIGHT,
         crate::maturity::MIN_LABELS,
         crate::maturity::MIN_LABELS
@@ -552,9 +547,8 @@ fn table_row(rule: &Rule, width: usize, question: Option<&crate::custom::Questio
 /// Every rule for `jevgate rules --format json`: its catalog entry, its
 /// labels per level (`maturity`) and where they come from
 /// (`evaluation_dataset`; for a custom question, the file that defines it),
-/// whether a threshold was measured for one of its questions
-/// (`thresholds_validated`), and the decision policy; a custom question also
-/// carries its definition (`custom`).
+/// and the decision policy; a custom question also carries its definition
+/// (`custom`).
 pub fn describe(questions: &'static [crate::custom::Question]) -> Value {
     Value::Array(
         with_custom(questions)
@@ -567,7 +561,6 @@ pub fn describe(questions: &'static [crate::custom::Question]) -> Value {
                 value["evaluation_dataset"] = question
                     .map_or_else(|| crate::maturity::dataset(key), |q| q.provenance().into())
                     .into();
-                value["thresholds_validated"] = crate::policy::calibrated(key).into();
                 value["decision_policy"] = serde_json::json!(policy());
                 if let Some(question) = question {
                     value["custom"] = question.describe();

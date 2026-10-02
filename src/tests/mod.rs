@@ -84,6 +84,7 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
     crate::schema::Finding {
         rule: "maintainability/shared-logic".into(),
         strength,
+        measured_as: Some(strength),
         line: 12,
         message: "Copies: 50% alike,\nsee `b`".into(),
         action: "Share one | implementation".into(),
@@ -98,7 +99,6 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
         }],
         quote: None,
         category: None,
-        values: Vec::new(),
         fingerprint: String::new(),
         rank: 1.0,
         baselined: false,
@@ -128,6 +128,15 @@ pub(super) fn finding_of(rule: &str, strength: crate::schema::Strength) -> crate
     crate::schema::Finding {
         rule: rule.into(),
         ..finding(strength)
+    }
+}
+
+/// [`finding_of`] as one level reports it: a review that keeps the level its
+/// questions composed.
+pub(super) fn reported(rule: &str, composed: crate::schema::Strength) -> crate::schema::Finding {
+    crate::schema::Finding {
+        strength: crate::schema::Strength::Review,
+        ..finding_of(rule, composed)
     }
 }
 
@@ -163,6 +172,14 @@ pub(super) fn gated_at(
 pub(super) fn function(name: &str) -> String {
     format!(
         "fn {name}(values: &[i32]) -> i32 {{\n    let mut total = 0;\n    for value in values {{\n        total += value;\n    }}\n    let doubled = total * 2;\n    doubled + 1\n}}\n"
+    )
+}
+
+/// A function as long as [`function`] that is no copy of it: two files each
+/// holding [`function`] share a run of tokens, which is a shared-logic candidate.
+pub(super) fn other_function(name: &str) -> String {
+    format!(
+        "fn {name}(values: &[i32]) -> i32 {{\n    let mut positive = 0;\n    for value in values {{\n        if *value > 0 {{\n            positive += 1;\n        }}\n    }}\n    positive\n}}\n"
     )
 }
 
@@ -290,9 +307,7 @@ fn a_file_nested_past_what_jevgate_reads_fails_the_run() {
 
 #[test]
 fn unchanged_files_are_answered_from_cache_without_api_calls() {
-    let project = Project::new();
-    project.write("a.rs", &function("a"));
-    project.write("b.rs", &function("b"));
+    let project = two_files();
     let options = args();
     let mut mock = Mock::default();
     let first = run(&project, &options, &mut mock);
@@ -308,7 +323,7 @@ fn unchanged_files_are_answered_from_cache_without_api_calls() {
             .iter()
             .all(|f| f.status == schema::Status::Clear)
     );
-    project.write("b.rs", &function("b_changed"));
+    project.write("b.rs", &other_function("b_changed"));
     let third = run(&project, &options, &mut mock);
     assert_eq!(third.api_requests, 1, "only the changed unit is sent again");
 }
@@ -504,6 +519,6 @@ fn changed_and_deleted_files_invalidate_snapshot_before_evaluation() {
 fn two_files() -> Project {
     let project = Project::new();
     project.write("a.rs", &function("a"));
-    project.write("b.rs", &function("b"));
+    project.write("b.rs", &other_function("b"));
     project
 }

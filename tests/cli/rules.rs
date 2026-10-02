@@ -50,20 +50,16 @@ fn catalog_and_cli_expose_only_the_supported_maintainability_checks() {
     assert_eq!(rule("hardcoded_values")["default_enabled"], false);
     let simplification = &rule("function_simplification")["maturity"];
     assert_eq!(simplification["review"]["mature"], true);
-    assert_eq!(simplification["consider"]["mature"], false);
+    assert!(
+        simplification.get("consider").is_none(),
+        "its considers are look-here findings, not yet measured"
+    );
     assert_eq!(
         simplification["review"]["unseen"],
         serde_json::json!({"right": 20, "labeled": 23})
     );
     let shared = rule("shared_logic");
-    assert_eq!(
-        shared["thresholds_validated"], true,
-        "its consider threshold"
-    );
-    assert_eq!(
-        rule("function_simplification")["thresholds_validated"],
-        false
-    );
+    assert_eq!(shared["maturity"], serde_json::json!({}));
     let dataset = shared["evaluation_dataset"].as_str().unwrap();
     assert!(dataset.contains("never tuned on"), "{dataset}");
     let laws = rule("laws")["evaluation_dataset"].as_str().unwrap();
@@ -102,12 +98,12 @@ fn rules_table_names_rules_groups_and_opt_in_rules() {
     };
     assert_eq!(
         row("maintainability/function-simplification"),
-        "maintainability/function-simplification yes review 87% of 23 67% of 126"
+        "maintainability/function-simplification yes review 87% of 23 - Could the"
     );
     assert_eq!(
         row("maintainability/hardcoded-values"),
-        "maintainability/hardcoded-values opt-in - 1 of 8 17% of 29",
-        "below 20 labels, the counts, as a finding says it is not yet measured"
+        "maintainability/hardcoded-values opt-in - - - Does a function or",
+        "a look-here question is not yet measured"
     );
     assert!(table.contains("BLOCKS: the levels that fail the check by default"));
     assert!(
@@ -167,16 +163,16 @@ fn skipped_rules_and_rule_levels_shape_the_run() {
         JUDGED_RS.replace("total * 2", "total * 86400"),
     )
     .unwrap();
-    let environment = "f0_environment".to_string();
+    let values = "f0_values".to_string();
     assert!(
-        !asked(&project, &[]).contains(&environment),
+        !asked(&project, &[]).contains(&values),
         "hardcoded values is opt-in"
     );
     let opted_in = asked(
         &project,
         &["--rule", "default", "--rule", "hardcoded-values"],
     );
-    assert!(opted_in.contains(&environment));
+    assert!(opted_in.contains(&values));
     let preview = dry_run(
         &project,
         &[

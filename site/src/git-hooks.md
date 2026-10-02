@@ -19,8 +19,10 @@ Both judge only what the change touches, as `--base` does, and read the files th
 ```text
 JevGate stopped this push: fix the findings above and push again. A person who judges a finding
 acceptable can add a `jevgate: allow(RULE) reason` comment on its line, or run `jevgate baseline --merge`
-and commit jevgate-baseline.json. Coding agents: fix the findings; never bypass this check with
---no-verify, an allow comment or the baseline, and if a finding looks wrong, tell the person.
+and commit jevgate-baseline.json. Coding agents: fix each finding, or dismiss one that is mistaken,
+intended or left for later with `jevgate baseline mark wrong|intended|later PATH:LINE` and commit
+jevgate-baseline.json with the change, which the person audits with `jevgate baseline stats`; never
+bypass this check with --no-verify or an allow comment.
 ```
 
 ## When the check cannot finish

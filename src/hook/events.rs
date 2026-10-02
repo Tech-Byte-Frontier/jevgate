@@ -1,7 +1,7 @@
 //! What each event does in its repository: a session's or turn's start
 //! records a snapshot of the working tree, an edit is checked and its
 //! findings go to the agent, and a stop is checked against the turn's start
-//! and blocked while findings fail the gate.
+//! and blocked while a finding is neither fixed nor dismissed with a reason.
 use super::{
     Host,
     agents::{self, Event, Kind, Reply},
@@ -400,10 +400,11 @@ impl<'a> Hook<'a> {
         })
     }
 
-    /// Block while findings fail the gate, or units left undecided where
-    /// undecided results fail it: at most three times a turn, and not again
-    /// when nothing changed since the last block. A stop that is not blocked
-    /// ends the turn. The person hears of the turn's guards.
+    /// Block while a finding is neither fixed nor dismissed with a reason
+    /// (see [`Flagged::blocks`]), or units are left undecided where undecided
+    /// results fail the gate: at most three times a turn, and not again when
+    /// nothing changed since the last block. A stop that is not blocked ends
+    /// the turn. The person hears of the turn's dismissals and guards.
     fn decide(&self, turn: Turn, now: String, mut checked: Checked) -> Reply {
         let blocks = if self.event.continued { turn.blocks } else { 0 };
         let unseen = turn
@@ -417,16 +418,20 @@ impl<'a> Hook<'a> {
             text::guards_user(&checked.guards),
             " ",
         );
-        let (failing, advisory): (Vec<_>, Vec<_>) =
-            checked.flagged.into_iter().partition(Flagged::fails);
-        let (failed, unsure) = (failing.len(), checked.undecided.len());
-        let user = if failed + unsure == 0 {
-            text::passed(blocks > 0, &advisory, !checked.unreviewed.is_empty())
+        let (open, optional): (Vec<_>, Vec<_>) =
+            checked.flagged.into_iter().partition(Flagged::blocks);
+        let (found, unsure) = (open.len(), checked.undecided.len());
+        let user = if found + unsure == 0 {
+            text::passed(
+                blocks > 0,
+                (&checked.dismissed, &optional),
+                !checked.unreviewed.is_empty(),
+            )
         } else if let Some(why) = let_through(&turn, &now, blocks) {
-            Some(text::let_through(failed, unsure, why))
+            Some(text::let_through(found, unsure, why))
         } else {
             let blocking = Blocking {
-                failing: &failing,
+                open: &open,
                 undecided: &checked.undecided,
                 block: blocks + 1,
             };
@@ -457,18 +462,18 @@ impl<'a> Hook<'a> {
         guards: Option<String>,
     ) -> Reply {
         let Blocking {
-            failing,
+            open,
             undecided,
             block,
         } = blocking;
-        let reason = text::block_reason(failing, undecided, block, turn.carried);
+        let reason = text::block_reason(open, undecided, block, turn.carried);
         turn.blocks = block;
         turn.block_line = reason.lines().next().map(str::to_string);
         turn.blocked_tree = Some(now);
         if let Err(error) = turn::save(&self.root, &turn) {
             return failed(self.event, "this turn", &format!("{error:#}"));
         }
-        let user = text::blocked(failing.len(), undecided.len(), block);
+        let user = text::blocked(open.len(), undecided.len(), block);
         Reply {
             block: true,
             agent: Some(reason),
@@ -537,14 +542,14 @@ impl<'a> Hook<'a> {
 
 /// What a stop is blocked on, and which block of the turn it is.
 struct Blocking<'a> {
-    failing: &'a [Flagged],
+    open: &'a [Flagged],
     undecided: &'a [review::Undecided],
     block: u32,
 }
 
-/// Why a stop whose findings fail the gate lets the agent finish: nothing
-/// changed since the turn's last block, or the turn was blocked as often as
-/// the hook blocks one. None when the stop is blocked again.
+/// Why a stop with open findings lets the agent finish: nothing changed
+/// since the turn's last block, or the turn was blocked as often as the hook
+/// blocks one. None when the stop is blocked again.
 fn let_through(turn: &Turn, now: &str, blocks: u32) -> Option<text::LetThrough> {
     if turn.blocked_tree.as_deref() == Some(now) {
         Some(text::LetThrough::Unchanged)

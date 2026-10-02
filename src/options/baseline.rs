@@ -1,9 +1,10 @@
-//! The baseline actions: `baseline mark` (which accepted findings, and why
-//! they were accepted) and `baseline stats` (how to print the counts).
+//! The baseline actions: `baseline mark` (which findings to dismiss or
+//! accepted findings to mark, and why) and `baseline stats` (how to print
+//! the counts).
 use super::RulesFormat;
 use clap::{Subcommand, ValueEnum};
 
-/// Why a finding was accepted into the baseline.
+/// Why a finding was dismissed or accepted into the baseline.
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Disposition {
@@ -17,11 +18,16 @@ pub enum Disposition {
 
 #[derive(Subcommand)]
 pub enum BaselineAction {
-    /// Record why accepted findings were accepted
+    /// Dismiss findings with a reason, or record why accepted ones were accepted
     ///
     /// Each target is a path or directory as the check output prints it, a
     /// `PATH:LINE`, or a fingerprint (at least its first 8 characters) from
-    /// the JSON report. `--rule` narrows the match to rules or groups.
+    /// the JSON report. A finding of the last check that the baseline does
+    /// not hold yet is accepted with the reason when a `PATH:LINE` or
+    /// fingerprint names it: a coding agent dismisses what its hook reported
+    /// this way, and `baseline stats` counts the reasons for a person to
+    /// audit. A path or directory marks only findings already accepted.
+    /// `--rule` narrows the match to rules or groups.
     Mark {
         /// intended, later or wrong
         #[arg(value_enum)]

@@ -91,14 +91,14 @@ fn a_comment_claiming_more_than_its_law_is_a_finding_at_the_law() {
         "{}",
         finding.message
     );
-    // "Barely" is a note.
+    // "Barely" is a note, which is not reported.
     let mut options = options;
     options.refresh = true;
     let mut eval = scripted(0);
     eval.overrides = vec![("l0_states", spread(0.1, 0.8, 0.1))];
     let report = run(&project, &options, &mut eval);
-    let (dimension, _) = dimension_of(report, "server/LAWS.bend", catalog::LAWS);
-    assert_eq!((dimension.units.note, dimension.units.clear), (1, 1));
+    let (dimension, findings) = dimension_of(report, "server/LAWS.bend", catalog::LAWS);
+    assert_eq!((dimension.units.clear, findings.len()), (2, 0));
 }
 
 #[test]
@@ -110,10 +110,7 @@ fn an_undecided_law_is_asked_what_its_comment_adds() {
     eval.recheck_overrides = vec![("relation", choice_of("property", &options_of))];
     let report = run(&project, &options, &mut eval);
     let (dimension, findings) = dimension_of(report, "server/LAWS.bend", catalog::LAWS);
-    assert_eq!(
-        (dimension.units.consider, dimension.units.uncertain),
-        (1, 0)
-    );
+    assert_eq!((dimension.units.review, dimension.units.uncertain), (1, 0));
     assert!(
         findings[0]
             .message

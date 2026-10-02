@@ -44,21 +44,16 @@ fn a_path_finding_is_a_note_when_its_paths_stay_in_their_directory() {
             .findings
             .iter()
             .find(|f| f.rule == "security/injection")
-            .map(|f| (f.strength, f.message.clone()))
+            .map(|f| (composed(f), f.message.clone()))
     };
     assert_eq!(
         judged(choice_of("outside", &PATHS)).map(|f| f.0),
         Some(Strength::Review)
     );
-    let (strength, message) = judged(choice_of("confined", &PATHS)).unwrap();
     assert_eq!(
-        strength,
-        Strength::Note,
-        "a UUID cannot climb out of the directory"
-    );
-    assert!(
-        message.contains("likely keeps the path inside"),
-        "{message}"
+        judged(choice_of("confined", &PATHS)),
+        None,
+        "a UUID cannot climb out of the directory: a note, not reported"
     );
 }
 
@@ -95,11 +90,8 @@ fn a_log_line_an_operator_turns_on_to_log_tokens_is_a_note() {
         "debug level is still a log"
     );
     let (status, message) = judged("opt_in");
-    assert_eq!(status, Status::Note);
-    assert!(
-        message.contains("only when an operator turns on"),
-        "{message}"
-    );
+    assert_eq!(status, Status::Clear);
+    assert!(message.is_empty(), "a note, not reported: {message}");
 }
 
 /// A handler that percent-encodes a name before it builds a link, and one
@@ -128,8 +120,7 @@ fn markup_and_redirect_findings_are_notes_when_their_values_can_do_no_harm() {
             .findings
             .iter()
             .find(|f| f.rule == "security/injection")
-            .map(|f| (f.strength, f.message.clone()))
-            .unwrap()
+            .map(composed)
     };
     let markup = MARKUP_VALUES;
     assert_eq!(
@@ -138,18 +129,19 @@ fn markup_and_redirect_findings_are_notes_when_their_values_can_do_no_harm() {
             "markup",
             "markup_values",
             choice_of("raw", &markup)
-        )
-        .0,
-        Strength::Review
+        ),
+        Some(Strength::Review)
     );
-    let (strength, message) = judged(
-        ENCODED,
-        "markup",
-        "markup_values",
-        choice_of("encoded", &markup),
+    assert_eq!(
+        judged(
+            ENCODED,
+            "markup",
+            "markup_values",
+            choice_of("encoded", &markup)
+        ),
+        None,
+        "percent-encoded before the link: a note, not reported"
     );
-    assert_eq!(strength, Strength::Note, "percent-encoded before the link");
-    assert!(message.contains("escaped or encoded before"), "{message}");
     let reach = REACH;
     assert_eq!(
         judged(
@@ -157,18 +149,19 @@ fn markup_and_redirect_findings_are_notes_when_their_values_can_do_no_harm() {
             "redirect",
             "redirect_reach",
             choice_of("anywhere", &reach)
-        )
-        .0,
-        Strength::Review
+        ),
+        Some(Strength::Review)
     );
-    let (strength, message) = judged(
-        ADMIN,
-        "redirect",
-        "redirect_reach",
-        choice_of("own_site", &reach),
+    assert_eq!(
+        judged(
+            ADMIN,
+            "redirect",
+            "redirect_reach",
+            choice_of("own_site", &reach)
+        ),
+        None,
+        "the admin path comes first: a note, not reported"
     );
-    assert_eq!(strength, Strength::Note, "the admin path comes first");
-    assert!(message.contains("keeps it on the site"), "{message}");
 }
 
 /// The options of the Choice on what a markup finding's values hold.
@@ -200,36 +193,29 @@ fn a_query_finding_is_a_note_when_its_values_are_fixed_text() {
     review_until_harmless(
         judged,
         (&QUERY_VALUES, "fixed"),
-        (
-            "one of two clauses written in the code",
-            "cannot change the syntax",
-        ),
+        "one of two clauses written in the code",
     );
 }
 
-/// The strength and message of the first finding of `rule` in a report of
-/// one file.
-fn first_of(report: &Report, rule: &str) -> (Strength, String) {
+/// The composed level of the first finding of `rule` in a report of one file.
+fn first_of(report: &Report, rule: &str) -> Option<Strength> {
     report.files[0]
         .findings
         .iter()
         .find(|f| f.rule == rule)
-        .map(|f| (f.strength, f.message.clone()))
-        .unwrap()
+        .map(composed)
 }
 
 /// A finding that a confirm Choice follows stays a review when the Choice
-/// answers `raw`, and is a note whose message names `words` when it answers
-/// `harmless`.
+/// answers `raw`, and is a note, which one level does not report, when it
+/// answers `harmless`.
 fn review_until_harmless(
-    judged: impl Fn(Value) -> (Strength, String),
+    judged: impl Fn(Value) -> Option<Strength>,
     (options, harmless): (&[&str], &str),
-    (reason, words): (&str, &str),
+    reason: &str,
 ) {
-    assert_eq!(judged(choice_of("raw", options)).0, Strength::Review);
-    let (strength, message) = judged(choice_of(harmless, options));
-    assert_eq!(strength, Strength::Note, "{reason}");
-    assert!(message.contains(words), "{message}");
+    assert_eq!(judged(choice_of("raw", options)), Some(Strength::Review));
+    assert_eq!(judged(choice_of(harmless, options)), None, "{reason}");
 }
 
 #[test]
@@ -249,13 +235,15 @@ fn a_markup_consider_on_parameters_is_a_note_when_its_values_arrive_escaped() {
             .findings
             .iter()
             .find(|f| f.rule == "security/injection")
-            .map(|f| f.strength)
-            .unwrap()
+            .map(composed)
     };
-    assert_eq!(judged(choice_of("raw", &MARKUP_VALUES)), Strength::Consider);
+    assert_eq!(
+        judged(choice_of("raw", &MARKUP_VALUES)),
+        Some(Strength::Consider)
+    );
     assert_eq!(
         judged(choice_of("encoded", &MARKUP_VALUES)),
-        Strength::Note,
+        None,
         "text another party wrote, escaped before it enters the markup"
     );
 }
@@ -277,7 +265,7 @@ fn unescaped_html_is_a_note_when_the_library_that_built_it_escaped_it() {
     review_until_harmless(
         judged,
         (&MARKUP_VALUES, "encoded"),
-        ("the highlighter escapes the code", "escaped or sanitized"),
+        "the highlighter escapes the code",
     );
 }
 
@@ -335,19 +323,13 @@ fn error_details_only_their_own_user_reads_are_a_note_asked_with_the_readme() {
             .findings
             .iter()
             .find(|f| f.rule == "security/sensitive-data")
-            .map(|f| (f.strength, f.message.clone()))
-            .unwrap()
+            .map(composed)
     };
-    assert_eq!(judged("public").0, Strength::Review);
-    let (strength, message) = judged("local");
+    assert_eq!(judged("public"), Some(Strength::Review));
     assert_eq!(
-        strength,
-        Strength::Note,
-        "the person running it reads its logs anyway"
-    );
-    assert!(
-        message.contains("see the program's logs anyway"),
-        "{message}"
+        judged("local"),
+        None,
+        "the person running it reads its logs anyway: a note, not reported"
     );
 }
 
@@ -366,17 +348,11 @@ fn a_value_shown_as_the_output_its_user_asked_for_is_no_logged_secret() {
         ("logged_when", choice_of("output", &when)),
     ];
     let report = run(&project, &options, &mut eval);
-    let finding = report.files[0]
-        .findings
-        .iter()
-        .find(|f| f.rule == "security/sensitive-data")
-        .unwrap();
-    assert_eq!(finding.strength, Strength::Note);
     assert!(
-        finding
-            .message
-            .contains("shows the value only to the person who asked"),
-        "{}",
-        finding.message
+        !report.files[0]
+            .findings
+            .iter()
+            .any(|f| f.rule == "security/sensitive-data"),
+        "shown only to the person who asked: a note, not reported"
     );
 }

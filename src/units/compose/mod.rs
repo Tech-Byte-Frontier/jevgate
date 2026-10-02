@@ -7,24 +7,21 @@
 use super::{
     Access, Block, Detail, FilePlan, Planned, Presence, UnitPlan,
     outcome::{
-        Answers, Outcome, QUERIED, at_most_note, benefit, checks, choice, choice_mass, confirmable,
-        document_split, errors_found, escape_found, logs_found, lowered, noul, open,
-        organization_outcome, origin_outcome, part_answers, score, separable_part, settled_checks,
-        several_kind, unit_outcome, value_signals,
+        Answers, LOOK, Outcome, QUERIED, at_most_note, benefit, checks, choice, confirmable,
+        document_split, errors_found, escape_found, logs_found, look, looks, lowered, noul, open,
+        origin_outcome, score, settled_checks, unit_outcome,
     },
     wording::{Wording, comment_reason, comment_wording},
     wording::{
         custom_wording, doc_pair_wording, document_wording, function_wording, handler_wording,
-        law_wording, module_wording, outline_wording, pair_wording, part_wording, plan_wording,
-        privilege_wording, question_label, section_wording, security_wording, stale_wording,
-        test_pair_wording, test_wording, values_wording,
+        law_wording, look_wording, module_wording, plan_wording, privilege_wording, question_label,
+        section_wording, security_wording, stale_wording, test_pair_wording, test_wording,
     },
 };
 use crate::{
     catalog,
     schema::{
-        Answer, Dimension, Finding, Judgment, Location, Pass, Status, Strength, Undecided,
-        UnitCounts, hash,
+        Answer, Dimension, Finding, Judgment, Pass, Status, Strength, Undecided, UnitCounts, hash,
     },
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -40,8 +37,8 @@ use answers::*;
 use caps::*;
 use comments::*;
 pub use due::{
-    finished_plans, uncertain_units, unconfirmed_units, unkinded_units, unkinded_values,
-    unlocated_units, unparted_units, unqueried_units, unsettled, untraced_units,
+    finished_plans, uncertain_units, unconfirmed_units, unkinded_units, unlocated_units,
+    unqueried_units, unsettled, untraced_units,
 };
 use located::*;
 use open::Quotes;
@@ -92,7 +89,8 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment], first: &[&Planned]) -> C
         .rules
         .keys()
         .map(|rule| {
-            let count = counts.remove(rule).unwrap_or_default();
+            let mut count = counts.remove(rule).unwrap_or_default();
+            one_level_counts(rule, &mut count);
             let concern = concern.get(rule).copied().unwrap_or(0.0);
             let undecided = undecided.remove(rule).unwrap_or_default();
             let question = plan.questions.iter().find(|q| q.rule == *rule).copied();
@@ -132,7 +130,11 @@ impl<'p> Tally<'p> {
             return;
         }
         let (outcome, answers) = resolved(unit, judgments);
-        let outcome = capped(unit, judgments, few, outcome);
+        let (outcome, measured) = if looks(unit.rule) {
+            (outcome, false)
+        } else {
+            looked(unit, judgments, capped(unit, judgments, few, outcome))
+        };
         // Text written to steer the reviewer keeps the unit that sends it
         // from clearing: its answers may be the text's, not the code's.
         let steered = steered(plan, unit, judgments)
@@ -167,8 +169,13 @@ impl<'p> Tally<'p> {
                         comment_reason(&answers, documented(unit)),
                     ));
                 } else {
+                    let raised = Raised {
+                        strength,
+                        p,
+                        measured,
+                    };
                     self.findings
-                        .push(finding(plan, unit, strength, p, &answers, judgments));
+                        .push(finding(plan, unit, raised, &answers, judgments));
                 }
             }
             None if outcome == Outcome::Clear => count.clear += 1,
@@ -250,9 +257,7 @@ fn strength_of(outcome: Outcome) -> Option<(Strength, f64)> {
 fn deciding_questions(rule: &str) -> &'static [&'static str] {
     match rule {
         catalog::FUNCTION_SIMPLIFICATION => &["split", "flatten"],
-        catalog::FILE_ORGANIZATION => &["split"],
-        catalog::SHARED_LOGIC => &["same"],
-        catalog::HARDCODED_VALUES => &["environment", "magic", "special"],
+        catalog::FILE_ORGANIZATION | catalog::SHARED_LOGIC | catalog::HARDCODED_VALUES => &[LOOK],
         catalog::COMMENTS => &["restates", "verbose", "history", "disabled"],
         catalog::TEST_VALUE => &["own_logic", "mock_only"],
         catalog::INJECTION => &[
@@ -380,9 +385,6 @@ fn open_questions(unit: &UnitPlan, answers: &Answers<'_>) -> Vec<&'static str> {
             .collect();
     }
     let get = |q: &str| answers.get(q).copied();
-    let settled_values = (unit.rule == catalog::HARDCODED_VALUES)
-        .then(|| value_signals(&get, &unit.detail, true))
-        .flatten();
     // Instruction sections and section pairs settle some signals by others.
     let settled_sections = match unit.rule {
         catalog::AGENT_CONTEXT => super::outcome::section_signals(&get),
@@ -398,18 +400,13 @@ fn open_questions(unit: &UnitPlan, answers: &Answers<'_>) -> Vec<&'static str> {
         ),
         _ => None,
     };
-    match (settled_values, settled_sections) {
-        (Some(signals), _) => signals
-            .iter()
-            .filter(|(_, o, _)| matches!(o, Outcome::Uncertain(_)))
-            .map(|(q, ..)| *q)
-            .collect(),
-        (None, Some(signals)) => signals
+    match settled_sections {
+        Some(signals) => signals
             .iter()
             .filter(|(_, o)| matches!(o, Outcome::Uncertain(_)))
             .map(|(q, _)| *q)
             .collect(),
-        (None, None) => undecided_questions(unit.rule, answers),
+        None => undecided_questions(unit.rule, answers),
     }
 }
 
@@ -474,6 +471,44 @@ pub(super) fn counted_status(count: &UnitCounts) -> Status {
     }
 }
 
+/// Report one level: every finding is a `review`, a place worth a look that
+/// a coding agent fixes or dismisses with a reason. A consider keeps its
+/// composed level in `measured_as`, which the default gate reads. Notes, the
+/// optional improvements of earlier versions, are not reported, except a
+/// custom question's, whose team chose that level. Runs once findings are
+/// grouped across files, which lowers some to notes.
+pub fn one_level(files: &mut [crate::schema::FileResult]) {
+    for file in files {
+        file.findings
+            .retain(|f| f.strength != Strength::Note || catalog::custom(&f.rule));
+        for finding in &mut file.findings {
+            finding.strength = Strength::Review;
+        }
+        for (rule, dimension) in &mut file.dimensions {
+            one_level_counts(rule, &mut dimension.units);
+            dimension.status = counted_status(&dimension.units);
+        }
+        if matches!(
+            file.status,
+            Status::Review | Status::Consider | Status::Note
+        ) {
+            file.status = file_status(&file.dimensions, &file.findings);
+        }
+    }
+}
+
+/// A rule's unit counts at one level: considers count as reviews, and notes
+/// as clear, or for a custom question, whose notes are reported, as reviews.
+fn one_level_counts(rule: &str, count: &mut UnitCounts) {
+    count.review += std::mem::take(&mut count.consider);
+    let notes = std::mem::take(&mut count.note);
+    if catalog::custom(rule) {
+        count.review += notes;
+    } else {
+        count.clear += notes;
+    }
+}
+
 pub(super) fn file_status(
     dimensions: &BTreeMap<String, Dimension>,
     findings: &[Finding],
@@ -504,7 +539,7 @@ fn noun(rule: &str) -> &'static str {
     match rule {
         catalog::FILE_ORGANIZATION => "outline",
         catalog::FUNCTION_SIMPLIFICATION => "function",
-        catalog::SHARED_LOGIC => "candidate pair",
+        catalog::SHARED_LOGIC => "repeat",
         catalog::TEST_VALUE => "test",
         catalog::HARDCODED_VALUES => "value unit",
         catalog::COMMENTS => "comment",
@@ -596,67 +631,62 @@ fn rank(probability: f64, lines: usize) -> f64 {
     probability * (1.0 + lines as f64).ln()
 }
 
+/// The level and probability a unit's outcome raised, and whether its
+/// rule's measured questions set it rather than a look-here question.
+struct Raised {
+    strength: Strength,
+    p: f64,
+    measured: bool,
+}
+
+/// Function simplification keeps its split and flatten Scores, whose
+/// reviews the default gate measures, and asks the look-here question for
+/// the rest: a review those Scores set stays, and otherwise the look answer
+/// flags the function or clears it, whatever else they said, a decisive
+/// recheck of the split included, whose answers replace the first pass's.
+/// Every other rule's outcome is its measured one.
+fn looked(unit: &UnitPlan, judgments: &[Judgment], outcome: Outcome) -> (Outcome, bool) {
+    if unit.rule != catalog::FUNCTION_SIMPLIFICATION || matches!(outcome, Outcome::Review(_)) {
+        return (outcome, true);
+    }
+    let first = answers(judgments, &unit.id, Pass::First);
+    match first.get(LOOK).map(|answer| look(answer)) {
+        Some(Outcome::Review(p)) => (Outcome::Review(p), false),
+        Some(Outcome::Clear) => (Outcome::Clear, true),
+        _ => (outcome, true),
+    }
+}
+
 fn finding(
     plan: &FilePlan,
     unit: &UnitPlan,
-    strength: Strength,
-    p: f64,
+    raised: Raised,
     answers: &Answers<'_>,
     judgments: &[Judgment],
 ) -> Finding {
+    let Raised {
+        strength,
+        p,
+        measured,
+    } = raised;
     let name = &unit.name;
     let mut locations = unit.locations.clone();
     let mut symbol = Some(name.clone());
     let mut block = None;
     let mut category = None;
     let (message, action) = match &unit.detail {
-        Detail::Function { blocks, .. } => {
+        Detail::Function { blocks, .. } if measured => {
             block = located_block(unit, blocks, judgments, "block")
                 .filter(|b| !most_of(&b.location, &unit.locations));
             let bend = crate::analysis::bend::file(&plan.path);
             function_wording(name, strength, answers, (block, bend))
         }
-        Detail::Outline {
-            tests,
-            groups,
-            members,
-            parts,
-            ..
-        } => {
-            if let Some(part) = deciding_part(answers, parts) {
-                symbol = part.names.first().cloned();
-                locations = part.locations.clone();
-                part_wording(part, strength)
-            } else {
-                let chosen = outline_groups(answers.get("module").copied(), groups, *members);
-                symbol = chosen.first().map(|group| group.id.clone());
-                if !chosen.is_empty() {
-                    locations = chosen.iter().flat_map(|g| g.locations.clone()).collect();
-                }
-                let several =
-                    several_kind(answers.get("split").copied(), answers.get("kind").copied());
-                outline_wording(&chosen, *tests, several, strength)
-            }
+        // A file's outline and its constants are about the file as a whole.
+        Detail::Outline { .. } | Detail::Constants { .. } => {
+            symbol = None;
+            look_wording(unit)
         }
-        Detail::Pair {
-            differences,
-            within_test,
-            in_tests,
-            in_cases,
-        } => pair_wording(
-            name,
-            differences,
-            (*within_test, *in_tests, *in_cases),
-            strength,
-        ),
-        Detail::Values { .. } | Detail::Constants { .. } => {
-            let (wording, constant) = values_finding(unit, strength, answers, judgments);
-            if let Some(location) = constant {
-                symbol = location.symbol.clone();
-                locations = vec![location];
-            }
-            wording
-        }
+        Detail::Function { .. } | Detail::Pair | Detail::Values { .. } => look_wording(unit),
         Detail::Security {
             sites, messages, ..
         } => {
@@ -741,6 +771,7 @@ fn finding(
     Finding {
         rule: catalog::id(unit.rule).into(),
         strength,
+        measured_as: measured.then_some(strength),
         line: locations.first().map_or(1, |l| l.start_line),
         message,
         action: action.into(),
@@ -753,17 +784,6 @@ fn finding(
         locations,
         quote: unit.quote.clone(),
         category,
-        // Only a special-cased identity groups across files: the same number
-        // or path can mean different things in different code.
-        values: located_value(unit, judgments)
-            .filter(|_| {
-                matches!(
-                    answers.get("special").map(|a| noul(a)),
-                    Some(Outcome::Review(_) | Outcome::Consider(_))
-                )
-            })
-            .into_iter()
-            .collect(),
         fingerprint: fingerprint(unit.rule, plan, &unit.identity),
         rank: rank(p, lines),
         baselined: false,

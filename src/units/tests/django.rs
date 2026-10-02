@@ -248,14 +248,9 @@ fn a_weak_django_setting_must_be_named_by_a_check_and_development_settings_are_l
             .into_iter()
             .next()
     };
-    let unnamed = finding(&[("weakened", 0.95)], &options, "site/settings/base.py").unwrap();
-    assert_eq!(unnamed.strength, Strength::Note, "presence alone");
     assert!(
-        unnamed
-            .message
-            .contains("no specific check named the setting"),
-        "{}",
-        unnamed.message
+        finding(&[("weakened", 0.95)], &options, "site/settings/base.py").is_none(),
+        "presence alone is a note, which is not reported"
     );
     options.refresh = true;
     let named = finding(
@@ -264,7 +259,7 @@ fn a_weak_django_setting_must_be_named_by_a_check_and_development_settings_are_l
         "site/settings/base.py",
     )
     .unwrap();
-    assert_eq!(named.strength, Strength::Review);
+    assert_eq!(composed(&named), Strength::Review);
     assert_eq!(named.category.as_deref(), Some("CWE-489 active debug code"));
     assert!(
         named
@@ -283,16 +278,8 @@ fn a_weak_django_setting_must_be_named_by_a_check_and_development_settings_are_l
         &[("weakened", 0.95), ("debug", 0.95), ("dev_only", 0.95)],
         &options,
         "site/settings/dev.py",
-    )
-    .unwrap();
-    assert_eq!(development.strength, Strength::Note, "two levels lower");
-    assert!(
-        development
-            .message
-            .ends_with("but it runs only in development or tests."),
-        "{}",
-        development.message
     );
+    assert!(development.is_none(), "two levels lower, a note");
 }
 
 #[test]
@@ -306,14 +293,17 @@ fn a_django_view_exempt_from_csrf_needs_the_check_to_name_it() {
     options.rules = vec![catalog::UNSAFE_SETTINGS.into()];
     let report = run_with_nouls(&project, &options, &[("weakened", 0.9), ("csrf", 0.95)]);
     let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(composed(finding), Strength::Review);
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-352 cross-site request forgery")
     );
     options.refresh = true;
     let report = run_with_nouls(&project, &options, &[("weakened", 0.9), ("csrf", 0.6)]);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    assert!(
+        report.files[0].findings.is_empty(),
+        "unnamed by the check, a note"
+    );
 }
 
 #[test]
@@ -391,7 +381,7 @@ fn django_error_views_middleware_and_the_rest_framework_handler_are_error_handle
 }
 
 #[test]
-fn a_django_injection_note_that_no_check_found_is_settled_like_an_undecided_unit() {
+fn a_django_injection_note_that_no_check_found_is_not_settled() {
     let project = Project::new();
     project.write(
         "shop/views.py",
@@ -399,29 +389,19 @@ fn a_django_injection_note_that_no_check_found_is_settled_like_an_undecided_unit
     );
     let mut options = args();
     options.rules = vec![catalog::INJECTION.into()];
-    let outcome = |target: &str, options: &CheckArgs| {
-        let mut eval = scripted(0);
-        eval.overrides = vec![
-            ("resource", noul_at(0.9)),
-            ("redirect", noul_at(0.3)),
-            ("origin", spread(0.0, 0.05, 0.95)),
-            (
-                "redirect_target",
-                choice_of(target, &["own", "checked", "given", "outside", "none"]),
-            ),
-        ];
-        let report = run(&project, options, &mut eval);
-        let file = &report.files[0];
-        (
-            file.dimensions[catalog::INJECTION].status.clone(),
-            file.findings.iter().map(|f| f.strength).collect::<Vec<_>>(),
-        )
-    };
-    assert_eq!(outcome("own", &options), (Status::Clear, Vec::new()));
-    options.refresh = true;
+    let mut eval = scripted(0);
+    eval.overrides = vec![
+        ("resource", noul_at(0.9)),
+        ("redirect", noul_at(0.3)),
+        ("origin", spread(0.0, 0.05, 0.95)),
+    ];
+    let report = run(&project, &options, &mut eval);
+    // Values from another party that no check found placed unhandled are a
+    // note, which is not reported, so where the redirect leads is not asked.
+    assert!(report.files[0].findings.is_empty());
     assert_eq!(
-        outcome("outside", &options).1,
-        [Strength::Note],
-        "a target the Choice does not clear keeps the note"
+        report.files[0].dimensions[catalog::INJECTION].status,
+        Status::Clear
     );
+    assert!(!report.stages.contains_key("settle"));
 }

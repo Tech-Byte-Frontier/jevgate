@@ -7,7 +7,7 @@
 //! projects, reviews were right 55%, 46%, 56% and 61% of the time with a
 //! probability below 0.90, below 0.95, below 0.98 and above.
 use crate::{
-    catalog::{self, COMMENTS, FILE_ORGANIZATION, FUNCTION_SIMPLIFICATION, SHARED_LOGIC},
+    catalog::{self, COMMENTS, FUNCTION_SIMPLIFICATION},
     schema::Strength::{self, Consider, Review},
 };
 use serde::{Deserialize, Serialize};
@@ -104,31 +104,20 @@ const fn row(rule: &'static str, level: Strength, unseen: [u32; 2], tuned: [u32;
 }
 
 /// Measured on 2026-09-28 from the corpus's labels
-/// (`evaluation/labels`, joined by fingerprint) and JevGate's findings with the
-/// shared-logic consider threshold of `policy::CALIBRATED`, replayed from the
-/// answer cache over the 94 labeled projects outside Bend 2; the few files
-/// whose requests the cache lacked keep their 0.24.1 findings. Unseen:
-/// [right, labeled] on the 11 held-out and 14 fresh projects never used for
-/// tuning (22 of them have findings); tuned: on the other 72.
-/// `docs/research/2026-09-28/scripts/maturity.py` in the maintainer's clone
-/// prints these rows. Two are mature: function-simplification reviews (20 of
-/// 23) and agent-context considers (22 of 24). The gap between the columns is
-/// why only unseen projects count: shared-logic reviews were right 75% of the
-/// time on tuned projects and 54% on unseen ones.
-const TABLE: [Measure; 26] = [
-    row(catalog::FILE_ORGANIZATION, Review, [2, 5], [15, 30]),
-    row(catalog::FILE_ORGANIZATION, Consider, [17, 29], [19, 43]),
+/// (`evaluation/labels`, joined by fingerprint) and JevGate's findings,
+/// replayed from the answer cache over the 94 labeled projects outside Bend
+/// 2; the few files whose requests the cache lacked keep their 0.24.1
+/// findings. Unseen: [right, labeled] on the 11 held-out and 14 fresh
+/// projects never used for tuning (22 of them have findings); tuned: on the
+/// other 72. `docs/research/2026-09-28/scripts/maturity.py` in the
+/// maintainer's clone prints these rows. Two are mature: function-simplification
+/// reviews (20 of 23) and agent-context considers (22 of 24). The gap between
+/// the columns is why only unseen projects count. The look-here questions
+/// (file organization, shared logic, hardcoded values, and function
+/// simplification beyond its split reviews) have no rows: these labels
+/// measured the questions they replaced.
+const TABLE: [Measure; 19] = [
     row(catalog::FUNCTION_SIMPLIFICATION, Review, [20, 23], [57, 69]),
-    row(
-        catalog::FUNCTION_SIMPLIFICATION,
-        Consider,
-        [85, 126],
-        [147, 197],
-    ),
-    row(catalog::SHARED_LOGIC, Review, [46, 85], [181, 240]),
-    row(catalog::SHARED_LOGIC, Consider, [76, 129], [121, 190]),
-    row(catalog::HARDCODED_VALUES, Review, [1, 8], [15, 28]),
-    row(catalog::HARDCODED_VALUES, Consider, [5, 29], [32, 57]),
     row(catalog::INJECTION, Review, [3, 4], [81, 96]),
     row(catalog::INJECTION, Consider, [5, 13], [27, 47]),
     row(catalog::SENSITIVE_DATA, Review, [10, 24], [41, 64]),
@@ -181,69 +170,28 @@ const fn preview_row(
 /// never used for tuning (3 to 8 a language), all 598 reviews and considers
 /// labeled by hand from the code, a debatable one counting as not right
 /// (`evaluation/labels/parts/0.30-*.jsonl` in the maintainer's clone), as
-/// `languages.md` tabulates them. Shared-logic considers are counted as the
-/// same-steps threshold of `policy::CALIBRATED` reports them, fitted on the
-/// supported languages: of the 104 that run reported, it makes 40 notes, 31
-/// of them not right, and the other 64 were right 26 times (35 of 104
-/// before). A finding counts for the language its path names, as
-/// `analysis::generic::preview` names it; a rule and level without a row
-/// had no finding there. The ten supported languages' shares in
-/// [`TABLE`] say little of these: Bash's shared-logic reviews were right 4
-/// times in 34 and its function-simplification reviews 25 in 28, where the
-/// ten's were right 46 in 85 and 20 in 23.
-const PREVIEW: [PreviewMeasure; 53] = [
+/// `languages.md` tabulates them. A finding counts for the language its path
+/// names, as `analysis::generic::preview` names it; a rule and level without
+/// a row had no finding there, or is a look-here question's, which these
+/// labels do not measure. The ten supported languages' shares in [`TABLE`]
+/// say little of these: Bash's function-simplification reviews were right
+/// 25 times in 28, where the ten's were right 20 in 23.
+const PREVIEW: [PreviewMeasure; 16] = [
     preview_row("C", FUNCTION_SIMPLIFICATION, Review, [10, 11]),
-    preview_row("C", FUNCTION_SIMPLIFICATION, Consider, [13, 19]),
-    preview_row("C", SHARED_LOGIC, Review, [6, 14]),
-    preview_row("C", SHARED_LOGIC, Consider, [2, 6]),
     preview_row("C", COMMENTS, Consider, [0, 8]),
-    preview_row("C", FILE_ORGANIZATION, Consider, [0, 1]),
     preview_row("C++", FUNCTION_SIMPLIFICATION, Review, [11, 11]),
-    preview_row("C++", FUNCTION_SIMPLIFICATION, Consider, [19, 37]),
-    preview_row("C++", SHARED_LOGIC, Review, [12, 29]),
-    preview_row("C++", SHARED_LOGIC, Consider, [1, 6]),
     preview_row("C++", COMMENTS, Consider, [1, 6]),
-    preview_row("C++", FILE_ORGANIZATION, Consider, [1, 3]),
     preview_row("Kotlin", FUNCTION_SIMPLIFICATION, Review, [1, 1]),
-    preview_row("Kotlin", FUNCTION_SIMPLIFICATION, Consider, [6, 7]),
-    preview_row("Kotlin", SHARED_LOGIC, Review, [6, 7]),
-    preview_row("Kotlin", SHARED_LOGIC, Consider, [2, 2]),
     preview_row("Kotlin", COMMENTS, Consider, [1, 2]),
-    preview_row("Kotlin", FILE_ORGANIZATION, Review, [1, 1]),
     preview_row("Swift", FUNCTION_SIMPLIFICATION, Review, [10, 10]),
-    preview_row("Swift", FUNCTION_SIMPLIFICATION, Consider, [22, 30]),
-    preview_row("Swift", SHARED_LOGIC, Review, [17, 23]),
-    preview_row("Swift", SHARED_LOGIC, Consider, [16, 27]),
     preview_row("Swift", COMMENTS, Consider, [4, 4]),
-    preview_row("Swift", FILE_ORGANIZATION, Review, [1, 1]),
-    preview_row("Swift", FILE_ORGANIZATION, Consider, [2, 2]),
     preview_row("Bash", FUNCTION_SIMPLIFICATION, Review, [25, 28]),
-    preview_row("Bash", FUNCTION_SIMPLIFICATION, Consider, [34, 50]),
-    preview_row("Bash", SHARED_LOGIC, Review, [4, 34]),
-    preview_row("Bash", SHARED_LOGIC, Consider, [0, 10]),
     preview_row("Bash", COMMENTS, Consider, [22, 28]),
-    preview_row("Bash", FILE_ORGANIZATION, Review, [0, 2]),
-    preview_row("Bash", FILE_ORGANIZATION, Consider, [0, 2]),
     preview_row("Dart", FUNCTION_SIMPLIFICATION, Review, [5, 5]),
-    preview_row("Dart", FUNCTION_SIMPLIFICATION, Consider, [9, 10]),
-    preview_row("Dart", SHARED_LOGIC, Review, [3, 7]),
-    preview_row("Dart", SHARED_LOGIC, Consider, [1, 1]),
     preview_row("Dart", COMMENTS, Consider, [2, 4]),
-    preview_row("Dart", FILE_ORGANIZATION, Consider, [1, 1]),
     preview_row("Scala", FUNCTION_SIMPLIFICATION, Review, [2, 3]),
-    preview_row("Scala", FUNCTION_SIMPLIFICATION, Consider, [5, 11]),
-    preview_row("Scala", SHARED_LOGIC, Review, [1, 2]),
-    preview_row("Scala", SHARED_LOGIC, Consider, [1, 2]),
     preview_row("Scala", COMMENTS, Consider, [3, 5]),
-    preview_row("Scala", FILE_ORGANIZATION, Consider, [0, 3]),
-    preview_row("Elixir", FUNCTION_SIMPLIFICATION, Consider, [7, 8]),
-    preview_row("Elixir", SHARED_LOGIC, Review, [4, 5]),
-    preview_row("Elixir", SHARED_LOGIC, Consider, [3, 5]),
-    preview_row("Elixir", FILE_ORGANIZATION, Review, [1, 1]),
     preview_row("Lua", FUNCTION_SIMPLIFICATION, Review, [11, 12]),
-    preview_row("Lua", FUNCTION_SIMPLIFICATION, Consider, [18, 22]),
-    preview_row("Lua", SHARED_LOGIC, Review, [8, 9]),
-    preview_row("Lua", SHARED_LOGIC, Consider, [0, 5]),
     preview_row("Lua", COMMENTS, Consider, [1, 10]),
 ];
 
@@ -429,20 +377,26 @@ mod tests {
             value["review"],
             json!({"unseen": {"right": 20, "labeled": 23}, "tuned": {"right": 57, "labeled": 69}, "mature": true})
         );
-        assert_eq!(value["consider"]["mature"], false);
+        assert!(value.get("consider").is_none(), "a look-here question's");
         assert_eq!(describe(catalog::LAWS), json!({}));
+        assert_eq!(describe(catalog::SHARED_LOGIC), json!({}));
         let unseen = |rule| measure(rule, Review).unwrap().unseen;
         assert_eq!(
-            unseen(catalog::SHARED_LOGIC).summary().as_deref(),
-            Some("54% of 85")
+            unseen(catalog::SENSITIVE_DATA).summary().as_deref(),
+            Some("42% of 24")
         );
-        let few = unseen(catalog::HARDCODED_VALUES);
+        let few = unseen(catalog::TEST_VALUE);
         assert_eq!(
             few.summary().as_deref(),
-            Some("1 of 8"),
+            Some("3 of 5"),
             "no share below 20"
         );
-        assert_eq!(few.percent(), Some(13), "12.5% rounds up");
+        assert_eq!(few.percent(), Some(60));
+        let eighth = Labels {
+            right: 1,
+            labeled: 8,
+        };
+        assert_eq!(eighth.percent(), Some(13), "12.5% rounds up");
         assert_eq!(unseen(catalog::ACCESS_CONTROL).summary(), None);
     }
 
@@ -464,8 +418,8 @@ mod tests {
         let at = |path: &str, rule, level| precision_at(Path::new(path), rule, level);
         let labels = |right, labeled| Some(Labels { right, labeled });
         assert_eq!(
-            at("View.swift", catalog::FUNCTION_SIMPLIFICATION, Consider),
-            labels(22, 30)
+            at("deploy.sh", catalog::FUNCTION_SIMPLIFICATION, Review),
+            labels(25, 28)
         );
         assert_eq!(
             at("Shop.kt", catalog::COMMENTS, Review),
@@ -485,14 +439,14 @@ mod tests {
         );
         assert_eq!(
             precision_in_words(
-                catalog::SHARED_LOGIC,
+                catalog::FUNCTION_SIMPLIFICATION,
                 Labels {
-                    right: 22,
-                    labeled: 30
+                    right: 25,
+                    labeled: 28
                 },
-                Some("Swift")
+                Some("Bash")
             ),
-            "right 73% of the time in Swift (30 labels)"
+            "right 89% of the time in Bash (28 labels)"
         );
         assert_eq!(
             Labels {
@@ -506,18 +460,19 @@ mod tests {
 
     #[test]
     fn the_preview_table_sums_to_each_language_s_published_counts() {
-        // `languages.md`'s support levels: reviews, then considers, right of
-        // labeled; and a file of each language's.
+        // `languages.md`'s support levels: function-simplification reviews,
+        // then comment considers, right of labeled; and a file of each
+        // language's.
         let published = [
-            ("C", "x.c", [16, 25], [15, 34]),
-            ("C++", "x.cpp", [23, 40], [22, 52]),
-            ("Kotlin", "x.kt", [8, 9], [9, 11]),
-            ("Swift", "x.swift", [28, 34], [44, 63]),
-            ("Bash", "x.sh", [29, 64], [56, 90]),
-            ("Dart", "x.dart", [8, 12], [13, 16]),
-            ("Scala", "x.scala", [3, 5], [9, 21]),
-            ("Elixir", "x.ex", [5, 6], [10, 13]),
-            ("Lua", "x.lua", [19, 21], [19, 37]),
+            ("C", "x.c", [10, 11], [0, 8]),
+            ("C++", "x.cpp", [11, 11], [1, 6]),
+            ("Kotlin", "x.kt", [1, 1], [1, 2]),
+            ("Swift", "x.swift", [10, 10], [4, 4]),
+            ("Bash", "x.sh", [25, 28], [22, 28]),
+            ("Dart", "x.dart", [5, 5], [2, 4]),
+            ("Scala", "x.scala", [2, 3], [3, 5]),
+            ("Elixir", "x.ex", [0, 0], [0, 0]),
+            ("Lua", "x.lua", [11, 12], [1, 10]),
         ];
         let keys = catalog::keys();
         for m in &PREVIEW {
@@ -556,9 +511,14 @@ mod tests {
             labels("maintainability/function-simplification", Review).in_words(),
             "right 87% of the time (23 labels)"
         );
-        let shared = labels(catalog::SHARED_LOGIC, Consider);
-        assert_eq!(shared, unseen(76, 129).unseen);
-        assert_eq!(shared.in_words(), "right 59% of the time (129 labels)");
+        let comments = labels(catalog::COMMENTS, Consider);
+        assert_eq!(comments, unseen(39, 72).unseen);
+        assert_eq!(comments.in_words(), "right 54% of the time (72 labels)");
+        assert_eq!(
+            labels(catalog::SHARED_LOGIC, Review),
+            Labels::default(),
+            "a look-here question is not yet measured"
+        );
         assert_eq!(unseen(19, 19).unseen.in_words(), "not yet measured");
         assert_eq!(
             unseen(16, 20).unseen.in_words(),

@@ -28,10 +28,10 @@ pub enum JevCommand {
     /// for what changed. Every run writes the full report to
     /// `.jevgate/latest.json`, whatever the output format.
     ///
-    /// Findings are `review` (act on it), `consider` (worth a look) or `note`
-    /// (optional; never fails the gate). A file whose answers stay undecided is
-    /// `uncertain`; one that cannot be judged without more evidence is
-    /// `needs-context`.
+    /// Every finding is a `review`: a place worth a look, to fix when it is
+    /// right or dismiss with a reason (`jevgate baseline mark`). A file whose
+    /// answers stay undecided is `uncertain`; one that cannot be judged
+    /// without more evidence is `needs-context`.
     ///
     /// Settings resolve in this order: flags, then `jevgate.toml`, then
     /// defaults. Upload patterns and budgets in the file are ceilings that
@@ -80,9 +80,10 @@ pub enum JevCommand {
     /// accepted: `--rule`, `--skip-rule`, `--fail-on TARGET=LEVEL` and
     /// `[rules]`. A custom question is named `custom/<id>`.
     ///
-    /// Each rule shows how often its reviews and considers were right on
-    /// projects JevGate was never tuned on, from findings labeled from the
-    /// code. The levels right at least 80% of the time over at least 20
+    /// Each rule shows how often the reviews and considers its measured
+    /// questions composed were right on projects JevGate was never tuned on,
+    /// from findings labeled from the code; a look-here question's findings
+    /// are not yet measured. The levels right at least 80% of the time over at least 20
     /// labels are mature: by default only they fail the check (`--fail-on
     /// mature`), never in a preview language, with each custom question at
     /// its own level in every language, and the other findings are reported
@@ -214,7 +215,7 @@ Workflow:
   jevgate check                             Review and apply the gate
   jevgate baseline                          Accept current findings; later checks fail only on new ones
   jevgate baseline --merge                  Accept a partial check's findings, keeping the rest
-  jevgate baseline mark wrong PATH[:LINE]   Record why a finding was accepted; `baseline stats` counts them
+  jevgate baseline mark wrong PATH[:LINE]   Dismiss a finding with a reason; `baseline stats` counts them
   jevgate rules propose                     Propose custom questions from AGENTS.md and other instruction files
   jevgate rules add NAME                    Add a measured custom question from the gallery
 
@@ -273,8 +274,8 @@ Examples:
   jevgate check --rule comments                    Only code comments: repeated code, filler, narrated edits
   jevgate check --include-tests                    Also judge test value and redundancy
   jevgate check --fail-on none                     Advisory: never exits 1; exits 2 when incomplete
-  jevgate check --fail-on review                   Fail on every review, not only on mature rules
-  jevgate check --fail-on review --fail-on security=consider
+  jevgate check --fail-on review                   Fail on every finding, not only on mature rules
+  jevgate check --fail-on mature --fail-on security=review
   jevgate check --dry-run --show-requests          Exactly what would be uploaded, offline
   jevgate check --cache-only                       Replay cached answers; never contact the provider
   jevgate check --max-seconds 30 --max-cost 0.10   Stop asking after 30 s or 10 cents; incomplete then
@@ -288,9 +289,11 @@ Reading the JSON report (--format json or .jevgate/latest.json):
                      commit --pre-push judged, from base_revision
   gate               passed, reasons, new_findings, baselined_findings
   fail_on            the gate levels; fail_on_mature says what `mature` stands for
-  files[].status     clear, note, consider, review, uncertain, needs-context,
-                     not-applicable, skipped or error
-  files[].findings   rule, strength, line, message, action, locations,
+  files[].status     clear, review, uncertain, needs-context, not-applicable,
+                     skipped or error
+  files[].findings   rule, strength (review), measured_as (the level its
+                     measured questions composed; none for a look-here
+                     finding), line, message, action, locations,
                      concern_probability, fingerprint, baselined; precision:
                      right of labeled findings of its rule and level on
                      projects never used for tuning; preview: the preview

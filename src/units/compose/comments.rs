@@ -75,6 +75,7 @@ pub(super) fn comment_findings(
             Finding {
                 rule: catalog::id(catalog::COMMENTS).into(),
                 strength,
+                measured_as: Some(strength),
                 line: locations[0].start_line,
                 message,
                 action: action.into(),
@@ -84,7 +85,6 @@ pub(super) fn comment_findings(
                 locations,
                 quote: entries[0].0.quote.clone(),
                 category: None,
-                values: Vec::new(),
                 fingerprint: fingerprint(
                     catalog::COMMENTS,
                     plan,

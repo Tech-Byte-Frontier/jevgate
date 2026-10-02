@@ -1,11 +1,11 @@
 //! The message and recommended action of each kind of finding, one module
 //! per rule family; helpers they share are here.
 use super::{
-    Block, Detail, GroupInfo,
+    Block, Detail,
     outcome::{
         Answers, Outcome, RESOURCE_CHECKS, benefit, choice, comment_concern_kind, comment_signals,
         disagreement, document_split, noul, origin_outcome, particular_inputs, repeated,
-        section_signals, settled_checks, value_signals,
+        section_signals, settled_checks,
     },
 };
 use crate::catalog;
@@ -22,9 +22,7 @@ pub(super) use documentation::{
     comment_reason, comment_wording, doc_pair_wording, document_wording, plan_wording,
     section_wording, stale_wording,
 };
-pub(super) use maintainability::{
-    function_wording, outline_wording, pair_wording, part_wording, values_wording,
-};
+pub(super) use maintainability::{function_wording, look_wording};
 pub(super) use security::{handler_wording, module_wording, privilege_wording, security_wording};
 pub(super) use test_rules::{law_wording, test_pair_wording, test_wording};
 

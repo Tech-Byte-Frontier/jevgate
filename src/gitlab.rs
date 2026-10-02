@@ -80,9 +80,10 @@ mod tests {
         assert_eq!(review["location"]["path"], "src/a,b.rs");
         assert_eq!(review["location"]["lines"], json!({"begin": 12, "end": 20}));
         assert!(
-            review["description"].as_str().unwrap().ends_with(
-                "Right 54% of the time (85 labels). Next step: Share one | implementation"
-            )
+            review["description"]
+                .as_str()
+                .unwrap()
+                .ends_with("Not yet measured. Next step: Share one | implementation")
         );
         assert_eq!(review["fingerprint"].as_str().unwrap().len(), 64);
         let consider = issue(path, &finding(Strength::Consider));

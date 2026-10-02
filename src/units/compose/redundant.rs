@@ -2,14 +2,15 @@
 //! shared-logic findings that repeat what a redundancy finding says.
 use super::*;
 
-/// A shared-logic finding whose every copy lies inside tests a redundancy
-/// finding already names says the same thing twice: on sqlite-utils, 12
-/// test pairs were reported by both rules. The redundancy finding stays,
-/// since it says which test to merge or delete.
+/// A shared-logic finding whose every copy lies inside tests a reported
+/// redundancy finding already names says the same thing twice: on
+/// sqlite-utils, 12 test pairs were reported by both rules. The redundancy
+/// finding stays, since it says which test to merge or delete; a note is not
+/// reported, so the copies stay reported by shared logic.
 pub(super) fn drop_copies_of_redundant_tests(findings: &mut Vec<Finding>) {
     let tests: Vec<crate::schema::Location> = findings
         .iter()
-        .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY))
+        .filter(|f| f.rule == catalog::id(catalog::TEST_REDUNDANCY) && f.strength != Strength::Note)
         .flat_map(|f| f.locations.iter().cloned())
         .collect();
     let named = |l: &crate::schema::Location| {
@@ -122,6 +123,7 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
     Finding {
         rule: catalog::id(catalog::TEST_REDUNDANCY).into(),
         strength: Strength::Consider,
+        measured_as: Some(Strength::Consider),
         line: locations.first().map_or(1, |l| l.start_line),
         message: format!(
             "{} tests of `{subject}` overlap: {}.",
@@ -135,7 +137,6 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         locations,
         quote: None,
         category: None,
-        values: Vec::new(),
         fingerprint: fingerprint(
             catalog::TEST_REDUNDANCY,
             plan,

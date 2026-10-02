@@ -1,6 +1,7 @@
-//! Type-2 clone candidates across the selected files and explicit context.
-//! Identifiers and literals are normalized; windows start and end on whole
-//! statements inside function bodies; identifiers must be renamed consistently.
+//! Shared-logic candidates across the selected files and explicit context:
+//! Type-2 statement windows, whose identifiers and literals are normalized,
+//! start and end on whole statements inside function bodies and must be
+//! renamed consistently, and repeated token runs (`runs`).
 //! `apart` holds the copies that are never compared and `frame` the statements
 //! every tree walk repeats, which do not make a copy on their own.
 use super::{
@@ -16,12 +17,14 @@ use tree_sitter::Node;
 
 mod apart;
 mod frame;
+mod runs;
 mod scripts;
 #[cfg(test)]
 mod tests;
 use apart::*;
 pub(crate) use apart::{benchmark_code, example_code};
 use frame::*;
+pub use runs::RUN_TOKENS;
 use scripts::Scripts;
 
 pub const MIN_BYTES: usize = 120;
@@ -29,9 +32,9 @@ pub const MIN_BYTES: usize = 120;
 pub const MIN_STATEMENTS: usize = 2;
 /// Statements a reported copy needs.
 pub const MIN_CLONE_STATEMENTS: usize = 3;
-pub const RUN_CAP: usize = 64;
+/// Candidates a check asks about at most; the rest are counted as omitted.
+pub const RUN_CAP: usize = 256;
 pub const FILE_CAP: usize = 8;
-const DIFFERENCES: usize = 12;
 /// A statement pair repeated more often than this is an idiom; its extra pairs are not compared.
 const SEED_OCCURRENCES: usize = 48;
 
@@ -60,17 +63,10 @@ pub struct Site {
     pub quote: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Difference {
-    pub a: String,
-    pub b: String,
-}
-
 #[derive(Clone, Debug)]
 pub struct Pair {
     pub a: Site,
     pub b: Site,
-    pub differences: Vec<Difference>,
     /// Non-whitespace bytes of the shorter site.
     pub size: usize,
     /// Distinct sites in this pair's clone group, including `a` and `b`.
@@ -148,6 +144,10 @@ struct Parsed<'a> {
     tokens: Vec<Token<'a>>,
 }
 
+/// Shared-logic candidates: statement windows, which find renamed copies of
+/// three or more statements, and repeated token runs (`runs`), which find
+/// the shorter repeats inside them, such as a predicate or a lookup written
+/// out at several call sites. Both are grouped and capped together.
 pub fn find(files: &[SourceFile<'_>]) -> Candidates {
     let (parsed, blocks) = statement_blocks(files);
     let local: BTreeSet<String> = files
@@ -155,18 +155,19 @@ pub fn find(files: &[SourceFile<'_>]) -> Candidates {
         .filter_map(|f| f.package?.name.clone())
         .collect();
     let scripts = Scripts::of(files);
+    let linked = |x: usize, y: usize| {
+        let (a, b) = (&files[x], &files[y]);
+        crate::packages::linked(a.package, b.package, &local)
+            && generic::family(a.path) == generic::family(b.path)
+            && scripts.linked(x, y)
+            && !separate_examples(a.path, b.path)
+            && !separate_tests(a, b)
+    };
     let mut pairs: Vec<Pair> = matching_windows(&blocks)
         .into_iter()
-        .filter(|&((bx, _), (by, _), _)| {
-            let (x, y) = (blocks[bx].file, blocks[by].file);
-            let (a, b) = (&files[x], &files[y]);
-            crate::packages::linked(a.package, b.package, &local)
-                && generic::family(a.path) == generic::family(b.path)
-                && scripts.linked(x, y)
-                && !separate_examples(a.path, b.path)
-                && !separate_tests(a, b)
-        })
+        .filter(|&((bx, _), (by, _), _)| linked(blocks[bx].file, blocks[by].file))
         .filter_map(|window| pair(files, &parsed, &blocks, window))
+        .chain(runs::pairs(files, (&parsed, &blocks), linked))
         .filter(|p| !deprecated(files, &p.a) && !deprecated(files, &p.b))
         .filter(|p| !retired(&p.a.path) && !retired(&p.b.path))
         .collect();
@@ -317,7 +318,9 @@ fn pair(
     let y = &blocks[by].statements[ky..ky + n];
     let tx = &parsed[fx].tokens[x[0].tokens.start..x[n - 1].tokens.end];
     let ty = &parsed[fy].tokens[y[0].tokens.start..y[n - 1].tokens.end];
-    let differences = align(tx, ty)?;
+    if !aligned(tx, ty) {
+        return None;
+    }
     let span_x = x[0].span.start..x[n - 1].span.end;
     let span_y = y[0].span.start..y[n - 1].span.end;
     let size =
@@ -343,19 +346,10 @@ fn pair(
     // Ties keep path and line order.
     let swap = !files[fx].selected
         || (files[fy].selected && (&b.path, b.start_line) < (&a.path, a.start_line));
-    let (a, b, differences) = if swap {
-        let flipped = differences
-            .into_iter()
-            .map(|d| Difference { a: d.b, b: d.a })
-            .collect();
-        (b, a, flipped)
-    } else {
-        (a, b, differences)
-    };
+    let (a, b) = if swap { (b, a) } else { (a, b) };
     Some(Pair {
         a,
         b,
-        differences,
         size,
         occurrences: 2,
         copies: Vec::new(),
@@ -604,17 +598,16 @@ fn site(files: &[SourceFile<'_>], index: usize, span: Range<usize>) -> Site {
 }
 
 /// Aligned tokens must match after normalization, and each identifier must map
-/// to exactly one identifier on the other side. Returns renamed names and values.
-fn align(x: &[Token<'_>], y: &[Token<'_>]) -> Option<Vec<Difference>> {
+/// to exactly one identifier on the other side.
+fn aligned(x: &[Token<'_>], y: &[Token<'_>]) -> bool {
     if x.len() != y.len() {
-        return None;
+        return false;
     }
     let mut forward = BTreeMap::new();
     let mut backward = BTreeMap::new();
-    let mut differences = Vec::new();
     for (a, b) in x.iter().zip(y) {
         if a.normal() != b.normal() {
-            return None;
+            return false;
         }
         // Each side calling itself is the same step, not a rename.
         if a.own && b.own {
@@ -624,19 +617,10 @@ fn align(x: &[Token<'_>], y: &[Token<'_>]) -> Option<Vec<Difference>> {
             && (*forward.entry(a.text).or_insert(b.text) != b.text
                 || *backward.entry(b.text).or_insert(a.text) != a.text)
         {
-            return None;
-        }
-        if a.kind != TokenKind::Other && a.text != b.text {
-            let difference = Difference {
-                a: a.text.to_string(),
-                b: b.text.to_string(),
-            };
-            if !differences.contains(&difference) && differences.len() < DIFFERENCES {
-                differences.push(difference);
-            }
+            return false;
         }
     }
-    Some(differences)
+    true
 }
 
 /// Leaves holding literal values in the languages with their own analyzers;

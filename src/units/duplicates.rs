@@ -1,24 +1,24 @@
-//! Shared logic: one candidate pair per request, entity-alignment style.
+//! Shared logic: one request per candidate group, asking the look-here
+//! question over every copy: whether the snippets repeat one piece of logic
+//! a maintainer should keep in one place. A coding agent verifies each flag.
 use super::{
     Asked, Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, identity,
-    questions, request,
+    outcome::LOOK, questions, request,
 };
 use crate::{
-    analysis::{
-        clones::{Candidates, Pair, Site},
-        test_map::TestCase,
-    },
+    analysis::clones::{Candidates, Pair, Site},
     catalog::SHARED_LOGIC,
     schema::{Location, Pass},
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
 
+/// Copies a request shows at most: the two it was found from first.
+const SHOWN_SITES: usize = 6;
+
 pub(super) fn plan(
     file: &FileContext<'_>,
     candidates: &Candidates,
-    cases: &BTreeMap<PathBuf, Vec<TestCase>>,
-    test_lines: &[std::ops::Range<usize>],
     hashes: &BTreeMap<PathBuf, String>,
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
@@ -33,7 +33,7 @@ pub(super) fn plan(
             pair.b.path.display(),
             pair.b.start_line
         );
-        let (request, asked) = build(file, pair, hashes, &id, false);
+        let (request, asked) = build(file, pair, hashes, &id);
         let presence = if file.budget.fits(&request) {
             requests.push(Planned {
                 owner: file.owner,
@@ -44,18 +44,6 @@ pub(super) fn plan(
         } else {
             Presence::NeedsContext
         };
-        let recheck = (presence == Presence::Judged
-            && (pair.a.function_source.is_some() || pair.b.function_source.is_some()))
-        .then(|| build(file, pair, hashes, &id, true))
-        .filter(|(request, _)| file.budget.fits(request));
-        let in_case = |site: &Site| {
-            cases.get(&site.path).is_some_and(|cases| {
-                cases
-                    .iter()
-                    .any(|case| case.line <= site.start_line && site.end_line <= case.end_line)
-            })
-        };
-        let own_cases = cases.get(file.path).map_or(&[][..], Vec::as_slice);
         out.units.push(UnitPlan {
             rule: SHARED_LOGIC,
             name: match pair.copies.len() {
@@ -95,21 +83,8 @@ pub(super) fn plan(
                 pair.b.function.as_deref().unwrap_or(""),
                 &pair.normalized,
             ]),
-            detail: Detail::Pair {
-                differences: pair.differences.clone(),
-                within_test: pair.b.path == file.path
-                    && own_cases.iter().any(|case| {
-                        [&pair.a, &pair.b].iter().all(|site| {
-                            case.line <= site.start_line && site.end_line <= case.end_line
-                        })
-                    }),
-                in_tests: test_lines.iter().any(|l| l.contains(&pair.a.start_line)),
-                in_cases: [&pair.a, &pair.b]
-                    .into_iter()
-                    .chain(&pair.copies)
-                    .all(in_case),
-            },
-            recheck: recheck.map(Into::into),
+            detail: Detail::Pair,
+            recheck: None,
         });
     }
 }
@@ -130,13 +105,10 @@ fn location(site: &Site) -> Location {
     }
 }
 
-fn site_state(site: &Site, recheck: bool) -> Value {
+fn site_state(site: &Site) -> Value {
     let mut state = json!({"path": site.path, "source": site.quote});
     if let Some(function) = &site.function {
         state["function"] = json!(function);
-    }
-    if recheck && let Some(source) = &site.function_source {
-        state["function_source"] = json!(source);
     }
     state
 }
@@ -146,28 +118,30 @@ fn build(
     pair: &Pair,
     hashes: &BTreeMap<PathBuf, String>,
     id: &str,
-    recheck: bool,
 ) -> (Value, Asked) {
-    let pass = if recheck { Pass::Recheck } else { Pass::First };
     let mut questions = Questions::default();
-    for (question, body) in [
-        ("same", questions::duplicate_same(recheck)),
-        ("only_differences", questions::duplicate_only_differences()),
-        ("required", questions::duplicate_required()),
-    ] {
-        questions.ask(question.into(), body, id, SHARED_LOGIC, question, pass);
-    }
-    let state = json!({
-        "site_a": site_state(&pair.a, recheck),
-        "site_b": site_state(&pair.b, recheck),
-        "differences": pair.differences.iter().map(|d| json!({"site_a": d.a, "site_b": d.b})).collect::<Vec<_>>(),
-    });
-    let stage = if recheck { "recheck" } else { "duplicate-pair" };
+    questions.ask(
+        LOOK.into(),
+        questions::copies_look(),
+        id,
+        SHARED_LOGIC,
+        LOOK,
+        Pass::First,
+    );
+    let sites: Vec<&Site> = [&pair.a, &pair.b]
+        .into_iter()
+        .chain(&pair.copies)
+        .take(SHOWN_SITES)
+        .collect();
+    let state = json!({"sites": sites.iter().map(|s| site_state(s)).collect::<Vec<_>>()});
     let mut sources = vec![(file.path, file.source_hash)];
-    if pair.b.path != file.path
-        && let Some(hash) = hashes.get(&pair.b.path)
-    {
-        sources.push((pair.b.path.as_path(), hash.as_str()));
+    for site in &sites {
+        if site.path != file.path
+            && !sources.iter().any(|(path, _)| *path == site.path.as_path())
+            && let Some(hash) = hashes.get(&site.path)
+        {
+            sources.push((site.path.as_path(), hash.as_str()));
+        }
     }
-    request(file.model, stage, &sources, state, questions)
+    request(file.model, "duplicate-pair", &sources, state, questions)
 }

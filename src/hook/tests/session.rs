@@ -166,7 +166,7 @@ fn a_replayed_claude_code_session_blocks_until_the_agent_splits_its_function() {
     let last = replies.last().unwrap();
     assert_eq!(
         message(last),
-        "JevGate: the findings that blocked this turn are fixed.",
+        "JevGate: the findings that blocked this turn are fixed or dismissed.",
         "{last}"
     );
     // One line per event, as `jevgate hook` prints each reply.

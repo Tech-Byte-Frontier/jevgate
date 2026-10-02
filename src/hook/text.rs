@@ -1,11 +1,10 @@
 //! What the hook says: one line per finding for the agent, within what every
 //! agent reads whole, and short notes for the person. Context states facts;
 //! only the reason of a block, which the agent is meant to act on, instructs.
-use super::review::{Flagged, Undecided, Unreviewed};
+use super::review::{Dismissed, Flagged, Undecided, Unreviewed};
 use crate::{
     guards::{self, Guard, Kind},
     output,
-    schema::Strength,
     view::FindingView,
 };
 use std::path::PathBuf;
@@ -26,6 +25,10 @@ const REASON_CHARS: usize = 400;
 pub(super) const MAX_BLOCKS: u32 = 3;
 /// Where the person sees findings the hook did not send the agent.
 const LIST_THEM: &str = "`jevgate check --base HEAD` lists them.";
+/// How the agent dismisses a finding it judged, and who audits that.
+const DISMISS: &str = "dismiss it with `jevgate baseline mark wrong|intended|later PATH:LINE`, which the person audits with `jevgate baseline stats`";
+/// Dismissed findings named in the person's note, at most.
+const NAMED_DISMISSED: usize = 3;
 /// Guards and unreviewed files listed after an edit, and named in the
 /// person's note, at most.
 const SHOWN_GUARDS: usize = 5;
@@ -100,17 +103,28 @@ fn undecided_line(unit: &Undecided) -> String {
     )
 }
 
-/// What fails the gate, for a sentence: "2 findings", "1 undecided unit",
-/// "1 finding and 2 undecided units".
-fn failing_things(findings: usize, undecided: usize) -> String {
+/// What keeps the agent working, `where` they are: "2 findings in this
+/// turn's changes are not fixed or dismissed", "1 undecided unit in this
+/// turn's changes fails the quality gate", or both.
+fn open_things(findings: usize, undecided: usize, place: &str) -> String {
+    let open = |n: usize, place: &str| {
+        format!(
+            "{}{place} {} not fixed or dismissed",
+            output::count(n, "finding"),
+            if n == 1 { "is" } else { "are" }
+        )
+    };
+    let unsure = |n: usize, place: &str| {
+        format!(
+            "{}{place} {} the quality gate",
+            output::count(n, "undecided unit"),
+            if n == 1 { "fails" } else { "fail" }
+        )
+    };
     match (findings, undecided) {
-        (_, 0) => output::count(findings, "finding"),
-        (0, _) => output::count(undecided, "undecided unit"),
-        _ => format!(
-            "{} and {}",
-            output::count(findings, "finding"),
-            output::count(undecided, "undecided unit")
-        ),
+        (_, 0) => open(findings, place),
+        (0, _) => unsure(undecided, place),
+        _ => format!("{}, and {}", open(findings, place), unsure(undecided, "")),
     }
 }
 
@@ -199,10 +213,15 @@ fn findings_after_edit(
         ),
         fail(failing)
     );
-    let blocks = if failing > 0 || known.iter().any(Flagged::fails) {
-        "Findings that fail the gate block the end of the turn until they are fixed; the others are optional."
-    } else {
-        "None of them blocks the end of the turn."
+    let all = new.len() + known.len();
+    let blocks = match new.iter().chain(known).filter(|f| f.blocks()).count() {
+        0 => "None of them blocks the end of the turn.",
+        n if n == all => {
+            "Each one blocks the end of the turn until it is fixed or dismissed with a reason."
+        }
+        _ => {
+            "Each one not marked optional blocks the end of the turn until it is fixed or dismissed with a reason."
+        }
     };
     let tail = if known.is_empty() {
         blocks.to_string()
@@ -218,21 +237,19 @@ fn findings_after_edit(
 /// A `carried` turn began where one JevGate could not check did, so its
 /// changes are those since JevGate last checked.
 pub(super) fn block_reason(
-    failing: &[Flagged],
+    open: &[Flagged],
     undecided: &[Undecided],
     block: u32,
     carried: bool,
 ) -> String {
-    let one = failing.len() + undecided.len() == 1;
+    let place = if carried {
+        " in code changed since JevGate last checked"
+    } else {
+        " in code changed this turn"
+    };
     let head = format!(
-        "JevGate blocked the end of this turn ({block} of at most {MAX_BLOCKS}): {} in code changed {} {} the quality gate.",
-        failing_things(failing.len(), undecided.len()),
-        if carried {
-            "since JevGate last checked"
-        } else {
-            "this turn"
-        },
-        if one { "fails" } else { "fail" }
+        "JevGate blocked the end of this turn ({block} of at most {MAX_BLOCKS}): {}.",
+        open_things(open.len(), undecided.len(), place)
     );
     let mut tail: String = undecided
         .iter()
@@ -243,22 +260,17 @@ pub(super) fn block_reason(
         tail.push_str(UNDECIDED_NEXT);
         tail.push(' ');
     }
-    let (them, a_finding) = if failing.len() == 1 {
-        ("it", "it")
-    } else {
-        ("them", "a finding")
-    };
-    if failing.is_empty() {
-        tail.push_str("JevGate does not block again when nothing changed.");
-    } else {
+    if !open.is_empty() {
+        let each = if open.len() == 1 { "It" } else { "Each one" };
         tail.push_str(&format!(
-            "Fix {them}, then finish. If {a_finding} is mistaken, keep the code as it is and say why in your reply; JevGate does not block again when nothing changed."
+            "{each} is a place worth a look: read the code there and fix it when it is right; when it is mistaken, intended or right but left for later, {DISMISS}. "
         ));
     }
-    if failing.iter().any(|f| f.accepted_this_turn) {
-        tail.push_str(" A finding accepted this turn, by a baseline entry or a `jevgate: allow` comment, counts until the next turn: accepting findings is the person's call, so leave that to them.");
+    tail.push_str("JevGate does not block again when nothing changed.");
+    if open.iter().any(|f| f.accepted_this_turn) {
+        tail.push_str(" A `jevgate: allow` comment or a baseline entry without a reason added this turn counts from the next turn: accepting findings that way is the person's call, so dismiss with a reason instead.");
     }
-    list(&head, failing, &tail, MAX_CHARS)
+    list(&head, open, &tail, MAX_CHARS)
 }
 
 /// The context after an edit about what the turn did to the checks around
@@ -280,7 +292,7 @@ fn guards_noticed(guards: &[&Guard]) -> Option<String> {
             output::count(guards.len() - SHOWN_GUARDS, "more")
         ));
     }
-    text.push_str("JevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began.");
+    text.push_str("JevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began, except a finding dismissed with a reason through `jevgate baseline mark`.");
     Some(text)
 }
 
@@ -310,7 +322,7 @@ pub(super) fn guards_user(guards: &[Guard]) -> Option<String> {
         )
     };
     if guards.iter().any(edited) {
-        text.push_str(" Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began.");
+        text.push_str(" Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began, except findings dismissed with a reason.");
     }
     Some(text)
 }
@@ -327,19 +339,22 @@ pub(super) fn joined(
     }
 }
 
-/// The person's note on a block, on `failing` findings and `undecided`
-/// units that fail the gate.
-pub(super) fn blocked(failing: usize, undecided: usize, block: u32) -> String {
-    let one = failing + undecided == 1;
+/// The person's note on a block, on `open` findings and `undecided` units
+/// that fail the gate.
+pub(super) fn blocked(open: usize, undecided: usize, block: u32) -> String {
+    let them = if open + undecided == 1 { "it" } else { "them" };
+    let asked = if open > 0 {
+        format!("fix or dismiss {them} with a reason")
+    } else {
+        format!("fix {them}")
+    };
     format!(
-        "JevGate: {} in this turn's changes {} the quality gate; the agent is asked to fix {} (block {block} of {MAX_BLOCKS}).",
-        failing_things(failing, undecided),
-        if one { "fails" } else { "fail" },
-        if one { "it" } else { "them" }
+        "JevGate: {}; the agent is asked to {asked} (block {block} of {MAX_BLOCKS}).",
+        open_things(open, undecided, " in this turn's changes")
     )
 }
 
-/// Why a stop with findings that fail the gate lets the agent finish.
+/// Why a stop with open findings lets the agent finish.
 pub(super) enum LetThrough {
     /// The turn was blocked as often as the hook blocks one.
     Cap,
@@ -347,18 +362,24 @@ pub(super) enum LetThrough {
     Unchanged,
 }
 
-/// Why a stop with `failing` findings and `undecided` units that fail the
+/// Why a stop with `open` findings and `undecided` units that fail the
 /// gate lets the agent finish.
-pub(super) fn let_through(failing: usize, undecided: usize, why: LetThrough) -> String {
-    let still = format!(
-        "{} still {} the quality gate",
-        failing_things(failing, undecided),
-        if failing + undecided == 1 {
-            "fails"
-        } else {
-            "fail"
-        }
-    );
+pub(super) fn let_through(open: usize, undecided: usize, why: LetThrough) -> String {
+    let findings = (open > 0).then(|| {
+        format!(
+            "{} {} still not fixed or dismissed",
+            output::count(open, "finding"),
+            if open == 1 { "is" } else { "are" }
+        )
+    });
+    let units = (undecided > 0).then(|| {
+        format!(
+            "{} still {} the quality gate",
+            output::count(undecided, "undecided unit"),
+            if undecided == 1 { "fails" } else { "fail" }
+        )
+    });
+    let still = joined(findings, units, ", and ").unwrap_or_default();
     match why {
         LetThrough::Cap => format!(
             "JevGate blocked this turn {MAX_BLOCKS} times and lets the agent finish; {still}. {LIST_THEM}"
@@ -370,35 +391,50 @@ pub(super) fn let_through(failing: usize, undecided: usize, why: LetThrough) -> 
 }
 
 /// The person's note on a stop that passes: whether the findings of a block
-/// are fixed, and the findings that do not fail the gate.
-pub(super) fn passed(after_block: bool, advisory: &[Flagged], unreviewed: bool) -> Option<String> {
+/// are fixed or dismissed, the findings the agent dismissed with a reason,
+/// and those optional here.
+pub(super) fn passed(
+    after_block: bool,
+    (dismissed, optional): (&[Dismissed], &[Flagged]),
+    unreviewed: bool,
+) -> Option<String> {
     let mut notes = Vec::new();
     if after_block {
         // A blocked unit the parser can no longer read is not fixed.
         notes.push(if unreviewed {
-            "JevGate: no finding of this turn fails the gate now, but some of the code it changed was not reviewed.".to_string()
+            "JevGate: no finding of this turn is open now, but some of the code it changed was not reviewed.".to_string()
         } else {
-            "JevGate: the findings that blocked this turn are fixed.".to_string()
+            "JevGate: the findings that blocked this turn are fixed or dismissed.".to_string()
         });
     }
-    if !advisory.is_empty() {
-        let reviews = advisory
+    if !dismissed.is_empty() {
+        let mut named: Vec<String> = dismissed
             .iter()
-            .filter(|f| f.finding.strength == Strength::Review)
-            .count();
-        let counts: Vec<String> = [(reviews, "review"), (advisory.len() - reviews, "consider")]
-            .iter()
-            .filter(|(n, _)| *n > 0)
-            .map(|(n, noun)| output::count(*n, noun))
+            .take(NAMED_DISMISSED)
+            .map(|d| {
+                format!(
+                    "{}:{} {} as {}",
+                    d.path.display(),
+                    d.line,
+                    d.rule,
+                    output::label(&d.reason)
+                )
+            })
             .collect();
+        if dismissed.len() > NAMED_DISMISSED {
+            named.push(format!("{} more", dismissed.len() - NAMED_DISMISSED));
+        }
         notes.push(format!(
-            "JevGate: {} in this turn's changes {} the quality gate. {LIST_THEM}",
-            counts.join(" and "),
-            if advisory.len() == 1 {
-                "doesn't fail"
-            } else {
-                "don't fail"
-            }
+            "JevGate: the agent dismissed {} in this turn's changes ({}); `jevgate baseline stats` counts dismissals by rule and reason.",
+            output::count(dismissed.len(), "finding"),
+            named.join("; ")
+        ));
+    }
+    if !optional.is_empty() {
+        notes.push(format!(
+            "JevGate: {} in this turn's changes {} optional here. {LIST_THEM}",
+            output::count(optional.len(), "finding"),
+            if optional.len() == 1 { "is" } else { "are" }
         ));
     }
     (!notes.is_empty()).then(|| notes.join(" "))
@@ -517,11 +553,16 @@ fn list(head: &str, found: &[Flagged], tail: &str, room: usize) -> String {
 /// finding. A long why is cut, never how often such findings were right.
 fn line(flagged: &Flagged) -> String {
     let finding = FindingView::new(&flagged.path, &flagged.finding);
-    let mark = match (finding.fails(), flagged.accepted_this_turn) {
-        (true, true) => " (fails the gate; accepted this turn)",
-        (true, false) => " (fails the gate)",
-        (false, true) => " (accepted this turn)",
-        (false, false) => "",
+    let mark = match (
+        finding.fails(),
+        flagged.accepted_this_turn,
+        flagged.blocks(),
+    ) {
+        (true, true, _) => " (fails the gate; accepted this turn)",
+        (true, false, _) => " (fails the gate)",
+        (false, true, _) => " (accepted this turn)",
+        (false, false, true) => "",
+        (false, false, false) => " (optional)",
     };
     let why = sentence(&flagged.finding.message, WHY_CHARS);
     format!(

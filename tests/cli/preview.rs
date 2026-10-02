@@ -42,10 +42,10 @@ fn preview_sends_one_request_per_candidate_pair_without_local_metadata() {
     let requests = report["initial_requests"].as_array().unwrap();
     assert_eq!(requests.len(), 1);
     assert!(requests[0].get("jevgate").is_none());
-    let state = &requests[0]["state"];
-    assert_eq!(state["site_a"]["function"], "a");
-    assert_eq!(state["site_b"]["function"], "b");
-    assert!(requests[0]["questions"]["same"]["type"] == "score");
+    let sites = &requests[0]["state"]["sites"];
+    assert_eq!(sites[0]["function"], "a");
+    assert_eq!(sites[1]["function"], "b");
+    assert!(requests[0]["questions"]["look"]["type"] == "noul");
     let stage = &report["stages"]["duplicate-pair"];
     assert_eq!(stage["planned_requests"], 1);
     assert!(stage["planned_tokens"].as_u64().unwrap() > 0);

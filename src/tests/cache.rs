@@ -380,15 +380,16 @@ fn paid_tokens_are_what_was_sent_and_a_file_counts_its_answers_shares() {
     let mut mock = Mock::default();
     let first = run(&project, &options, &mut mock);
     assert_eq!((first.api_requests, first.paid_input_tokens), (1, 10));
+    // Each function is asked its split Score and its look-here question.
     let stage = &first.stages["functions"];
-    assert_eq!((stage.asked_questions, stage.cached_questions), (2, 0));
+    assert_eq!((stage.asked_questions, stage.cached_questions), (4, 0));
     let cached = run(&project, &options, &mut mock);
     assert_eq!((cached.api_requests, cached.paid_input_tokens), (0, 0));
     assert_eq!(
         cached.files[0].input_tokens, 10,
         "the shares add up to what was paid"
     );
-    assert_eq!(cached.stages["functions"].cached_questions, 2);
+    assert_eq!(cached.stages["functions"].cached_questions, 4);
 }
 
 /// The one state file of a project whose run asked about one state.
@@ -420,7 +421,7 @@ fn a_dry_run_counts_the_questions_the_cache_answers_and_prices_the_rest() {
     let cold = preview(&options);
     assert_eq!(
         (cold.planned_questions, cold.planned_cached_questions),
-        (2, 0)
+        (4, 0)
     );
     options.dry_run = false;
     run(&project, &options, &mut Mock::default());
@@ -437,7 +438,7 @@ fn a_dry_run_counts_the_questions_the_cache_answers_and_prices_the_rest() {
     );
     assert_eq!(
         (partial.planned_questions, partial.planned_cached_questions),
-        (2, 1)
+        (4, 3)
     );
     assert!(
         (1..cold.planned_tokens).contains(&partial.planned_tokens),
@@ -447,7 +448,7 @@ fn a_dry_run_counts_the_questions_the_cache_answers_and_prices_the_rest() {
     );
     let headline = output::headline(&snapshot(&project, &options).1);
     assert!(
-        headline.contains("2 questions, 1 answered by the cache"),
+        headline.contains("4 questions, 3 answered by the cache"),
         "{headline}"
     );
 }

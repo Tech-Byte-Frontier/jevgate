@@ -29,9 +29,13 @@ fn top_level_setup_is_one_unit_for_unsafe_settings() {
 fn a_broad_weak_setting_answer_that_no_check_names_is_a_note() {
     let (project, options) = security_project(QUERY);
     let unnamed = run_with_nouls(&project, &options, &[("weakened", 0.95), ("debug", 0.95)]);
-    let finding = &unnamed.files[0].findings[0];
-    assert_eq!(finding.rule, "security/unsafe-settings");
-    assert_eq!(finding.strength, Strength::Note);
+    // A note, which one level does not report.
+    assert!(
+        !unnamed.files[0]
+            .findings
+            .iter()
+            .any(|f| f.rule == "security/unsafe-settings")
+    );
     let asked = |report: &Report, question: &str| {
         report.files[0]
             .judgments
@@ -44,7 +48,7 @@ fn a_broad_weak_setting_answer_that_no_check_names_is_a_note() {
     );
     let (project, options) = security_project(QUERY);
     let named = run_with_nouls(&project, &options, &[("weakened", 0.95), ("cookie", 0.95)]);
-    assert_eq!(named.files[0].findings[0].strength, Strength::Review);
+    assert_eq!(composed(&named.files[0].findings[0]), Strength::Review);
 
     let project = Project::new();
     project.write(
@@ -56,7 +60,7 @@ fn a_broad_weak_setting_answer_that_no_check_names_is_a_note() {
     let named = run_with_nouls(&project, &options, &[("weakened", 0.95), ("debug", 0.95)]);
     assert!(asked(&named, "debug") && asked(&named, "token"));
     let finding = &named.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(composed(finding), Strength::Review);
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-489 active debug code")
@@ -125,7 +129,7 @@ fn a_csharp_setup_trace_shows_the_constants_it_names_and_finds_a_key_written_in_
         .find(|f| f.path.ends_with("Program.cs"))
         .unwrap();
     let finding = &program.findings[0];
-    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(composed(finding), Strength::Review);
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-321 hard-coded cryptographic key")
@@ -179,7 +183,7 @@ fn code_outside_csharp_and_django_is_asked_about_tokens_keys_and_escaping() {
         assert!(questions[check].is_object(), "{check}");
     }
     let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(composed(finding), Strength::Review);
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-321 hard-coded cryptographic key")
@@ -222,7 +226,7 @@ fn a_token_the_code_only_passes_on_is_no_review() {
                 .any(|r| r["questions"]["token_use"].is_object()),
             "asked although the check found a concern"
         );
-        report.files[0].findings.first().map(|f| f.strength)
+        report.files[0].findings.first().map(composed)
     };
     assert_eq!(strength("turned_off"), Some(Strength::Review));
     assert_eq!(
@@ -230,10 +234,10 @@ fn a_token_the_code_only_passes_on_is_no_review() {
         Some(Strength::Consider),
         "whether a token was verified before lies outside the function"
     );
-    assert_eq!(strength("reads_claims"), Some(Strength::Note));
+    assert_eq!(strength("reads_claims"), None);
     assert_eq!(
         strength("passes"),
-        Some(Strength::Note),
+        None,
         "the broad answer alone names no setting"
     );
 }
@@ -248,7 +252,7 @@ fn a_password_saved_as_plain_text_is_a_consider_and_one_hashed_fast_a_review() {
             &[("weakened", 0.95), ("hash", 0.9)],
             Some(("password_handling", choice_of(choice, &HANDLING))),
         );
-        report.files[0].findings.first().map(|f| f.strength)
+        report.files[0].findings.first().map(composed)
     };
     assert_eq!(strength("fast_hash"), Some(Strength::Review));
     assert_eq!(

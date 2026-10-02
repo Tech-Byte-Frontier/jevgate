@@ -148,7 +148,11 @@ fn every_undecided_unit_quotes_each_question_it_left_open() {
         .filter(|(_, d)| !d.undecided.is_empty())
         .map(|(rule, _)| rule.as_str())
         .collect();
-    assert!(rules.len() >= 3, "{rules:?}");
+    // Look-here questions never leave a unit undecided; literal checks do.
+    assert!(
+        rules.contains("injection") && rules.contains("test_value"),
+        "{rules:?}"
+    );
     for unit in &undecided {
         assert_eq!(unit.open.len(), unit.questions.len(), "{unit:#?}");
         assert_eq!(unit.fingerprint.len(), 64);
@@ -234,8 +238,9 @@ fn a_request_refused_as_beyond_the_context_leaves_its_units_unsent() {
     let report = run(&project, &options, &mut refusing);
     let file = &report.files[0];
     assert_ne!(file.status, Status::Error, "{:?}", file.error);
+    // Its split stays undecided, and its look-here answer clears it.
     let units = &file.dimensions["function_simplification"].units;
-    assert_eq!((units.judged, units.uncertain), (1, 1));
+    assert_eq!((units.judged, units.uncertain, units.clear), (1, 0, 1));
 }
 
 /// The rules whose first pass asks about functions.
@@ -269,9 +274,9 @@ fn every_rule_asks_about_a_function_in_one_request_that_sends_it_once() {
         .map(|f| f["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["find", "scan"]);
-    assert_eq!(
-        functions[0]["values"],
-        json!(["\"SELECT id FROM {table}\"", "40"])
+    assert!(
+        functions[0].get("values").is_none(),
+        "the look-here questions read the source"
     );
     let asked: Vec<(&str, &str, &str)> = pack
         .asked
@@ -288,9 +293,8 @@ fn every_rule_asks_about_a_function_in_one_request_that_sends_it_once() {
                 catalog::FUNCTION_SIMPLIFICATION,
                 "function:find"
             ),
-            ("f0_environment", catalog::HARDCODED_VALUES, "values:find"),
-            ("f0_magic", catalog::HARDCODED_VALUES, "values:find"),
-            ("f0_special", catalog::HARDCODED_VALUES, "values:find"),
+            ("f0_look", catalog::FUNCTION_SIMPLIFICATION, "function:find"),
+            ("f0_values", catalog::HARDCODED_VALUES, "values:find"),
             ("f0_interpreted", catalog::INJECTION, "injection:find"),
             ("f0_resource", catalog::INJECTION, "injection:find"),
             ("f0_logs_secret", catalog::SENSITIVE_DATA, "data:find"),
@@ -315,7 +319,7 @@ fn a_preview_language_s_function_pack_asks_only_function_simplification() {
     };
     let every = packs(&FUNCTION_RULES);
     let keys: Vec<&String> = every[0]["questions"].as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["f0_split"]);
+    assert_eq!(keys, ["f0_look", "f0_split"]);
     assert!(every[0]["state"]["functions"][0].get("values").is_none());
     assert_eq!(every, packs(&[catalog::FUNCTION_SIMPLIFICATION]));
 }
@@ -358,13 +362,13 @@ fn a_packs_questions_are_cached_one_by_one_so_a_reworded_one_is_asked_alone() {
     let receipt = ask(&reworded);
     let (body, _, cached) = receipt.result.unwrap();
     assert!(!cached);
-    assert_eq!(body["answers"].as_object().unwrap().len(), 9);
+    assert_eq!(body["answers"].as_object().unwrap().len(), 8);
     assert_eq!(
         (
             receipt.metrics.asked_questions,
             receipt.metrics.cached_questions
         ),
-        (1, 8),
+        (1, 7),
         "the other rules' answers about the pack come from the cache"
     );
     let sent: Vec<&String> = mock.requests[1]["questions"]

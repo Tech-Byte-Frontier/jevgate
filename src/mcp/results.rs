@@ -556,7 +556,8 @@ mod tests {
         assert_eq!(result["gate"]["passed"], false);
         assert_eq!(
             result["findings"][1]["precision"],
-            json!({"right": 46, "labeled": 85})
+            json!({"right": 0, "labeled": 0}),
+            "a look-here question is not yet measured"
         );
     }
 

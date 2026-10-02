@@ -158,7 +158,7 @@ fn an_unchecked_definer_is_a_review_and_an_open_search_path_a_consider() {
             .unwrap()
     };
     let definer = &file("2_own.sql").findings[0];
-    assert_eq!(definer.strength, Strength::Consider);
+    assert_eq!(composed(definer), Strength::Consider);
     assert_eq!(definer.rule, "security/access-control");
     assert_eq!(
         definer.category.as_deref(),
@@ -171,7 +171,7 @@ fn an_unchecked_definer_is_a_review_and_an_open_search_path_a_consider() {
     );
     assert_eq!(file("1_init.sql").status, Status::NotApplicable);
     let job = &file("greet.yml").findings[0];
-    assert_eq!(job.strength, Strength::Review);
+    assert_eq!(composed(job), Strength::Review);
     assert_eq!(job.category.as_deref(), Some("CWE-78 command injection"));
     assert!(
         job.message
@@ -281,7 +281,7 @@ fn spacetimedb_tables_views_and_reducers_are_judged_with_helpers_and_the_version
         .iter()
         .find(|f| f.symbol.as_deref() == Some("renameCharacter"))
         .unwrap();
-    assert_eq!(reducer.strength, Strength::Review);
+    assert_eq!(composed(reducer), Strength::Review);
     assert!(
         reducer
             .message
@@ -297,7 +297,7 @@ fn spacetimedb_tables_views_and_reducers_are_judged_with_helpers_and_the_version
         .iter()
         .find(|f| f.symbol.as_deref() == Some("character"))
         .unwrap();
-    assert_eq!(table.strength, Strength::Consider);
+    assert_eq!(composed(table), Strength::Consider);
     assert!(
         table
             .message

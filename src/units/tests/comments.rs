@@ -84,19 +84,19 @@ fn repeated_code_in_one_function_is_one_consider_and_documentation_a_note() {
     let file = &report.files[0];
     let dimension = &file.dimensions[catalog::COMMENTS];
     assert_eq!(
-        (dimension.units.judged, dimension.units.consider),
+        (dimension.units.judged, dimension.units.review),
         (4, 3),
-        "comments are never reviews"
+        "comments reach a consider at most, reported as a review"
     );
     let findings: Vec<_> = file
         .findings
         .iter()
-        .map(|f| (f.strength, f.line, f.locations.len()))
+        .map(|f| (composed(f), f.line, f.locations.len()))
         .collect();
     assert_eq!(
         findings,
-        [(Strength::Consider, 4, 3), (Strength::Note, 1, 1)],
-        "the three comments inside `total` are one finding"
+        [(Strength::Consider, 4, 3)],
+        "the three comments inside `total` are one finding; the documentation's note is not reported"
     );
     let consider = &file.findings[0];
     assert_eq!(consider.rule, "documentation/comments");
@@ -116,12 +116,9 @@ fn a_single_short_comment_is_a_note_and_a_narrated_edit_is_rewritten() {
     let mut eval = scripted(0);
     eval.overrides = vec![("_history", json!({"type":"noul","noul":0.95}))];
     let report = run(&project, &options, &mut eval);
-    let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Note, "one line costs little");
     assert!(
-        finding.message.contains("narrates an edit"),
-        "{}",
-        finding.message
+        report.files[0].findings.is_empty(),
+        "one line costs little: a note, which is not reported"
     );
     let long = source.replace(
         "    // Now sums with a loop instead of fold, as requested.\n",
@@ -131,7 +128,12 @@ fn a_single_short_comment_is_a_note_and_a_narrated_edit_is_rewritten() {
     options.refresh = true;
     let report = run(&project, &options, &mut eval);
     let finding = &report.files[0].findings[0];
-    assert_eq!(finding.strength, Strength::Consider);
+    assert_eq!(composed(finding), Strength::Consider);
+    assert!(
+        finding.message.contains("narrates an edit"),
+        "{}",
+        finding.message
+    );
     assert!(
         finding
             .action
@@ -143,7 +145,7 @@ fn a_single_short_comment_is_a_note_and_a_narrated_edit_is_rewritten() {
 
 #[test]
 fn an_undecided_comment_is_rechecked_then_settled_by_its_kind() {
-    let source = "fn total(values: &[i32]) -> i32 {\n    let mut sum = 0;\n    // Walk the values\n    // one by one.\n    for value in values {\n        sum += value;\n    }\n    sum\n}\n";
+    let source = "fn total(values: &[i32]) -> i32 {\n    let mut sum = 0;\n    // Walk the values\n    // one by one,\n    // in order.\n    for value in values {\n        sum += value;\n    }\n    sum\n}\n";
     let (project, options) = rule_project(source, catalog::COMMENTS);
     let mut eval = scripted(UNDECIDED);
     let report = run(&project, &options, &mut eval);
@@ -164,14 +166,15 @@ fn an_undecided_comment_is_rechecked_then_settled_by_its_kind() {
     eval.overrides = vec![("kind", choice_of("restates", &kinds))];
     let report = run(&project, &options, &mut eval);
     let finding = &report.files[0].findings[0];
-    // Two lines in all: a note.
-    assert_eq!(finding.strength, Strength::Note);
+    // Three lines in all: a consider.
+    assert_eq!(composed(finding), Strength::Consider);
     assert!(
-        finding.message.contains("at lines 3–4 it repeats the code"),
+        finding.message.contains("at lines 3–5 it repeats the code"),
         "{}",
         finding.message
     );
-    // A kind that only leans decides as well: toward restating, a note.
+    // A kind that only leans decides as well: toward restating, a note,
+    // which is not reported.
     let leaning = |restates: f64| {
         let mut probabilities: serde_json::Map<String, Value> =
             kinds.iter().map(|k| (k.to_string(), json!(0.0))).collect();
@@ -186,7 +189,7 @@ fn an_undecided_comment_is_rechecked_then_settled_by_its_kind() {
     };
     eval.overrides = vec![("kind", leaning(0.6))];
     let report = run(&project, &options, &mut eval);
-    assert_eq!(report.files[0].findings[0].strength, Strength::Note);
+    assert!(report.files[0].findings.is_empty());
     eval.overrides = vec![("kind", leaning(0.4))];
     let report = run(&project, &options, &mut eval);
     let dimension = &report.files[0].dimensions[catalog::COMMENTS];

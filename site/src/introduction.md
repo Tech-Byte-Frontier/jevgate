@@ -5,13 +5,14 @@
 JevGate parses your repository locally and builds small units of evidence: a function, a file outline, a pair of copies, a test, a documentation section. It asks [TypeSafe Jev](https://docs.typesafe.ai) short, typed questions about each one. Code, not a chat model, combines the answers into a verdict. Each finding has a location, how often findings like it were right and a concrete next step, so an agent or CI job can act on it and a person can check it quickly. By default the gate fails only on the rules and levels measured right at least 80% of the time on projects JevGate was never tuned on: among the default rules, function-simplification reviews, right 20 of the 23 times they were labeled there (87%), and 80 of 93 times on 27 more public projects ([accuracy](accuracy.md)).
 
 ```text
-JevGate: consider · gate passed · 42 files · 118 API requests · 263410 input tokens · ~$0.0111
+JevGate: review · gate passed · 42 files · 118 API requests · 263410 input tokens · ~$0.0111
 
-Consider (2):
+Review (2):
   src/billing/invoices.ts:88 [maintainability/shared-logic] `createInvoice` and `createReceipt`
-    perform the same steps for the same purpose. Differences: `invoices`→`receipts`.
-    Right 59% of the time (129 labels).
-    → Move the shared steps into one implementation
+    may repeat one piece of logic, so a change to it would have to be made in each place.
+    Not yet measured.
+    → Keep the logic in one shared function, or dismiss this finding with a reason if the
+      copies must stay separate
   src/api/search.py:41 [security/injection] `search_orders` places its parameters into a
     database query without binding, escaping or checking them; a caller passing outside
     input would make it exploitable. Not yet measured.

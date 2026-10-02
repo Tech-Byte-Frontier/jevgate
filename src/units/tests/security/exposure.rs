@@ -46,7 +46,7 @@ fn development_only_exposure_is_one_level_lower_and_names_its_weakness() {
     );
     let finding = &report.files[0].findings[0];
     assert_eq!(finding.rule, "security/sensitive-data");
-    assert_eq!(finding.strength, Strength::Consider);
+    assert_eq!(composed(finding), Strength::Consider);
     assert_eq!(
         finding.category.as_deref(),
         Some("CWE-532 sensitive data in logs")
@@ -79,17 +79,9 @@ fn error_details_clear_on_the_programs_own_messages_or_lean_into_a_note() {
             ("own_messages", 0.5),
         ],
     );
-    let note = &report.files[0].findings[0];
-    assert_eq!(note.strength, Strength::Note);
-    assert!(
-        note.message.contains("may send internal error details"),
-        "{}",
-        note.message
-    );
-    assert_eq!(
-        note.category.as_deref(),
-        Some("CWE-209 error details exposed")
-    );
+    // Leaning toward a client, it is a note, which one level does not report.
+    assert!(report.files[0].findings.is_empty());
+    assert_eq!(status(&report), Status::Clear);
 }
 
 #[test]
@@ -104,22 +96,11 @@ fn a_foreign_error_message_names_the_error_text_in_an_error_detail_note() {
             ("own_messages", 0.1),
         ],
     );
-    let finding = &report.files[0].findings[0];
+    // Where the text goes is still undecided: a note, not reported.
+    assert!(report.files[0].findings.is_empty());
     assert_eq!(
-        finding.strength,
-        Strength::Note,
-        "where the text goes is still undecided"
-    );
-    assert!(
-        finding
-            .message
-            .contains("text of a library or database error"),
-        "{}",
-        finding.message
-    );
-    assert_eq!(
-        finding.category.as_deref(),
-        Some("CWE-209 error details exposed")
+        report.files[0].dimensions[catalog::SENSITIVE_DATA].status,
+        Status::Clear
     );
 }
 
@@ -230,19 +211,8 @@ fn each_created_error_message_is_asked_about_and_names_the_foreign_one() {
     );
     options.refresh = true;
     let report = run_with(&options, "m0");
-    let finding = &report.files[0].findings[0];
-    assert_eq!(
-        finding.strength,
-        Strength::Note,
-        "where the text goes is still undecided"
-    );
-    assert!(
-        finding
-            .message
-            .ends_with("into an error message, which may reach a remote client."),
-        "{}",
-        finding.message
-    );
+    // Where the text goes is still undecided: a note, not reported.
+    assert!(report.files[0].findings.is_empty());
 }
 
 #[test]

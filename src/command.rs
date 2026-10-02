@@ -196,7 +196,7 @@ fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> 
             let marked = baseline::mark(&context.root, reason, &targets, &keys)?;
             say!(
                 "Marked {} as {}",
-                output::count(marked, "accepted finding"),
+                output::count(marked, "finding"),
                 output::label(&reason)
             );
         }

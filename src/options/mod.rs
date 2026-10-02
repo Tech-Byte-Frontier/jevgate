@@ -72,16 +72,18 @@ impl Moment {
 /// for 8 minutes before it ended incomplete.
 pub const HOOK_SECONDS: u64 = 60;
 
-/// Results that fail the check. Consider also fails on review findings.
+/// Results that fail the check. Every finding is a review, so `consider`
+/// fails on the same findings as `review`.
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 pub enum FailOn {
-    /// New review findings
+    /// Every new finding
     Review,
-    /// New review or consider findings
+    /// Every new finding, as review does
     Consider,
-    /// New findings of the rule's mature levels, measured right at least 80%
-    /// of the time on projects JevGate was never tuned on, outside the
-    /// preview languages, or of a custom question's own level (the default)
+    /// New findings whose questions composed one of the rule's mature levels,
+    /// measured right at least 80% of the time on projects JevGate was never
+    /// tuned on, outside the preview languages, or of a custom question's
+    /// own level (the default)
     Mature,
     /// Files whose answers stayed undecided or that need context
     Uncertain,
@@ -257,15 +259,17 @@ pub struct CheckArgs {
     pub skip_rules: Vec<String>,
     /// What fails the gate: LEVEL for every rule, or TARGET=LEVEL (repeatable) [default: mature]
     ///
-    /// LEVEL is review, consider (also fails on review), mature, uncertain, or
-    /// none (advisory; `report` is accepted as a synonym). `mature` fails only
-    /// on the levels of a rule measured right at least 80% of the time on
-    /// projects JevGate was never tuned on, never in a preview language, and
-    /// on a custom question's own level (`jevgate rules` shows them); other
-    /// findings are reported without failing. TARGET is a rule ID, key or
-    /// group, for example `security=consider`; the most specific target wins.
-    /// Flags replace `fail_on` and `[rules]` levels from jevgate.toml for the
-    /// rules they address. Notes and baselined findings never fail the gate.
+    /// LEVEL is review (every new finding; `consider` is the same), mature,
+    /// uncertain, or none (advisory; `report` is accepted as a synonym).
+    /// `mature` fails only on the levels of a rule measured right at least 80%
+    /// of the time on projects JevGate was never tuned on, as its questions
+    /// composed them, never in a preview language, and on a custom question's
+    /// own level (`jevgate rules` shows them); other findings are reported
+    /// without failing. TARGET is a rule ID, key or group, for example
+    /// `security=review`; the most specific target wins. Flags replace
+    /// `fail_on` and `[rules]` levels from jevgate.toml for the rules they
+    /// address. Baselined and dismissed findings, and a custom question's
+    /// notes, never fail the gate.
     /// An incomplete run exits 2 regardless of the gate, unless --on-incomplete
     /// passes it.
     #[arg(long = "fail-on", value_name = "[TARGET=]LEVEL", value_parser = fail_on_spec, help_heading = RULES)]
@@ -312,7 +316,7 @@ pub struct CheckArgs {
     /// that set TERM count. Other formats are never colored.
     #[arg(long, value_enum, value_name = "WHEN", default_value_t = ColorChoice::Auto, help_heading = OUTPUT)]
     pub color: ColorChoice,
-    /// Show optional notes, every consider finding and per-file detail in agent output
+    /// Show every finding and per-file detail in agent output
     #[arg(long, help_heading = OUTPUT)]
     pub verbose: bool,
     /// Also write .jevgate/report.html and open it in a browser (not opened when CI is set)

@@ -56,11 +56,13 @@ fn an_allow_comment_added_in_the_turn_does_not_let_the_agent_stop() {
         "{why}"
     );
     assert!(
-        why.ends_with("accepting findings is the person's call, so leave that to them."),
+        why.ends_with(
+            "accepting findings that way is the person's call, so dismiss with a reason instead."
+        ),
         "{why}"
     );
     assert!(
-        message(&blocked).ends_with("JevGate: this turn adds 1 `jevgate: allow` comment (lib.rs:1 accepts a finding: // jevgate: allow(function-simplification) it reads as one job). Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began."),
+        message(&blocked).ends_with("JevGate: this turn adds 1 `jevgate: allow` comment (lib.rs:1 accepts a finding: // jevgate: allow(function-simplification) it reads as one job). Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began, except findings dismissed with a reason."),
         "{blocked}"
     );
     // From the next turn on, the comment is the person's to keep or remove.
@@ -187,10 +189,6 @@ fn settings_the_turn_breaks_do_not_let_the_agent_stop() {
         );
     }
 }
-
-/// A custom question about every function, which `reviewing` answers yes.
-const BODY_LOGS: &str =
-    "question = \"Does this function write a request body to a log?\"\nunit = \"function\"\n";
 
 /// A repository judged only by `custom/body-logs`, from its question file;
 /// with `ignored`, a root `.gitignore` entry of `/.jevgate/` keeps that file
@@ -380,7 +378,7 @@ fn an_edit_to_jevgate_toml_alone_is_told_to_the_person() {
     assert!(stopped.get("decision").is_none());
     assert_eq!(
         message(&stopped),
-        "JevGate: this turn edits jevgate.toml (jevgate.toml is edited: fail_on). Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began."
+        "JevGate: this turn edits jevgate.toml (jevgate.toml is edited: fail_on). Its gate read jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began, except findings dismissed with a reason."
     );
 }
 
@@ -396,7 +394,7 @@ fn a_suppression_and_a_skipped_test_reach_the_agent_once_and_the_person_at_the_s
     let first = send(&project, &host, edit(&project, "lib.rs"));
     assert_eq!(
         context(&first),
-        "JevGate noticed that this turn adds 1 suppression so far:\n- lib.rs:1 turns off the Rust compiler or Clippy here: #[allow(dead_code)]\nJevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began."
+        "JevGate noticed that this turn adds 1 suppression so far:\n- lib.rs:1 turns off the Rust compiler or Clippy here: #[allow(dead_code)]\nJevGate reports these to the person at the end of the turn. Within a turn it reads jevgate.toml, custom questions, the baseline and `jevgate: allow` comments as they were when the turn began, except a finding dismissed with a reason through `jevgate baseline mark`."
     );
     assert!(
         send(&project, &host, edit(&project, "lib.rs"))

@@ -611,9 +611,7 @@ impl Outcome {
 /// Compact JSON: ureq's `send_json` pretty-prints, and the provider's edge
 /// blocks indented bodies carrying JSX that it accepts when compact.
 fn request_body(request: &Value) -> Result<Vec<u8>> {
-    Ok(serde_json::to_vec(
-        crate::requests::provider_request(request).as_ref(),
-    )?)
+    Ok(crate::requests::body(request)?)
 }
 
 /// Send one request, giving up at the agent's timeout or after `timeout`

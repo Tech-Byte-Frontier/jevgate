@@ -35,12 +35,8 @@ pub(super) enum Ask {
     /// Function simplification: whether splitting it would help and, where
     /// its nesting is deep, whether flattening it would.
     Split { unit: usize, nested: bool },
-    /// Hardcoded values: whether the literal values in `evidence` change
-    /// between deployments, need a name, or special-case one identity.
-    Values {
-        unit: usize,
-        evidence: Map<String, Value>,
-    },
+    /// Hardcoded values: whether the function holds a fixed value worth a look.
+    Values { unit: usize },
     /// The presence questions of each enabled security rule, one unit per
     /// rule, with the framework facts its code is judged with.
     Presence {
@@ -60,8 +56,8 @@ impl Ask {
 
     fn evidence(&self) -> Option<&Map<String, Value>> {
         match self {
-            Self::Split { .. } => None,
-            Self::Values { evidence, .. } | Self::Presence { evidence, .. } => Some(evidence),
+            Self::Split { .. } | Self::Values { .. } => None,
+            Self::Presence { evidence, .. } => Some(evidence),
         }
     }
 
@@ -83,7 +79,7 @@ impl Ask {
             Self::Split { unit, nested } => {
                 functions::ask(questions, index, &out.units[*unit].id, *nested, Pass::First);
             }
-            Self::Values { unit, .. } => hardcoded::ask(questions, index, &out.units[*unit].id),
+            Self::Values { unit } => hardcoded::ask(questions, index, &out.units[*unit].id),
             Self::Presence { units, django, .. } => {
                 let units: Vec<(&'static str, &str)> = units
                     .iter()
@@ -281,9 +277,6 @@ mod tests {
         out.units.push(unit(FUNCTION_SIMPLIFICATION, name, split));
         let values = Detail::Values {
             values: vec!["40".into()],
-            choices: vec!["40".into()],
-            repeated: vec![false],
-            locate: Some(follow_up()),
         };
         out.units.push(unit(HARDCODED_VALUES, name, values));
         let ask = |ask| FunctionAsk {
@@ -299,7 +292,6 @@ mod tests {
             }),
             ask(Ask::Values {
                 unit: out.units.len() - 1,
-                evidence: Map::from_iter([("values".to_string(), json!(["40"]))]),
             }),
         ]
     }
@@ -354,7 +346,7 @@ mod tests {
                 .is_some_and(|f| f.len() == 1)
         };
         let asked = planned(asks, &mut out, &one_function);
-        let every_rule = ["f0_environment", "f0_magic", "f0_special", "f0_split"];
+        let every_rule = ["f0_look", "f0_split", "f0_values"];
         assert_eq!(asked, [every_rule, every_rule]);
         assert!(out.units.iter().all(|u| u.presence == Presence::Judged));
     }
@@ -363,21 +355,24 @@ mod tests {
     fn a_function_whose_questions_do_not_fit_together_is_asked_rule_by_rule() {
         let mut out = FilePlan::default();
         let asks = Vec::from(judged("find", 0, &mut out));
-        let split_alone = |request: &Value| {
-            request["questions"]
-                .as_object()
-                .is_some_and(|q| q.keys().all(|key| key.ends_with("_split")))
+        // Function simplification's two questions fit; the values do not.
+        let simplification_alone = |request: &Value| {
+            request["questions"].as_object().is_some_and(|q| {
+                q.keys()
+                    .all(|key| key.ends_with("_split") || key.ends_with("_look"))
+            })
         };
-        assert_eq!(planned(asks, &mut out, &split_alone), [["f0_split"]]);
+        assert_eq!(
+            planned(asks, &mut out, &simplification_alone),
+            [["f0_look", "f0_split"]]
+        );
         let [split, values] = &out.units[..] else {
             panic!("two units");
         };
         assert_eq!(split.presence, Presence::Judged);
         assert!(split.recheck.is_some(), "the split is still rechecked");
-        // Its values could not be sent even alone: they need context, and
-        // neither their recheck nor their locate is asked.
+        // Its values could not be sent even alone: they need context.
         assert_eq!(values.presence, Presence::NeedsContext);
         assert!(values.recheck.is_none());
-        assert!(matches!(values.detail, Detail::Values { locate: None, .. }));
     }
 }

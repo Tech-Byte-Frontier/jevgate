@@ -80,7 +80,7 @@ fn an_unhandled_value_from_another_party_is_a_located_injection_review() {
     );
     let finding = &report.files[0].findings[0];
     assert_eq!(finding.rule, "security/injection");
-    assert_eq!(finding.strength, Strength::Review);
+    assert_eq!(composed(finding), Strength::Review);
     assert_eq!(finding.category.as_deref(), Some("CWE-89 SQL injection"));
     assert_eq!(finding.line, 2, "located at the chosen site");
     assert!(finding.action.contains("bound query parameters"));
@@ -108,7 +108,7 @@ fn a_parameter_origin_is_a_consider_that_callers_can_settle() {
     let report = run(&project, &options, &mut eval);
     assert_eq!(
         report.files[0].dimensions[catalog::INJECTION].status,
-        Status::Consider,
+        Status::Review,
         "no caller is known, so the parameter stays a concern"
     );
     let (project, options) = security_project(&caller);
@@ -151,11 +151,11 @@ fn a_parameter_consider_is_a_note_when_its_values_are_the_programs_own() {
             .findings
             .iter()
             .find(|f| f.rule == "security/injection" && f.symbol.as_deref() == Some("find"))
-            .map(|f| f.strength)
+            .map(composed)
     };
     assert_eq!(
         judged(choice_of("fixed", &VALUES)),
-        Some(Strength::Note),
+        None,
         "the caller passes a literal"
     );
     assert_eq!(
@@ -171,7 +171,7 @@ fn a_parameter_consider_is_a_note_when_its_values_are_the_programs_own() {
         json!({"type":"choice","choice":"unknown","confidence":0.4,"probabilities":split});
     assert_eq!(
         judged(leaning),
-        Some(Strength::Note),
+        None,
         "the program's own options together lead"
     );
 }
@@ -213,11 +213,12 @@ fn a_parameter_in_a_path_or_url_is_a_note_until_callers_show_another_party() {
         ("origin", spread(0.0, 0.9, 0.1)),
         ("url_parts", choice_of("given", &URL_PARTS)),
     ];
-    let finding = &first_finding(&project, &options, &mut eval);
-    assert_eq!(finding.strength, Strength::Note);
+    let report = run(&project, &options, &mut eval);
+    // A note, which one level does not report.
+    assert!(report.files[0].findings.is_empty());
     assert_eq!(
-        finding.category.as_deref(),
-        Some("CWE-918 server-side request forgery")
+        report.files[0].dimensions[catalog::INJECTION].status,
+        Status::Clear
     );
 }
 
@@ -294,8 +295,8 @@ fn an_undecided_url_is_settled_only_by_a_host_of_the_programs_own() {
     // A URL its caller gives or forwards is a note, as a found one would be;
     // one from another party stays open.
     for (parts, status) in [
-        ("forwards", Status::Note),
-        ("given", Status::Note),
+        ("forwards", Status::Clear),
+        ("given", Status::Clear),
         ("outside", Status::Uncertain),
     ] {
         options.refresh = true;
@@ -313,7 +314,7 @@ fn an_undecided_path_is_settled_by_the_programs_own_or_its_local_users_paths() {
     for (parts, status) in [
         ("own", Status::Clear),
         ("local", Status::Clear),
-        ("given", Status::Note),
+        ("given", Status::Clear),
         ("outside", Status::Uncertain),
     ] {
         assert_eq!(
@@ -323,21 +324,6 @@ fn an_undecided_path_is_settled_by_the_programs_own_or_its_local_users_paths() {
         );
         options.refresh = true;
     }
-    // The note names the path it left undecided.
-    let mut eval = scripted(0);
-    eval.overrides = vec![
-        ("resource", noul_at(0.95)),
-        ("path", noul_at(0.4)),
-        ("origin", spread(0.0, 0.9, 0.1)),
-        ("path_source", choice_of("given", &PATH_SOURCE)),
-    ];
-    let report = run(&project, &options, &mut eval);
-    let note = &report.files[0].findings[0];
-    assert!(
-        note.message.contains("places a parameter into a file path"),
-        "{}",
-        note.message
-    );
 }
 
 #[test]
@@ -352,49 +338,6 @@ fn checks_that_all_clear_rule_out_an_uncertain_presence() {
     assert_eq!(
         report.files[0].dimensions[catalog::INJECTION].status,
         Status::Clear
-    );
-}
-
-#[test]
-fn an_undecided_value_is_cleared_by_its_kind_or_leans_into_a_note() {
-    let (project, mut options) = hardcoded_project();
-    let split = || {
-        vec![
-            ("environment", spread(0.4, 0.1, 0.5)),
-            ("magic", spread(0.6, 0.1, 0.3)),
-        ]
-    };
-    let mut eval = scripted(0);
-    eval.overrides = split();
-    let report = run(&project, &options, &mut eval);
-    assert!(eval.stages.contains(&"recheck".to_string()));
-    let dimension = &report.files[0].dimensions["hardcoded_values"];
-    assert_eq!(
-        (dimension.units.note, dimension.units.uncertain),
-        (2, 0),
-        "not cleared by the kind checks, and leaning toward the concern"
-    );
-    let leaned = report.files[0]
-        .findings
-        .iter()
-        .find(|f| f.symbol.as_deref() == Some("connect"))
-        .expect("the environment answer leaned toward its concern");
-    assert_eq!(leaned.strength, Strength::Note);
-    assert!(
-        leaned.message.contains("the answer was split"),
-        "{}",
-        leaned.message
-    );
-    options.refresh = true;
-    let mut eval = scripted(0);
-    eval.overrides = split();
-    eval.recheck_level = Some(2);
-    let report = run(&project, &options, &mut eval);
-    let dimension = &report.files[0].dimensions["hardcoded_values"];
-    assert_eq!(
-        dimension.status,
-        Status::Clear,
-        "every value is of an acceptable kind"
     );
 }
 
@@ -561,7 +504,7 @@ fn a_decided_check_asks_no_settle_choice() {
         settle,
     );
     assert_eq!(settles, 0, "a markup check at review is not second-guessed");
-    assert_eq!(status, Status::Consider);
+    assert_eq!(status, Status::Review);
 }
 
 #[test]

@@ -89,7 +89,7 @@ It reads every file before writing any, so when it stops, nothing was written.
 
 ## The agent accepted a finding and the hook still blocks
 
-Within a turn, the agent hook reads `jevgate.toml`, the custom questions in it and in `.jevgate/questions/`, `jevgate-baseline.json` and `jevgate: allow` comments as they were when the turn began, so an agent cannot unblock itself by accepting its own findings or loosening the gate, which includes deleting a custom question or lowering it to a note. Such a finding is marked `(fails the gate; accepted this turn)`, the person is told of the edit when the turn ends, and the edit counts from the next turn. If the finding is wrong, keep the accepting edit; if not, remove it. The same holds for a `jevgate.toml` or baseline the turn leaves unreadable (the person reads that it `does not parse`), and for a generated-code marker (`// @generated`, `DO NOT EDIT`) added to a file JevGate judged when the turn began: the file is judged this turn, and a guard says it is skipped from now on.
+Within a turn, the agent hook reads `jevgate.toml`, the custom questions in it and in `.jevgate/questions/`, `jevgate-baseline.json` and `jevgate: allow` comments as they were when the turn began, so an agent cannot unblock itself by accepting its own findings wholesale or loosening the gate, which includes deleting a custom question or lowering it to a note. Such a finding is marked `(accepted this turn)`, the person is told of the edit when the turn ends, and the edit counts from the next turn. If the finding is wrong, keep the accepting edit; if not, remove it. A finding the agent dismisses with a reason through `jevgate baseline mark` counts at once, and the person reads each dismissal when the turn ends and audits them with `jevgate baseline stats`. The same holds for a `jevgate.toml` or baseline the turn leaves unreadable (the person reads that it `does not parse`), and for a generated-code marker (`// @generated`, `DO NOT EDIT`) added to a file JevGate judged when the turn began: the file is judged this turn, and a guard says it is skipped from now on.
 ## A custom question is not asked, or is ignored by Git
 
 **`jevgate: custom/<id> was not asked: it needs --base`** (or `--include-tests`)
@@ -141,7 +141,7 @@ By default only the rules and levels measured right at least 80% of the time on 
 
 ## A finding is wrong
 
-Each rule's page in the [rules reference](reference/rules.md) shows findings it got wrong and why, which may match yours. Accept it with `jevgate baseline`, and record why with `jevgate baseline mark wrong PATH:LINE`; `jevgate baseline stats` counts each rule's mistaken findings. Reporting it with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml), with the finding from `.jevgate/latest.json` and a small piece of the code, is how the rules improve.
+Each rule's page in the [rules reference](reference/rules.md) shows findings it got wrong and why, which may match yours. Dismiss it with `jevgate baseline mark wrong PATH:LINE`, which accepts it with that reason; `jevgate baseline stats` counts each rule's mistaken findings. Reporting it with the [wrong finding template](https://github.com/Tech-Byte-Frontier/jevgate/issues/new?template=wrong_finding.yml), with the finding from `.jevgate/latest.json` and a small piece of the code, is how the rules improve.
 
 ## A `--base` check leaves out a finding
 

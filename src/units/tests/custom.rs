@@ -117,7 +117,7 @@ fn a_function_question_rides_in_the_pack_every_rule_asks_about_the_function_in()
     let questions = plan.requests[0].request["questions"].as_object().unwrap();
     for key in [
         "f0_split",
-        "f0_environment",
+        "f0_values",
         "f0_interpreted",
         "custom_0_body_logs",
     ] {
@@ -275,7 +275,7 @@ fn yes_at_the_threshold_is_a_finding_at_the_question_level_that_fails_the_gate()
     let findings = findings_of(&report, "custom/body-logs");
     assert_eq!(findings.len(), 1);
     let finding = findings[0];
-    assert_eq!(finding.strength, Strength::Consider);
+    assert_eq!(composed(finding), Strength::Consider);
     assert_eq!(
         finding.message,
         "`charge`: Does this function write a request body to a log? Yes."
@@ -314,7 +314,7 @@ fn yes_at_the_threshold_is_a_finding_at_the_question_level_that_fails_the_gate()
     );
     let dimension = &report.files[0].dimensions["custom/body-logs"];
     assert_eq!(dimension.rule_version, options.questions[0].version);
-    assert_eq!(dimension.decision_basis, "1 function judged: 1 consider.");
+    assert_eq!(dimension.decision_basis, "1 function judged: 1 review.");
 
     options.refresh = true;
     let undecided = run(&project, &options, &mut Custom { yes: 0.5 });
@@ -356,19 +356,30 @@ fn a_review_question_fails_the_gate_and_a_note_question_never_does() {
     );
     let note = configured(&format!("{BODY_LOGS}level = \"note\"\n"), &["custom"]);
     let report = run(&project, &note, &mut Custom { yes: 0.95 });
+    let finding = findings_of(&report, "custom/body-logs")[0];
     assert_eq!(
-        findings_of(&report, "custom/body-logs")[0].strength,
-        Strength::Note
+        (composed(finding), finding.gate),
+        (Strength::Note, None),
+        "listed, and never counted by the gate"
     );
     assert_eq!(crate::gate::exit_code(&report), 0);
     let mut out = Vec::new();
     crate::output::agent(&mut out, &report, false, crate::output::Style::PLAIN).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(
-        text.contains("Notes from custom questions (1):\n  lib.rs:1 [custom/body-logs] `charge`"),
+        text.contains("Review (1):\n  lib.rs:1 [custom/body-logs] `charge`"),
         "a question tried as a note shows its findings without --verbose: {text}"
     );
-    assert!(!text.contains("reads well as it is"), "{text}");
+    let reviews = configured(
+        &format!("fail_on = [\"review\"]\n{BODY_LOGS}level = \"note\"\n"),
+        &["custom"],
+    );
+    let report = run(&project, &reviews, &mut Custom { yes: 0.95 });
+    assert_eq!(
+        crate::gate::exit_code(&report),
+        0,
+        "a note question fails no level"
+    );
     let advisory = configured(&format!("fail_on = [\"none\"]\n{BODY_LOGS}"), &["custom"]);
     let report = run(&project, &advisory, &mut Custom { yes: 0.95 });
     assert_eq!(crate::gate::exit_code(&report), 0);
