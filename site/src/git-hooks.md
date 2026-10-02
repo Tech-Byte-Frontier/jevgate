@@ -49,7 +49,7 @@ The hooks need JevGate 0.31.0 or later on the PATH (or built by pre-commit), and
 default_install_hook_types: [pre-commit, pre-push]
 repos:
   - repo: https://github.com/Tech-Byte-Frontier/jevgate
-    rev: v0.32.0
+    rev: v0.33.0
     hooks:
       - id: jevgate-push-system   # before each push; jevgate-system before each commit
 ```
