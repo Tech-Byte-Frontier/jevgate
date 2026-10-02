@@ -1,7 +1,7 @@
 //! Literal values written into code: the candidates for hardcoded-value
 //! questions. Eligibility skips trivial values (0, 1, 2, one-character or
 //! blank strings), documentation and attributes; Jev judges every other value.
-use super::{is_comment, line_of, text};
+use super::{clipped, is_comment, line_of, lines_of, text};
 use tree_sitter::Node;
 
 /// At most this many distinct values are listed per function or file.
@@ -99,7 +99,7 @@ fn collect(node: Node<'_>, source: &str, found: &mut Vec<Literal>) {
             && !found.iter().any(|l: &Literal| l.text == value)
         {
             found.push(Literal {
-                text: clip(value),
+                text: clipped(value, MAX_TEXT),
                 line: line_of(source, node.start_byte()),
             });
         }
@@ -144,28 +144,32 @@ fn capacity_hint(node: Node<'_>, source: &str) -> bool {
             .is_some_and(|name| CAPACITY_TYPES.iter().any(|kind| name.ends_with(kind)))
 }
 
+/// A definition whose name names the one number it returns: a Java method
+/// (`java_constant`) or a Bend 2 def (`bend_constant`).
+pub fn returns_constant(node: Node<'_>) -> bool {
+    java_constant(node) || bend_constant(node)
+}
+
 /// A Java method whose whole body returns one number, as in
 /// `int cost() { return 7; }`: the method's name names the value. A returned
 /// string stays a candidate, since it may be an address or other setting.
-/// Bend 2 names its constants the same way (`bend_constant`).
-pub fn returns_constant(node: Node<'_>) -> bool {
-    bend_constant(node)
-        || node.kind() == "method_declaration"
-            && node
-                .child_by_field_name("body")
-                .filter(|body| body.named_child_count() == 1)
-                .and_then(|body| body.named_child(0))
-                .filter(|statement| statement.kind() == "return_statement")
-                .and_then(|statement| statement.named_child(0))
-                .is_some_and(|value| {
-                    let value = if value.kind() == "unary_expression" {
-                        value.child_by_field_name("operand").unwrap_or(value)
-                    } else {
-                        value
-                    };
-                    value.kind().ends_with("integer_literal")
-                        || value.kind().ends_with("floating_point_literal")
-                })
+fn java_constant(node: Node<'_>) -> bool {
+    let number = |value: Node<'_>| {
+        let value = match value.kind() {
+            "unary_expression" => value.child_by_field_name("operand").unwrap_or(value),
+            _ => value,
+        };
+        value.kind().ends_with("integer_literal")
+            || value.kind().ends_with("floating_point_literal")
+    };
+    node.kind() == "method_declaration"
+        && node
+            .child_by_field_name("body")
+            .filter(|body| body.named_child_count() == 1)
+            .and_then(|body| body.named_child(0))
+            .filter(|statement| statement.kind() == "return_statement")
+            .and_then(|statement| statement.named_child(0))
+            .is_some_and(number)
 }
 
 /// A Bend 2 def without parameters whose whole body is one number, as in
@@ -210,24 +214,28 @@ fn docstring(node: Node<'_>) -> bool {
             .is_some_and(|p| matches!(p.kind(), "block" | "module"))
 }
 
+/// The grammars' kinds of number literal.
+const NUMBER_KINDS: [&str; 14] = [
+    "integer_literal",
+    "int_literal",
+    "float_literal",
+    "integer",
+    "float",
+    "number",
+    "real_literal",
+    "decimal_integer_literal",
+    "hex_integer_literal",
+    "octal_integer_literal",
+    "binary_integer_literal",
+    "decimal_floating_point_literal",
+    "hex_floating_point_literal",
+    "natural",
+];
+
+/// A number other than 0, 1 or 2, or a string of more than one character
+/// that is not a single escape.
 fn eligible(kind: &str, value: &str) -> bool {
-    if matches!(
-        kind,
-        "integer_literal"
-            | "int_literal"
-            | "float_literal"
-            | "integer"
-            | "float"
-            | "number"
-            | "real_literal"
-            | "decimal_integer_literal"
-            | "hex_integer_literal"
-            | "octal_integer_literal"
-            | "binary_integer_literal"
-            | "decimal_floating_point_literal"
-            | "hex_floating_point_literal"
-            | "natural"
-    ) {
+    if NUMBER_KINDS.contains(&kind) {
         let digits = value.trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '_');
         return !matches!(digits, "0" | "1" | "2" | "0.0" | "1.0" | "2.0");
     }
@@ -276,13 +284,6 @@ fn single_escape(content: &str) -> bool {
         })
 }
 
-fn clip(value: &str) -> String {
-    if value.chars().count() <= MAX_TEXT {
-        return value.to_string();
-    }
-    format!("{}…", value.chars().take(MAX_TEXT).collect::<String>())
-}
-
 /// Top-level constants and bindings whose value holds an eligible literal:
 /// Rust `const`/`static`, JavaScript and TypeScript `const`/`let`/`var`
 /// (exported or not), Python module assignments, Go `const`/`var`, Ruby
@@ -321,12 +322,13 @@ fn constants_in(root: Node<'_>, source: &str, found: &mut Vec<Constant>) {
                 continue;
             }
             let whole = text(value, source);
+            let (line, end_line) = lines_of(source, node);
             found.push(Constant {
                 name: text(name, source).to_string(),
                 value: (whole.chars().count() <= MAX_VALUE).then(|| whole.to_string()),
                 values: values.into_iter().map(|l| l.text).collect(),
-                line: line_of(source, node.start_byte()),
-                end_line: line_of(source, node.end_byte().saturating_sub(1)),
+                line,
+                end_line,
             });
         }
     }
@@ -407,6 +409,7 @@ fn csharp_field(child: Node<'_>, source: &str, owner: &str, found: &mut Vec<Cons
         }
         let whole = text(value, source);
         let name = text(name, source);
+        let (line, end_line) = lines_of(source, child);
         found.push(Constant {
             name: if owner.is_empty() {
                 name.to_string()
@@ -415,8 +418,8 @@ fn csharp_field(child: Node<'_>, source: &str, owner: &str, found: &mut Vec<Cons
             },
             value: (whole.chars().count() <= MAX_VALUE).then(|| whole.to_string()),
             values: values.into_iter().map(|l| l.text).collect(),
-            line: line_of(source, child.start_byte()),
-            end_line: line_of(source, child.end_byte().saturating_sub(1)),
+            line,
+            end_line,
         });
     }
 }

@@ -211,7 +211,7 @@ pub(super) fn setup_hooks(region: &str) -> Vec<String> {
         while let Some(found) = region[from..].find(hook) {
             let at = from + found;
             let text = if hook.starts_with("def ") {
-                let line_start = region[..at].rfind('\n').map_or(0, |i| i + 1);
+                let line_start = crate::analysis::line_start(region, at);
                 indented_block(&region[at..], at - line_start)
             } else {
                 balanced_call(&region[at..])

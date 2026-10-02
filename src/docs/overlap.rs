@@ -4,6 +4,7 @@
 //! A section that pairs with two or more others heads a family: its members
 //! are asked against it alone, not against each other, so a section repeated
 //! in seven quickstarts is six questions, not twenty-one.
+use super::markdown::{Fenced, Fences};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -84,26 +85,26 @@ const PROGRAM_LANGUAGES: &[&str] = &[
 /// The text outside fenced code blocks and the blocks that are not program
 /// code.
 fn outside_code(text: &str) -> String {
-    let mut fence: Option<(&str, bool)> = None;
+    let mut fences = Fences::default();
+    let mut kept = false;
     let mut out = String::new();
     for line in text.lines() {
-        let trimmed = line.trim_start();
-        if let Some((open, kept)) = fence {
-            if trimmed.starts_with(open) {
-                fence = None;
-            } else if kept {
-                out.push_str(line);
-                out.push('\n');
+        let keep = match fences.line(line) {
+            Fenced::Opens(info) => {
+                let language = info
+                    .trim_start_matches(['`', '~', '{', '.'])
+                    .split(|c: char| c.is_whitespace() || c == '}' || c == ',')
+                    .next()
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                kept = !PROGRAM_LANGUAGES.contains(&language.as_str());
+                false
             }
-        } else if let Some(open) = ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f)) {
-            let language = trimmed[open.len()..]
-                .trim_start_matches(['`', '~', '{', '.'])
-                .split(|c: char| c.is_whitespace() || c == '}' || c == ',')
-                .next()
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            fence = Some((open, !PROGRAM_LANGUAGES.contains(&language.as_str())));
-        } else {
+            Fenced::Inside => kept,
+            Fenced::Closes => false,
+            Fenced::Outside => true,
+        };
+        if keep {
             out.push_str(line);
             out.push('\n');
         }

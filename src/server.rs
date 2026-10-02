@@ -9,6 +9,9 @@ use std::{
     time::Duration,
 };
 
+/// How long the report API waits between looks for a connection.
+const ACCEPT_POLL: Duration = Duration::from_millis(50);
+
 pub fn run(root: &Path, port: u16) -> Result<()> {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))?;
     listener.set_nonblocking(true)?;
@@ -20,7 +23,7 @@ pub fn run(root: &Path, port: u16) -> Result<()> {
                 let _ = respond(root, &mut stream);
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(50))
+                std::thread::sleep(ACCEPT_POLL)
             }
             Err(error) => return Err(error.into()),
         }

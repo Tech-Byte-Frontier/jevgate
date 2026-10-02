@@ -34,17 +34,15 @@ pub(in crate::units) fn plan_pairs(
             );
             file.request("locate", state.clone(), questions)
         });
-        let (request, asked) = file.request("test-pair", state, pair_questions(&id, ruby));
-        let fits = file.budget.fits(&request);
+        let fits = file.push_fitting(
+            file.request("test-pair", state, pair_questions(&id, ruby)),
+            requests,
+        );
         out.units.push(UnitPlan {
             rule: TEST_REDUNDANCY,
             id,
             name: format!("`{}` and `{}`", a.name, b.name),
-            presence: if fits {
-                Presence::Judged
-            } else {
-                Presence::NeedsContext
-            },
+            presence: Presence::judged_if(fits),
             locations: vec![
                 file.location(a.line, a.end_line, Some(&a.name)),
                 file.location(b.line, b.end_line, Some(&b.name)),
@@ -69,13 +67,6 @@ pub(in crate::units) fn plan_pairs(
             },
             recheck: recheck.filter(|_| fits).map(Into::into),
         });
-        if fits {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        }
     }
 }
 
@@ -173,6 +164,7 @@ pub(super) fn pair_recheck(
     if found.path != file.path {
         paths.push((found.path.as_path(), hash.as_str()));
     }
-    let (request, asked) = crate::units::request(file.model, "recheck", &paths, state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(crate::units::request(
+        file.model, "recheck", &paths, state, questions,
+    ))
 }

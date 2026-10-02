@@ -23,19 +23,9 @@ pub fn emit(out: &mut impl Write, report: &Report) -> Result<()> {
 }
 
 fn issue(path: &Path, finding: &Finding) -> Value {
-    let end = finding
-        .locations
-        .iter()
-        .find(|l| l.path == path && l.start_line == finding.line)
-        .map_or(finding.line, |l| l.end_line.max(finding.line));
-    let mut description = format!(
-        "{} Next step: {}",
-        output::claim(path, finding, output::Style::PLAIN),
-        finding.action
-    );
-    if let Some(note) = output::measuring_note(path, finding) {
-        description.push_str(&format!(" {note}"));
-    }
+    let end =
+        output::own_location(path, finding).map_or(finding.line, |l| l.end_line.max(finding.line));
+    let description = output::described(path, finding, " Next step: ", " ");
     json!({
         "description": description,
         "check_name": finding.rule,

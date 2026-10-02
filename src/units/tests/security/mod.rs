@@ -434,63 +434,52 @@ fn undecided_markup_cors_cookies_and_logged_objects_are_settled_by_their_choices
             "{chosen}"
         );
     }
-    let origins = ["unset", "listed", "public", "any"];
-    let undecided_cors = [("weakened", 0.4), ("cors", 0.3)];
-    for (chosen, status) in [("public", Status::Clear), ("any", Status::Uncertain)] {
-        options.refresh = true;
-        let settle = ("cors_origins", choice_of(chosen, &origins));
-        assert_eq!(
-            settled_status(
-                &project,
-                &options,
-                catalog::UNSAFE_SETTINGS,
-                &undecided_cors,
-                settle
-            )
-            .0,
-            status,
-            "{chosen}"
-        );
-    }
-    let cookies = ["unset", "flagged", "missing"];
-    let undecided_cookie = [("weakened", 0.4), ("cookie", 0.3)];
-    for (chosen, status) in [("flagged", Status::Clear), ("missing", Status::Uncertain)] {
-        options.refresh = true;
-        let settle = ("cookie_flags", choice_of(chosen, &cookies));
-        assert_eq!(
-            settled_status(
-                &project,
-                &options,
-                catalog::UNSAFE_SETTINGS,
-                &undecided_cookie,
-                settle
-            )
-            .0,
-            status,
-            "{chosen}"
-        );
-    }
-    let logs = [
-        "plain", "identity", "operator", "secret", "personal", "none",
+    // Each choice that settles a check: its options, rule, the undecided
+    // answers it settles, and the status each option gives.
+    let settled: [Settled; 3] = [
+        (
+            "cors_origins",
+            &["unset", "listed", "public", "any"],
+            catalog::UNSAFE_SETTINGS,
+            &[("weakened", 0.4), ("cors", 0.3)],
+            [("public", Status::Clear), ("any", Status::Uncertain)],
+        ),
+        (
+            "cookie_flags",
+            &["unset", "flagged", "missing"],
+            catalog::UNSAFE_SETTINGS,
+            &[("weakened", 0.4), ("cookie", 0.3)],
+            [("flagged", Status::Clear), ("missing", Status::Uncertain)],
+        ),
+        (
+            "logged",
+            &[
+                "plain", "identity", "operator", "secret", "personal", "none",
+            ],
+            catalog::SENSITIVE_DATA,
+            &[("logs_secret", 0.4), ("logs_object_secret", 0.4)],
+            [("plain", Status::Clear), ("secret", Status::Uncertain)],
+        ),
     ];
-    let undecided_logs = [("logs_secret", 0.4), ("logs_object_secret", 0.4)];
-    for (chosen, status) in [("plain", Status::Clear), ("secret", Status::Uncertain)] {
-        options.refresh = true;
-        let settle = ("logged", choice_of(chosen, &logs));
-        assert_eq!(
-            settled_status(
-                &project,
-                &options,
-                catalog::SENSITIVE_DATA,
-                &undecided_logs,
-                settle
-            )
-            .0,
-            status,
-            "{chosen}"
-        );
+    for (question, choices, rule, undecided, outcomes) in settled {
+        for (chosen, status) in outcomes {
+            options.refresh = true;
+            let settle = (question, choice_of(chosen, choices));
+            let (found, _) = settled_status(&project, &options, rule, undecided, settle);
+            assert_eq!(found, status, "{question}: {chosen}");
+        }
     }
 }
+
+/// A settle choice, its options, its rule, the undecided answers it
+/// settles, and the status two of its options give.
+type Settled = (
+    &'static str,
+    &'static [&'static str],
+    &'static str,
+    &'static [(&'static str, f64)],
+    [(&'static str, Status); 2],
+);
 
 #[test]
 fn a_decided_check_asks_no_settle_choice() {

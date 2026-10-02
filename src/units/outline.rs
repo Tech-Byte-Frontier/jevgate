@@ -168,10 +168,8 @@ fn plan_outline(
         name: file.path.display().to_string(),
         presence: if small {
             Presence::TooSmall
-        } else if fits {
-            Presence::Judged
         } else {
-            Presence::NeedsContext
+            Presence::judged_if(fits)
         },
         locations: vec![file.location(first, last, None)],
         quote: None,

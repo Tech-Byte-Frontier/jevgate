@@ -309,41 +309,32 @@ impl<'a> Hook<'a> {
     /// The context telling the agent what `checked` found in the files
     /// `shown`, less what `turn` already told it, which it remembers.
     fn told(&self, turn: Option<Turn>, shown: &[PathBuf], checked: Checked) -> Reply {
-        let Some(mut turn) = turn else {
-            let undecided: Vec<_> = checked.undecided.iter().collect();
-            let guards: Vec<_> = checked.guards.iter().collect();
-            let unreviewed: Vec<_> = checked.unreviewed.iter().collect();
-            return Reply {
-                agent: text::after_edit(
-                    shown,
-                    (&checked.flagged, &[]),
-                    &undecided,
-                    &guards,
-                    &unreviewed,
-                ),
-                ..Reply::default()
-            };
+        let reported = |id: &str| {
+            turn.as_ref()
+                .is_some_and(|t| t.reported.iter().any(|r| r == id))
         };
         let (known, new): (Vec<_>, Vec<_>) = checked
             .flagged
             .into_iter()
-            .partition(|f| turn.reported.contains(&f.finding.fingerprint));
+            .partition(|f| reported(&f.finding.fingerprint));
         let undecided: Vec<_> = checked
             .undecided
             .iter()
-            .filter(|u| !turn.reported.contains(&u.id()))
+            .filter(|u| !reported(&u.id()))
             .collect();
-        let guards: Vec<_> = checked
-            .guards
-            .iter()
-            .filter(|g| !turn.reported.contains(&g.id))
-            .collect();
+        let guards: Vec<_> = checked.guards.iter().filter(|g| !reported(&g.id)).collect();
         let unreviewed: Vec<_> = checked
             .unreviewed
             .iter()
-            .filter(|u| !turn.reported.contains(&u.id()))
+            .filter(|u| !reported(&u.id()))
             .collect();
         let context = text::after_edit(shown, (&new, &known), &undecided, &guards, &unreviewed);
+        let Some(mut turn) = turn else {
+            return Reply {
+                agent: context,
+                ..Reply::default()
+            };
+        };
         let ids: Vec<String> = new
             .iter()
             .map(|f| f.finding.fingerprint.clone())

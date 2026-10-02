@@ -2,6 +2,8 @@
 //! reads paths from: in Markdown, and in reStructuredText and MyST, whose
 //! interpreted-text roles say whether a span names a file.
 
+use super::markdown::{Fenced, Fences};
+
 /// Interpreted-text roles whose target is a file: reStructuredText's
 /// `:file:` and `:download:`, and the same roles written the MyST way.
 const PATH_ROLES: &[&str] = &["file", "download", "doc"];
@@ -9,19 +11,12 @@ const PATH_ROLES: &[&str] = &["file", "download", "doc"];
 /// The lines outside fenced code blocks, and the fenced lines, of `text`.
 pub(super) fn split_fences(text: &str) -> (Vec<&str>, Vec<&str>) {
     let (mut prose, mut code) = (Vec::new(), Vec::new());
-    let mut fence: Option<&str> = None;
+    let mut fences = Fences::default();
     for line in text.lines() {
-        let trimmed = line.trim_start();
-        if let Some(open) = fence {
-            if trimmed.starts_with(open) {
-                fence = None;
-            } else {
-                code.push(line);
-            }
-        } else if let Some(open) = ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f)) {
-            fence = Some(open);
-        } else {
-            prose.push(line);
+        match fences.line(line) {
+            Fenced::Inside => code.push(line),
+            Fenced::Outside => prose.push(line),
+            Fenced::Opens(_) | Fenced::Closes => {}
         }
     }
     (prose, code)

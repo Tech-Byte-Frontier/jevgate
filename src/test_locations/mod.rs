@@ -135,7 +135,7 @@ fn owns_lines(source: &str, start: usize, end: usize) -> bool {
     if start > end || end > source.len() {
         return false;
     }
-    let line_start = source[..start].rfind('\n').map_or(0, |index| index + 1);
+    let line_start = crate::analysis::line_start(source, start);
     let line_end = source[end..]
         .find('\n')
         .map_or(source.len(), |index| end + index);

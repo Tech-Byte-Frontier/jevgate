@@ -43,12 +43,18 @@ fn functions_file(names: &[&str], edited: &[&str]) -> String {
 
 const NAMES: [&str; 6] = ["f0", "f1", "f2", "f3", "f4", "f5"];
 
-#[test]
-fn only_the_functions_a_change_touched_are_asked_and_reported() {
+/// A project whose committed `lib.rs` holds `NAMES`, with `f2` edited since.
+fn f2_edited() -> Project {
     let project = Project::new();
     project.write("lib.rs", &functions_file(&NAMES, &[]));
     project.commit_all();
     project.write("lib.rs", &functions_file(&NAMES, &["f2"]));
+    project
+}
+
+#[test]
+fn only_the_functions_a_change_touched_are_asked_and_reported() {
+    let project = f2_edited();
     let options = since("HEAD", &[catalog::FUNCTION_SIMPLIFICATION]);
     let (inputs, plan) = planned(&project, &options);
     assert!(inputs[0].changed.is_some());
@@ -157,10 +163,7 @@ fn a_new_file_is_judged_whole() {
 
 #[test]
 fn whole_files_asks_what_a_check_of_the_changed_files_asks() {
-    let project = Project::new();
-    project.write("lib.rs", &functions_file(&NAMES, &[]));
-    project.commit_all();
-    project.write("lib.rs", &functions_file(&NAMES, &["f2"]));
+    let project = f2_edited();
     let bodies = |options: &CheckArgs| -> Vec<String> {
         let (_, plan) = planned(&project, options);
         plan.requests
@@ -368,10 +371,7 @@ fn a_pull_request_check_fails_only_on_what_the_change_touched() {
     // Changed lines and the default gate together: every function answers
     // review-worthy, only the touched one is judged, and its mature
     // function-simplification review alone fails the gate.
-    let project = Project::new();
-    project.write("lib.rs", &functions_file(&NAMES, &[]));
-    project.commit_all();
-    project.write("lib.rs", &functions_file(&NAMES, &["f2"]));
+    let project = f2_edited();
     let mut options = since("HEAD", &[catalog::FUNCTION_SIMPLIFICATION]);
     let report = run(&project, &options, &mut scripted(2));
     assert_eq!(report.gate.unwrap().reasons, ["1 new review finding"]);
@@ -393,10 +393,7 @@ unit = "function"
 
 #[test]
 fn a_custom_question_asks_only_about_the_units_a_change_touched() {
-    let project = Project::new();
-    project.write("lib.rs", &functions_file(&NAMES, &[]));
-    project.commit_all();
-    project.write("lib.rs", &functions_file(&NAMES, &["f2"]));
+    let project = f2_edited();
     let mut alone = super::custom::configured(BODY_LOGS, &["custom"]);
     alone.base = Some("HEAD".into());
     let (_, plan) = planned(&project, &alone);

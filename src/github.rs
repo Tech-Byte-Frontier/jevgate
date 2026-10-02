@@ -59,19 +59,9 @@ pub fn emit(out: &mut impl Write, report: &Report, args: &CheckArgs) -> Result<(
 }
 
 fn annotation(path: &Path, finding: &Finding) -> String {
-    let end = finding
-        .locations
-        .iter()
-        .find(|l| l.path == path && l.start_line == finding.line)
+    let end = output::own_location(path, finding)
         .map_or(String::new(), |l| format!(",endLine={}", l.end_line));
-    let mut message = format!(
-        "{}\n→ {}",
-        output::claim(path, finding, output::Style::PLAIN),
-        finding.action
-    );
-    if let Some(note) = output::measuring_note(path, finding) {
-        message.push_str(&format!("\n{note}"));
-    }
+    let message = output::described(path, finding, "\n→ ", "\n");
     format!(
         "::{} file={},line={}{end},title={}::{}",
         if finding.fails_gate() {

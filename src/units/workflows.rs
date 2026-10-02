@@ -35,36 +35,25 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
             "expressions": expressions,
         });
         let recheck = recheck(file, &id, &state, parsed.privileged_trigger());
-        let (request, asked) = file.request("workflows", state, questions);
-        if asked.questions.is_empty() {
+        let built = file.request("workflows", state, questions);
+        if built.1.questions.is_empty() {
             continue;
         }
-        let fits = file.budget.fits(&request);
+        let fits = file.push_fitting(built, requests);
         out.units.push(UnitPlan {
             rule: WORKFLOWS,
             id: id.clone(),
             name: job.name.clone(),
-            presence: if fits {
-                Presence::Judged
-            } else {
-                Presence::NeedsContext
-            },
+            presence: Presence::judged_if(fits),
             locations: vec![file.location(job.start_line, job.end_line, Some(&job.name))],
             quote: None,
             lines: job.end_line + 1 - job.start_line,
             identity: identity(&[&id, &compact(&job.source)]),
             detail: Detail::Job { expressions },
             recheck: recheck
-                .filter(|(request, _)| file.budget.fits(request))
+                .and_then(|built| file.fitting(built))
                 .map(Into::into),
         });
-        if fits {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        }
     }
 }
 

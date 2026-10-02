@@ -31,11 +31,7 @@ pub(crate) fn excerpt(source: &str, range: &SourceRange) -> String {
         .take(range.end_line.saturating_sub(range.start_line) + 1)
         .collect::<Vec<_>>()
         .join("\n");
-    if text.len() <= EXCERPT_CHARS {
-        text
-    } else {
-        format!("{}…", text.chars().take(EXCERPT_CHARS).collect::<String>())
-    }
+    crate::analysis::clipped(&text, EXCERPT_CHARS)
 }
 
 pub(crate) fn blank_lines(source: &str, ranges: &[SourceRange]) -> String {

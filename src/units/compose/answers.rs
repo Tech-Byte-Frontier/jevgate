@@ -26,12 +26,11 @@ pub(super) fn security_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -
         "origin" => origin_outcome(answer),
         _ => noul(answer),
     };
-    for (question, answer) in answers(judgments, &unit.id, Pass::Recheck) {
-        let traced = merged.get(question).map(|a| judged(question, a));
-        if judged(question, answer).decisive() || !traced.is_some_and(Outcome::decisive) {
-            merged.insert(question, answer);
-        }
-    }
+    replace_rechecked(
+        &mut merged,
+        answers(judgments, &unit.id, Pass::Recheck),
+        judged,
+    );
     // The settle answers sit beside the checks they settle, under their own
     // names, and so does what an injection consider's values can hold.
     merged.extend(answers(judgments, &unit.id, Pass::Settle));
@@ -140,15 +139,26 @@ pub(super) fn comment_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) ->
 /// first is decisive.
 pub(super) fn test_value_answers<'a>(unit: &UnitPlan, judgments: &'a [Judgment]) -> Answers<'a> {
     let mut merged = answers(judgments, &unit.id, Pass::First);
-    for (question, answer) in answers(judgments, &unit.id, Pass::Recheck) {
-        let first = merged.get(question).map(|a| noul(a));
-        if noul(answer).decisive() || !first.is_some_and(Outcome::decisive) {
-            merged.insert(question, answer);
-        }
-    }
+    let recheck = answers(judgments, &unit.id, Pass::Recheck);
+    replace_rechecked(&mut merged, recheck, |_, answer| noul(answer));
     // What its assertions read, asked after an internal-details consider.
     merged.extend(answers(judgments, &unit.id, Pass::Locate));
     merged
+}
+
+/// Puts each `recheck` answer in place of the one `merged` holds, unless
+/// only the held one is decisive as `judged` reads them.
+fn replace_rechecked<'a>(
+    merged: &mut Answers<'a>,
+    recheck: Answers<'a>,
+    judged: impl Fn(&str, &Answer) -> Outcome,
+) {
+    for (question, answer) in recheck {
+        let held = merged.get(question).map(|a| judged(question, a));
+        if judged(question, answer).decisive() || !held.is_some_and(Outcome::decisive) {
+            merged.insert(question, answer);
+        }
+    }
 }
 
 /// The first-pass outcome, or the recheck's when the first called for one

@@ -68,6 +68,18 @@ pub enum Presence {
     NeedsContext,
 }
 
+impl Presence {
+    /// Judged when the unit's request fits the provider's limit; otherwise
+    /// it needs context.
+    pub fn judged_if(fits: bool) -> Self {
+        if fits {
+            Self::Judged
+        } else {
+            Self::NeedsContext
+        }
+    }
+}
+
 /// A top-level block of a function body, offered when locating a split.
 #[derive(Clone, Debug)]
 pub struct Block {

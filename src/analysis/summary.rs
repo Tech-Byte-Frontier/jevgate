@@ -18,7 +18,7 @@ pub(super) fn signature(outer: Node<'_>, body: Option<Node<'_>>, source: &str) -
         .last()
         .map_or(outer.start_byte(), |c| c.end_byte())
         .min(end);
-    clip(
+    super::clipped(
         source[start..end]
             .lines()
             .map(str::trim)
@@ -73,7 +73,7 @@ pub(super) fn doc_line(leading: &str, node: Node<'_>, source: &str) -> String {
             .find(|line| !line.is_empty())
             .map(str::to_string)
     };
-    clip(&comment.or_else(docstring).unwrap_or_default(), DOC_CHARS)
+    super::clipped(&comment.or_else(docstring).unwrap_or_default(), DOC_CHARS)
 }
 
 fn clean_comment(line: &str) -> String {
@@ -102,10 +102,3 @@ const DOC_TAGS: [&str; 8] = [
     "<para>",
     "</para>",
 ];
-
-fn clip(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    format!("{}…", text.chars().take(limit).collect::<String>())
-}

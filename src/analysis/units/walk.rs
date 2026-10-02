@@ -206,11 +206,7 @@ pub(super) fn walk(node: Node<'_>, source: &str, owner: &str, file: &mut FileUni
 /// configures the file that includes it.
 fn php_closure(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
     if let Some(closure) = crate::analysis::php::returned_closure(node) {
-        let definition = Definition {
-            outer: node,
-            node: closure,
-            body: closure.child_by_field_name("body"),
-        };
+        let definition = Definition::function(node, closure, closure);
         let name = crate::analysis::php::RETURNED_CLOSURE;
         push(definition, name, owner, Kind::Function, source, file);
     }
@@ -302,11 +298,7 @@ fn type_specs(node: Node<'_>, source: &str, file: &mut FileUnits) {
 /// such as route handlers.
 fn statement_functions(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnits) {
     if let Some((object, name, function)) = assigned_function(node, source) {
-        let definition = Definition {
-            outer: node,
-            node: function,
-            body: function.child_by_field_name("body"),
-        };
+        let definition = Definition::function(node, function, function);
         push(definition, name, object, Kind::Method, source, file);
         return;
     }
@@ -332,11 +324,8 @@ fn registered<'t>(
 ) {
     let single = callbacks.len() == 1;
     for (name, function) in callbacks {
-        let definition = Definition {
-            outer: if single { statement } else { function },
-            node: function,
-            body: function.child_by_field_name("body"),
-        };
+        let outer = if single { statement } else { function };
+        let definition = Definition::function(outer, function, function);
         push(definition, &name, owner, Kind::Function, source, file);
     }
 }
@@ -366,11 +355,7 @@ fn declared_functions(node: Node<'_>, source: &str, owner: &str, file: &mut File
             }
             continue;
         };
-        let definition = Definition {
-            outer: node,
-            node: value,
-            body: function.child_by_field_name("body"),
-        };
+        let definition = Definition::function(node, value, function);
         push(definition, &name, owner, Kind::Function, source, file);
     }
 }
@@ -389,11 +374,7 @@ fn field_function(node: Node<'_>, source: &str, owner: &str, file: &mut FileUnit
     let Some(function) = callback(value, 2) else {
         return;
     };
-    let definition = Definition {
-        outer: node,
-        node: value,
-        body: function.child_by_field_name("body"),
-    };
+    let definition = Definition::function(node, value, function);
     push(
         definition,
         text(name, source),
@@ -478,11 +459,7 @@ fn object_functions(object: Node<'_>, source: &str, owner: &str, file: &mut File
                 ) {
                     continue;
                 }
-                let definition = Definition {
-                    outer: property,
-                    node: value,
-                    body: value.child_by_field_name("body"),
-                };
+                let definition = Definition::function(property, value, value);
                 let key = text(key, source).trim_matches(['"', '\'', '`']);
                 push(definition, key, owner, Kind::Method, source, file);
             }
@@ -518,11 +495,7 @@ fn function(outer: Node<'_>, node: Node<'_>, source: &str, owner: &str, file: &m
     } else {
         Kind::Method
     };
-    let definition = Definition {
-        outer,
-        node,
-        body: node.child_by_field_name("body"),
-    };
+    let definition = Definition::function(outer, node, node);
     push(definition, &name, owner, kind, source, file);
 }
 

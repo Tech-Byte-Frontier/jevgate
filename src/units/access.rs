@@ -307,18 +307,13 @@ fn push_unit(file: &FileContext<'_>, unit: Unit, plan: &mut FilePlan, requests: 
     }
     let mut state = unit.state;
     state["file"] = file.file_state();
-    let (request, asked) = file.request("access", state, questions);
-    let fits = file.budget.fits(&request);
+    let fits = file.push_fitting(file.request("access", state, questions), requests);
     let statement = &unit.statement;
     plan.units.push(UnitPlan {
         rule: ACCESS_CONTROL,
         id: unit.id.clone(),
         name: unit.name.clone(),
-        presence: if fits {
-            Presence::Judged
-        } else {
-            Presence::NeedsContext
-        },
+        presence: Presence::judged_if(fits),
         locations: vec![file.location(statement.start_line, statement.end_line, Some(&unit.name))],
         quote: None,
         lines: statement.end_line + 1 - statement.start_line,
@@ -326,13 +321,6 @@ fn push_unit(file: &FileContext<'_>, unit: Unit, plan: &mut FilePlan, requests: 
         detail: Detail::Access(unit.access),
         recheck: None,
     });
-    if fits {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-    }
 }
 
 #[cfg(test)]

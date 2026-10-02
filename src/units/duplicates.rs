@@ -33,17 +33,8 @@ pub(super) fn plan(
             pair.b.path.display(),
             pair.b.start_line
         );
-        let (request, asked) = build(file, pair, hashes, &id);
-        let presence = if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-            Presence::Judged
-        } else {
-            Presence::NeedsContext
-        };
+        let sent = file.push_fitting(build(file, pair, hashes, &id), requests);
+        let presence = Presence::judged_if(sent);
         out.units.push(UnitPlan {
             rule: SHARED_LOGIC,
             name: match pair.copies.len() {

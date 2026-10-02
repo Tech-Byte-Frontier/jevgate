@@ -129,11 +129,8 @@ fn title(id: &str) -> String {
 }
 
 fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
-    let end = finding
-        .locations
-        .iter()
-        .find(|l| l.path == path && l.start_line == finding.line)
-        .map_or(finding.line, |l| l.end_line.max(finding.line));
+    let end =
+        output::own_location(path, finding).map_or(finding.line, |l| l.end_line.max(finding.line));
     let related: Vec<Value> = finding
         .locations
         .iter()
@@ -149,14 +146,7 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
             })
         })
         .collect();
-    let mut text = format!(
-        "{}\n\nNext step: {}",
-        output::claim(path, finding, output::Style::PLAIN),
-        finding.action
-    );
-    if let Some(note) = output::measuring_note(path, finding) {
-        text.push_str(&format!("\n\n{note}"));
-    }
+    let text = output::described(path, finding, "\n\nNext step: ", "\n\n");
     let mut value = json!({
         "ruleId": finding.rule,
         "level": if finding.fails_gate() { "error" } else { "warning" },

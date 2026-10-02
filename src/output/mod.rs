@@ -5,7 +5,7 @@
 //! headline in `headline`.
 use crate::{
     options::{CheckArgs, ColorChoice, Format},
-    schema::{Finding, Gating, LeftOut, Report, Status},
+    schema::{Finding, Gating, LeftOut, Location, Report, Status},
 };
 use anyhow::Result;
 use std::{
@@ -220,6 +220,27 @@ pub(crate) fn measuring_note(path: &Path, finding: &Finding) -> Option<String> {
             ),
         }
     })
+}
+
+/// A finding's plain claim, its next step after `next`, and its measuring
+/// note after `apart`: the message each CI format shows.
+pub(crate) fn described(path: &Path, finding: &Finding, next: &str, apart: &str) -> String {
+    let claim = claim(path, finding, Style::PLAIN);
+    let mut text = format!("{claim}{next}{}", finding.action);
+    if let Some(note) = measuring_note(path, finding) {
+        text.push_str(apart);
+        text.push_str(&note);
+    }
+    text
+}
+
+/// The location of `finding` that it is reported at in `path`, the one its
+/// line starts.
+pub(crate) fn own_location<'f>(path: &Path, finding: &'f Finding) -> Option<&'f Location> {
+    finding
+        .locations
+        .iter()
+        .find(|l| l.path == path && l.start_line == finding.line)
 }
 
 /// A finding's message, then how often findings of its rule and level were

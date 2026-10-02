@@ -241,28 +241,26 @@ fn file_context<'a>(
         model: args.model(),
         budget,
         project: args.project.as_deref(),
-        framework: crate::components::server_template(&input.result.path)
-            .then(|| crate::components::TEMPLATE_SCRIPT.to_string())
-            .or_else(|| {
-                crate::units::nextjs::describe(
-                    &input.result.path,
-                    input.source.as_deref().unwrap_or(""),
-                    input.package.as_ref(),
-                )
-            })
-            .or_else(|| {
-                crate::units::sveltekit::describe(&input.result.path, input.package.as_ref())
-            })
-            .or_else(|| {
-                crate::units::graphql::describe(
-                    &input.result.path,
-                    input.source.as_deref().unwrap_or(""),
-                )
-                .or_else(|| crate::units::client_app::describe(input.package.as_ref()))
-                .map(str::to_string)
-            }),
+        framework: framework_role(input),
         changed: input.changed.as_ref(),
     }
+}
+
+/// The role a framework gives the file, as the questions about values name
+/// it: a server template's script, a Next.js or SvelteKit file, a GraphQL
+/// resolver or a client app's code.
+fn framework_role(input: &Input) -> Option<String> {
+    let (path, source) = (&input.result.path, input.source.as_deref().unwrap_or(""));
+    if crate::components::server_template(path) {
+        return Some(crate::components::TEMPLATE_SCRIPT.to_string());
+    }
+    crate::units::nextjs::describe(path, source, input.package.as_ref())
+        .or_else(|| crate::units::sveltekit::describe(path, input.package.as_ref()))
+        .or_else(|| {
+            crate::units::graphql::describe(path, source)
+                .or_else(|| crate::units::client_app::describe(input.package.as_ref()))
+                .map(str::to_string)
+        })
 }
 
 /// An application file's members outside tests, or a test file's cases;

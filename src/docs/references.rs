@@ -110,6 +110,21 @@ pub fn names_one_of(base: &Path, name: &str, paths: &BTreeSet<PathBuf>) -> bool 
 }
 
 /// Everything `text`, a section of `doc`, names that the repository lacks.
+/// The task runners the repository's tracked files set up: Make and just.
+fn runners(history: &History) -> Runners {
+    let tracks = |names: &[&str]| {
+        history.tracked.iter().any(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                names.contains(&n) || n.ends_with(".mk") && names.contains(&"*.mk")
+            })
+        })
+    };
+    Runners {
+        make: tracks(&["Makefile", "makefile", "GNUmakefile", "*.mk"]),
+        just: tracks(&["justfile", "Justfile", ".justfile"]),
+    }
+}
+
 pub fn missing(
     root: &Path,
     doc: &Path,
@@ -129,18 +144,7 @@ pub fn missing(
         }
     }
     if !scripts.is_empty() {
-        let tracks = |names: &[&str]| {
-            history.tracked.iter().any(|p| {
-                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-                    names.contains(&n) || n.ends_with(".mk") && names.contains(&"*.mk")
-                })
-            })
-        };
-        let runners = Runners {
-            make: tracks(&["Makefile", "makefile", "GNUmakefile", "*.mk"]),
-            just: tracks(&["justfile", "Justfile", ".justfile"]),
-        };
-        for script in commands(text, runners) {
+        for script in commands(text, runners(history)) {
             if !scripts.contains(&script) && found.insert(format!("script:{script}")) {
                 out.push(Missing {
                     name: script,

@@ -245,6 +245,12 @@ fn baseline_reasons_are_marked_counted_and_kept_across_rewrites() {
         1
     );
     assert!(baseline::mark(&project.0, Wrong, &["c.rs".into()], &[]).is_err());
+    for empty in ["", " ", "/"] {
+        assert!(
+            baseline::mark(&project.0, Wrong, &[empty.into()], &[]).is_err(),
+            "{empty:?} names no finding"
+        );
+    }
     assert!(
         baseline::mark(
             &project.0,

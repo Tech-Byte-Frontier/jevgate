@@ -72,9 +72,8 @@ pub(super) fn plan(
     };
     for (index, id, state) in &items {
         let item = (*index, id.clone(), state.clone());
-        let (request, asked) = kind_request(file, &evidence, &item);
-        if file.budget.fits(&request) {
-            out.units[*index].recheck = Some((request, asked).into());
+        if let Some(built) = file.fitting(kind_request(file, &evidence, &item)) {
+            out.units[*index].recheck = Some(built.into());
         }
     }
     // Runs end after headings, never after a unit's name, which names a
@@ -87,7 +86,12 @@ pub(super) fn plan(
         |(index, _, _)| file.judges_unit(&out.units[*index]),
     );
     for group in packs {
-        send_or_split(file, &evidence, group, out, requests);
+        file.send_or_split(
+            group,
+            |items, _| sections_request(file, &evidence, items),
+            |item, out| out.units[item.0].presence = Presence::NeedsContext,
+            (out, requests),
+        );
     }
 }
 
@@ -184,37 +188,6 @@ struct Evidence<'a> {
     linters: &'a [String],
     /// Scope options, only for text loaded in every session.
     directories: &'a [String],
-}
-
-/// A pack that is too large is sent one section at a time.
-fn send_or_split(
-    file: &FileContext<'_>,
-    evidence: &Evidence<'_>,
-    group: Vec<(usize, String, Value)>,
-    out: &mut FilePlan,
-    requests: &mut Vec<Planned>,
-) {
-    let (request, asked) = sections_request(file, evidence, &group);
-    if file.budget.fits(&request) {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-        return;
-    }
-    for item in group {
-        let (request, asked) = sections_request(file, evidence, std::slice::from_ref(&item));
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        } else {
-            out.units[item.0].presence = Presence::NeedsContext;
-        }
-    }
 }
 
 fn sections_request(

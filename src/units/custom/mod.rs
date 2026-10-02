@@ -337,29 +337,16 @@ fn standalone(
         ),
     };
     for group in packs {
-        let (request, asked) = build(file, kind, &group, out);
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-            continue;
-        }
-        for entry in group {
-            let (request, asked) = build(file, kind, std::slice::from_ref(&entry), out);
-            if file.budget.fits(&request) {
-                requests.push(Planned {
-                    owner: file.owner,
-                    request,
-                    asked,
-                });
-            } else {
-                for ask in entry.1 {
+        file.send_or_split(
+            group,
+            |entries, out| build(file, kind, entries, out),
+            |(_, asks), out| {
+                for ask in asks {
                     out.units[ask.unit].presence = Presence::NeedsContext;
                 }
-            }
-        }
+            },
+            (out, requests),
+        );
     }
 }
 

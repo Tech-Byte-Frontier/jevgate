@@ -1,6 +1,6 @@
 //! Request building shared by every planner: one file's facts, the request
 //! envelope, packing, and stable identities.
-use super::{Asked, PACK_ITEMS, Questions};
+use super::{Asked, FilePlan, PACK_ITEMS, Planned, Questions};
 use crate::{schema::Location, token_budget::Limits};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -131,6 +131,46 @@ impl<'a> FileContext<'a> {
             state,
             questions.reworded(self.language),
         )
+    }
+
+    /// `built`, a request and what it asks, when the request fits the
+    /// provider limit; none otherwise.
+    pub(super) fn fitting(&self, built: (Value, Asked)) -> Option<(Value, Asked)> {
+        self.budget.fits(&built.0).then_some(built)
+    }
+
+    /// Adds `built` to `requests` when its request fits the provider limit,
+    /// and says whether it did.
+    pub(super) fn push_fitting(&self, built: (Value, Asked), requests: &mut Vec<Planned>) -> bool {
+        let Some((request, asked)) = self.fitting(built) else {
+            return false;
+        };
+        requests.push(Planned {
+            owner: self.owner,
+            request,
+            asked,
+        });
+        true
+    }
+
+    /// Plans `group` as one request that `build` makes when it fits the
+    /// provider limit, else each of its items alone; `unsent` marks an item
+    /// whose own request does not fit either.
+    pub(super) fn send_or_split<T>(
+        &self,
+        group: Vec<T>,
+        build: impl Fn(&[T], &FilePlan) -> (Value, Asked),
+        unsent: impl Fn(T, &mut FilePlan),
+        (out, requests): (&mut FilePlan, &mut Vec<Planned>),
+    ) {
+        if self.push_fitting(build(&group, out), requests) {
+            return;
+        }
+        for item in group {
+            if !self.push_fitting(build(std::slice::from_ref(&item), out), requests) {
+                unsent(item, out);
+            }
+        }
     }
 }
 

@@ -260,11 +260,7 @@ impl<'a> Shared<'a> {
             rule: DOC_DUPLICATION,
             id,
             name: heading(section).to_string(),
-            presence: if fits {
-                Presence::Judged
-            } else {
-                Presence::NeedsContext
-            },
+            presence: Presence::judged_if(fits),
             locations: vec![
                 file.location(section.start_line, section.end_line, Some(heading(section))),
                 other.clone(),
@@ -384,18 +380,13 @@ fn plan_unit(
     );
     let state =
         json!({"file": {"path": file.path}, "outline": super::documents::outline_of(file.source)});
-    let (request, asked) = file.request("docs", state, questions);
-    let fits = file.budget.fits(&request);
+    let fits = file.push_fitting(file.request("docs", state, questions), requests);
     let lines = file.source.lines().count().max(1);
     out.units.push(UnitPlan {
         rule: DOC_STALENESS,
         id: PLAN.into(),
         name: file.path.display().to_string(),
-        presence: if fits {
-            Presence::Judged
-        } else {
-            Presence::NeedsContext
-        },
+        presence: Presence::judged_if(fits),
         locations: vec![file.location(1, lines, None)],
         quote: None,
         lines,
@@ -405,13 +396,6 @@ fn plan_unit(
         },
         recheck: None,
     });
-    if fits {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-    }
 }
 
 /// A section that names paths or scripts the repository lacks, with its
@@ -465,11 +449,7 @@ fn stale_section(
         rule: DOC_STALENESS,
         id,
         name: heading(section).to_string(),
-        presence: if fits {
-            Presence::Judged
-        } else {
-            Presence::NeedsContext
-        },
+        presence: Presence::judged_if(fits),
         locations: vec![file.location(
             section.start_line,
             section.end_line,

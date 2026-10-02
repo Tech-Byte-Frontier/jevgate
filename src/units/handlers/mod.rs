@@ -237,17 +237,15 @@ fn plan_handler(
             .map(|(path, hash)| (path.as_path(), hash.as_str())),
     );
     let questions = questions.reworded(file.language);
-    let (request, asked) = super::request(file.model, "security", &sources, state, questions);
-    let fits = file.budget.fits(&request);
+    let fits = file.push_fitting(
+        super::request(file.model, "security", &sources, state, questions),
+        requests,
+    );
     out.units.push(UnitPlan {
         rule: SENSITIVE_DATA,
         id,
         name: handler.name.clone(),
-        presence: if fits {
-            Presence::Judged
-        } else {
-            Presence::NeedsContext
-        },
+        presence: Presence::judged_if(fits),
         locations: vec![file.location(handler.lines.0, handler.lines.1, Some(&handler.name))],
         quote: None,
         lines: handler.lines.1 + 1 - handler.lines.0,
@@ -257,11 +255,4 @@ fn plan_handler(
         },
         recheck: None,
     });
-    if fits {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-    }
 }

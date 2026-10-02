@@ -108,18 +108,13 @@ fn plan_constants(
         })
         .collect();
     let state = json!({"file": file.file_state(), "constants": listed});
-    let (request, asked) = file.request("constants", state, questions);
-    let fits = file.budget.fits(&request);
+    let fits = file.push_fitting(file.request("constants", state, questions), requests);
     let names: Vec<&str> = constants.iter().map(|c| c.name.as_str()).collect();
     out.units.push(UnitPlan {
         rule: HARDCODED_VALUES,
         id: CONSTANTS_ID.into(),
         name: "module constants".into(),
-        presence: if fits {
-            Presence::Judged
-        } else {
-            Presence::NeedsContext
-        },
+        presence: Presence::judged_if(fits),
         locations: constants
             .iter()
             .map(|c| file.location(c.line, c.end_line, Some(&c.name)))
@@ -132,11 +127,4 @@ fn plan_constants(
         },
         recheck: None,
     });
-    if fits {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-    }
 }

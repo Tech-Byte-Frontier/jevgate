@@ -68,13 +68,7 @@ pub(super) fn plan_steering(
     let lines: Vec<&str> = file.source.lines().collect();
     for mut steering in sent {
         steering.id = format!("steering:{}", out.steering.len() + 1);
-        let (request, asked) = steering_request(file, &steering, &lines);
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
+        if file.push_fitting(steering_request(file, &steering, &lines), requests) {
             out.steering.push(steering);
         }
     }

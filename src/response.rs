@@ -161,10 +161,11 @@ fn validate_choice(answer: &Value, probabilities: &Map<String, Value>) -> Result
     let choice = answer["choice"].as_str().context("Missing choice")?;
     ensure!(probabilities.contains_key(choice), "Invalid choice");
     let chosen = probability(&probabilities[choice])?;
+    // The chosen option and another may each be rounded by half a hundredth.
     ensure!(
         probabilities
             .values()
-            .all(|v| v.as_f64().unwrap() <= chosen + 0.01),
+            .all(|v| v.as_f64().unwrap() <= chosen + 2.0 * ROUNDING_PER_VALUE),
         "Choice is not a highest-probability option"
     );
     Ok(())

@@ -26,37 +26,35 @@ pub(super) fn keep_module_packages(args: &CheckArgs, inputs: &mut Vec<Input>) {
 /// the manifest's other text.
 pub(super) fn spacetimedb_package(root: &Path, relative: &Path) -> Framework {
     for directory in relative.ancestors().skip(1) {
-        if let Ok(text) = read_source(&root.join(directory).join("Cargo.toml"), LOCAL_PARSE_MAX)
-            && let Ok(table) = text.parse::<toml::Table>()
-            && let Some(dependency) = table.get("dependencies").and_then(|d| d.get("spacetimedb"))
-        {
-            let version = dependency
-                .as_str()
-                .or_else(|| dependency.get("version")?.as_str())
-                .unwrap_or("");
+        if let Some(version) = declared_version(&root.join(directory)) {
             return Framework {
                 root: directory.to_path_buf(),
                 version: version.trim_start_matches(['^', '~', '=', 'v', ' ']).into(),
             };
-        }
-        let manifest = root.join(directory).join("package.json");
-        let Ok(text) = read_source(&manifest, LOCAL_PARSE_MAX) else {
-            continue;
-        };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
-        for section in ["dependencies", "devDependencies", "peerDependencies"] {
-            if let Some(version) = json[section]["spacetimedb"].as_str() {
-                return Framework {
-                    root: directory.to_path_buf(),
-                    version: version.trim_start_matches(['^', '~', '=', 'v', ' ']).into(),
-                };
-            }
         }
     }
     Framework {
         root: relative.parent().unwrap_or(Path::new("")).to_path_buf(),
         version: String::new(),
     }
+}
+
+/// The SpacetimeDB version a `Cargo.toml` in `directory` depends on, or
+/// else its `package.json`; empty when the dependency names none.
+fn declared_version(directory: &Path) -> Option<String> {
+    if let Ok(text) = read_source(&directory.join("Cargo.toml"), LOCAL_PARSE_MAX)
+        && let Ok(table) = text.parse::<toml::Table>()
+        && let Some(dependency) = table.get("dependencies").and_then(|d| d.get("spacetimedb"))
+    {
+        let version = dependency
+            .as_str()
+            .or_else(|| dependency.get("version")?.as_str())
+            .unwrap_or("");
+        return Some(version.to_string());
+    }
+    let text = read_source(&directory.join("package.json"), LOCAL_PARSE_MAX).ok()?;
+    let json = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    ["dependencies", "devDependencies", "peerDependencies"]
+        .into_iter()
+        .find_map(|section| json[section]["spacetimedb"].as_str().map(str::to_string))
 }

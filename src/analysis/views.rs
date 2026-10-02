@@ -53,7 +53,7 @@ pub fn view(relative: &Path, text: &str) -> Option<Template> {
             if pug {
                 return pug_unescaped(line);
             }
-            let compact: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+            let compact = super::unspaced(line);
             let spaced = line.to_ascii_lowercase();
             marks.iter().any(|mark| {
                 let found = if mark.contains(' ') {

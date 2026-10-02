@@ -341,12 +341,7 @@ fn pair(
             .join(crate::schema::HASH_SEPARATOR)
             .as_bytes(),
     );
-    let a = site(files, fx, span_x);
-    let b = site(files, fy, span_y);
-    // Ties keep path and line order.
-    let swap = !files[fx].selected
-        || (files[fy].selected && (&b.path, b.start_line) < (&a.path, a.start_line));
-    let (a, b) = if swap { (b, a) } else { (a, b) };
+    let (a, b) = ordered_sites(files, (fx, span_x), (fy, span_y));
     Some(Pair {
         a,
         b,
@@ -422,7 +417,7 @@ fn go_idiom(statement: Node<'_>, source: &str) -> bool {
         "if_statement" => {
             let checks_err = statement
                 .child_by_field_name("condition")
-                .is_some_and(|c| compact_text(&source[c.byte_range()]) == "err!=nil");
+                .is_some_and(|c| super::unspaced(&source[c.byte_range()]) == "err!=nil");
             let returns = statement
                 .child_by_field_name("consequence")
                 .is_some_and(|block| {
@@ -439,10 +434,6 @@ fn go_idiom(statement: Node<'_>, source: &str) -> bool {
         }
         _ => false,
     }
-}
-
-fn compact_text(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 /// Drop pairs whose sites both lie inside a larger pair's sites.
@@ -576,6 +567,20 @@ fn contains(outer: &Site, inner: &Site) -> bool {
 
 fn compact(text: &str) -> usize {
     text.bytes().filter(|b| !b.is_ascii_whitespace()).count()
+}
+
+/// Two copies' sites, the owner first: a selected site, and between two,
+/// the first by path and line.
+fn ordered_sites(
+    files: &[SourceFile<'_>],
+    (fx, x): (usize, Range<usize>),
+    (fy, y): (usize, Range<usize>),
+) -> (Site, Site) {
+    let a = site(files, fx, x);
+    let b = site(files, fy, y);
+    let swap = !files[fx].selected
+        || (files[fy].selected && (&b.path, b.start_line) < (&a.path, a.start_line));
+    if swap { (b, a) } else { (a, b) }
 }
 
 fn site(files: &[SourceFile<'_>], index: usize, span: Range<usize>) -> Site {

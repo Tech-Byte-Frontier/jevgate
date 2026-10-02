@@ -1,23 +1,1670 @@
 {
   "version": 1,
-  "created_at": 1790633987,
+  "created_at": 1790976832,
   "findings": [
+    {
+      "fingerprint": "cb136da9d6988a35ece774dda70b9af6d90999597713efa15b161f74e6657115",
+      "rule": "maintainability/file-organization",
+      "path": "npm/lib/launcher.js",
+      "line": 31,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "69703131894f6b9fc8dd2dfffa68edb07a17c3ca0c813b2b8ea0ed5c712273a2",
+      "rule": "maintainability/function-simplification",
+      "path": "site/generate.py",
+      "line": 253,
+      "strength": "review",
+      "message": "`configuration_page` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "a18ca7b38e97da5af028a89d752eb5b30a455fdd03264d73ea8e5ed86f832582",
+      "rule": "maintainability/file-organization",
+      "path": "site/generate.py",
+      "line": 35,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "9a96af9248240fe3a6fdb93417e124d88c05a66455debc86a1be8d17548404d3",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/bend.rs",
+      "line": 47,
+      "strength": "review",
+      "message": "`proof_file` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "a88580de0e1e6266513e0064d7c61da3bed6a75a8204a1840ef1db6ea1341847",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/clones/apart.rs",
+      "line": 112,
+      "strength": "review",
+      "message": "`example_code` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "119f7b2c9bb9514ddb725f5e93236023ec9ffbe7c4d5755614ac2160a29e2e9b",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/clones/frame.rs",
+      "line": 86,
+      "strength": "review",
+      "message": "`recursion` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "3d03287bbbe463c2ebee5371c2c25de8b710d4212acce511f35af34031510bab",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/clones/mod.rs",
+      "line": 151,
+      "strength": "review",
+      "message": "`find` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "5f1798869ed886a1213412525a8cce10245de82d203065397d50d9efd769a42d",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/clones/mod.rs",
+      "line": 702,
+      "strength": "review",
+      "message": "`collect_blocks` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "ed866d6389143fbc68c478b2292fbb58a2fc46d47ce784d5cedb7d5d0cf5fae4",
+      "rule": "maintainability/shared-logic",
+      "path": "src/analysis/clones/mod.rs",
+      "line": 848,
+      "strength": "review",
+      "message": "`literal_setter` (src/analysis/clones/mod.rs:848), `accessor` (src/analysis/test_map.rs:727) and 5 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "150627130d39284585e392e4bb02a6c590a2ec39079ce56c80de3258f5ca8c81",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/clones/runs.rs",
+      "line": 180,
+      "strength": "review",
+      "message": "`streams` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "9ef109efbf9978bcb80b8dfe448a85a84ace46c073f62d3063918d8011768dc8",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/comments.rs",
+      "line": 694,
+      "strength": "review",
+      "message": "`nearby` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "f6d06eead95e71a8b4b704b4770af8ddac45ce5d6d3814dc7c3a2b322403a6b3",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/comments.rs",
+      "line": 648,
+      "strength": "review",
+      "message": "`member_of` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "fbb9bfdb4c8b939c749291a89f52e28e4ce77e54925ce1b94a989595aa394e31",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/comments.rs",
+      "line": 199,
+      "strength": "review",
+      "message": "`continues` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d7718c41150b4e8de0035c9c44e40ecd5a518c36d79afa54fdecf94603b476ab",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/django/secrets.rs",
+      "line": 28,
+      "strength": "review",
+      "message": "`secret_literals` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "a051471e547ae16df4b26d99340991cc1466ec87619b4ad173f01524058f9bfc",
+      "rule": "maintainability/shared-logic",
+      "path": "src/analysis/django/selection.rs",
+      "line": 34,
+      "strength": "review",
+      "message": "`selection_file` (src/analysis/django/selection.rs:34), `template_name` (src/analysis/django/templates.rs:26) and 8 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "46ccf409fc6606dd6bfa946c47cb62f5d642bbdf4f0b9ef67ed80f3bb925f5af",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/django/settings.rs",
+      "line": 78,
+      "strength": "review",
+      "message": "`extends` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "b2d459217f9eea9ded441f51a8db37515f976233a1bc37348d6f6d52b0aa747e",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/errors.rs",
+      "line": 31,
+      "strength": "review",
+      "message": "`errors_in` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "8654917f3bd7c9a05c66ea1fe85609b17244ad79e825093e6eb543edca953aeb",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/generic/mod.rs",
+      "line": 444,
+      "strength": "review",
+      "message": "`test_path` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "1ae7bab817ab0516b808f93c216289f348ea89656b3b682a3f8b6b79ce2bc63d",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/groups.rs",
+      "line": 44,
+      "strength": "review",
+      "message": "`test_groups` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "95c810109b41dc8e8a2f3ffc14e88c3999aa9d4b8084286ff1628ce77fd64b15",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/imports.rs",
+      "line": 129,
+      "strength": "review",
+      "message": "`Imports::reach` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "423db83c6dddf6cf9edb69e450cd2daf73a11186f996bd0136e9853e70a1fa8a",
+      "rule": "maintainability/shared-logic",
+      "path": "src/analysis/literals.rs",
+      "line": 413,
+      "strength": "review",
+      "message": "`csharp_field` (src/analysis/literals.rs:413), `Unit::placed` (src/analysis/units/mod.rs:282) and 12 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "bb9ad3d90d2bc1d8b192865d347fae8fbd2e2a4a1f9f7a0d14bc89e0b1207cfc",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/literals.rs",
+      "line": 510,
+      "strength": "review",
+      "message": "`bindings` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "fe8ca87542ac5c8c9d1e3a3336cf64b22ece3ecc10e2a895d6e8d02dfac67759",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/literals.rs",
+      "line": 581,
+      "strength": "review",
+      "message": "`reads` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "b107d94a43aeadcd2242f3bd7cacc91b51c5b47118841515f1357597ce592304",
+      "rule": "maintainability/file-organization",
+      "path": "src/analysis/mod.rs",
+      "line": 33,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "7dac942184f4d18d59adb67abe85870d1db33550f698f6cd20038861dad900c0",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/nesting.rs",
+      "line": 58,
+      "strength": "review",
+      "message": "`control` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "73508c028fc3114834102c56684168a4833c1b65738580aa7d60c3a27555dbe3",
+      "rule": "maintainability/shared-logic",
+      "path": "src/analysis/php/registration.rs",
+      "line": 77,
+      "strength": "review",
+      "message": "`registration` (src/analysis/php/registration.rs:77), `root` (src/analysis/php/registration.rs:92) and 4 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "8736c2775996dc42da2c8aa2db2d455e21fb40a5703e4c1ef0a4ac8c29bb3f54",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/sites.rs",
+      "line": 582,
+      "strength": "review",
+      "message": "`field_assignment` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d6a5f6316506bb72ec4e4b4d00abfa68ebe46173bafe72b62fca6252c924b57b",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/sites.rs",
+      "line": 483,
+      "strength": "review",
+      "message": "`priority` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "e60a09a1bcb7f8f50e360da567c1e36bebef2e8880b32710edeb2083d2cf8e8c",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/template_code.rs",
+      "line": 36,
+      "strength": "review",
+      "message": "`template_code` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "4886f4b2251c96edcf13fc785f60a36d1654efb195a0fb1298a20c37d8d6d8c1",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/test_map.rs",
+      "line": 537,
+      "strength": "review",
+      "message": "`javascript_case` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "52f72c33d63a2a60c79f94273ccd2850bc570373f9cbd6d6828454901d323f82",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/test_map.rs",
+      "line": 164,
+      "strength": "review",
+      "message": "`collect_suites` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "61eb284d643e4f4b7d7ee9310a025170313b5254454023ae37d3808379481e0c",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/test_map.rs",
+      "line": 117,
+      "strength": "review",
+      "message": "`qualify_repeated_names` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "6c0037e15c563cd789015e296d849ca39d3c9987035fff2fe424609b4c3a44f7",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/test_map.rs",
+      "line": 292,
+      "strength": "review",
+      "message": "`case` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "ab40f6381f860c6b74eaea77acb2fc4ef44c6b23d5f27bcca8e15b3c06b00e7f",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/test_map.rs",
+      "line": 636,
+      "strength": "review",
+      "message": "`walk` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d19ad8654a57e6682a382163a67b42624f923efc0cca99ca322ac9a5eb77e064",
+      "rule": "maintainability/file-organization",
+      "path": "src/analysis/test_map.rs",
+      "line": 27,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "1d3461d10180831da8702ef0fb1c3934a7d51bbfd5950149152fd74b1c2d2b4d",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/units/facts.rs",
+      "line": 16,
+      "strength": "review",
+      "message": "`Facts::visit` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "72c46367e68e87443ca11fcaa7563eeb853a68618ffcde1fcf347d3f3a8a1dd4",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/units/left_out.rs",
+      "line": 172,
+      "strength": "review",
+      "message": "`FileUnits::leave_out_tests` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "447db9cb65f03ae1d483e6ac975a1d8b6e4541c01ede945ed4b2dcefd51714f0",
+      "rule": "maintainability/file-organization",
+      "path": "src/analysis/units/mod.rs",
+      "line": 21,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "0931d272f2134c838b5c7be07e10a988601959c85087a333b05c02fbf2ba3be9",
+      "rule": "maintainability/shared-logic",
+      "path": "src/analysis/units/ruby_definitions.rs",
+      "line": 16,
+      "strength": "review",
+      "message": "`ruby_call` (src/analysis/units/ruby_definitions.rs:16), `imports` (src/docs/markdown.rs:316) and 7 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "78c02e7e5683010dd6edc70e6e5e5fe97b4827e36f67cf8ca80b456829c43398",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/units/tests/generic.rs",
+      "line": 297,
+      "strength": "review",
+      "message": "`three` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "de67dd37af0a025b506d024e4959dfca1358b4d2b682db21a78e32764a8e6e2f",
+      "rule": "tests/value",
+      "path": "src/analysis/units/tests/javascript.rs",
+      "line": 89,
+      "strength": "review",
+      "message": "`class_fields_holding_functions_are_methods_of_their_class` asserts internal details instead of observable results.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "70cab117172931b0b5252b3ebed98cf06965bb9fa7b817057f9bbaa144f305b1",
+      "rule": "maintainability/function-simplification",
+      "path": "src/analysis/units/walk.rs",
+      "line": 19,
+      "strength": "review",
+      "message": "`walk` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "8e038fee7eda6ab5958a540f5eb43c2933a6d348a3eda6126170739a666ce506",
+      "rule": "maintainability/file-organization",
+      "path": "src/auth/mod.rs",
+      "line": 24,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "fd90a71676c4f38c61b701bf6e15eb0a9344dac7801bfed21d72e200beff0741",
+      "rule": "maintainability/shared-logic",
+      "path": "src/auth/store.rs",
+      "line": 87,
+      "strength": "review",
+      "message": "`NativeBackend::get` (src/auth/store.rs:87), `NativeBackend::delete` (src/auth/store.rs:120) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "b86081c24f1f38455b3b3e35fb81891d518e9c24170967d0574e0264dcca1a13",
+      "rule": "maintainability/file-organization",
+      "path": "src/auth/tests.rs",
+      "line": 15,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "5cacb82760c55a2b30cdfaad510b3796cd571ba46bada152961e96613539f9a9",
+      "rule": "maintainability/file-organization",
+      "path": "src/baseline.rs",
+      "line": 17,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "b5974a3e8b0774e52416c53f1003281dc460cd55853041125750b311c3d71376",
+      "rule": "maintainability/function-simplification",
+      "path": "src/catalog.rs",
+      "line": 424,
+      "strength": "review",
+      "message": "`policy` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "a6700e4a21c651762feee83f7de9aa12078a6dba6031d07ce0672f71b06c9ad0",
+      "rule": "maintainability/function-simplification",
+      "path": "src/check.rs",
+      "line": 253,
+      "strength": "review",
+      "message": "`run` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "e6c158e718c4e07a169a5da108c8146e1f462a8b2ea2caf7bedcc61f350ff201",
+      "rule": "maintainability/file-organization",
+      "path": "src/check.rs",
+      "line": 23,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "2e93557a7de4691d86ca666724d7153336b1e4048eda8f973d8da554d237be2b",
+      "rule": "maintainability/function-simplification",
+      "path": "src/command.rs",
+      "line": 88,
+      "strength": "review",
+      "message": "`configured` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "98a9bf691db26467975da17123bbcf702cd98b0dfd8b88ff7287734126ad036c",
+      "rule": "maintainability/file-organization",
+      "path": "src/command.rs",
+      "line": 14,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "382884074321b13f806f4b5070f135fe49e274a909ba255b56896ea99cbb3d52",
+      "rule": "maintainability/file-organization",
+      "path": "src/config.rs",
+      "line": 15,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "b4459e75894735d2eaf267bae5ba33859315597ad9f30625b45637dc5df67704",
+      "rule": "maintainability/function-simplification",
+      "path": "src/config.rs",
+      "line": 366,
+      "strength": "review",
+      "message": "`ConfigContext::configure_budgets` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "1495c8aebae76556482c32808552bfddd7b99e2204324a19b5c9670c85db5dfd",
+      "rule": "maintainability/file-organization",
+      "path": "src/custom/gallery/tests.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "2bf41050c601326d33f1b9cd7fc269e2c6098647a519e34ae0864d0e22db5bc9",
+      "rule": "maintainability/shared-logic",
+      "path": "src/custom/propose/proposal.rs",
+      "line": 266,
+      "strength": "review",
+      "message": "`shortened` (src/custom/propose/proposal.rs:266), `shown` (src/custom/propose/render.rs:192) and 3 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "ebda5f61e0cac8d974977d49bce393fbf5ccaaec3d7096df473d45f9b6a03057",
+      "rule": "maintainability/function-simplification",
+      "path": "src/custom/propose/render.rs",
+      "line": 207,
+      "strength": "review",
+      "message": "`not_proposed` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "b5eb13fb9818b5604cd34789f949ab01bf7f6b41f5bf0f620956565b5cd62407",
+      "rule": "maintainability/file-organization",
+      "path": "src/custom/propose/tests/mod.rs",
+      "line": 56,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "59e697423a6b774e91bd6ed332575880de0d991e2bafe1afd61193df15d36900",
+      "rule": "maintainability/function-simplification",
+      "path": "src/discovery/copies.rs",
+      "line": 106,
+      "strength": "review",
+      "message": "`versioned_name` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "f965fca547f7211bff93166299358b14608a9f9b4338968739f313727fc13f0e",
+      "rule": "maintainability/function-simplification",
+      "path": "src/discovery/copies.rs",
+      "line": 11,
+      "strength": "review",
+      "message": "`vendored` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "09d324f7ac4a9291eb2e51829275d06f3d7c6891654284f19985ebf6fed77028",
+      "rule": "maintainability/function-simplification",
+      "path": "src/discovery/mod.rs",
+      "line": 42,
+      "strength": "review",
+      "message": "`Classifier::role` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "eb9a486967775a2726228d41978ab3bdb4fa8be9c0c9a6f44929b33ddabd17f3",
+      "rule": "maintainability/function-simplification",
+      "path": "src/discovery/mod.rs",
+      "line": 107,
+      "strength": "review",
+      "message": "`generated_name` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "6c591e5e64c99a7d457622e08b3cc7831f9bc6696a5f188d4eedd1cf13342e11",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/discover.rs",
+      "line": 68,
+      "strength": "review",
+      "message": "`agent_file` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "96eb26ac1172da5cc46ac7b41f4870fd4909655bdef47a774707208110e7b679",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/discover.rs",
+      "line": 194,
+      "strength": "review",
+      "message": "`discover` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "a6d36b0586ea72120db8614a1afb6d67a8549325c77ba557c295888b960baad1",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/discover.rs",
+      "line": 98,
+      "strength": "review",
+      "message": "`project_doc` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "b74303665968ff2d57cbd4a4aca710478f7f43a9df41231943f9fb8897161d7a",
+      "rule": "maintainability/shared-logic",
+      "path": "src/docs/discover.rs",
+      "line": 207,
+      "strength": "review",
+      "message": "`discover` (src/docs/discover.rs:207) and `walk_doc_dir` (src/docs/discover.rs:277) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "df799c22efbbcf94f8a441a814c019121caefe84de24222d89d018e055f34cdc",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/format/asciidoc.rs",
+      "line": 66,
+      "strength": "review",
+      "message": "`AsciiDoc::line` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d4f1acf5b1b7d2ad0cf39d8d48a2bba2ba3879885560962a6dfbf40e5eefed31",
+      "rule": "maintainability/shared-logic",
+      "path": "src/docs/load.rs",
+      "line": 472,
+      "strength": "review",
+      "message": "`skipped_agents` (src/docs/load.rs:472), `group_finished_plans` (src/units/grouping.rs:50) and 10 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "fa79103416f2d3a1c7fb553bbafca7adc1c9ed19c2203ade9f0f61cf1e0cf339",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/load.rs",
+      "line": 104,
+      "strength": "review",
+      "message": "`readers` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d92f066c1dbe4f1b45d60649547fda44dc5fe0ee2cb306d29ba644fa6a173a8c",
+      "rule": "maintainability/file-organization",
+      "path": "src/docs/markdown.rs",
+      "line": 9,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "3b025c2c38cdb94c44695def1312c70bdb7bed82a137a8ce319a3ae008664849",
+      "rule": "maintainability/shared-logic",
+      "path": "src/docs/project.rs",
+      "line": 111,
+      "strength": "review",
+      "message": "`cargo` (src/docs/project.rs:111), `cargo_manifest` (src/packages.rs:70) and 6 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "4b7b451f2153fcd27ba896e12a621fdddaf35ce4835f9b700eeed237fbd8766b",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/project.rs",
+      "line": 25,
+      "strength": "review",
+      "message": "`read` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "8cd349b0a8f510f7857c5eafc867776e12168498b49746132984672287fc754e",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/project.rs",
+      "line": 58,
+      "strength": "review",
+      "message": "`manifests` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "2fafebdc39bd29bee72994449424c1561f1cf36534580724bb9b39d71d75e1aa",
+      "rule": "maintainability/file-organization",
+      "path": "src/docs/references.rs",
+      "line": 14,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d0704d31be18f9accd08e9da62bd66846e27f69ba343c3d1ffe00dda3849f085",
+      "rule": "maintainability/function-simplification",
+      "path": "src/docs/references.rs",
+      "line": 327,
+      "strength": "review",
+      "message": "`names_in_part` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "51becc3059ac702f030276b9c776550aac5875112cbedf42b38573d938a720a7",
+      "rule": "maintainability/file-organization",
+      "path": "src/evaluate.rs",
+      "line": 14,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "eb77e4f652658c21a450d81c491bebefa62143f89a1776ec4871d369f950a70a",
+      "rule": "maintainability/function-simplification",
+      "path": "src/evaluate.rs",
+      "line": 297,
+      "strength": "review",
+      "message": "`Session::evaluate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "f9f7ae0fc216c908682f9d8e1924d78e1bd15579a8ab2063b4f1c6c703c89493",
+      "rule": "maintainability/function-simplification",
+      "path": "src/evaluate.rs",
+      "line": 682,
+      "strength": "review",
+      "message": "`add_metrics` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "51ed649b9dbeae8adf77272eb0af37483a5a6155c7340fa96372f6a137238dea",
+      "rule": "maintainability/function-simplification",
+      "path": "src/file_kind.rs",
+      "line": 294,
+      "strength": "review",
+      "message": "`decide_after_purpose` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "9bfb14068a6f1ff51ec27676bab62442872a1d831c191acc0d88cc1a3324954f",
+      "rule": "maintainability/function-simplification",
+      "path": "src/file_kind.rs",
+      "line": 506,
+      "strength": "review",
+      "message": "`prepare` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "bce573d4afdc0078085f34d5dad3642f8f606970ec3c9ed324fa5edfedaed067",
+      "rule": "maintainability/function-simplification",
+      "path": "src/file_kind.rs",
+      "line": 140,
+      "strength": "review",
+      "message": "`language` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "8333844ff2e2e98441062877670f3cea3b6e5139ab4e059fc3bcfc11133b12c3",
+      "rule": "maintainability/function-simplification",
+      "path": "src/git_hooks/install.rs",
+      "line": 84,
+      "strength": "review",
+      "message": "`install` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "90bae085012da39d42fd763456f716156dd43a3fc8bfc99b5925b601fbb2fedb",
+      "rule": "maintainability/file-organization",
+      "path": "src/guards/markers.rs",
+      "line": 14,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "a3fd4bd4c11c89c31749b3fea795a8c6d8996d96a9f4f3b276a75c8ee6a0ff24",
+      "rule": "maintainability/function-simplification",
+      "path": "src/guards/mod.rs",
+      "line": 182,
+      "strength": "review",
+      "message": "`summary` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "cdc4b52d7a6c8307e976272b9665a6b1d24e31b49460a89e89400d51973da048",
+      "rule": "maintainability/function-simplification",
+      "path": "src/guards/settings.rs",
+      "line": 140,
+      "strength": "review",
+      "message": "`question_tables` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "417b704fd1318a0cca1d3dea37b13407764d0e5707b579e27ac017b7c880c0ae",
+      "rule": "maintainability/function-simplification",
+      "path": "src/hook/events.rs",
+      "line": 311,
+      "strength": "review",
+      "message": "`Hook::told` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "6bc6c358468d19c446287e50e061612752de3b385cefcc50cac52b2c1dd10d16",
+      "rule": "maintainability/function-simplification",
+      "path": "src/hook/events.rs",
+      "line": 399,
+      "strength": "review",
+      "message": "`Hook::decide` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "0f8e2b896d8340868b4b4d2a751885e1e35d350559812fff25fd6e14c9fa3c35",
+      "rule": "maintainability/file-organization",
+      "path": "src/hook/tests/mod.rs",
+      "line": 24,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "later"
+    },
     {
       "fingerprint": "deb9de5dfe24d73e82b3e26115ff16eaf9c982aa964adf7ffd0edda5aec4000d",
       "rule": "maintainability/function-simplification",
       "path": "src/hook/tests/mod.rs",
-      "line": 158,
-      "strength": "consider",
-      "message": "`long_kotlin_function` likely mixes separate jobs; splitting it may make it easier to understand.",
+      "line": 162,
+      "strength": "review",
+      "message": "`long_kotlin_function` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
       "reason": "wrong"
     },
     {
-      "fingerprint": "62ce38c353079b7b9773080b905d226e8d8e473ef040d8b1b828e25cca8fc4f1",
+      "fingerprint": "fc7054a850a0767a6b171eedecdb83e17d39d8051b0b26f27c4962976350932f",
+      "rule": "maintainability/file-organization",
+      "path": "src/hook/tests/protocol.rs",
+      "line": 7,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "64f9b50eb6835d494cb641585fa7d1f1096f29347f0556d30c1bbb8ef8bc8287",
+      "rule": "maintainability/function-simplification",
+      "path": "src/hook/text.rs",
+      "line": 182,
+      "strength": "review",
+      "message": "`findings_after_edit` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "dc771fd3a45bb112b84587cc4c5fe126e563791c1643b1d8e995055a3d97da7b",
+      "rule": "maintainability/file-organization",
+      "path": "src/hook/turn.rs",
+      "line": 20,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "2b3a443ad111fdd14f51e7925a9a9d8cebe2f8852b7fc9ac1dbb7ca8390bfd4d",
+      "rule": "maintainability/function-simplification",
+      "path": "src/inventory/mod.rs",
+      "line": 316,
+      "strength": "review",
+      "message": "`load` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "4cfa0e8a440bf75f9422c8bf8b2f1e2fab212d71bd692cfc9776f864ae73d456",
+      "rule": "maintainability/function-simplification",
+      "path": "src/inventory/mod.rs",
+      "line": 539,
+      "strength": "review",
+      "message": "`over_read_cap` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "74cc52cf9e32e7165bcfdaacccf85f4de4aa85edf209ded983ba0b934c76891e",
+      "rule": "maintainability/function-simplification",
+      "path": "src/inventory/mod.rs",
+      "line": 88,
+      "strength": "review",
+      "message": "`collect` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "54b311acce0177d2a62c6c64335d3eb87e110bd847e965a6b64d49c7764b2f33",
+      "rule": "maintainability/hardcoded-values",
+      "path": "src/maturity.rs",
+      "line": 249,
+      "strength": "review",
+      "message": "`dataset` may hold a fixed value worth a look: a special-cased record, a value that differs between environments, or an unexplained number.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "3d661fd0f056fcc0d5c3d5f4936272528955ab4b797138ed7303092f7a3f2cc9",
+      "rule": "maintainability/shared-logic",
+      "path": "src/mcp/tools.rs",
+      "line": 19,
+      "strength": "review",
+      "message": "`list` (src/mcp/tools.rs:19), `result_schema` (src/mcp/tools.rs:75) and 11 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "bcdcb327a9866139598ac7e9484d31c2ed4a7e864358febdb10d3d08e4c04f7f",
+      "rule": "maintainability/function-simplification",
+      "path": "src/mcp/tools.rs",
+      "line": 74,
+      "strength": "review",
+      "message": "`result_schema` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d6536939f73a5b24aa8de344f920e422868aa55089757ecdb96edd0f7386af3a",
+      "rule": "maintainability/hardcoded-values",
+      "path": "src/model.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "A constant of this file may fix a value worth a look: one that differs between environments or singles out one record.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "769fd464b51592e74e18c54da24eff0d640829e137e93eac6030cee5a8eede2c",
+      "rule": "maintainability/file-organization",
+      "path": "src/options/mod.rs",
+      "line": 16,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "59c234b43337e0db4998feddb25326d9e05dd6867e009d472a46d69b15193731",
+      "rule": "maintainability/function-simplification",
+      "path": "src/output/mod.rs",
+      "line": 92,
+      "strength": "review",
+      "message": "`emit` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d3355c891fdbe6d9be90b1cfc24901caa73572c80feebdce9dbbcfadd30a79e0",
+      "rule": "maintainability/function-simplification",
+      "path": "src/output/mod.rs",
+      "line": 165,
+      "strength": "review",
+      "message": "`measuring` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "66e60a9323cc4e2e7a3d3c27a4e461b2aa5e56a4f85a1e72df96e9b04adb714a",
+      "rule": "maintainability/function-simplification",
+      "path": "src/packages.rs",
+      "line": 23,
+      "strength": "review",
+      "message": "`package` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "8b2d3585ff8427a229061957109564264ed673739f200a6701882d632d3bc343",
+      "rule": "maintainability/file-organization",
+      "path": "src/requests.rs",
+      "line": 20,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "e2475222720195f22f7d4cb772e0938e34b1ecbc12b7052f8051db4720b536e1",
+      "rule": "maintainability/file-organization",
+      "path": "src/revision/tests/mod.rs",
+      "line": 12,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "481cfa523378e76edebbeb2ef6a22aa986ba624dd143fcd61d0f9c09d0f42ad0",
+      "rule": "maintainability/file-organization",
+      "path": "src/revision.rs",
+      "line": 19,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "fc4438e1ec6171d2ee69313116b0e5b3ec5d300f8dd4c14cb2e09f022b9b81d2",
+      "rule": "maintainability/function-simplification",
+      "path": "src/rules_test/report.rs",
+      "line": 268,
+      "strength": "review",
+      "message": "`Report::headline` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d34e4a247eebf00b6f5b87022a8585e2e2030ec79709d6daf75e4ee49fcbe4a0",
+      "rule": "maintainability/function-simplification",
+      "path": "src/rules_test/tests.rs",
+      "line": 26,
+      "strength": "review",
+      "message": "`Marked::evaluate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d3b2644a14fa97f8b2b17e2a376725847b3ba0be4f9febad67efd4a1eb9c70c4",
+      "rule": "maintainability/file-organization",
+      "path": "src/rules_test/tests.rs",
+      "line": 7,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "712fb6062847a911f4a78958df15a60c9a830f77eff4c261264d4e5e78173dac",
+      "rule": "maintainability/function-simplification",
+      "path": "src/schema/report.rs",
+      "line": 428,
+      "strength": "review",
+      "message": "`Report::update_status` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "6ba1dca85ee7e994637e9318c34844deaa08eb169f6cd8920e0aacce586ece9c",
+      "rule": "maintainability/function-simplification",
+      "path": "src/server.rs",
+      "line": 93,
+      "strength": "review",
+      "message": "`route` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "e4b9405f65c77893fcb97c6d3c577b88f58cf3c91a6f501facd8a2b1411f7a89",
+      "rule": "maintainability/file-organization",
+      "path": "src/server.rs",
+      "line": 15,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "812206aaaca2b55d9f29fb0d6ad7eadbd041026fd1b98a0a2a7fa7714a043fba",
+      "rule": "maintainability/function-simplification",
+      "path": "src/setup/agents.rs",
+      "line": 261,
+      "strength": "review",
+      "message": "`paths` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "2528903f8454c4ecd0764325d544b88b37982002839fe909de2db4c2e4b0dbea",
+      "rule": "maintainability/file-organization",
+      "path": "src/setup/json.rs",
+      "line": 17,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "4547b6696e0f344afacc53a4efd457328181e808154d7e32dd4d724b797ab085",
+      "rule": "maintainability/function-simplification",
+      "path": "src/setup/opencode.js",
+      "line": 52,
+      "strength": "review",
+      "message": "`runHook` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "a7bae3a345bf3c4970ce5ce714de1caaeb7b290fbe54aaed944e5bd4a500e724",
+      "rule": "maintainability/function-simplification",
+      "path": "src/setup/opencode.js",
+      "line": 104,
+      "strength": "review",
+      "message": "`JevGate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "8dac1662f53a229659705d44f91be2a41a3e8a25fad59696c9bbcd09a35a27eb",
+      "rule": "maintainability/function-simplification",
+      "path": "src/setup/opencode.test.mjs",
+      "line": 21,
+      "strength": "review",
+      "message": "`fakeJevgate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "0c7269bb6a252f05c894c8b86b5824962af9108f63c4567d490b7578019eece4",
+      "rule": "maintainability/file-organization",
+      "path": "src/setup/tests.rs",
+      "line": 12,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "045ed99c4423ad71f5d67e252ae004cb657f799448729f1165f302eb55cce3f5",
+      "rule": "maintainability/function-simplification",
+      "path": "src/suppress.rs",
+      "line": 128,
+      "strength": "review",
+      "message": "`parse` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "b2472fdcbbeb4d7f5b4fd08922ba13f1528c678a952946013ac926f109b7a91c",
+      "rule": "maintainability/function-simplification",
+      "path": "src/syntax.rs",
+      "line": 332,
+      "strength": "review",
+      "message": "`without_tags` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "fc1b51b4f471eb5e76698e18e409e5c826867ca672726036d7bd9fe583420dab",
+      "rule": "maintainability/function-simplification",
+      "path": "src/test_locations/mod.rs",
+      "line": 76,
+      "strength": "review",
+      "message": "`walk` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "ae2e21700bc6ae706e6d3a89f18e01b7547436b35a6df7aeb90a7acb612041d0",
+      "rule": "maintainability/function-simplification",
+      "path": "src/test_locations/rust.rs",
+      "line": 108,
+      "strength": "review",
+      "message": "`is_test_attribute` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "e9f3f69f4ad38653eeaaa416736359c7e4a35351ca79d10c5086a2dc9597b48a",
+      "rule": "maintainability/file-organization",
+      "path": "src/tests/mod.rs",
+      "line": 26,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "f7568ceb52ea3ce6955e45b03c2db4a85e23221f503d86ff4eb668e8bea20f01",
+      "rule": "maintainability/file-organization",
+      "path": "src/transport/mod.rs",
+      "line": 47,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "ab3c10fca89e23c0db202ecc33b0e7d8866194f02818f3fc1612b36b2e598be0",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/compose/answers.rs",
+      "line": 33,
+      "strength": "review",
+      "message": "`security_answers` (src/units/compose/answers.rs:33), `beside_answers` (src/units/compose/answers.rs:111) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "faeb8bdd9ea02ebce3f8e162bb74c974525b5a0c30feba1a975bfd7ce533255f",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/caps.rs",
+      "line": 42,
+      "strength": "review",
+      "message": "`outside_function` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "0ae1ead1a753b5743725143ff14e70a790fba5f6c147e45442e252c13b9a909e",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/comments.rs",
+      "line": 44,
+      "strength": "review",
+      "message": "`comment_findings` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "0426cf29bc82927d5ba0d17e12226e080d2c849266ad2a8909303cd6fc633099",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/mod.rs",
+      "line": 456,
+      "strength": "review",
+      "message": "`counted_status` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "839519bcf4ed992fc3927e179fb57cb1d5fd5ea1f68d08f85c9d4d1f8f254db9",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/mod.rs",
+      "line": 126,
+      "strength": "review",
+      "message": "`Tally::add` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "84508d7744ab4fcac5c3239012c061061cbf8decb79641bac59f6175f1aa89b6",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/mod.rs",
+      "line": 660,
+      "strength": "review",
+      "message": "`finding` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "7b9c45a11bf97f35d12cf672422f6bb47560176fa5a5a91cd0618f98fed57922",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/custom/items.rs",
+      "line": 170,
+      "strength": "review",
+      "message": "`whole` (src/units/custom/items.rs:170), `plan_unit` (src/units/drift.rs:384) and 6 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "63f373d699dc0e64490e490447be4f918b909ade305fbbc5f0e524a216cb144c",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/custom/mod.rs",
+      "line": 149,
+      "strength": "review",
+      "message": "`Planner::plan` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "99fd68f6112cd8dec211130414c7d34e96da7204bfc622eae06a17e8efe44522",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/follow_ups.rs",
+      "line": 14,
+      "strength": "review",
+      "message": "`locates` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "368fb85e44e3230070b584f9350b9ab7288309c69c105e3b3e37d6064c3b5235",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/handlers/classes.rs",
+      "line": 59,
+      "strength": "review",
+      "message": "`error_class_texts` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "713f40626bd3d0d5961b2fd273f3bf18feba6bfd143774eb3a69f614ed08034f",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/handlers/implemented.rs",
+      "line": 63,
+      "strength": "review",
+      "message": "`framework_call` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "3148fa251227ce9315f2e29a31a5887dc76d64e727ef33ed5fb2ff2a7145e4b3",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/handlers/mod.rs",
+      "line": 146,
+      "strength": "review",
+      "message": "`named_handler` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "c1e307e3692f2d4277b739504c6bf4785b7e0542d7514e2235d1453d75942870",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/handlers/mod.rs",
+      "line": 156,
+      "strength": "review",
+      "message": "`named_handler` (src/units/handlers/mod.rs:156), `decorated` (src/units/handlers/registered.rs:130) and 13 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d260a9d54b139b9ea20279f13fb5a574cffe5e1a66805c13cd2735fff132e935",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/handlers/registered.rs",
+      "line": 165,
+      "strength": "review",
+      "message": "`django_views` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "22a65211103af2fb7703af9d752a37e23b59a491a8c6c11851143fad58e99075",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/hardcoded.rs",
+      "line": 44,
+      "strength": "review",
+      "message": "`plan` (src/units/hardcoded.rs:44), `plan` (src/units/laws.rs:73) and 5 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "ceb92404d2df076f9b2505269c7530f821c09f1d5fa18cf1465e8486c0b3aa44",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/instructions.rs",
+      "line": 193,
+      "strength": "review",
+      "message": "`sections_request` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "dbd181feea4bcc8d1689abd4a1aa3b87e0f2315b26b8d3695266b84d3ddb0c14",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/laws.rs",
+      "line": 257,
+      "strength": "review",
+      "message": "`without_headings` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "8d3ad32d9bf18bb1b988e80892b8eea259eef272306fdf5167e9be20ed6edc20",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/mod.rs",
+      "line": 328,
+      "strength": "review",
+      "message": "`UnitPlan::follow_ups` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "6e1e90bd31f01222d36fc642439bd470b583cfb2ae542cb74c0ae7d3e0577024",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/outcome/exposure.rs",
+      "line": 150,
+      "strength": "review",
+      "message": "`exposure_signals` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d548bae54c984f7782a9c9d09b1e4119422b485c8a5b41bfefde0980c7a88fcf",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/outcome/injection.rs",
+      "line": 41,
+      "strength": "review",
+      "message": "`injection_outcome` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "4c4f50387e1d17f04d43b47985937e7398f59691fcb6b959e5c01f202d24b8e0",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/outcome/mod.rs",
+      "line": 435,
+      "strength": "review",
+      "message": "`strongest` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "cc344175789d2da2b055a42c36d9089be8cfae2a8615f91793de281c56c620ac",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/outcome/mod.rs",
+      "line": 258,
+      "strength": "review",
+      "message": "`rule_outcome` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "0d67b1174cf848d492e1869b020379d045170a9ed8cd1a70111ef6573d3274d1",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/plan/file.rs",
+      "line": 28,
+      "strength": "review",
+      "message": "`plan_file` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "5a17c7a0e959ff5ffa91ed2f0f3e3c4dec48621b2eccacb3cb9567ccd9c4be01",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/plan/file.rs",
+      "line": 28,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "c5a9f017983841bd20189be39ba271545b3a7735726e4c7c6f31eb1f06be5621",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/plan/mod.rs",
+      "line": 304,
+      "strength": "review",
+      "message": "`parsed_scope` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "fa6491af668dc8dc248218b34a7b9c7e88fd633565412eacf3d670dd6b91f4ab",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/plan/mod.rs",
+      "line": 98,
+      "strength": "review",
+      "message": "`plan` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "1e77b4af8f3a25cfa70d4617fa4cb7e258f86443df44e752282db93d73e3e84e",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/plan/security_units.rs",
+      "line": 353,
+      "strength": "review",
+      "message": "`callers_of` (src/units/plan/security_units.rs:353), `test_helpers` (src/units/plan/shared.rs:238) and 8 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "a5da048b4e94fc26b54a2125cf922fac9b75df434162cd2ac1f659267db70b58",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/plan/shared.rs",
+      "line": 106,
+      "strength": "review",
+      "message": "`Shared::new` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "288c86aeff5a8df4a11fa9ac7c125f53fb12ba32ea446ed26dc0114caefe620b",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/questions/mod.rs",
+      "line": 226,
+      "strength": "review",
+      "message": "`security_checks` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "91203b85a66c3cd9d0ee4dd7f683f6928cf0ccedd1c31be92bf5026722d2b1a4",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/questions/mod.rs",
+      "line": 166,
+      "strength": "review",
+      "message": "`security` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "25223a4f0ed87d15e490b7521d8c7fac224f46342ef2cca1758200a58cfe7e79",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/questions/php.rs",
+      "line": 240,
+      "strength": "review",
+      "message": "`security_markup_parts` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "7ec39649289acadf6351ba6df643ec3cf4e2cb198c85a0c0cb9a921952e11424",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/questions/security/mod.rs",
+      "line": 23,
+      "strength": "review",
+      "message": "`security_interpreted` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "4190734d11de793e7db8220b894eff79f867f188ea02fbacad8f650fe1a4ce74",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/questions/settle.rs",
+      "line": 116,
+      "strength": "review",
+      "message": "`security_redirect_target` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "8d923ac2da59132acfd070c870fe5f61ff0da07482a84ad6c09a1b149aabf7a4",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/questions/settle.rs",
+      "line": 157,
+      "strength": "review",
+      "message": "`security_markup_output` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "a9bb69c0f2a2e976d4243ed7af550e0206d364ea1015a34546d3b3dd26ce7581",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/questions/spacetimedb.rs",
+      "line": 9,
+      "strength": "review",
+      "message": "`spacetimedb_framework` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "090d6712a50c452ffe0ee218e7cb63f8704b38de0db84a82c21d42e99db7dd16",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/security/mod.rs",
+      "line": 354,
+      "strength": "review",
+      "message": "`trace` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "2f69f82b221d8e504e66e5cdef85500ed2283ef2cdc857f6add86f2b9efb918a",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/security/mod.rs",
+      "line": 308,
+      "strength": "review",
+      "message": "`asked_checks` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "02d41b824c82a9728543382c75c8dd623efdd58d7b4405d85b949dac6c62b4ad",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/spacetimedb.rs",
+      "line": 276,
+      "strength": "review",
+      "message": "`typescript_definitions` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "41c0811c0b9850a3c5494aca78bd0678c42c11a26bda12bb1a183b48209ef55e",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/spacetimedb.rs",
+      "line": 291,
+      "strength": "review",
+      "message": "`typescript_definitions` (src/units/spacetimedb.rs:291), `rust_fields` (src/units/spacetimedb.rs:411) and 8 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d317455108f20758a9bdf283ddc98932d7afa3fb1e9ac6136b75f445b762f7bd",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/spacetimedb.rs",
+      "line": 17,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "a9169e4b253e63ef74d77426fa47371994d78155d9d95cb779065c42d23d08ab",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/test_units/mod.rs",
+      "line": 68,
+      "strength": "review",
+      "message": "`plan_values` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "a731ee0430f0cb1c1184eb406b43359f4118d0a8fdd7f689c7d939b6beea5670",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/test_units/setup.rs",
+      "line": 187,
+      "strength": "review",
+      "message": "`setup_hooks` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "4eab3103044d7bfdeff38c62232428c8badd13b0db6ebfe106f74f49346b1b3a",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/custom.rs",
+      "line": 6,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "b2e04f6d34e41c1ca8e363f836ca25f0515e2d01a5f17a06d56fdeab751fca7c",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/documentation.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "060fb7704348c8528321aed5d5076c19388154453e548c0cab13f6a52a3f07b0",
       "rule": "maintainability/hardcoded-values",
       "path": "src/units/tests/mod.rs",
-      "line": 312,
+      "line": 151,
       "strength": "review",
-      "message": "One of this file's constants fixes a value that differs between deployments (0.98). The constant is `HARDCODED`.",
+      "message": "A constant of this file may fix a value worth a look: one that differs between environments or singles out one record.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "76f152756739bb3b1c167f2ef55d71da86cf3e59f62983af21b177e3986b2231",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/mod.rs",
+      "line": 33,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "f39e1e303deae46eee3b2c9d11aa759bc0fe240391666679053594421e11f08f",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/tests/mod.rs",
+      "line": 336,
+      "strength": "review",
+      "message": "`hardcoded_file` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d3d6f089db9167d8c14ddd541b107dcdc70b9fa5f0e3b89b89d1dc31bf491aef",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/nextjs.rs",
+      "line": 10,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "c6b7074b90850e4440b65596fa0e0c74d4ab2de72941175e8a737d03cdc0460e",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/tests/organization.rs",
+      "line": 115,
+      "strength": "review",
+      "message": "`suites` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "d37826b03b745e3b0143abd91e228977e67fac2fcef143c0e6cdc719648639a9",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/pipeline.rs",
+      "line": 7,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "b2510a5d2250e35ab516a4f8a15ef05849f87d4d893bf23931c8fe54055ec42d",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/wording/documentation.rs",
+      "line": 329,
+      "strength": "review",
+      "message": "`comment_wording` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "b46a55fb8296b9ac7a02150c4f7660e217af973b2a0b0c89f0c0406735d5056a",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/wording/documentation.rs",
+      "line": 187,
+      "strength": "review",
+      "message": "`doc_pair_wording` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "70475f626123a734d9566ff554b8e556bc92d48ff3505b823da908fe31fcee1a",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/wording/maintainability.rs",
+      "line": 7,
+      "strength": "review",
+      "message": "`function_wording` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "d2d824b98223214203e88d056b3e93c3db4d7300aa8848a08f9d5d3fa19b0a8d",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/wording/mod.rs",
+      "line": 33,
+      "strength": "review",
+      "message": "`question_label` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "40d0a1c3e441b0a23553ac78ee76721c056d31ec5bc615152d7203bf3f15eb2f",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/wording/security.rs",
+      "line": 361,
+      "strength": "review",
+      "message": "`injection_wording` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "632507eee432037e1a9473af12739bf8c2c27fa40bed7e94d377fc6ec0773e98",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/wording/security.rs",
+      "line": 502,
+      "strength": "review",
+      "message": "`exposure_wording` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "b7b2dbbbe711208fbaa2802fef9aa7176ed746327af712ac5340004bfb9c79fe",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/wording/security.rs",
+      "line": 233,
+      "strength": "review",
+      "message": "`found_checks` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "15772bb21085cd0ece90a8e2a3a491b9dcd77b719902aa89fd6ca9e10d8c08c4",
+      "rule": "maintainability/file-organization",
+      "path": "tests/cli/changes.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "28ca0d566f63b03b435c74be6ae470766cc42b7c0c9cc1047e2bf48ca47e56ec",
+      "rule": "maintainability/function-simplification",
+      "path": "tests/cli/mcp.rs",
+      "line": 59,
+      "strength": "review",
+      "message": "`cache_clear_answers` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
+    },
+    {
+      "fingerprint": "7ffb887c20cc99f6edabfc2b441ec41172cef5637d90b288df6b702302702663",
+      "rule": "maintainability/file-organization",
+      "path": "tests/cli/preview.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "bbc7651a332e39692ee0723ee55b585dee812e28105d66d7de2a2075a6fd0635",
+      "rule": "maintainability/file-organization",
+      "path": "tests/cli/rules.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "04dccca4b4799653df2cd916f5ebb7a52bfce437ac756b239f3d18646f85a40d",
+      "rule": "maintainability/file-organization",
+      "path": "tests/support/mock_provider.rs",
+      "line": 14,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
       "reason": "wrong"
     }
   ]

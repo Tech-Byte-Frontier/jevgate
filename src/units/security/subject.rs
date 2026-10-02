@@ -111,13 +111,7 @@ pub(super) fn named_constants(
     }
     let mut found = Vec::new();
     for (field, declarations) in constants {
-        let named = source.match_indices(field.as_str()).any(|(at, _)| {
-            let before = source[..at].chars().next_back();
-            let after = source[at + field.len()..].chars().next();
-            let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
-            !word(before) && !word(after)
-        });
-        if named {
+        if crate::analysis::names_word(source, field) {
             found.extend(declarations.iter().cloned());
         }
     }
@@ -130,15 +124,9 @@ pub(super) const TYPES: usize = 3;
 
 /// The definitions of the project's types named as words in a signature.
 pub(super) fn named_types(signature: &str, types: &BTreeMap<String, String>) -> Vec<String> {
-    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
     types
         .iter()
-        .filter(|(name, _)| {
-            signature.match_indices(name.as_str()).any(|(at, _)| {
-                !word(signature[..at].chars().next_back())
-                    && !word(signature[at + name.len()..].chars().next())
-            })
-        })
+        .filter(|(name, _)| crate::analysis::names_word(signature, name))
         .map(|(_, definition)| definition.clone())
         .take(TYPES)
         .collect()

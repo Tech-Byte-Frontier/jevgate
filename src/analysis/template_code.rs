@@ -56,7 +56,9 @@ pub fn template_code(path: &Path, source: &str) -> Setup {
         }
         "ejs" => tags(source, "<%", "%>")
             .into_iter()
-            .filter(|(_, tag)| tag.starts_with("<%-") && !compact(tag).starts_with("<%-include"))
+            .filter(|(_, tag)| {
+                tag.starts_with("<%-") && !super::unspaced(tag).starts_with("<%-include")
+            })
             .collect(),
         "hbs" | "handlebars" | "mustache" => tags(source, "{{{", "}}}"),
         "twig" => filtered(tags(source, "{{", "}}"), "|raw"),
@@ -107,7 +109,7 @@ fn setup(source: &str, reads: &[Tag]) -> Setup {
 /// An ERB tag that writes a value unescaped: `<%== … %>`, `raw`, or
 /// `html_safe`.
 fn erb_unescaped(tag: &str) -> bool {
-    let inner = compact(tag);
+    let inner = super::unspaced(tag);
     inner.starts_with("<%==")
         || inner.starts_with("<%=raw(")
         || tag
@@ -117,14 +119,10 @@ fn erb_unescaped(tag: &str) -> bool {
         || inner.starts_with("<%=") && inner.contains(".html_safe")
 }
 
-fn compact(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
-}
-
 /// The tags that hold a filter such as `|safe`.
 fn filtered(tags: Vec<Tag>, filter: &str) -> Vec<Tag> {
     tags.into_iter()
-        .filter(|(_, tag)| compact(tag).contains(filter))
+        .filter(|(_, tag)| super::unspaced(tag).contains(filter))
         .collect()
 }
 

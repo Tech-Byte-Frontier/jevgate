@@ -5,7 +5,9 @@
 //! RSpec examples (`it`, `specify`), Rails `test "…" do` blocks and Minitest
 //! `test_*` methods, and Java `@Test`-family methods (or JUnit 3 `test…`
 //! methods of a `TestCase`).
-use super::{call_name, callee_name, fast_hash, is_comment, line_of, macro_calls, ruby, text};
+use super::{
+    call_name, callee_name, clipped, fast_hash, is_comment, lines_of, macro_calls, ruby, text,
+};
 use anyhow::Result;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -390,19 +392,14 @@ fn ruby_case_name(node: Node<'_>, source: &str) -> String {
             if line.is_empty() {
                 method.to_string()
             } else {
-                format!("{method} {{ {} }}", clip_name(line))
+                format!("{method} {{ {} }}", clipped(line, NAME_CHARS))
             }
         }
     }
 }
 
-fn clip_name(line: &str) -> String {
-    const NAME_CHARS: usize = 80;
-    if line.chars().count() <= NAME_CHARS {
-        return line.to_string();
-    }
-    format!("{}…", line.chars().take(NAME_CHARS).collect::<String>())
-}
+/// A body line shown in a test's name is cut at this many characters.
+const NAME_CHARS: usize = 80;
 
 /// The setup and calls of the last case, a Ruby example or test method.
 /// Its enclosing groups' `before` and `around` blocks, `let!`, and a
@@ -619,11 +616,12 @@ fn push(node: Node<'_>, start: usize, name: String, source: &str, found: &mut Ve
     let mut requests = Vec::new();
     walk(node, source, &mut calls, &mut tokens, &mut requests);
     let shingles = tokens.windows(SHINGLE_TOKENS).map(fast_hash).collect();
+    let (line, end_line) = lines_of(source, node);
     found.push(TestCase {
         name,
         span: start..node.end_byte(),
-        line: line_of(source, node.start_byte()),
-        end_line: line_of(source, node.end_byte().saturating_sub(1)),
+        line,
+        end_line,
         calls,
         subjects: Vec::new(),
         suite: Vec::new(),
@@ -714,6 +712,16 @@ pub fn link(cases: &mut [TestCase], scope: &BTreeSet<String>) {
 }
 
 /// A camelCase getter or setter, such as Java's `setBirthDate` or `isNew`.
+/// The share of two tests' shingles they have in common, 0 when neither has
+/// any.
+fn shingle_similarity(x: &BTreeSet<u64>, y: &BTreeSet<u64>) -> f64 {
+    let union = x.union(y).count();
+    if union == 0 {
+        return 0.0;
+    }
+    x.intersection(y).count() as f64 / union as f64
+}
+
 fn accessor(name: &str) -> bool {
     ["get", "set", "is"].iter().any(|prefix| {
         name.strip_prefix(prefix)
@@ -727,17 +735,17 @@ pub fn pairs(cases: &[TestCase]) -> (Vec<TestPair>, usize) {
     for subject in cases.iter().flat_map(|c| &c.subjects) {
         *uses.entry(subject).or_default() += 1;
     }
+    // Tests set up their objects through setters, fixtures and clients that
+    // most of the file's tests call, such as `setBirthDate` or
+    // `create_user`; the function a pair checks is another one it shares,
+    // the one the fewest tests call.
+    let setup = |s: &str| {
+        let common = uses[s] * 2 > cases.len();
+        (accessor(s), common, if common { 0 } else { uses[s] })
+    };
     let mut found = Vec::new();
     for a in 0..cases.len() {
         for b in a + 1..cases.len() {
-            // Tests set up their objects through setters, fixtures and
-            // clients that most of the file's tests call, such as
-            // `setBirthDate` or `create_user`; the function a pair checks is
-            // another one it shares, the one the fewest tests call.
-            let setup = |s: &str| {
-                let common = uses[s] * 2 > cases.len();
-                (accessor(s), common, if common { 0 } else { uses[s] })
-            };
             let Some(subject) = cases[a]
                 .subjects
                 .iter()
@@ -746,12 +754,7 @@ pub fn pairs(cases: &[TestCase]) -> (Vec<TestPair>, usize) {
             else {
                 continue;
             };
-            let (x, y) = (&cases[a].shingles, &cases[b].shingles);
-            let union = x.union(y).count();
-            if union == 0 {
-                continue;
-            }
-            let similarity = x.intersection(y).count() as f64 / union as f64;
+            let similarity = shingle_similarity(&cases[a].shingles, &cases[b].shingles);
             if similarity >= SIMILARITY {
                 found.push(TestPair {
                     a,

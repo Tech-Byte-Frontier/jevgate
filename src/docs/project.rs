@@ -220,36 +220,8 @@ pub fn scripts(root: &Path, history: &super::history::History) -> BTreeSet<Strin
         };
         match name {
             "package.json" => {
-                let Ok(package) = serde_json::from_str::<Value>(&text) else {
-                    continue;
-                };
-                if let Some(declared) = package["scripts"].as_object() {
-                    scripts.extend(declared.keys().cloned());
-                }
-                // A workspace package's own binaries run the same way, such as
-                // n8n's `pnpm n8n-generate-translations` from its core package.
-                match &package["bin"] {
-                    Value::Object(bins) => scripts.extend(bins.keys().cloned()),
-                    Value::String(_) => {
-                        if let Some(name) = package["name"].as_str() {
-                            scripts.insert(name.rsplit('/').next().unwrap_or(name).to_string());
-                        }
-                    }
-                    _ => {}
-                }
-                // `pnpm tsx` and `yarn eslint` run a dependency's binary,
-                // usually named after its package.
-                for field in DEPENDENCY_FIELDS {
-                    for name in package[field]
-                        .as_object()
-                        .into_iter()
-                        .flat_map(|d| d.keys())
-                    {
-                        scripts.insert(name.clone());
-                        if let Some((_, bare)) = name.rsplit_once('/') {
-                            scripts.insert(bare.to_string());
-                        }
-                    }
+                if let Ok(package) = serde_json::from_str::<Value>(&text) {
+                    package_scripts(&package, &mut scripts);
                 }
             }
             "Makefile" | "justfile" | "Justfile" => scripts.extend(targets(&text)),
@@ -257,6 +229,39 @@ pub fn scripts(root: &Path, history: &super::history::History) -> BTreeSet<Strin
         }
     }
     scripts
+}
+
+/// What a `package.json` lets `pnpm`, `npm` or `yarn` run: its scripts, its
+/// own binaries, and its dependencies' binaries, usually named after their
+/// packages.
+fn package_scripts(package: &Value, scripts: &mut BTreeSet<String>) {
+    if let Some(declared) = package["scripts"].as_object() {
+        scripts.extend(declared.keys().cloned());
+    }
+    // A workspace package's own binaries run the same way, such as n8n's
+    // `pnpm n8n-generate-translations` from its core package.
+    match &package["bin"] {
+        Value::Object(bins) => scripts.extend(bins.keys().cloned()),
+        Value::String(_) => {
+            if let Some(name) = package["name"].as_str() {
+                scripts.insert(name.rsplit('/').next().unwrap_or(name).to_string());
+            }
+        }
+        _ => {}
+    }
+    // `pnpm tsx` and `yarn eslint` run a dependency's binary.
+    for field in DEPENDENCY_FIELDS {
+        for name in package[field]
+            .as_object()
+            .into_iter()
+            .flat_map(|d| d.keys())
+        {
+            scripts.insert(name.clone());
+            if let Some((_, bare)) = name.rsplit_once('/') {
+                scripts.insert(bare.to_string());
+            }
+        }
+    }
 }
 
 /// The first `LISTED` names, then how many more there are.

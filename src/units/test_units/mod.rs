@@ -123,14 +123,7 @@ pub(super) fn plan_values(
         items.push((out.units.len() - 1, id, case, test_item(case, source, ruby)));
     }
     for group in pack(items, TEST_PACK_ITEMS, |(_, _, _, item)| item) {
-        let (request, asked) = value_request(file, &group, subjects.signatures);
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        } else {
+        if !file.push_fitting(value_request(file, &group, subjects.signatures), requests) {
             for (unit, ..) in group {
                 out.units[unit].presence = Presence::NeedsContext;
                 out.units[unit].recheck = None;
@@ -199,8 +192,7 @@ fn value_recheck(file: &FileContext<'_>, id: &str, evidence: &Evidence) -> Optio
     if !evidence.adds {
         return None;
     }
-    let (request, asked) = evidence.request(file, "recheck", recheck_questions(id, evidence.ruby));
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(evidence.request(file, "recheck", recheck_questions(id, evidence.ruby)))
 }
 
 /// Calls that reach past a language's visibility: reflection, a cast to
@@ -245,8 +237,7 @@ fn value_confirm(file: &FileContext<'_>, id: &str, evidence: &Evidence) -> Optio
         "reads",
         Pass::Locate,
     );
-    let (request, asked) = evidence.request(file, "locate", questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(evidence.request(file, "locate", questions))
 }
 
 /// The functions a test calls, with the route of a controller method it

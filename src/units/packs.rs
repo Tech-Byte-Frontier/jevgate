@@ -187,13 +187,7 @@ fn send_pack(
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
-    let (request, asked) = request(file, lane, &pack, out);
-    if file.budget.fits(&request) {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
+    if file.push_fitting(request(file, lane, &pack, out), requests) {
         return;
     }
     if pack.len() > 1 {

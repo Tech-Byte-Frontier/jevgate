@@ -38,6 +38,43 @@ pub(crate) fn line_of(source: &str, byte: usize) -> usize {
         + 1
 }
 
+/// `text` without its whitespace, to compare markers however they are spaced.
+pub(crate) fn unspaced(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// The byte where the line holding `byte` starts.
+pub(crate) fn line_start(source: &str, byte: usize) -> usize {
+    source[..byte].rfind('\n').map_or(0, |i| i + 1)
+}
+
+/// Whether `text` holds `word` as a whole identifier: no letter, digit or
+/// `_` right before or after it.
+pub(crate) fn names_word(text: &str, word: &str) -> bool {
+    let identifier = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    text.match_indices(word).any(|(at, _)| {
+        !identifier(text[..at].chars().next_back())
+            && !identifier(text[at + word.len()..].chars().next())
+    })
+}
+
+/// The first and last lines `node` spans.
+pub(crate) fn lines_of(source: &str, node: Node<'_>) -> (usize, usize) {
+    (
+        line_of(source, node.start_byte()),
+        line_of(source, node.end_byte().saturating_sub(1)),
+    )
+}
+
+/// `text` whole when it has at most `max` characters, else its first `max`
+/// characters and `…`.
+pub(crate) fn clipped(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    format!("{}…", text.chars().take(max).collect::<String>())
+}
+
 pub(crate) fn text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     node.utf8_text(source.as_bytes()).unwrap_or("")
 }

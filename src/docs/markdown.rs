@@ -3,6 +3,44 @@
 //! after dropping HTML comments.
 use std::collections::BTreeMap;
 
+/// Where a line stands among fenced code blocks, which ```` ``` ```` or `~~~`
+/// opens and the same marker closes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fenced<'a> {
+    /// The line opens a block; the text after its marker names the language.
+    Opens(&'a str),
+    Inside,
+    Closes,
+    Outside,
+}
+
+/// Follows fenced code blocks through a text, line by line.
+#[derive(Default)]
+pub struct Fences {
+    open: Option<&'static str>,
+}
+
+impl Fences {
+    /// Where `line`, the text's next line, stands.
+    pub fn line<'a>(&mut self, line: &'a str) -> Fenced<'a> {
+        let trimmed = line.trim_start();
+        match self.open {
+            Some(open) if trimmed.starts_with(open) => {
+                self.open = None;
+                Fenced::Closes
+            }
+            Some(_) => Fenced::Inside,
+            None => match ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f)) {
+                Some(open) => {
+                    self.open = Some(open);
+                    Fenced::Opens(&trimmed[open.len()..])
+                }
+                None => Fenced::Outside,
+            },
+        }
+    }
+}
+
 /// Text under one heading, up to the next heading of any level.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Section {
@@ -30,17 +68,12 @@ pub fn parse(source: &str) -> Markdown {
         end_line: body + 1,
         text: String::new(),
     };
-    let mut fence: Option<&str> = None;
+    let mut fences = Fences::default();
     let mut text = Vec::new();
     for (index, line) in lines.iter().enumerate().skip(body) {
-        let trimmed = line.trim_start();
-        if let Some(open) = fence {
-            if trimmed.starts_with(open) {
-                fence = None;
-            }
-        } else if let Some(open) = ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f)) {
-            fence = Some(open);
-        } else if let Some(heading) = heading(line) {
+        if fences.line(line) == Fenced::Outside
+            && let Some(heading) = heading(line)
+        {
             finish(&mut sections, current, &mut text, index);
             current = Section {
                 heading,
@@ -83,18 +116,13 @@ pub struct Heading {
 pub fn headings(source: &str) -> Vec<Heading> {
     let lines: Vec<&str> = source.lines().collect();
     let (_, body) = frontmatter(&lines);
-    let mut fence: Option<&str> = None;
+    let mut fences = Fences::default();
     let mut found = Vec::new();
     for (index, line) in lines.iter().enumerate().skip(body) {
-        let trimmed = line.trim_start();
-        if let Some(open) = fence {
-            if trimmed.starts_with(open) {
-                fence = None;
-            }
-        } else if let Some(open) = ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f)) {
-            fence = Some(open);
-        } else if let Some(text) = heading(line) {
-            let level = trimmed.chars().take_while(|c| *c == '#').count();
+        if fences.line(line) == Fenced::Outside
+            && let Some(text) = heading(line)
+        {
+            let level = line.trim_start().chars().take_while(|c| *c == '#').count();
             found.push(Heading {
                 line: index + 1,
                 level,

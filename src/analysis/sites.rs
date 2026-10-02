@@ -2,7 +2,7 @@
 //! setting is chosen: text built from values, calls and field assignments.
 //! They are syntax only, never API names, and serve only as options for
 //! locating a security finding; Jev judges what each one does.
-use super::{django, is_comment, line_of, text};
+use super::{django, is_comment, line_of, lines_of, text};
 use std::{collections::BTreeMap, ops::Range};
 use tree_sitter::Node;
 
@@ -162,11 +162,14 @@ fn numbered(
     chosen
         .into_iter()
         .enumerate()
-        .map(|(index, (_, node))| Site {
-            id: format!("S{}", index + 1),
-            text: clip(&django::redacted(source, node.byte_range(), redactions)),
-            line: line_of(source, node.start_byte()),
-            end_line: line_of(source, node.end_byte().saturating_sub(1)),
+        .map(|(index, (_, node))| {
+            let (line, end_line) = lines_of(source, node);
+            Site {
+                id: format!("S{}", index + 1),
+                text: clip(&django::redacted(source, node.byte_range(), redactions)),
+                line,
+                end_line,
+            }
         })
         .collect()
 }
@@ -226,12 +229,8 @@ pub fn setup(root: Node<'_>, source: &str, units: &[Range<usize>], settings: boo
         if !setup_statement(node, source, units, settings) {
             continue;
         }
-        let range = node.byte_range();
-        statements.push((
-            range,
-            line_of(source, node.start_byte()),
-            line_of(source, node.end_byte().saturating_sub(1)),
-        ));
+        let (first, last) = lines_of(source, node);
+        statements.push((node.byte_range(), first, last));
         let mode = Mode {
             django: settings,
             settings,
@@ -352,11 +351,8 @@ fn page<'t>(nodes: Vec<Node<'t>>, root: Node<'t>, source: &str, units: &[Range<u
         {
             continue;
         }
-        statements.push((
-            range,
-            line_of(source, node.start_byte()),
-            line_of(source, node.end_byte().saturating_sub(1)),
-        ));
+        let (first, last) = lines_of(source, node);
+        statements.push((range, first, last));
         collect(node, root, source, mode, &mut best);
     }
     Setup {
@@ -390,11 +386,8 @@ pub fn config_setup(root: Node<'_>, source: &str) -> Setup {
         {
             continue;
         }
-        statements.push((
-            node.byte_range(),
-            line_of(source, node.start_byte()),
-            line_of(source, node.end_byte().saturating_sub(1)),
-        ));
+        let (first, last) = lines_of(source, node);
+        statements.push((node.byte_range(), first, last));
         settings(node, false, &mut best);
     }
     Setup {
@@ -695,10 +688,7 @@ fn statement<'t>(node: Node<'t>, body: Node<'t>, source: &str) -> Node<'t> {
 
 pub(crate) fn clip(value: &str) -> String {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.chars().count() <= MAX_TEXT {
-        return collapsed;
-    }
-    format!("{}…", collapsed.chars().take(MAX_TEXT).collect::<String>())
+    super::clipped(&collapsed, MAX_TEXT)
 }
 
 #[cfg(test)]

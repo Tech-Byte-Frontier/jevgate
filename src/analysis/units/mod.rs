@@ -254,6 +254,16 @@ impl<'t> Definition<'t> {
             body: None,
         }
     }
+
+    /// A function that `outer` defines as `node`, with the body of
+    /// `function`: `node` itself, or the function a call around it wraps.
+    fn function(outer: Node<'t>, node: Node<'t>, function: Node<'t>) -> Self {
+        Self {
+            outer,
+            node,
+            body: function.child_by_field_name("body"),
+        }
+    }
 }
 
 impl Unit {

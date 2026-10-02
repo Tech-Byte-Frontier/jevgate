@@ -27,22 +27,35 @@ fn import_lines(source: &str, family: &str) -> Vec<String> {
                 block = *line != ")";
                 return true;
             }
-            [
-                "import ", "from ", "use ", "pub use ", "mod ", "pub mod ", "export ",
-            ]
-            .iter()
-            .any(|prefix| line.starts_with(prefix))
-                || line.contains("require(")
-                || line.contains("import(")
-                || ["require ", "require_relative ", "load ", "autoload "]
-                    .iter()
-                    .any(|prefix| line.starts_with(prefix))
-                // PHP runs other files with `require_once __DIR__ . '/x.php';`.
-                || family == "php"
-                    && ["require", "include"].iter().any(|p| line.starts_with(p))
+            imports_code(line, family)
         })
         .map(str::to_string)
         .collect()
+}
+
+/// The starts of lines that import a module, or with Ruby's `require` and
+/// `load`, run another file.
+const IMPORT_STARTS: [&str; 11] = [
+    "import ",
+    "from ",
+    "use ",
+    "pub use ",
+    "mod ",
+    "pub mod ",
+    "export ",
+    "require ",
+    "require_relative ",
+    "load ",
+    "autoload ",
+];
+
+/// Whether `line` imports a module or runs another file: PHP runs them with
+/// `require_once __DIR__ . '/x.php';`.
+fn imports_code(line: &str, family: &str) -> bool {
+    IMPORT_STARTS.iter().any(|start| line.starts_with(start))
+        || line.contains("require(")
+        || line.contains("import(")
+        || family == "php" && ["require", "include"].iter().any(|p| line.starts_with(p))
 }
 
 /// A Java file's directory and the capitalized names its code mentions.
@@ -75,43 +88,37 @@ pub struct Imports {
 impl Imports {
     pub fn new(path: &Path, source: &str) -> Self {
         let family = family(path);
-        if family == "bend" {
-            let paths: Vec<&str> = crate::analysis::bend::import_paths(source).collect();
-            return Self {
-                family,
-                lines: Vec::new(),
-                segments: HashSet::new(),
-                package: None,
-                directory: None,
-                files: paths
-                    .iter()
-                    .filter_map(|p| crate::analysis::bend::imported_file(path, p))
-                    .collect(),
-                base: paths.contains(&"Base"),
-            };
-        }
-        if family == "csharp" {
-            let lines = csharp_lines(source);
-            return Self {
-                family,
-                segments: segments(&lines),
-                lines,
-                package: None,
-                directory: None,
-                files: Vec::new(),
-                base: false,
-            };
-        }
-        let lines = import_lines(source, family);
-        Self {
+        let empty = Self {
             family,
+            lines: Vec::new(),
+            segments: HashSet::new(),
+            package: None,
+            directory: None,
+            files: Vec::new(),
+            base: false,
+        };
+        let lines = match family {
+            "bend" => {
+                let paths: Vec<&str> = crate::analysis::bend::import_paths(source).collect();
+                return Self {
+                    files: paths
+                        .iter()
+                        .filter_map(|p| crate::analysis::bend::imported_file(path, p))
+                        .collect(),
+                    base: paths.contains(&"Base"),
+                    ..empty
+                };
+            }
+            "csharp" => csharp_lines(source),
+            _ => import_lines(source, family),
+        };
+        Self {
             segments: segments(&lines),
             lines,
             package: (family == "java").then(|| java_package(path, source)),
             directory: (family == "go")
                 .then(|| path.parent().unwrap_or(Path::new("")).to_path_buf()),
-            files: Vec::new(),
-            base: false,
+            ..empty
         }
     }
 

@@ -51,8 +51,14 @@ pub fn pinned(name: &str) -> bool {
 /// Estimated dollars for `tokens` input tokens answered by `name`; none when
 /// its price is unknown. No tokens cost nothing, whatever the model.
 pub fn usd(name: &str, tokens: u64) -> Option<f64> {
+    (tokens == 0 || priced(name)).then(|| tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
+}
+
+/// Whether `name` is one of the `PRICED_LINES`, a version of one or a
+/// dated snapshot of one.
+fn priced(name: &str) -> bool {
     let base = base_name(name);
-    let priced = PRICED_LINES.iter().any(|line| {
+    PRICED_LINES.iter().any(|line| {
         base.strip_prefix(line).is_some_and(|rest| {
             rest.is_empty()
                 || rest
@@ -62,8 +68,7 @@ pub fn usd(name: &str, tokens: u64) -> Option<f64> {
                     date.len() == SNAPSHOT_DATE_DIGITS && date.bytes().all(|c| c.is_ascii_digit())
                 })
         })
-    });
-    (tokens == 0 || priced).then(|| tokens as f64 * INPUT_USD_PER_MILLION / 1_000_000.0)
+    })
 }
 
 /// Whether `text` is `count` runs of digits joined by dots: `1.13.0` for three.

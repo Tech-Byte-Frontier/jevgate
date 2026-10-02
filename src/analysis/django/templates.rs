@@ -42,7 +42,7 @@ pub fn unescaped_lines(text: &str) -> Vec<String> {
     text.lines()
         .enumerate()
         .filter(|(_, line)| {
-            let compact: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+            let compact = crate::analysis::unspaced(line);
             compact.contains("|safe") || compact.contains("{%autoescapeoff%}")
         })
         .take(UNESCAPED_LINES)

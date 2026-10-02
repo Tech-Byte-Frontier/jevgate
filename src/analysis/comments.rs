@@ -2,7 +2,7 @@
 //! rule. Consecutive comments on their own lines are one comment. License
 //! headers, tool directives, type annotations and decorations are left out:
 //! a reader cannot do without them, or they hold no prose to judge.
-use super::{is_comment, line_of, units::Unit};
+use super::{is_comment, line_of, line_start, units::Unit};
 use anyhow::Result;
 use std::{collections::BTreeSet, ops::Range, path::Path};
 use tree_sitter::Node;
@@ -193,22 +193,28 @@ struct Block {
 /// Consecutive line comments on their own lines, one directly below the
 /// other and written with the same marker, are one comment; block comments
 /// stand alone, and with `apart`, so do tool directives.
+/// Whether `comment` continues the block `last` ends with: two line
+/// comments of the same marker on lines of their own, one right below the
+/// other, neither a docstring, and with `apart`, neither a tool directive.
+fn continues(source: &str, last: &Block, comment: &Raw, apart: bool) -> bool {
+    let (before, after) = (&source[last.span.clone()], &source[comment.span.clone()]);
+    !last.docstring
+        && !comment.docstring
+        && !(apart && (directive(before) || directive(after)))
+        && own_line(source, last.span.start)
+        && own_line(source, comment.span.start)
+        && line_marker(before).is_some()
+        && line_marker(before) == line_marker(after)
+        && last.span.end <= comment.span.start
+        && source[last.span.end..comment.span.start].trim().is_empty()
+        && line_of(source, comment.span.start) == last_line(source, &last.span) + 1
+}
+
 fn merge(raw: Vec<Raw>, source: &str, apart: bool) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
     for comment in raw {
         if let Some(last) = blocks.last_mut()
-            && !last.docstring
-            && !comment.docstring
-            && !(apart
-                && (directive(&source[last.span.clone()])
-                    || directive(&source[comment.span.clone()])))
-            && own_line(source, last.span.start)
-            && own_line(source, comment.span.start)
-            && line_marker(&source[last.span.clone()]).is_some()
-            && line_marker(&source[last.span.clone()]) == line_marker(&source[comment.span.clone()])
-            && last.span.end <= comment.span.start
-            && source[last.span.end..comment.span.start].trim().is_empty()
-            && line_of(source, comment.span.start) == last_line(source, &last.span) + 1
+            && continues(source, last, &comment, apart)
         {
             last.span.end = comment.span.end;
             continue;
@@ -237,10 +243,6 @@ fn line_marker(text: &str) -> Option<&str> {
     ["///", "//!", "//", "#", "--"]
         .into_iter()
         .find(|m| text.starts_with(m))
-}
-
-fn line_start(source: &str, byte: usize) -> usize {
-    source[..byte].rfind('\n').map_or(0, |i| i + 1)
 }
 
 fn own_line(source: &str, byte: usize) -> bool {

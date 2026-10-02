@@ -108,28 +108,9 @@ fn push_unit(
     rule: &'static str,
     id: &str,
 ) -> usize {
-    let trace =
-        Some(trace(file, subject, rule, id)).filter(|(request, _)| file.budget.fits(request));
+    let trace = file.fitting(trace(file, subject, rule, id));
     let recheck = (rule == INJECTION)
         .then(|| recheck(file, subject, id))
-        .flatten();
-    let confirm = (rule == INJECTION)
-        .then(|| confirm(file, subject, id))
-        .flatten();
-    let checked = (rule == INJECTION)
-        .then(|| confirm_checks(file, subject, id))
-        .flatten();
-    let queried = (rule == INJECTION)
-        .then(|| confirm_query(file, subject, id))
-        .flatten();
-    let rendered = (rule == UNSAFE_SETTINGS)
-        .then(|| confirm_html(file, subject, id))
-        .flatten();
-    let readers = (rule == SENSITIVE_DATA)
-        .then(|| confirm_readers(file, subject, id))
-        .flatten();
-    let logging = (rule == SENSITIVE_DATA)
-        .then(|| confirm_logging(file, subject, id))
         .flatten();
     let settles = settles(file, subject, rule, id);
     out.units.push(UnitPlan {
@@ -150,14 +131,7 @@ fn push_unit(
             },
             trace: trace.map(Into::into),
             settles,
-            confirms: Box::new(Confirms {
-                values: confirm.map(Into::into),
-                checked: checked.map(Into::into),
-                queried: queried.map(Into::into),
-                rendered: rendered.map(Into::into),
-                readers: readers.map(Into::into),
-                logging: logging.map(Into::into),
-            }),
+            confirms: Box::new(confirms(file, subject, rule, id)),
             django: subject.django,
             test_path: subject.test_path,
         },
@@ -189,14 +163,7 @@ fn send_module(
         django,
     );
     let state = json!({"file": file.file_state(), "module": state});
-    let (request, asked) = file.request("security", state, questions);
-    if file.budget.fits(&request) {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-    } else {
+    if !file.push_fitting(file.request("security", state, questions), requests) {
         out.units[unit].unsent();
     }
 }
@@ -316,6 +283,28 @@ fn rule_checks(
 /// language's deserializers. Code that parses XML with a parser able to
 /// resolve external entities (`xml`) is asked the XML check. The token and
 /// key checks are asked of code outside C# and Django, which ask their own.
+/// A follow-up request about a subject, when it fits.
+type FollowUpOf = fn(&FileContext<'_>, &Subject<'_>, &str) -> Option<(Value, Asked)>;
+
+/// The Choices asked after a finding of `rule`, each only of the findings it
+/// serves, when its request fits.
+fn confirms(file: &FileContext<'_>, subject: &Subject<'_>, rule: &str, id: &str) -> Confirms {
+    let asked = |of: &str, ask: FollowUpOf| {
+        (rule == of)
+            .then(|| ask(file, subject, id))
+            .flatten()
+            .map(Into::into)
+    };
+    Confirms {
+        values: asked(INJECTION, confirm),
+        checked: asked(INJECTION, confirm_checks),
+        queried: asked(INJECTION, confirm_query),
+        rendered: asked(UNSAFE_SETTINGS, confirm_html),
+        readers: asked(SENSITIVE_DATA, confirm_readers),
+        logging: asked(SENSITIVE_DATA, confirm_logging),
+    }
+}
+
 fn asked_checks(
     rule: &str,
     language: &str,
@@ -512,8 +501,7 @@ fn recheck(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
             Pass::Recheck,
         );
     }
-    let (request, asked) = file.request("recheck", with_callers(file, subject), questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(file.request("recheck", with_callers(file, subject), questions))
 }
 
 /// The unit's code with the functions that call it and the enums its sites
@@ -552,8 +540,7 @@ fn confirm(file: &FileContext<'_>, subject: &Subject<'_>, id: &str) -> Option<(V
         "values",
         Pass::Locate,
     );
-    let (request, asked) = file.request("locate", with_callers(file, subject), questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(file.request("locate", with_callers(file, subject), questions))
 }
 
 /// What the values of a path, markup or redirect finding can hold or where
@@ -582,8 +569,7 @@ fn confirm_checks(
     if !subject.types.is_empty() {
         state["types_named_in_parameters"] = json!(subject.types);
     }
-    let (request, asked) = file.request("locate", state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(file.request("locate", state, questions))
 }
 
 /// What the values of an SQL, command or code finding hold where they enter
@@ -610,8 +596,7 @@ fn confirm_query(
     if types {
         state["types_named_in_parameters"] = json!(subject.types);
     }
-    let (request, asked) = file.request("locate", state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(file.request("locate", state, questions))
 }
 
 /// What the HTML a weak-settings finding writes without escaping holds,
@@ -676,8 +661,7 @@ fn confirm_alone(
     if let Some((key, value)) = extra {
         state[key] = value;
     }
-    let (request, asked) = file.request("locate", state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(file.request("locate", state, questions))
 }
 
 fn sites(file: &FileContext<'_>, subject: &Subject<'_>) -> Vec<Block> {

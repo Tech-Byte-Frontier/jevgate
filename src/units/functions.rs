@@ -38,7 +38,7 @@ pub(super) fn plan(
         let blocks = blocks(file, unit);
         let locate = (presence == Presence::Judged && !blocks.is_empty())
             .then(|| locate(file, unit, &id, &blocks))
-            .filter(|(request, _)| file.budget.fits(request));
+            .and_then(|built| file.fitting(built));
         out.units.push(UnitPlan {
             rule: FUNCTION_SIMPLIFICATION,
             id,
@@ -133,8 +133,7 @@ fn recheck(
         "functions": [{"name": unit.name, "source": unit.source(file.source)}],
         "callees": callees,
     });
-    let (request, asked) = file.request("recheck", state, questions);
-    file.budget.fits(&request).then_some((request, asked))
+    file.fitting(file.request("recheck", state, questions))
 }
 
 fn blocks(file: &FileContext<'_>, unit: &Unit) -> Vec<Block> {

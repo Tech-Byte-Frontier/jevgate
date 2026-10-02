@@ -485,6 +485,40 @@ fn called_names(text: &str) -> Vec<&str> {
 /// Plan one module file's tables, views and reducers. `lookup` finds a
 /// function of the same package by name; `version` is the `spacetimedb`
 /// version its manifest declares, empty when unknown.
+/// The state key of a definition of `access`, and the questions asked of it.
+fn asked_of(access: &Access, framework: &str) -> (&'static str, Vec<(&'static str, Value)>) {
+    match access {
+        Access::Table => (
+            "table",
+            vec![
+                ("data", questions::stdb_table_data(framework)),
+                ("exposed", questions::stdb_table_exposed(framework)),
+            ],
+        ),
+        Access::View => (
+            "view",
+            vec![
+                ("rows", questions::stdb_view_rows(framework)),
+                ("returns_others", questions::stdb_view_others(framework)),
+            ],
+        ),
+        _ => (
+            "reducer",
+            vec![
+                ("reach", questions::stdb_reducer_reach(framework)),
+                (
+                    "argument_rows",
+                    questions::stdb_reducer_argument_rows(framework),
+                ),
+                (
+                    "operator_only",
+                    questions::stdb_reducer_operator_only(framework),
+                ),
+            ],
+        ),
+    }
+}
+
 pub(super) fn plan<'a>(
     file: &FileContext<'_>,
     version: &str,
@@ -496,36 +530,7 @@ pub(super) fn plan<'a>(
     let framework = questions::spacetimedb_framework(version, rust);
     out.rules.insert(ACCESS_CONTROL, 0);
     for definition in definitions(file.path, file.source) {
-        let (key, asked): (&str, Vec<(&'static str, Value)>) = match definition.access {
-            Access::Table => (
-                "table",
-                vec![
-                    ("data", questions::stdb_table_data(&framework)),
-                    ("exposed", questions::stdb_table_exposed(&framework)),
-                ],
-            ),
-            Access::View => (
-                "view",
-                vec![
-                    ("rows", questions::stdb_view_rows(&framework)),
-                    ("returns_others", questions::stdb_view_others(&framework)),
-                ],
-            ),
-            _ => (
-                "reducer",
-                vec![
-                    ("reach", questions::stdb_reducer_reach(&framework)),
-                    (
-                        "argument_rows",
-                        questions::stdb_reducer_argument_rows(&framework),
-                    ),
-                    (
-                        "operator_only",
-                        questions::stdb_reducer_operator_only(&framework),
-                    ),
-                ],
-            ),
-        };
+        let (key, asked) = asked_of(&definition.access, &framework);
         let id = format!("{key}:{}", definition.name);
         let mut questions = Questions::default();
         for (question, body) in asked {
@@ -538,43 +543,24 @@ pub(super) fn plan<'a>(
                 Pass::First,
             );
         }
-        let mut state = json!({"file": file.file_state()});
+        let found = match definition.access {
+            Access::Table => Vec::new(),
+            _ => helpers(&definition.source, &lookup),
+        };
+        let state = definition_state(file, &definition, key, &found);
         let mut sources: Vec<(&Path, &str)> = vec![(file.path, file.source_hash)];
-        if definition.access == Access::Table {
-            state["table"] = json!({
-                "name": definition.name,
-                "source": definition.source,
-                "columns_naming_users": user_columns(&definition.source),
-            });
-        } else {
-            state[key] = json!({"name": definition.name, "source": definition.source});
-            if let Some(table) = scheduled_by(file.source, definition.name) {
-                state[key]["scheduled_by"] = json!(table);
-            }
-            let found = helpers(&definition.source, &lookup);
-            state["helpers"] = json!(
-                found
-                    .iter()
-                    .map(|h| json!({"name": h.name, "source": h.source}))
-                    .collect::<Vec<_>>()
-            );
-            for helper in &found {
-                if !sources.iter().any(|(p, _)| *p == helper.path) {
-                    sources.push((&helper.path, &helper.source_hash));
-                }
+        for helper in &found {
+            if !sources.iter().any(|(p, _)| *p == helper.path) {
+                sources.push((&helper.path, &helper.source_hash));
             }
         }
-        let (request, asked) = super::request(file.model, "access", &sources, state, questions);
-        let fits = file.budget.fits(&request);
+        let built = super::request(file.model, "access", &sources, state, questions);
+        let sent = file.push_fitting(built, requests);
         out.units.push(UnitPlan {
             rule: ACCESS_CONTROL,
             id: id.clone(),
             name: definition.name.to_string(),
-            presence: if fits {
-                Presence::Judged
-            } else {
-                Presence::NeedsContext
-            },
+            presence: Presence::judged_if(sent),
             locations: vec![file.location(
                 definition.start_line,
                 definition.end_line,
@@ -586,14 +572,38 @@ pub(super) fn plan<'a>(
             detail: Detail::Access(definition.access),
             recheck: None,
         });
-        if fits {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        }
     }
+}
+
+/// What a request shows about `definition` under `key`: a table with the
+/// columns that name users, or a reducer or view with the table that
+/// schedules it and the `helpers` it calls.
+fn definition_state(
+    file: &FileContext<'_>,
+    definition: &Definition<'_>,
+    key: &str,
+    helpers: &[&Helper],
+) -> Value {
+    let mut state = json!({"file": file.file_state()});
+    if definition.access == Access::Table {
+        state["table"] = json!({
+            "name": definition.name,
+            "source": definition.source,
+            "columns_naming_users": user_columns(&definition.source),
+        });
+        return state;
+    }
+    state[key] = json!({"name": definition.name, "source": definition.source});
+    if let Some(table) = scheduled_by(file.source, definition.name) {
+        state[key]["scheduled_by"] = json!(table);
+    }
+    state["helpers"] = json!(
+        helpers
+            .iter()
+            .map(|h| json!({"name": h.name, "source": h.source}))
+            .collect::<Vec<_>>()
+    );
+    state
 }
 
 #[cfg(test)]

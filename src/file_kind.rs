@@ -167,63 +167,8 @@ pub fn language(path: &Path) -> &'static str {
 }
 
 pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Result<Plan> {
-    let format = crate::docs::format::Format::of(&input.result.path).language();
-    if input.result.role == crate::inventory::INSTRUCTIONS {
-        return Ok(Plan::Ready(document(
-            INSTRUCTIONS,
-            "Agent instruction file. Documentation rules judge its sections.",
-            format,
-        )));
-    }
-    if input.result.role == crate::inventory::DOCS {
-        return Ok(Plan::Ready(document(
-            DOCS,
-            "Project documentation. Documentation rules judge its sections.",
-            format,
-        )));
-    }
-    if input.result.role == crate::inventory::TEXT {
-        return Ok(Plan::Ready(View {
-            classification: classification(
-                TEXT,
-                "deterministic",
-                "custom",
-                "A file a custom question's paths name. Only file and hunk questions judge it.",
-                language(&input.result.path),
-            ),
-            application: false,
-            tests: false,
-            test_lines: Vec::new(),
-        }));
-    }
-    let configuration = match input.result.role.as_str() {
-        crate::inventory::SQL => Some((
-            "SQL. The access-control rule judges its policies, SECURITY DEFINER functions and grants.",
-            "SQL",
-        )),
-        crate::inventory::SQL_CONTEXT => Some((
-            "Unchanged SQL, read only for the final state of changed migrations.",
-            "SQL",
-        )),
-        crate::inventory::WORKFLOW => Some((
-            "GitHub Actions workflow. The workflow rule judges its jobs.",
-            "YAML",
-        )),
-        _ => None,
-    };
-    if let Some((reason, language)) = configuration {
-        return Ok(Plan::Ready(View {
-            classification: classification(
-                &input.result.role,
-                "deterministic",
-                "security",
-                reason,
-                language,
-            ),
-            application: false,
-            tests: false,
-            test_lines: Vec::new(),
-        }));
+    if let Some(view) = no_code(input) {
+        return Ok(Plan::Ready(view));
     }
     let source = input.source.as_deref().unwrap_or_default();
     let prepared = match crate::analysis::generic::read(&input.result.path, source) {
@@ -248,10 +193,58 @@ pub(crate) fn plan(input: &Input, args: &CheckArgs, budget: Limits<'_>) -> Resul
     }
 }
 
+/// The view of a file whose role keeps it from the code rules:
+/// documentation, text only custom questions read, and SQL or workflows the
+/// security rules read.
+fn no_code(input: &Input) -> Option<View> {
+    let path = &input.result.path;
+    let format = || crate::docs::format::Format::of(path).language();
+    let security = |reason: &str, language: &str| {
+        Some(unjudged(&input.result.role, "security", reason, language))
+    };
+    match input.result.role.as_str() {
+        crate::inventory::INSTRUCTIONS => Some(document(
+            INSTRUCTIONS,
+            "Agent instruction file. Documentation rules judge its sections.",
+            format(),
+        )),
+        crate::inventory::DOCS => Some(document(
+            DOCS,
+            "Project documentation. Documentation rules judge its sections.",
+            format(),
+        )),
+        crate::inventory::TEXT => Some(unjudged(
+            TEXT,
+            "custom",
+            "A file a custom question's paths name. Only file and hunk questions judge it.",
+            language(path),
+        )),
+        crate::inventory::SQL => security(
+            "SQL. The access-control rule judges its policies, SECURITY DEFINER functions and grants.",
+            "SQL",
+        ),
+        crate::inventory::SQL_CONTEXT => security(
+            "Unchanged SQL, read only for the final state of changed migrations.",
+            "SQL",
+        ),
+        crate::inventory::WORKFLOW => security(
+            "GitHub Actions workflow. The workflow rule judges its jobs.",
+            "YAML",
+        ),
+        _ => None,
+    }
+}
+
 /// A documentation file: only the documentation rules judge it.
 fn document(kind: &str, reason: &str, language: &str) -> View {
+    unjudged(kind, "documentation", reason, language)
+}
+
+/// A file only the rules of `scope` read, as its role decided: neither
+/// application code nor tests.
+fn unjudged(kind: &str, scope: &str, reason: &str, language: &str) -> View {
     View {
-        classification: classification(kind, "deterministic", "documentation", reason, language),
+        classification: classification(kind, "deterministic", scope, reason, language),
         application: false,
         tests: false,
         test_lines: Vec::new(),

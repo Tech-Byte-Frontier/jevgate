@@ -121,43 +121,44 @@ pub(crate) fn statement(node: Node<'_>, source: &str) -> Option<Statement> {
         .collect();
     let witness = parts.iter().any(|c| c.kind() == "exists_clause");
     let (stated, before) = parts.split_last()?;
-    let code = |node: Option<Node<'_>>| node.map_or(String::new(), |n| squeezed(text(n, source)));
-    let clauses = before
-        .iter()
-        .filter_map(|clause| match clause.kind() {
-            "for_clause" => {
-                let kind = clause.child_by_field_name("type");
-                Some(Clause::Every {
-                    name: code(clause.child_by_field_name("name")),
-                    // A hypothesis reads as the equality it assumes.
-                    kind: match kind {
-                        Some(k) if k.kind() == "equality_type" => words(k, source),
-                        _ => code(kind),
-                    },
-                    equality: kind.is_some_and(holds_equality),
-                    head: kind.and_then(|k| head_name(k, source)),
-                    condition: clause
-                        .child_by_field_name("condition")
-                        .map(|c| squeezed(text(c, source))),
-                })
-            }
-            "exists_clause" => Some(Clause::Some {
-                name: code(clause.child_by_field_name("name")),
-                kind: code(clause.child_by_field_name("type")),
-            }),
-            "let_statement" => Some(Clause::Let {
-                pattern: code(clause.child_by_field_name("pattern")),
-                value: code(clause.child_by_field_name("value")),
-            }),
-            _ => None,
-        })
-        .collect();
+    let clauses = before.iter().filter_map(|c| clause(*c, source)).collect();
     Some(Statement {
         equality: witness || holds_equality(*stated),
         head: head_name(*stated, source),
         clauses,
         words: words(*stated, source),
     })
+}
+
+/// One clause before a law's statement: `for`, `exists` or `let`.
+fn clause(clause: Node<'_>, source: &str) -> Option<Clause> {
+    let code = |node: Option<Node<'_>>| node.map_or(String::new(), |n| squeezed(text(n, source)));
+    let field = |name: &str| clause.child_by_field_name(name);
+    match clause.kind() {
+        "for_clause" => {
+            let kind = field("type");
+            Some(Clause::Every {
+                name: code(field("name")),
+                // A hypothesis reads as the equality it assumes.
+                kind: match kind {
+                    Some(k) if k.kind() == "equality_type" => words(k, source),
+                    _ => code(kind),
+                },
+                equality: kind.is_some_and(holds_equality),
+                head: kind.and_then(|k| head_name(k, source)),
+                condition: field("condition").map(|c| squeezed(text(c, source))),
+            })
+        }
+        "exists_clause" => Some(Clause::Some {
+            name: code(field("name")),
+            kind: code(field("type")),
+        }),
+        "let_statement" => Some(Clause::Let {
+            pattern: code(field("pattern")),
+            value: code(field("value")),
+        }),
+        _ => None,
+    }
 }
 
 /// A statement in words, its terms as code.

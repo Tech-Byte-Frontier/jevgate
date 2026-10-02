@@ -65,36 +65,8 @@ pub(super) fn plan(
     let ids = unique_ids("law", claims.iter().map(|(_, u, _)| u.name.as_str()));
     let mut items = Vec::new();
     for ((at, unit, comment), id) in claims.into_iter().zip(ids) {
-        let group = group(units, at, file.source);
-        let law = group
-            .iter()
-            .map(|u| &file.source[declaration_start(u, file.source)..u.span.end])
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        let reading = |u: &Unit| {
-            u.statement
-                .as_ref()
-                .map(|s| s.reading(propositions))
-                .unwrap_or_default()
-        };
-        let reading = match group.as_slice() {
-            [only] => reading(only),
-            laws => laws
-                .iter()
-                .map(|u| format!("`{}`: {}", u.name, reading(u)))
-                .collect::<Vec<_>>()
-                .join(" "),
-        };
-        let named = named_defs(&group, defs);
-        let state = json!({
-            "name": unit.name,
-            "source": law,
-            "reading": reading,
-            "comment": comment,
-            "defs": named,
-        });
-        let recheck =
-            Some(recheck(file, &id, &state)).filter(|(request, _)| file.budget.fits(request));
+        let (law, state) = law_state(file, units, at, &comment, (propositions, defs));
+        let recheck = file.fitting(recheck(file, &id, &state));
         out.units.push(UnitPlan {
             rule: LAWS,
             id: id.clone(),
@@ -120,27 +92,12 @@ pub(super) fn plan(
         |item| file.judges_unit(&out.units[item.index]),
     );
     for group in packs {
-        let (request, asked) = build(file, &group);
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-            continue;
-        }
-        for item in group {
-            let (request, asked) = build(file, std::slice::from_ref(&item));
-            if file.budget.fits(&request) {
-                requests.push(Planned {
-                    owner: file.owner,
-                    request,
-                    asked,
-                });
-            } else {
-                out.units[item.index].presence = Presence::NeedsContext;
-            }
-        }
+        file.send_or_split(
+            group,
+            |items, _| build(file, items),
+            |item, out| out.units[item.index].presence = Presence::NeedsContext,
+            (out, requests),
+        );
     }
 }
 
@@ -175,6 +132,46 @@ fn recheck(file: &FileContext<'_>, id: &str, law: &Value) -> (Value, Asked) {
         state["file"]["comment"] = json!(header);
     }
     file.request("recheck", state, questions)
+}
+
+/// The source of the law at `at` with the laws stated beside it, and the
+/// state that asks about them: how they read, the comment above and the
+/// defs they name.
+fn law_state(
+    file: &FileContext<'_>,
+    units: &[Unit],
+    at: usize,
+    comment: &str,
+    (propositions, defs): (&BTreeSet<String>, &[Named<'_>]),
+) -> (String, Value) {
+    let group = group(units, at, file.source);
+    let law = group
+        .iter()
+        .map(|u| &file.source[declaration_start(u, file.source)..u.span.end])
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let reading = |u: &Unit| {
+        u.statement
+            .as_ref()
+            .map(|s| s.reading(propositions))
+            .unwrap_or_default()
+    };
+    let reading = match group.as_slice() {
+        [only] => reading(only),
+        laws => laws
+            .iter()
+            .map(|u| format!("`{}`: {}", u.name, reading(u)))
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    let state = json!({
+        "name": units[at].name,
+        "source": law,
+        "reading": reading,
+        "comment": comment,
+        "defs": named_defs(&group, defs),
+    });
+    (law, state)
 }
 
 fn build(file: &FileContext<'_>, items: &[Item]) -> (Value, Asked) {

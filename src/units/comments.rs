@@ -110,8 +110,7 @@ fn push_comment(
             code_like: comment.code_like,
             words: comment.words,
         };
-        let (request, asked) = build(file, &[entry], Pass::Recheck);
-        file.budget.fits(&request).then_some((request, asked))
+        file.fitting(build(file, &[entry], Pass::Recheck))
     });
     let kind = kind(file, &id, &state, unit);
     out.units.push(UnitPlan {
@@ -148,30 +147,19 @@ fn send(
     out: &mut FilePlan,
     requests: &mut Vec<Planned>,
 ) {
-    let entries: Vec<Entry> = group.iter().map(|(_, e)| e.clone()).collect();
-    let (request, asked) = build(file, &entries, Pass::First);
-    if file.budget.fits(&request) {
-        requests.push(Planned {
-            owner: file.owner,
-            request,
-            asked,
-        });
-        return;
-    }
-    for (index, entry) in group {
-        let (request, asked) = build(file, &[entry], Pass::First);
-        if file.budget.fits(&request) {
-            requests.push(Planned {
-                owner: file.owner,
-                request,
-                asked,
-            });
-        } else {
+    file.send_or_split(
+        group,
+        |group, _| {
+            let entries: Vec<Entry> = group.iter().map(|(_, e)| e.clone()).collect();
+            build(file, &entries, Pass::First)
+        },
+        |(index, _), out| {
             let unit = &mut out.units[index];
             unit.presence = Presence::NeedsContext;
             unit.recheck = None;
-        }
-    }
+        },
+        (out, requests),
+    );
 }
 
 /// The name of the unit a comment belongs to: the definition it documents
@@ -207,9 +195,8 @@ fn kind(
         );
         file.request("settle", state, questions)
     };
-    unit.map(|u| ask(Some(u.source(file.source))))
-        .filter(|(request, _)| file.budget.fits(request))
-        .or_else(|| Some(ask(None)).filter(|(request, _)| file.budget.fits(request)))
+    unit.and_then(|u| file.fitting(ask(Some(u.source(file.source)))))
+        .or_else(|| file.fitting(ask(None)))
 }
 
 /// Where a comment sits, in words.

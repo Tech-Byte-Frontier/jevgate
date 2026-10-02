@@ -643,54 +643,10 @@ fn send(
         )
         .content_type("application/json")
         .send(&body[..]);
-    let mut response = match response {
-        Ok(response) => response,
-        Err(ureq::Error::StatusCode(status)) => {
-            let failure = Failure {
-                status,
-                ..Default::default()
-            };
-            return Err(provider_error(service, failure).into());
-        }
-        Err(ureq::Error::HostNotFound | ureq::Error::ConnectionFailed) => {
-            return Err(Unsent(service).into());
-        }
-        Err(ureq::Error::Timeout(_) | ureq::Error::Io(_)) => {
-            return Err(Interrupted(service).into());
-        }
-        Err(_) => bail!(
-            "{} transport failure; request was not retried",
-            service.label
-        ),
-    };
-    let header = |name: &str| {
-        response
-            .headers()
-            .get(name)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned)
-    };
-    let id = request_id(header(REQUEST_ID).as_deref());
+    let mut response = response.map_err(|error| unanswered(service, error))?;
+    let id = request_id(header(&response, REQUEST_ID).as_deref());
     if !response.status().is_success() {
-        let wait = retry_after(
-            header("retry-after-ms").as_deref(),
-            header("retry-after").as_deref(),
-            std::time::SystemTime::now(),
-        );
-        let status = response.status().as_u16();
-        let body = response
-            .body_mut()
-            .with_config()
-            .limit(65_536)
-            .read_to_string()
-            .ok();
-        let failure = Failure {
-            status,
-            body: body.as_deref(),
-            retry_after: wait,
-            request_id: id,
-        };
-        return Err(provider_error(service, failure).into());
+        return Err(rejected(service, response, id));
     }
     // Error bodies and headers may echo credentials or source; never render them.
     let mut answer: Value = response
@@ -712,6 +668,62 @@ fn send(
         };
     }
     Ok(answer)
+}
+
+/// The error of a request that got no successful response: a status, a
+/// host or connection that could not be reached, or one that broke.
+fn unanswered(service: &'static Service, error: ureq::Error) -> anyhow::Error {
+    match error {
+        ureq::Error::StatusCode(status) => {
+            let failure = Failure {
+                status,
+                ..Default::default()
+            };
+            provider_error(service, failure).into()
+        }
+        ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => Unsent(service).into(),
+        ureq::Error::Timeout(_) | ureq::Error::Io(_) => Interrupted(service).into(),
+        _ => anyhow::anyhow!(
+            "{} transport failure; request was not retried",
+            service.label
+        ),
+    }
+}
+
+/// The provider's error for a `response` that is no success: its status,
+/// the start of its body, when to retry and the request `id`.
+fn rejected(
+    service: &'static Service,
+    mut response: ureq::http::Response<ureq::Body>,
+    id: Option<String>,
+) -> anyhow::Error {
+    let wait = retry_after(
+        header(&response, "retry-after-ms").as_deref(),
+        header(&response, "retry-after").as_deref(),
+        std::time::SystemTime::now(),
+    );
+    let status = response.status().as_u16();
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(65_536)
+        .read_to_string()
+        .ok();
+    let failure = Failure {
+        status,
+        body: body.as_deref(),
+        retry_after: wait,
+        request_id: id,
+    };
+    provider_error(service, failure).into()
+}
+
+fn header(response: &ureq::http::Response<ureq::Body>, name: &str) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
 }
 
 #[cfg(test)]

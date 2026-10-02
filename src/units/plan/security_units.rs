@@ -220,18 +220,9 @@ fn rendered_templates(
 }
 
 fn constants_used(constants: &[(String, String)], source: &str) -> Vec<String> {
-    let word = |c: char| c.is_alphanumeric() || c == '_';
     constants
         .iter()
-        .filter(|(name, _)| {
-            source.match_indices(name.as_str()).any(|(at, _)| {
-                source[..at].chars().next_back().is_none_or(|c| !word(c))
-                    && source[at + name.len()..]
-                        .chars()
-                        .next()
-                        .is_none_or(|c| !word(c))
-            })
-        })
+        .filter(|(name, _)| crate::analysis::names_word(source, name))
         .map(|(_, shown)| shown.clone())
         .take(CONSTANTS)
         .collect()

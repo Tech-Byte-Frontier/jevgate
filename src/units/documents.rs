@@ -64,8 +64,8 @@ pub(super) fn plan(file: &FileContext<'_>, out: &mut FilePlan, requests: &mut Ve
     }
     let locate = (parts.len() >= 2)
         .then(|| locate_request(file, &shown, &parts))
-        .filter(|(request, _)| file.budget.fits(request));
-    let kind = Some(kind_request(file, &shown)).filter(|(request, _)| file.budget.fits(request));
+        .and_then(|built| file.fitting(built));
+    let kind = file.fitting(kind_request(file, &shown));
     unit.detail = Detail::Document {
         parts,
         locate: locate.map(Into::into),

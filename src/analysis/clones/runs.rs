@@ -10,7 +10,7 @@
 //! candidates: statement windows of three renamed statements saw none of the
 //! one-line predicates, lookups with a fallback and connection lifecycles a
 //! reviewer wanted shared on a 32-file sample, and runs saw six of nine.
-use super::{Block, Pair, Parsed, SourceFile, Token, TokenKind, compact, site};
+use super::{Block, Pair, Parsed, SourceFile, Token, TokenKind, compact, ordered_sites};
 use std::{collections::BTreeSet, ops::Range};
 
 /// Tokens a run needs to be a candidate.
@@ -45,31 +45,7 @@ pub(super) fn pairs(
 ) -> Vec<Pair> {
     let streams = streams(parsed, blocks);
     let wrappers = wrappers(parsed.len(), blocks);
-    let mut shingles: Vec<(u64, u32, u32)> = Vec::new();
-    for (f, stream) in streams.iter().enumerate() {
-        for p in 0..stream.eligible.len().saturating_sub(RUN_TOKENS - 1) {
-            let last = p + RUN_TOKENS - 1;
-            if stream.segment[p] == stream.segment[last] {
-                let hash = crate::analysis::fast_hash(&stream.normal[p..=last]);
-                shingles.push((hash, f as u32, p as u32));
-            }
-        }
-    }
-    shingles.sort_unstable();
-    let mut starts = BTreeSet::<(u32, u32, u32, u32)>::new();
-    for group in shingles.chunk_by(|a, b| a.0 == b.0) {
-        if group.len() < 2 || group.len() > RUN_OCCURRENCES {
-            continue;
-        }
-        for (i, &(_, fx, px)) in group.iter().enumerate() {
-            for &(_, fy, py) in &group[i + 1..] {
-                let apart = fx != fy || px.abs_diff(py) as usize >= RUN_TOKENS;
-                if apart && linked(fx as usize, fy as usize) {
-                    starts.insert((fx, px, fy, py));
-                }
-            }
-        }
-    }
+    let starts = matched_starts(&streams, linked);
     let mut found = Vec::new();
     for &(fx, px, fy, py) in &starts {
         if px > 0 && py > 0 && starts.contains(&(fx, px - 1, fy, py - 1)) {
@@ -144,12 +120,7 @@ fn pair(
     (fy, y): (usize, Range<usize>),
     run: &[&str],
 ) -> Pair {
-    let a = site(files, fx, x);
-    let b = site(files, fy, y);
-    // The owner is a selected site; ties keep path and line order.
-    let swap = !files[fx].selected
-        || (files[fy].selected && (&b.path, b.start_line) < (&a.path, a.start_line));
-    let (a, b) = if swap { (b, a) } else { (a, b) };
+    let (a, b) = ordered_sites(files, (fx, x), (fy, y));
     let size = compact(&files[a.file].source[a.span.clone()])
         .min(compact(&files[b.file].source[b.span.clone()]));
     Pair {
@@ -167,6 +138,41 @@ fn span(tokens: &[Token<'_>], stream: &Stream<'_>, p: usize, length: usize) -> R
     let first = &tokens[stream.eligible[p]];
     let last = &tokens[stream.eligible[p + length - 1]];
     first.start..last.start + last.text.len()
+}
+
+/// The pairs of positions, as (file, position, file, position), where the
+/// same `RUN_TOKENS` tokens start in two places of linked files, within one
+/// segment each, apart and among at most `RUN_OCCURRENCES` places.
+fn matched_starts(
+    streams: &[Stream<'_>],
+    linked: impl Fn(usize, usize) -> bool,
+) -> BTreeSet<(u32, u32, u32, u32)> {
+    let mut shingles: Vec<(u64, u32, u32)> = Vec::new();
+    for (f, stream) in streams.iter().enumerate() {
+        for p in 0..stream.eligible.len().saturating_sub(RUN_TOKENS - 1) {
+            let last = p + RUN_TOKENS - 1;
+            if stream.segment[p] == stream.segment[last] {
+                let hash = crate::analysis::fast_hash(&stream.normal[p..=last]);
+                shingles.push((hash, f as u32, p as u32));
+            }
+        }
+    }
+    shingles.sort_unstable();
+    let mut starts = BTreeSet::new();
+    for group in shingles.chunk_by(|a, b| a.0 == b.0) {
+        if group.len() < 2 || group.len() > RUN_OCCURRENCES {
+            continue;
+        }
+        for (i, &(_, fx, px)) in group.iter().enumerate() {
+            for &(_, fy, py) in &group[i + 1..] {
+                let apart = fx != fy || px.abs_diff(py) as usize >= RUN_TOKENS;
+                if apart && linked(fx as usize, fy as usize) {
+                    starts.insert((fx, px, fy, py));
+                }
+            }
+        }
+    }
+    starts
 }
 
 /// Each file's stream: the tokens of its blocks' statements, without those

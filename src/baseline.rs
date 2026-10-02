@@ -250,6 +250,13 @@ fn save_baseline(root: &Path, baseline: &Baseline) -> Result<std::path::PathBuf>
 /// what its hook reported this way. A path or directory accepts nothing new,
 /// so no finding is dismissed unread.
 pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]) -> Result<usize> {
+    // An empty path would be the start of every path.
+    ensure!(
+        targets
+            .iter()
+            .all(|t| !t.trim().trim_end_matches('/').is_empty()),
+        "An empty target names no finding; give PATH:LINE, a fingerprint or a path"
+    );
     let mut baseline = read_baseline(root)?.unwrap_or_else(|| Baseline {
         version: 1,
         created_at: crate::schema::now(),
@@ -262,31 +269,18 @@ pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]
         };
         rules.is_empty() || key.is_some_and(|key| rules.contains(&key))
     };
+    let named = |finding: &Accepted, paths: bool| {
+        selected(&finding.rule) && targets.iter().any(|t| names(t, finding, paths))
+    };
     let mut marked = 0;
     for finding in &mut baseline.findings {
-        if selected(&finding.rule) && targets.iter().any(|t| names(t, finding, true)) {
+        if named(finding, true) {
             finding.reason = Some(reason);
             marked += 1;
         }
     }
     if let Ok(report) = crate::storage::read_latest(root) {
-        let held: BTreeSet<String> = baseline
-            .findings
-            .iter()
-            .map(|f| f.fingerprint.clone())
-            .collect();
-        let mut dismissed: Vec<Accepted> = to_accept(&report, Some(reason))
-            .into_iter()
-            .filter(|f| !held.contains(&f.fingerprint) && selected(&f.rule))
-            .filter(|f| targets.iter().any(|t| names(t, f, false)))
-            .collect();
-        dismissed.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
-        dismissed.dedup_by(|a, b| a.fingerprint == b.fingerprint);
-        marked += dismissed.len();
-        baseline.findings.extend(dismissed);
-        baseline
-            .findings
-            .sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
+        marked += add_dismissed(&mut baseline, &report, reason, |f| named(f, false));
     }
     ensure!(
         marked > 0,
@@ -295,6 +289,33 @@ pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]
     );
     save_baseline(root, &baseline)?;
     Ok(marked)
+}
+
+/// Adds the findings of `report` that `named` picks and `baseline` does not
+/// hold yet, dismissed for `reason`, and says how many it added.
+fn add_dismissed(
+    baseline: &mut Baseline,
+    report: &Report,
+    reason: Disposition,
+    named: impl Fn(&Accepted) -> bool,
+) -> usize {
+    let held: BTreeSet<String> = baseline
+        .findings
+        .iter()
+        .map(|f| f.fingerprint.clone())
+        .collect();
+    let mut dismissed: Vec<Accepted> = to_accept(report, Some(reason))
+        .into_iter()
+        .filter(|f| !held.contains(&f.fingerprint) && named(f))
+        .collect();
+    dismissed.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
+    dismissed.dedup_by(|a, b| a.fingerprint == b.fingerprint);
+    let added = dismissed.len();
+    baseline.findings.extend(dismissed);
+    baseline
+        .findings
+        .sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
+    added
 }
 
 /// Whether a `mark` target names a finding: by fingerprint prefix or
@@ -309,8 +330,8 @@ fn names(target: &str, finding: &Accepted, paths: bool) -> bool {
     {
         return finding.path == Path::new(path) && finding.line == Some(line);
     }
-    let target = Path::new(target.trim_end_matches('/'));
-    paths && finding.path.starts_with(target)
+    let target = target.trim_end_matches('/');
+    paths && !target.is_empty() && finding.path.starts_with(target)
 }
 
 /// Accepted findings of one rule by reason.

@@ -73,7 +73,7 @@ pub(crate) fn expected_output(source: &str) -> Option<usize> {
     let mut start = None;
     let mut end = body.len();
     loop {
-        let line_start = body[..end].rfind('\n').map_or(0, |newline| newline + 1);
+        let line_start = super::line_start(body, end);
         if !body[line_start..end].trim_start().starts_with("#|") {
             return start;
         }
