@@ -6,6 +6,7 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 - `jevgate baseline mark REASON --note TEXT TARGET…` keeps a short note with the reason, such as the issue that will fix a `later` finding. Notes survive rewrites, `--merge` and marking again without one; the hook names them in the person's list of dismissals. Baseline entries also record the unit a finding names. Baselines without notes or units load unchanged.
 - `jevgate baseline list [--reason …] [--rule …] [--format text|md|json]` lists accepted findings by path and line with their reason, rule, unit, fingerprint prefix and note; `--format md` prints a checklist to paste into a cleanup issue.
+- The instructions `jevgate init --agent` writes and the plugin's skill tell agents to give a `later` mark the issue that will fix it with `--note`, and to export `later` marks with `baseline list --reason later --format md`. Run `jevgate init --agent` again to update them.
 
 ## [0.33.0] - 2026-10-02
 
