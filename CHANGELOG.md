@@ -4,6 +4,10 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-03
+
+A dismissal can say where it will be fixed: `baseline mark` takes a short `--note`, such as the issue that will fix a `later` finding, and `baseline list` prints the accepted findings by reason, as text, JSON or a Markdown checklist to paste into a cleanup issue. Findings, rules and fingerprints are unchanged.
+
 - `jevgate baseline mark REASON --note TEXT TARGET…` keeps a short note with the reason, such as the issue that will fix a `later` finding. Notes survive rewrites, `--merge` and marking again without one; the hook names them in the person's list of dismissals. Baseline entries also record the unit a finding names. Baselines without notes or units load unchanged.
 - `jevgate baseline list [--reason …] [--rule …] [--format text|md|json]` lists accepted findings by path and line with their reason, rule, unit, fingerprint prefix and note; `--format md` prints a checklist to paste into a cleanup issue.
 - The instructions `jevgate init --agent` writes and the plugin's skill tell agents to give a `later` mark the issue that will fix it with `--note`, and to export `later` marks with `baseline list --reason later --format md`. Run `jevgate init --agent` again to update them.
@@ -495,7 +499,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.30.0...v0.31.0
