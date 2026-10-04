@@ -378,14 +378,16 @@ fn run(
 /// The findings of `report` the agent dismissed with a reason since the
 /// turn began at `start`, which the report's gate already accepts.
 fn dismissed(root: &Path, report: &Report, start: &str) -> Vec<Dismissed> {
-    let dismissals = crate::baseline::dismissed_since(root, start).unwrap_or_default();
+    let Ok(dismissals) = crate::baseline::Dismissals::since(root, start) else {
+        return Vec::new();
+    };
     report
         .files
         .iter()
         .flat_map(|file| file.findings.iter().map(move |f| (file, f)))
         .filter(|(_, f)| f.baselined)
         .filter_map(|(file, f)| {
-            let dismissal = dismissals.get(&f.fingerprint)?;
+            let dismissal = dismissals.of(f)?;
             Some(Dismissed {
                 path: file.path.clone(),
                 line: f.line,

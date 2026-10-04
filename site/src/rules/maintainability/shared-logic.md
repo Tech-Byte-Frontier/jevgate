@@ -10,7 +10,11 @@ Copies are compared within a package and across packages linked by a local depen
 
 ## Copies a change left untouched
 
-With `--base`, and in an agent's turn, a repeat is asked about when the change touched at least one copy. When it left some copies untouched, the finding points at the change's own copy and names each untouched one, saying whether its file is one the change edits; the JSON report lists them under `untouched`, with `file_changed`. The change fixes its own copy, for example by reusing an untouched one; when sharing the logic would rewrite the untouched copies, it marks the finding `later --note "#issue"` and leaves them. The agent hook holds the end of a turn for the change's copy until it is fixed or marked, never for the untouched ones. The finding keeps the fingerprint its repeat has in a check of whole files, so a baseline accepts it in both.
+With `--base`, and in an agent's turn, a repeat is asked about when the change touched at least one copy. When it left some copies untouched, the finding points at the change's own copy and names each untouched one, saying whether its file is one the change edits; the JSON report lists them under `untouched`, with `file_changed`. The change fixes its own copy, for example by reusing an untouched one; when sharing the logic would rewrite the untouched copies, it marks the finding `later --note "#issue"` and leaves them. The agent hook holds the end of a turn for the change's copy until it is fixed or marked, never for the untouched ones. A baseline that accepts the repeat from a check of whole files accepts it here too.
+
+## Fingerprints
+
+A repeat is identified by its copies: each function that holds one, by path and name, and a copy outside a function by its path and statements. Its fingerprint is the same whichever file a check selects or reports it in and whichever window of those functions repeats. A baseline accepts it while every copy is one an accepted repeat names: a copy that goes leaves it accepted, and a new copy that joins raises it again.
 
 ## How it is measured
 

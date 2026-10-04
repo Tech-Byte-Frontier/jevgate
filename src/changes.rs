@@ -1,4 +1,7 @@
-//! Finding lineage between snapshots, by fingerprint: introduced, persistent or resolved.
+//! Finding lineage between snapshots, by fingerprint: introduced, persistent
+//! or resolved. A finding is also known by the fingerprints it had before
+//! (`Identity::earlier`), so a snapshot taken before they changed or before
+//! its file was renamed still holds it.
 use crate::schema::{Change, Report, Scope, Status};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -68,7 +71,9 @@ fn lineage(previous: &Report, report: &Report) -> Vec<Change> {
     let current: BTreeSet<&str> = report
         .files
         .iter()
-        .flat_map(|f| f.findings.iter().map(|x| x.fingerprint.as_str()))
+        .flat_map(|f| &f.findings)
+        .flat_map(|x| x.fingerprints())
+        .map(String::as_str)
         .collect();
     let judged = judged_paths(report);
     for (fingerprint, (path, rule)) in before {
@@ -107,7 +112,10 @@ fn current_changes(
     let mut changes = Vec::new();
     for file in &report.files {
         for finding in &file.findings {
-            let (state, reason) = if before.contains_key(finding.fingerprint.as_str()) {
+            let seen = finding
+                .fingerprints()
+                .any(|fingerprint| before.contains_key(fingerprint.as_str()));
+            let (state, reason) = if seen {
                 ("persistent", "The same finding remains")
             } else if comparable {
                 ("introduced", "New since the previous snapshot")
@@ -167,6 +175,7 @@ mod tests {
             precision: None,
             preview: None,
             untouched: Vec::new(),
+            identity: Default::default(),
         }
     }
 
@@ -190,22 +199,35 @@ mod tests {
         old.files[0].findings = vec![finding("kept"), finding("fixed")];
         let mut new = old.clone();
         new.generation = 2;
+        let mut renamed = finding("now");
+        renamed.identity.aliases = vec!["fixed".into()];
         new.files[0].findings = vec![finding("kept"), finding("added")];
+        let states = |new: &Report| -> BTreeMap<String, String> {
+            new.changes
+                .iter()
+                .map(|c| (c.fingerprint.clone(), c.state.clone()))
+                .collect()
+        };
         compare(Some(&old), &mut new);
-        let states: BTreeMap<_, _> = new
-            .changes
-            .iter()
-            .map(|c| (c.fingerprint.as_str(), c.state.as_str()))
-            .collect();
-        assert_eq!(states["kept"], "persistent");
-        assert_eq!(states["added"], "introduced");
-        assert_eq!(states["fixed"], "resolved");
+        let states_now = states(&new);
+        assert_eq!(states_now["kept"], "persistent");
+        assert_eq!(states_now["added"], "introduced");
+        assert_eq!(states_now["fixed"], "resolved");
         new.files[0].status = Status::Error;
         compare(Some(&old), &mut new);
         assert!(
             new.changes
                 .iter()
                 .any(|c| c.fingerprint == "fixed" && c.state == "non-comparable")
+        );
+        new.files[0].status = Status::Review;
+        new.files[0].findings.push(renamed);
+        compare(Some(&old), &mut new);
+        let states_now = states(&new);
+        assert_eq!(
+            (states_now["now"].as_str(), states_now.get("fixed")),
+            ("persistent", None),
+            "a finding is the one it was before its fingerprint changed"
         );
         compare(None, &mut new);
         assert!(new.changes.iter().all(|c| c.state == "baseline"));

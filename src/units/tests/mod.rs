@@ -7,6 +7,7 @@ mod django;
 mod documentation;
 mod duplicates;
 mod examples;
+mod fingerprints;
 mod functions;
 mod handlers;
 mod hardcoded;
@@ -48,6 +49,15 @@ fn planned(project: &Project, options: &CheckArgs) -> (Vec<Input>, Plan) {
 }
 
 /// A `lib.rs` holding `count` judged functions `f0`, `f1`…
+/// Accept every finding of `report`, as `jevgate baseline` does after the check.
+fn accept_all(project: &Project, report: &Report) {
+    crate::storage::Store::open(&project.0)
+        .unwrap()
+        .publish(report)
+        .unwrap();
+    crate::baseline::write(&project.0, false, None).unwrap();
+}
+
 fn functions_project(count: usize) -> Project {
     let project = Project::new();
     let source: String = (0..count).map(|i| function(&format!("f{i}"))).collect();

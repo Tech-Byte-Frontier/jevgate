@@ -35,6 +35,7 @@ pub(super) fn plan(
         );
         let sent = file.push_fitting(build(file, pair, hashes, &id), requests);
         let presence = Presence::judged_if(sent);
+        let members = members(pair);
         out.units.push(UnitPlan {
             rule: SHARED_LOGIC,
             name: match pair.copies.len() {
@@ -61,23 +62,44 @@ pub(super) fn plan(
             },
             id,
             presence,
-            locations: [&pair.a, &pair.b]
-                .into_iter()
-                .chain(&pair.copies)
-                .map(location)
-                .collect(),
+            locations: sites(pair).map(location).collect(),
             quote: Some(pair.a.quote.clone()),
             lines: pair.a.end_line + 1 - pair.a.start_line,
-            identity: identity(&[
-                pair.a.function.as_deref().unwrap_or(""),
-                &pair.b.path.to_string_lossy(),
-                pair.b.function.as_deref().unwrap_or(""),
-                &pair.normalized,
-            ]),
-            detail: Detail::Pair,
+            identity: identity(&members.iter().map(String::as_str).collect::<Vec<_>>()),
+            detail: Detail::Pair {
+                members,
+                v1: identity(&[
+                    pair.a.function.as_deref().unwrap_or(""),
+                    &pair.b.path.to_string_lossy(),
+                    pair.b.function.as_deref().unwrap_or(""),
+                    &pair.normalized,
+                ]),
+            },
             recheck: None,
         });
     }
+}
+
+/// The copies a pair's finding is identified by, in order: each function
+/// as `path::function`, whichever window of it repeats and whichever pair
+/// represents the group, and a copy outside a function as `path#hash` of
+/// the repeated statements. Neither the file that owns the finding nor
+/// which files a check selected changes them.
+fn members(pair: &Pair) -> Vec<String> {
+    let mut members: Vec<String> = sites(pair)
+        .map(|site| match &site.function {
+            Some(function) => format!("{}::{function}", site.path.display()),
+            None => format!("{}#{}", site.path.display(), pair.normalized),
+        })
+        .collect();
+    members.sort();
+    members.dedup();
+    members
+}
+
+/// A pair's copies: the two it was found from, then the group's others.
+fn sites(pair: &Pair) -> impl Iterator<Item = &Site> {
+    [&pair.a, &pair.b].into_iter().chain(&pair.copies)
 }
 
 fn site_label(site: &Site) -> String {
@@ -119,11 +141,7 @@ fn build(
         LOOK,
         Pass::First,
     );
-    let sites: Vec<&Site> = [&pair.a, &pair.b]
-        .into_iter()
-        .chain(&pair.copies)
-        .take(SHOWN_SITES)
-        .collect();
+    let sites: Vec<&Site> = sites(pair).take(SHOWN_SITES).collect();
     let state = json!({"sites": sites.iter().map(|s| site_state(s)).collect::<Vec<_>>()});
     let mut sources = vec![(file.path, file.source_hash)];
     for site in &sites {

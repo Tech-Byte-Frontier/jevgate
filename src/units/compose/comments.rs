@@ -72,6 +72,7 @@ pub(super) fn comment_findings(
             let identities: Vec<&str> = std::iter::once(owner)
                 .chain(entries.iter().map(|(unit, ..)| unit.identity.as_str()))
                 .collect();
+            let identity = crate::units::identity(&identities);
             Finding {
                 rule: catalog::id(catalog::COMMENTS).into(),
                 strength,
@@ -85,11 +86,7 @@ pub(super) fn comment_findings(
                 locations,
                 quote: entries[0].0.quote.clone(),
                 category: None,
-                fingerprint: fingerprint(
-                    catalog::COMMENTS,
-                    plan,
-                    &crate::units::identity(&identities),
-                ),
+                fingerprint: fingerprint(catalog::COMMENTS, plan, &identity),
                 rank: rank(p, lines),
                 baselined: false,
                 suppressed: None,
@@ -97,6 +94,7 @@ pub(super) fn comment_findings(
                 precision: None,
                 preview: None,
                 untouched: Vec::new(),
+                identity: renamed_only(catalog::COMMENTS, plan, &identity),
             }
         })
         .collect()

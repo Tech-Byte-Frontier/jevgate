@@ -30,6 +30,8 @@ pub(super) struct Item {
     pub lines: usize,
     /// What its findings' fingerprints keep across unrelated edits.
     pub identity: String,
+    /// The identity JevGate 0.35 and earlier gave it, when it differs.
+    pub v1: Option<String>,
     pub quote: Option<String>,
     /// Where runs of packed items end, as the built-in stage keys them: a
     /// definition's name, a comment's owner, a heading, a hunk's content.
@@ -60,6 +62,7 @@ pub(super) fn functions(
                 reach: (line_of(file.source, unit.span.start), unit.end_line),
                 lines: unit.lines(),
                 identity: identity(&[&unit.name, &compact(source)]),
+                v1: None,
                 quote: None,
                 run: unit.name.clone(),
             }
@@ -84,6 +87,7 @@ pub(super) fn tests(file: &FileContext<'_>, cases: &[TestCase]) -> Vec<Item> {
                 reach: (line_of(file.source, case.span.start), case.end_line),
                 lines: case.end_line + 1 - case.line,
                 identity: identity(&[&case.name, &compact(source)]),
+                v1: None,
                 quote: None,
                 run: case.name.clone(),
             }
@@ -122,6 +126,7 @@ pub(super) fn comments(
             reach: (comment.line, comment.end_line),
             lines: comment.end_line + 1 - comment.line,
             identity: identity(&[owner, &compact(&comment.text)]),
+            v1: None,
             quote: Some(comment.text.clone()),
             run: owner.to_string(),
         })
@@ -153,6 +158,7 @@ pub(super) fn sections(file: &FileContext<'_>) -> Vec<Item> {
             reach: (section.start_line, section.end_line),
             lines: section.end_line + 1 - section.start_line,
             identity: identity(&[&section.heading, &compact(&section.text)]),
+            v1: None,
             quote: None,
             run: section.heading.clone(),
             name,
@@ -176,17 +182,21 @@ pub(super) fn whole(file: &FileContext<'_>) -> Item {
         reach: (1, lines),
         lines,
         identity: identity(&["file", &compact(file.source)]),
+        v1: None,
         quote: None,
         run: String::new(),
     }
 }
 
-/// Changed hunks. A hunk's findings are identified by the definition Git
-/// names for it and what it changes, without line numbers, so they follow
-/// the change when lines above it move.
-pub(super) fn changed(file: &FileContext<'_>, hunks: &[Hunk]) -> Vec<Item> {
+/// Changed hunks. A hunk's findings are identified by the definition
+/// JevGate's parser finds around it and the lines it changes, without line
+/// numbers, so they follow the change when lines above it move or a change
+/// nearby comes and goes; a second hunk with the same changes in the same
+/// definition is told apart by its order.
+pub(super) fn changed(file: &FileContext<'_>, hunks: &[Hunk], units: &[Unit]) -> Vec<Item> {
     let labels: Vec<String> = hunks.iter().map(Hunk::lines).collect();
     let ids = unique_ids("hunk", labels.iter().map(String::as_str));
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
     hunks
         .iter()
         .zip(labels)
@@ -196,10 +206,12 @@ pub(super) fn changed(file: &FileContext<'_>, hunks: &[Hunk]) -> Vec<Item> {
             if let Some(context) = &hunk.context {
                 state["in"] = json!(context);
             }
-            let changed = identity(&[
-                hunk.context.as_deref().unwrap_or_default(),
-                &compact(&hunk.changed),
-            ]);
+            let mut changed = identity(&[enclosing(units, hunk), &compact(&hunk.changed)]);
+            let earlier = seen.entry(changed.clone()).or_default();
+            *earlier += 1;
+            if *earlier > 1 {
+                changed = identity(&[&changed, &earlier.to_string()]);
+            }
             Item {
                 state,
                 name: if hunk.start == hunk.end {
@@ -212,9 +224,23 @@ pub(super) fn changed(file: &FileContext<'_>, hunks: &[Hunk]) -> Vec<Item> {
                 reach: (hunk.start, hunk.end),
                 lines: hunk.end + 1 - hunk.start,
                 identity: changed.clone(),
+                v1: Some(identity(&[
+                    hunk.context.as_deref().unwrap_or_default(),
+                    &compact(&hunk.joined),
+                ])),
                 quote: None,
                 run: changed,
             }
         })
         .collect()
+}
+
+/// The name of the innermost definition around a hunk's changed lines,
+/// empty at the top level.
+fn enclosing<'u>(units: &'u [Unit], hunk: &Hunk) -> &'u str {
+    units
+        .iter()
+        .filter(|u| u.line <= hunk.start && hunk.end <= u.end_line)
+        .min_by_key(|u| u.span.len())
+        .map_or("", |u| u.name.as_str())
 }

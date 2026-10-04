@@ -4,7 +4,7 @@ use super::*;
 use std::path::Path;
 
 /// A check of what changed since `base`, for `rules`.
-fn since(base: &str, rules: &[&str]) -> CheckArgs {
+pub(super) fn since(base: &str, rules: &[&str]) -> CheckArgs {
     let mut options = args();
     options.rules = rules.iter().map(|r| r.to_string()).collect();
     options.base = Some(base.into());
@@ -227,7 +227,7 @@ fn a_copy_pair_is_asked_when_either_copy_changed() {
 /// `LOAD` loading `what` from `field`, then a tail that is no copy,
 /// edited beside the copy when `tail_edited`, and with the copy's default
 /// changed when `copy_edited`: a literal, so the copies still match.
-fn load_copy(
+pub(super) fn load_copy(
     what: &str,
     field: &str,
     tail: String,
@@ -249,7 +249,7 @@ fn load_copy(
 }
 
 /// The shared-logic findings of `report`, by the file each is in.
-fn copies_found(report: &Report) -> Vec<(&Path, &crate::schema::Finding)> {
+pub(super) fn copies_found(report: &Report) -> Vec<(&Path, &crate::schema::Finding)> {
     report
         .files
         .iter()
@@ -710,10 +710,56 @@ unit = "hunk"
         "def charge(order):\n    x = 2\n\n    y = log(order.body)\n    return x + y\n",
     );
     let (_, plan) = planned(&project, &custom_since_head(toml));
-    assert_eq!(unit_names(&plan, "m.py"), ["lines 2–4"]);
-    let diff = &plan.requests[0].request["state"]["hunks"][0]["diff"];
+    // Each run of changed lines is its own hunk.
+    assert_eq!(unit_names(&plan, "m.py"), ["line 2", "line 4"]);
+    let diff = &plan.requests[0].request["state"]["hunks"][1]["diff"];
     assert!(
-        diff.as_str().unwrap().contains("+    y = log(order.body)"),
+        diff.as_str()
+            .unwrap()
+            .starts_with(" \n-    y = 2\n+    y = log(order.body)"),
         "{diff}"
     );
+}
+
+/// A hunk is identified by the definition around it and its own changed
+/// lines: a change a line away, such as a parent branch's, or a function
+/// added above leaves it as it was.
+#[test]
+fn a_hunk_keeps_its_identity_when_a_change_nearby_or_a_function_above_comes_and_goes() {
+    let toml = r#"
+[[question]]
+id = "no-body-logs"
+question = "Does this change log a request body?"
+unit = "hunk"
+"#;
+    let project = Project::new();
+    let base = "def charge(order):\n    x = 1\n    z = 0\n    y = 2\n    return x + y\n";
+    project.write("m.py", base);
+    project.commit_all();
+    let hunks = |source: &str| {
+        project.write("m.py", source);
+        let (_, plan) = planned(&project, &custom_since_head(toml));
+        file_plan(&plan, "m.py")
+            .units
+            .iter()
+            .map(|unit| (unit.identity.clone(), unit.detail.clone()))
+            .collect::<Vec<_>>()
+    };
+    let logged = base.replace("y = 2", "y = log(order.body)");
+    let alone = hunks(&logged);
+    assert_eq!(alone.len(), 1);
+    let v1 = |detail: &Detail| match detail {
+        Detail::Custom(_, v1) => v1.clone(),
+        _ => None,
+    };
+    let nearby = hunks(&logged.replace("x = 1", "x = 2"));
+    assert_eq!(nearby.len(), 2, "two runs of changed lines");
+    assert_eq!(nearby[1].0, alone[0].0);
+    assert_ne!(
+        v1(&nearby[1].1),
+        v1(&alone[0].1),
+        "JevGate 0.35 joined the two into one hunk"
+    );
+    let above = hunks(&format!("def audit():\n    pass\n\n\n{logged}"));
+    assert_eq!(above.last().unwrap().0, alone[0].0);
 }

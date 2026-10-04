@@ -120,6 +120,7 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
     let identity: Vec<&str> = std::iter::once(subject.as_str())
         .chain(tests.iter().map(|t| t.as_str()))
         .collect();
+    let identity = crate::units::identity(&identity);
     Finding {
         rule: catalog::id(catalog::TEST_REDUNDANCY).into(),
         strength: Strength::Consider,
@@ -137,11 +138,7 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         locations,
         quote: None,
         category: None,
-        fingerprint: fingerprint(
-            catalog::TEST_REDUNDANCY,
-            plan,
-            &crate::units::identity(&identity),
-        ),
+        fingerprint: fingerprint(catalog::TEST_REDUNDANCY, plan, &identity),
         rank: rank(p, lines),
         baselined: false,
         suppressed: None,
@@ -149,5 +146,6 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         precision: None,
         preview: None,
         untouched: Vec::new(),
+        identity: renamed_only(catalog::TEST_REDUNDANCY, plan, &identity),
     }
 }

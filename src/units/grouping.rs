@@ -80,6 +80,7 @@ fn group_finished_plans(files: &mut [FileResult]) -> BTreeSet<usize> {
             "Delete the finished plans, or move them out of the living documentation".into();
         primary.locations.extend(locations);
         primary.fingerprint = directory_fingerprint(primary, &directory);
+        primary.identity = Default::default();
     }
     changed
 }
@@ -237,6 +238,7 @@ fn head_finding(finding: &mut Finding, head: &Section, names: &[String], locatio
         .unwrap_or_default();
     finding.category = Some(REPEATED_SECTION.into());
     finding.fingerprint = section_fingerprint(finding, &head.0, &heading);
+    finding.identity = Default::default();
 }
 
 /// A section a finding names: its path and first line.

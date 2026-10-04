@@ -428,6 +428,16 @@
       "reason": "wrong"
     },
     {
+      "fingerprint": "5dc95562dd420d856dd0a09a3e6a44afcd14cef3aabe34d0dd9ca73d8f66e7a3",
+      "rule": "maintainability/file-organization",
+      "path": "src/baseline.rs",
+      "line": 19,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended",
+      "note": "the baseline file's reads and writes; this PR moves matching and listing to baseline/entries.rs and baseline/listing.rs"
+    },
+    {
       "fingerprint": "89c1deedd5fe8507aad0a494fda37caae01d5a80be6d0590ca591092f0592dbe",
       "rule": "maintainability/file-organization",
       "path": "src/baseline.rs",
@@ -436,6 +446,17 @@
       "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
       "reason": "wrong",
       "note": "every function reads or writes jevgate-baseline.json; marked wrong on main before"
+    },
+    {
+      "fingerprint": "d0d9af103ceb80928d4f43721e3c4abb763c76ad1babc37d992e36cbd11df897",
+      "rule": "maintainability/shared-logic",
+      "path": "src/baseline.rs",
+      "line": 358,
+      "unit": "`last_check` (src/baseline.rs:190) and `mark` (src/baseline.rs:358)",
+      "strength": "review",
+      "message": "`mark` (src/baseline.rs:358), which this change touched, may repeat logic that copies it left untouched also hold: `last_check` (src/baseline.rs:190, in a file this change edits).",
+      "reason": "wrong",
+      "note": "one read_latest call, optional for a mark and required for a write"
     },
     {
       "fingerprint": "b5974a3e8b0774e52416c53f1003281dc460cd55853041125750b311c3d71376",
@@ -801,6 +822,17 @@
       "strength": "review",
       "message": "`question_tables` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
       "reason": "intended"
+    },
+    {
+      "fingerprint": "40804709e7f925e3b46f2579ce4fcd2d9568214edf862e73c2a55caf656ebdac",
+      "rule": "maintainability/function-simplification",
+      "path": "src/hook/events.rs",
+      "line": 311,
+      "unit": "Hook::told",
+      "strength": "review",
+      "message": "`Hook::told` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR changes one partition condition"
     },
     {
       "fingerprint": "417b704fd1318a0cca1d3dea37b13407764d0e5707b579e27ac017b7c880c0ae",
@@ -1236,6 +1268,17 @@
       "note": "as on main; this PR only adds the new empty untouched field"
     },
     {
+      "fingerprint": "758ba90e8cd677dd4f595cec6954a046c60fb0906f3195f62feb41173cccd4cf",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/comments.rs",
+      "line": 44,
+      "unit": "comment_findings",
+      "strength": "review",
+      "message": "`comment_findings` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR only names the identity and adds rename aliases"
+    },
+    {
       "fingerprint": "0426cf29bc82927d5ba0d17e12226e080d2c849266ad2a8909303cd6fc633099",
       "rule": "maintainability/function-simplification",
       "path": "src/units/compose/mod.rs",
@@ -1243,6 +1286,28 @@
       "strength": "review",
       "message": "`counted_status` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
       "reason": "wrong"
+    },
+    {
+      "fingerprint": "04ff31dddb13b208c6d96a23cf0c263172b25248218f99a754d6a0d105697687",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/compose/mod.rs",
+      "line": 350,
+      "unit": "`undecided_unit` (src/units/compose/mod.rs:350) and `finding` (src/units/compose/mod.rs:787)",
+      "strength": "review",
+      "message": "`undecided_unit` (src/units/compose/mod.rs:350) and `finding` (src/units/compose/mod.rs:787) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong",
+      "note": "a two-arm match on the custom question in two different outputs"
+    },
+    {
+      "fingerprint": "64555705f5133a7b8372d67a8333eed3393f9e853c91b19b698db3cca8ddaa36",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/compose/mod.rs",
+      "line": 374,
+      "unit": "`finding` (src/units/compose/mod.rs:782), `group_finding` (src/units/compose/redundant.rs:127) and 1 more copy",
+      "strength": "review",
+      "message": "`undecided_unit` (src/units/compose/mod.rs:374), which this change touched, may repeat logic that copies it left untouched also hold: `finding` (src/units/compose/mod.rs:782, in a file this change edits); `group_finding` (src/units/compose/redundant.rs:127, in a file this change edits).",
+      "reason": "wrong",
+      "note": "one first-line expression in three struct literals"
     },
     {
       "fingerprint": "839519bcf4ed992fc3927e179fb57cb1d5fd5ea1f68d08f85c9d4d1f8f254db9",
@@ -1274,6 +1339,28 @@
       "note": "as on main; this PR only adds the new empty untouched field"
     },
     {
+      "fingerprint": "e4ab21fc2ce573a1a85c439f886b5e57b8ab8deb8aa200e826f94fd179bcb545",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/mod.rs",
+      "line": 667,
+      "unit": "finding",
+      "strength": "review",
+      "message": "`finding` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR only takes the fingerprint and identity from known()"
+    },
+    {
+      "fingerprint": "819b49424c2d2fa8601c98ce04e340aba0f82f13576dd277fa02159ca1a5ad22",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/custom/hunks.rs",
+      "line": 189,
+      "unit": "split",
+      "strength": "review",
+      "message": "`split` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong",
+      "note": "a short loop over the parts lines_now, runs and in_order compute"
+    },
+    {
       "fingerprint": "7b9c45a11bf97f35d12cf672422f6bb47560176fa5a5a91cd0618f98fed57922",
       "rule": "maintainability/shared-logic",
       "path": "src/units/custom/items.rs",
@@ -1281,6 +1368,17 @@
       "strength": "review",
       "message": "`whole` (src/units/custom/items.rs:170), `plan_unit` (src/units/drift.rs:384) and 6 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
       "reason": "wrong"
+    },
+    {
+      "fingerprint": "9fd482e579cb61d310999ba136e44333c58e7af38d6bcf3893deeec372679199",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/custom/items.rs",
+      "line": 199,
+      "unit": "`comments` (src/units/custom/items.rs:116), `sections` (src/units/custom/items.rs:150) and 1 more copy",
+      "strength": "review",
+      "message": "`changed` (src/units/custom/items.rs:199), which this change touched, may repeat logic that copies it left untouched also hold: `comments` (src/units/custom/items.rs:116, in a file this change edits); `sections` (src/units/custom/items.rs:150, in a file this change edits).",
+      "reason": "wrong",
+      "note": "each kind zips its own items with their ids; the items differ"
     },
     {
       "fingerprint": "63f373d699dc0e64490e490447be4f918b909ade305fbbc5f0e524a216cb144c",
@@ -1429,6 +1527,17 @@
       "reason": "intended"
     },
     {
+      "fingerprint": "d4621f0ec7cfb7d2c46fa373015502193d63cca30378530ca13848ad34a6c5de",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/outcome/mod.rs",
+      "line": 258,
+      "unit": "rule_outcome",
+      "strength": "review",
+      "message": "`rule_outcome` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR only adds a field to a pattern"
+    },
+    {
       "fingerprint": "0d67b1174cf848d492e1869b020379d045170a9ed8cd1a70111ef6573d3274d1",
       "rule": "maintainability/function-simplification",
       "path": "src/units/plan/file.rs",
@@ -1465,6 +1574,17 @@
       "strength": "review",
       "message": "`parsed_scope` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
       "reason": "intended"
+    },
+    {
+      "fingerprint": "ed7dae0e4679174d2696ad4d986f61fe7a0c86883018ec54cd2b606308b79a00",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/plan/mod.rs",
+      "line": 98,
+      "unit": "plan",
+      "strength": "review",
+      "message": "`plan` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR only adds the note_renames call"
     },
     {
       "fingerprint": "fa6491af668dc8dc248218b34a7b9c7e88fd633565412eacf3d670dd6b91f4ab",
@@ -1639,6 +1759,16 @@
       "reason": "wrong"
     },
     {
+      "fingerprint": "fb70b4fbd170ce7111d30aeedbb9490409aa0df579c613eb63d97e8fae913a26",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/custom.rs",
+      "line": 6,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended",
+      "note": "the custom question tests, one file as for every rule; this PR adds a rename test"
+    },
+    {
       "fingerprint": "b2e04f6d34e41c1ca8e363f836ca25f0515e2d01a5f17a06d56fdeab751fca7c",
       "rule": "maintainability/file-organization",
       "path": "src/units/tests/documentation.rs",
@@ -1655,6 +1785,16 @@
       "strength": "review",
       "message": "A constant of this file may fix a value worth a look: one that differs between environments or singles out one record.",
       "reason": "intended"
+    },
+    {
+      "fingerprint": "0d6b6454a9185e789a8d4165909e449868ca000d3ec7c849157abcaa97b756ce",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/mod.rs",
+      "line": 34,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended",
+      "note": "the unit tests' shared helpers; this PR adds accept_all"
     },
     {
       "fingerprint": "76f152756739bb3b1c167f2ef55d71da86cf3e59f62983af21b177e3986b2231",

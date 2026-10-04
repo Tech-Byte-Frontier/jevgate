@@ -4,6 +4,15 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+Fingerprints stay the same across merges, stacked branches and renames, so a dismissed finding is not raised again because main moved underneath it or a check selected other files. An upgraded baseline keeps accepting every finding it accepted, and its next write moves each entry to its new fingerprint with its reason and note: expect one large `jevgate-baseline.json` diff.
+
+- A shared-logic finding is identified by its copies, each function that holds one by path and name, and a copy outside a function by its path and statements: no longer by which file a check selected, which pair represents a group or how far the repeated window reaches. A baseline accepts a repeat while every copy is one an accepted repeat names, so a copy that goes leaves it accepted and a new copy that joins raises it again.
+- A file-organization finding is identified by its file's path, and a baseline accepts it while at least 80% of its member names are the ones accepted; a file that grew a lot is asked about again.
+- A custom `hunk` question asks about each run of changed lines on its own, as a diff without context lines has it, identified by the definition JevGate's parser finds around it and the lines it changes, not Git's hunk header: a change nearby, such as a parent branch's, or a function added above leaves it as it was.
+- With `--base` and in an agent's turn, a finding of a file the change renamed is also accepted under its old path.
+- Baseline entries of shared-logic and file-organization findings record their `members`. An entry written by 0.35 or earlier still accepts its finding through the fingerprint it had then; `jevgate baseline`, `--merge` and `baseline mark` rewrite it to the new one. The JSON report gives such a finding's earlier fingerprint as `fingerprint_v1`, its fingerprints under a renamed file's old path as `aliases`, and its `members`.
+- SARIF results carry `jevgateFingerprint/v2` beside `jevgateFingerprint/v1`, which holds the earlier fingerprint where it changed, so code-scanning alerts stay the same alerts across the upgrade. GitLab Code Quality reports and MCP ids use the new fingerprint.
+
 ## [0.35.0] - 2026-10-03
 
 A repeat found by a `--base` check or an agent's turn points at the change's own copy and names the copies it left untouched, so a change fixes its own copy without rewriting code it never touched. Fingerprints, and what fails the gate, are unchanged.

@@ -181,10 +181,17 @@ pub enum Detail {
         /// split question raises a review or consider.
         locate: Option<FollowUp>,
     },
-    /// A file's outline: a test file's cases, or an application's members.
-    Outline { tests: bool },
+    /// A file's outline: a test file's cases, or an application's members,
+    /// whose names a baseline matches a changed outline by.
+    Outline { tests: bool, members: Vec<String> },
     /// A group of repeated snippets, its first site owned by the file.
-    Pair,
+    Pair {
+        /// Each copy as `path::function`, or `path#hash` outside a
+        /// function, in order: what identifies the finding.
+        members: Vec<String>,
+        /// The identity JevGate 0.35 and earlier gave it.
+        v1: String,
+    },
     /// A function and the literal values it uses.
     Values { values: Vec<String> },
     /// A comment of application code and the unit it documents or sits in.
@@ -272,8 +279,9 @@ pub enum Detail {
         /// first answer says it asserts internal details.
         confirm: Option<FollowUp>,
     },
-    /// A unit a custom question asks about.
-    Custom(&'static crate::custom::Question),
+    /// A unit a custom question asks about, and for a changed hunk the
+    /// identity JevGate 0.35 and earlier gave it.
+    Custom(&'static crate::custom::Question, Option<String>),
     TestPair {
         names: [String; 2],
         subject: String,
@@ -345,7 +353,7 @@ impl UnitPlan {
                 check.iter().chain(settle).collect()
             }
             Detail::Test { confirm } | Detail::TestPair { confirm, .. } => confirm.iter().collect(),
-            Detail::Pair
+            Detail::Pair { .. }
             | Detail::Outline { .. }
             | Detail::Values { .. }
             | Detail::Constants { .. }
@@ -355,7 +363,7 @@ impl UnitPlan {
             | Detail::Access(_)
             | Detail::Job { .. }
             | Detail::Law
-            | Detail::Custom(_) => Vec::new(),
+            | Detail::Custom(..) => Vec::new(),
         };
         self.recheck.iter().chain(planned)
     }
@@ -374,6 +382,9 @@ pub struct FilePlan {
     pub questions: Vec<&'static crate::custom::Question>,
     /// What syntax errors left out of this file's units, as the report names it.
     pub left_out: Vec<crate::schema::LeftOut>,
+    /// The path the file had before a rename the checked change made: its
+    /// findings are also known by their fingerprints under it.
+    pub previous: Option<PathBuf>,
 }
 
 impl UnitPlan {

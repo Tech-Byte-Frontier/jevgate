@@ -136,7 +136,7 @@ fn items_of(kind: Kind, file: &FileContext<'_>) -> Result<Vec<Item>> {
     Ok(match kind {
         Kind::Section => items::sections(file),
         Kind::File => vec![items::whole(file)],
-        Kind::Hunk => items::changed(file, &hunks::example(file.source)),
+        Kind::Hunk => items::changed(file, &hunks::example(file.source), &[]),
         Kind::Function | Kind::Comment | Kind::Test => {
             let parsed = crate::analysis::units::parse(file.path, file.source)?;
             ensure!(

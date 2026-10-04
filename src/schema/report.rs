@@ -169,8 +169,12 @@ pub struct Finding {
     /// The weakness a security finding names, such as "CWE-89 SQL injection".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
-    /// Rule, path, unit and normalized evidence; stable across unrelated edits.
+    /// Rule, path, unit and normalized evidence; stable across unrelated
+    /// edits, merges and changes to which files a check selects.
     pub fingerprint: String,
+    /// The fingerprints a baseline written earlier may hold for it.
+    #[serde(flatten)]
+    pub identity: Identity,
     /// Probability times the log of the lines involved; orders findings.
     pub rank: f64,
     #[serde(default)]
@@ -201,6 +205,38 @@ pub struct Finding {
     pub untouched: Vec<Untouched>,
 }
 
+/// What else a finding is known by: the fingerprints a baseline written
+/// before may hold for it, and the members a baseline matches by.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Identity {
+    /// The fingerprint JevGate 0.35 and earlier gave it, when it differs:
+    /// a shared-logic, file-organization or changed-hunk finding's. A
+    /// baseline entry still holding it accepts the finding until the next
+    /// baseline write rewrites the entry.
+    #[serde(
+        default,
+        rename = "fingerprint_v1",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub v1: Option<String>,
+    /// Its fingerprints under the path its file had before a rename the
+    /// change made, which a baseline written before the rename holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    /// What a baseline entry matches it by when its fingerprint differs: a
+    /// shared-logic finding's copies as `path::function`, or `path#hash`
+    /// outside a function, and a file-organization finding's member names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<String>,
+}
+
+impl Identity {
+    /// Every fingerprint a baseline written earlier may hold for it.
+    pub fn earlier(&self) -> impl Iterator<Item = &String> {
+        self.v1.iter().chain(&self.aliases)
+    }
+}
+
 /// A copy of a shared-logic finding that its change did not touch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Untouched {
@@ -219,6 +255,11 @@ impl Finding {
     /// Whether the gate counted it as a failure.
     pub fn fails_gate(&self) -> bool {
         self.gate == Some(Gating::Fails)
+    }
+
+    /// Its fingerprint, then those it had before (`Identity::earlier`).
+    pub fn fingerprints(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.fingerprint).chain(self.identity.earlier())
     }
 }
 
