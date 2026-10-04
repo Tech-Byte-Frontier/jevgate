@@ -1,6 +1,7 @@
 //! End-to-end tests of the `jevgate` binary, by command; the shared
 //! project helper is here.
 mod auth;
+mod baseline;
 mod changes;
 mod commit;
 mod convention;

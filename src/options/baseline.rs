@@ -1,6 +1,6 @@
 //! The baseline actions: `baseline mark` (which findings to dismiss or
-//! accepted findings to mark, and why) and `baseline stats` (how to print
-//! the counts).
+//! accepted findings to mark, and why), `baseline list` (which marks to
+//! print, and how) and `baseline stats` (how to print the counts).
 use super::RulesFormat;
 use clap::{Subcommand, ValueEnum};
 
@@ -37,6 +37,27 @@ pub enum BaselineAction {
         /// Only findings of this rule ID, name, key or group (repeatable)
         #[arg(long = "rule", value_name = "RULE")]
         rules: Vec<String>,
+        /// A short note to keep with the reason, such as the issue that will fix a `later` finding
+        ///
+        /// One line of at most 200 characters. Without it, a finding marked
+        /// again keeps its note; an empty note removes it.
+        #[arg(long, value_name = "TEXT")]
+        note: Option<String>,
+    },
+    /// List accepted findings with their reason, rule, location, unit, fingerprint and note
+    ///
+    /// Ordered by path, then line. `--format md` prints a checklist to paste
+    /// into a cleanup issue.
+    List {
+        /// Only findings marked with this reason (repeatable)
+        #[arg(long = "reason", value_enum, value_name = "REASON")]
+        reasons: Vec<Disposition>,
+        /// Only findings of this rule ID, name, key or group (repeatable)
+        #[arg(long = "rule", value_name = "RULE")]
+        rules: Vec<String>,
+        /// `text` for people; `md` for a Markdown checklist; `json` for scripts
+        #[arg(long, value_enum, default_value_t = ListFormat::Text)]
+        format: ListFormat,
     },
     /// Count accepted findings by rule and reason, with each rule's rate of wrong findings
     ///
@@ -48,4 +69,15 @@ pub enum BaselineAction {
         #[arg(long, value_enum, default_value_t = RulesFormat::Table)]
         format: RulesFormat,
     },
+}
+
+/// How `baseline list` prints the findings.
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum ListFormat {
+    /// Aligned columns
+    Text,
+    /// A Markdown checklist
+    Md,
+    /// A JSON array
+    Json,
 }

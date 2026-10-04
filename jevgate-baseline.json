@@ -408,6 +408,17 @@
       "reason": "intended"
     },
     {
+      "fingerprint": "477e510655e0f1bf20507decaef90abdb35418fdfa15c436e22ff891924c7360",
+      "rule": "maintainability/shared-logic",
+      "path": "src/baseline.rs",
+      "line": 275,
+      "unit": "`uncovered` (src/baseline.rs:275) and `list` (src/baseline.rs:437)",
+      "strength": "review",
+      "message": "`uncovered` (src/baseline.rs:275) and `list` (src/baseline.rs:437) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong",
+      "note": "a filter over different collections with different tests"
+    },
+    {
       "fingerprint": "5cacb82760c55a2b30cdfaad510b3796cd571ba46bada152961e96613539f9a9",
       "rule": "maintainability/file-organization",
       "path": "src/baseline.rs",
@@ -415,6 +426,16 @@
       "strength": "review",
       "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
       "reason": "wrong"
+    },
+    {
+      "fingerprint": "89c1deedd5fe8507aad0a494fda37caae01d5a80be6d0590ca591092f0592dbe",
+      "rule": "maintainability/file-organization",
+      "path": "src/baseline.rs",
+      "line": 18,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong",
+      "note": "every function reads or writes jevgate-baseline.json; marked wrong on main before"
     },
     {
       "fingerprint": "b5974a3e8b0774e52416c53f1003281dc460cd55853041125750b311c3d71376",
@@ -453,13 +474,24 @@
       "reason": "intended"
     },
     {
+      "fingerprint": "39cf607b259539e80396bc6504520bac88b2559c0f226ab511ca4d217d2c2319",
+      "rule": "maintainability/file-organization",
+      "path": "src/command.rs",
+      "line": 14,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong",
+      "note": "one function per command; marked wrong on main before"
+    },
+    {
       "fingerprint": "98a9bf691db26467975da17123bbcf702cd98b0dfd8b88ff7287734126ad036c",
       "rule": "maintainability/file-organization",
       "path": "src/command.rs",
       "line": 14,
       "strength": "review",
       "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
-      "reason": "wrong"
+      "reason": "wrong",
+      "note": "one function per command; marked wrong on main before"
     },
     {
       "fingerprint": "382884074321b13f806f4b5070f135fe49e274a909ba255b56896ea99cbb3d52",
@@ -813,6 +845,28 @@
       "reason": "intended"
     },
     {
+      "fingerprint": "bcfdb6990731fd8229fca0d548d243382da1f7836974bddb6a03a3c3da289220",
+      "rule": "maintainability/shared-logic",
+      "path": "src/hook/text.rs",
+      "line": 181,
+      "unit": "`findings_after_edit` (src/hook/text.rs:181), `passed` (src/hook/text.rs:409) and 2 more copies",
+      "strength": "review",
+      "message": "`findings_after_edit` (src/hook/text.rs:181), `passed` (src/hook/text.rs:409) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong",
+      "note": "a singular or plural word chosen by a count; the words differ at each site"
+    },
+    {
+      "fingerprint": "df9713caafce9a632f15768a3840f9e336235077320120f16a378c72efaf7812",
+      "rule": "maintainability/shared-logic",
+      "path": "src/hook/text.rs",
+      "line": 98,
+      "unit": "`undecided_line` (src/hook/text.rs:98), `passed` (src/hook/text.rs:395) and 1 more copy",
+      "strength": "review",
+      "message": "`undecided_line` (src/hook/text.rs:98), `passed` (src/hook/text.rs:395) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong",
+      "note": "each formats a different line: an undecided unit, a dismissal, a finding"
+    },
+    {
       "fingerprint": "dc771fd3a45bb112b84587cc4c5fe126e563791c1643b1d8e995055a3d97da7b",
       "rule": "maintainability/file-organization",
       "path": "src/hook/turn.rs",
@@ -1090,6 +1144,16 @@
       "strength": "review",
       "message": "`is_test_attribute` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
       "reason": "wrong"
+    },
+    {
+      "fingerprint": "fe11fb904733a7cf785aa7d81d3d07e239e8ded7b90e768e184f7304744896d4",
+      "rule": "maintainability/file-organization",
+      "path": "src/tests/gating.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "intended",
+      "note": "the gate and the baseline it reads are tested together, as the module doc says"
     },
     {
       "fingerprint": "e9f3f69f4ad38653eeaaa416736359c7e4a35351ca79d10c5086a2dc9597b48a",

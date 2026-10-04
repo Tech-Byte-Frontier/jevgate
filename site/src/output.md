@@ -40,7 +40,7 @@ PORT = 4222
 
 The report keeps the finding with its reason, it never fails the gate, and `jevgate baseline` leaves it out, so deleting the comment brings it back.
 
-`jevgate baseline` can record why each finding was accepted: `intended` (right, and meant to be so), `later` (right, to fix later) or `wrong` (mistaken), with `--reason` or `jevgate baseline mark`. Reasons survive later rewrites of the baseline, and `jevgate baseline stats` reports each rule's share of findings marked wrong: labels from daily use, not the model's own probabilities.
+`jevgate baseline` can record why each finding was accepted: `intended` (right, and meant to be so), `later` (right, to fix later) or `wrong` (mistaken), with `--reason` or `jevgate baseline mark`. `baseline mark --note "#192"` keeps a one-line note with the reason, such as the issue a `later` finding will be fixed in. Reasons and notes survive later rewrites of the baseline. `jevgate baseline list --reason later --format md` prints the marks as a checklist for a cleanup issue (`text` and `json` too), and `jevgate baseline stats` reports each rule's share of findings marked wrong: labels from daily use, not the model's own probabilities.
 
 ## Guards
 

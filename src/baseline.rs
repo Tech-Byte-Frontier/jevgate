@@ -1,5 +1,6 @@
 //! The baseline of accepted findings: writing it from the last check, marking
-//! why findings were accepted, and counting those reasons per rule.
+//! why findings were accepted, with an optional note, listing the marks, and
+//! counting their reasons per rule.
 use crate::{
     options::Disposition,
     schema::{Report, Scope, Strength},
@@ -27,12 +28,37 @@ struct Accepted {
     path: std::path::PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
+    /// The function, type or other unit the finding names, when it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     strength: Option<Strength>,
     message: String,
     /// Why it was accepted, when someone said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reason: Option<Disposition>,
+    /// A short note with the reason, such as the issue a `later` finding
+    /// will be fixed in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+}
+
+/// A note is one line of at most this many characters.
+pub const NOTE_CHARS: usize = 200;
+
+/// The note `baseline mark --note` records: one line, trimmed, of at most
+/// [`NOTE_CHARS`] characters. An empty note clears the one a finding has.
+pub fn note(text: &str) -> Result<Option<String>> {
+    let text = text.trim();
+    ensure!(
+        !text.chars().any(char::is_control),
+        "A note is one line of text, without line breaks or tabs"
+    );
+    ensure!(
+        text.chars().count() <= NOTE_CHARS,
+        "A note is at most {NOTE_CHARS} characters; link an issue for more"
+    );
+    Ok((!text.is_empty()).then(|| text.to_string()))
 }
 
 /// A baseline is read whole up to this size.
@@ -94,12 +120,19 @@ pub fn apply(root: &Path, report: &mut Report, as_of: Option<&str>) -> Result<()
     Ok(())
 }
 
+/// Why a finding was dismissed: its reason, and the note given with it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dismissal {
+    pub reason: Disposition,
+    pub note: Option<String>,
+}
+
 /// The findings the baseline dismisses with a reason that its version in Git
 /// tree `since` did not accept, by fingerprint: what an agent dismissed with
 /// `baseline mark` during a turn that began at `since`. Accepting a finding
 /// is otherwise the person's call, so an entry without a reason counts from
 /// the next turn; a person audits the reasons with `baseline stats`.
-pub fn dismissed_since(root: &Path, since: &str) -> Result<BTreeMap<String, Disposition>> {
+pub fn dismissed_since(root: &Path, since: &str) -> Result<BTreeMap<String, Dismissal>> {
     let held: BTreeSet<String> = baseline_in(root, since)?
         .map_or_else(Vec::new, |b| b.findings)
         .into_iter()
@@ -109,7 +142,16 @@ pub fn dismissed_since(root: &Path, since: &str) -> Result<BTreeMap<String, Disp
         .map_or_else(Vec::new, |b| b.findings)
         .into_iter()
         .filter(|f| !held.contains(&f.fingerprint))
-        .filter_map(|f| Some((f.fingerprint, f.reason?)))
+        .filter_map(|f| {
+            let reason = f.reason?;
+            Some((
+                f.fingerprint,
+                Dismissal {
+                    reason,
+                    note: f.note,
+                },
+            ))
+        })
         .collect())
 }
 
@@ -146,14 +188,14 @@ fn last_check(root: &Path, merge: bool) -> Result<Report> {
 /// are replaced by what the check found. A check of changed lines judged only
 /// what its change touched, so the entries of the files it checked stay too,
 /// and only deleted files' entries go. A finding accepted before keeps its
-/// reason; the others get `reason`.
+/// reason and note; the others get `reason`.
 pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Written> {
     let report = last_check(root, merge)?;
     let mut findings = to_accept(&report, reason);
     let accepted = findings.len();
     let previous = read_baseline(root)?;
     if let Some(previous) = &previous {
-        keep_reasons(&mut findings, previous);
+        keep_marks(&mut findings, previous);
     }
     let earlier = match previous {
         Some(previous) if merge => uncovered(&report, previous),
@@ -161,8 +203,7 @@ pub fn write(root: &Path, merge: bool, reason: Option<Disposition>) -> Result<Wr
     };
     let kept = earlier.len();
     findings.extend(earlier);
-    findings.sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
-    findings.dedup_by(|a, b| a.fingerprint == b.fingerprint);
+    in_file_order(&mut findings);
     let path = save_baseline(
         root,
         &Baseline {
@@ -193,24 +234,29 @@ fn to_accept(report: &Report, reason: Option<Disposition>) -> Vec<Accepted> {
                     rule: f.rule.clone(),
                     path: file.path.clone(),
                     line: Some(f.line),
+                    unit: f.symbol.clone(),
                     strength: Some(f.strength),
                     message: f.message.clone(),
                     reason,
+                    note: None,
                 })
         })
         .collect()
 }
 
-/// Give each finding accepted before the reason it was accepted with.
-fn keep_reasons(findings: &mut [Accepted], previous: &Baseline) {
-    let reasons: BTreeMap<&str, Disposition> = previous
+/// Give each finding accepted before the reason it was accepted with, and
+/// its note.
+fn keep_marks(findings: &mut [Accepted], previous: &Baseline) {
+    let marks: BTreeMap<&str, &Accepted> = previous
         .findings
         .iter()
-        .filter_map(|f| Some((f.fingerprint.as_str(), f.reason?)))
+        .filter(|f| f.reason.is_some() || f.note.is_some())
+        .map(|f| (f.fingerprint.as_str(), f))
         .collect();
     for finding in findings {
-        if let Some(earlier) = reasons.get(finding.fingerprint.as_str()) {
-            finding.reason = Some(*earlier);
+        if let Some(earlier) = marks.get(finding.fingerprint.as_str()) {
+            finding.reason = earlier.reason.or(finding.reason);
+            finding.note.clone_from(&earlier.note);
         }
     }
 }
@@ -241,15 +287,28 @@ fn save_baseline(root: &Path, baseline: &Baseline) -> Result<std::path::PathBuf>
     Ok(path)
 }
 
-/// Record `reason` on the findings a target names whose rule is among
-/// `rules` (every rule when empty); returns how many were marked. A target
-/// is a path or directory, `PATH:LINE`, or a fingerprint prefix of at least
-/// 8 characters. Accepted findings are marked; a finding of the last check
-/// that the baseline does not hold yet is accepted with the reason when a
-/// target names it by `PATH:LINE` or fingerprint: a coding agent dismisses
-/// what its hook reported this way. A path or directory accepts nothing new,
-/// so no finding is dismissed unread.
-pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]) -> Result<usize> {
+/// What `baseline mark` records, and on which findings.
+pub struct Mark<'a> {
+    pub reason: Disposition,
+    /// The note to record, already checked by [`note`]: `None` keeps the
+    /// note a finding has, `Some(None)` clears it.
+    pub note: Option<Option<String>>,
+    /// Paths or directories, `PATH:LINE`s or fingerprint prefixes.
+    pub targets: &'a [String],
+    /// Rule keys; every rule when empty.
+    pub rules: &'a [&'a str],
+}
+
+/// Record a reason, and a note when given, on the findings a target names
+/// whose rule is among the mark's rules; returns how many were marked. A
+/// target is a path or directory, `PATH:LINE`, or a fingerprint prefix of
+/// at least 8 characters. Accepted findings are marked; a finding of the
+/// last check that the baseline does not hold yet is accepted with the
+/// reason when a target names it by `PATH:LINE` or fingerprint: a coding
+/// agent dismisses what its hook reported this way. A path or directory
+/// accepts nothing new, so no finding is dismissed unread.
+pub fn mark(root: &Path, mark: &Mark<'_>) -> Result<usize> {
+    let targets = mark.targets;
     // An empty path would be the start of every path.
     ensure!(
         targets
@@ -262,25 +321,24 @@ pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]
         created_at: crate::schema::now(),
         findings: Vec::new(),
     });
-    let selected = |rule: &str| {
-        let key = match crate::catalog::find(rule) {
-            Some(found) => Some(found.key),
-            None => crate::catalog::custom(rule).then_some(rule),
-        };
-        rules.is_empty() || key.is_some_and(|key| rules.contains(&key))
-    };
     let named = |finding: &Accepted, paths: bool| {
-        selected(&finding.rule) && targets.iter().any(|t| names(t, finding, paths))
+        selected(&finding.rule, mark.rules) && targets.iter().any(|t| names(t, finding, paths))
     };
     let mut marked = 0;
     for finding in &mut baseline.findings {
         if named(finding, true) {
-            finding.reason = Some(reason);
+            finding.reason = Some(mark.reason);
+            if let Some(note) = &mark.note {
+                finding.note.clone_from(note);
+            }
             marked += 1;
         }
     }
     if let Ok(report) = crate::storage::read_latest(root) {
-        marked += add_dismissed(&mut baseline, &report, reason, |f| named(f, false));
+        let note = mark.note.clone().flatten();
+        marked += add_dismissed(&mut baseline, &report, (mark.reason, note), |f| {
+            named(f, false)
+        });
     }
     ensure!(
         marked > 0,
@@ -291,12 +349,23 @@ pub fn mark(root: &Path, reason: Disposition, targets: &[String], rules: &[&str]
     Ok(marked)
 }
 
+/// Whether a finding of `rule` is among `rules`, rule keys: every rule when
+/// there are none.
+fn selected(rule: &str, rules: &[&str]) -> bool {
+    let key = match crate::catalog::find(rule) {
+        Some(found) => Some(found.key),
+        None => crate::catalog::custom(rule).then_some(rule),
+    };
+    rules.is_empty() || key.is_some_and(|key| rules.contains(&key))
+}
+
 /// Adds the findings of `report` that `named` picks and `baseline` does not
-/// hold yet, dismissed for `reason`, and says how many it added.
+/// hold yet, dismissed for the reason with the note, and says how many it
+/// added.
 fn add_dismissed(
     baseline: &mut Baseline,
     report: &Report,
-    reason: Disposition,
+    (reason, note): (Disposition, Option<String>),
     named: impl Fn(&Accepted) -> bool,
 ) -> usize {
     let held: BTreeSet<String> = baseline
@@ -307,15 +376,24 @@ fn add_dismissed(
     let mut dismissed: Vec<Accepted> = to_accept(report, Some(reason))
         .into_iter()
         .filter(|f| !held.contains(&f.fingerprint) && named(f))
+        .map(|f| Accepted {
+            note: note.clone(),
+            ..f
+        })
         .collect();
-    dismissed.sort_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
-    dismissed.dedup_by(|a, b| a.fingerprint == b.fingerprint);
+    in_file_order(&mut dismissed);
     let added = dismissed.len();
     baseline.findings.extend(dismissed);
-    baseline
-        .findings
-        .sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
+    in_file_order(&mut baseline.findings);
     added
+}
+
+/// The order the baseline file keeps its entries in, by path, then
+/// fingerprint, each finding once.
+fn in_file_order(findings: &mut Vec<Accepted>) {
+    findings.sort_by(|a, b| (&a.path, &a.fingerprint).cmp(&(&b.path, &b.fingerprint)));
+    // A fingerprint covers the path, so a finding's copies are adjacent.
+    findings.dedup_by(|a, b| a.fingerprint == b.fingerprint);
 }
 
 /// Whether a `mark` target names a finding: by fingerprint prefix or
@@ -332,6 +410,127 @@ fn names(target: &str, finding: &Accepted, paths: bool) -> bool {
     }
     let target = target.trim_end_matches('/');
     paths && !target.is_empty() && finding.path.starts_with(target)
+}
+
+/// An accepted finding as `baseline list` prints it.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct Listed {
+    pub path: std::path::PathBuf,
+    pub line: Option<usize>,
+    pub reason: Option<Disposition>,
+    pub rule: String,
+    pub unit: Option<String>,
+    pub fingerprint: String,
+    pub note: Option<String>,
+    pub message: String,
+}
+
+/// The fingerprint prefix the listing prints: as many characters as
+/// `baseline mark` needs to name a finding.
+const LISTED_PREFIX: usize = 8;
+
+/// The accepted findings with one of `reasons` (any, or none, when empty)
+/// whose rule is among `rules` (every rule when empty), by path, then line.
+pub fn list(root: &Path, reasons: &[Disposition], rules: &[&str]) -> Result<Vec<Listed>> {
+    let baseline = read_baseline(root)?
+        .with_context(|| format!("No {BASELINE_FILE}; run jevgate baseline first"))?;
+    let mut listed: Vec<Listed> = baseline
+        .findings
+        .into_iter()
+        .filter(|f| reasons.is_empty() || f.reason.is_some_and(|r| reasons.contains(&r)))
+        .filter(|f| selected(&f.rule, rules))
+        .map(|f| Listed {
+            path: f.path,
+            line: f.line,
+            reason: f.reason,
+            rule: f.rule,
+            unit: f.unit,
+            fingerprint: f.fingerprint,
+            note: f.note,
+            message: f.message,
+        })
+        .collect();
+    listed
+        .sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
+    Ok(listed)
+}
+
+impl Listed {
+    fn location(&self) -> String {
+        match self.line {
+            Some(line) => format!("{}:{line}", self.path.display()),
+            None => self.path.display().to_string(),
+        }
+    }
+
+    fn reason(&self) -> String {
+        self.reason
+            .map_or_else(|| "no reason".into(), |r| crate::output::label(&r))
+    }
+
+    fn id(&self) -> &str {
+        self.fingerprint
+            .get(..LISTED_PREFIX)
+            .unwrap_or(&self.fingerprint)
+    }
+}
+
+/// The listing for people: location, reason, rule and fingerprint prefix
+/// in aligned columns, then the unit and the note.
+pub fn list_text(listed: &[Listed]) -> String {
+    let rows: Vec<[String; 4]> = listed
+        .iter()
+        .map(|l| [l.location(), l.reason(), l.rule.clone(), l.id().to_string()])
+        .collect();
+    let widths: Vec<usize> = (0..4)
+        .map(|column| {
+            rows.iter()
+                .map(|row| row[column].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    rows.iter()
+        .zip(listed)
+        .map(|(row, l)| {
+            let mut cells: Vec<String> = row
+                .iter()
+                .zip(&widths)
+                .map(|(cell, &width)| format!("{cell:<width$}"))
+                .collect();
+            cells.extend(l.unit.clone());
+            cells.extend(l.note.as_ref().map(|note| format!("note: {note}")));
+            cells.join("  ").trim_end().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The listing as a Markdown checklist to paste into a cleanup issue.
+pub fn list_markdown(listed: &[Listed]) -> String {
+    // A unit named with its own code spans stays as it is.
+    let code = |text: &str| {
+        if text.contains('`') {
+            text.to_string()
+        } else {
+            format!("`{text}`")
+        }
+    };
+    listed
+        .iter()
+        .map(|l| {
+            let mut line = format!("- [ ] {} {}", code(&l.location()), l.rule);
+            if let Some(unit) = &l.unit {
+                line.push_str(&format!(" {}", code(unit)));
+            }
+            line.push_str(&format!(" ({}, {})", l.reason(), code(l.id())));
+            if let Some(note) = &l.note {
+                line.push_str(&format!(": {note}"));
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Accepted findings of one rule by reason.

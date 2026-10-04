@@ -127,6 +127,24 @@ fn a_scope_makes_its_paths_report_only_while_other_files_gate() {
     );
 }
 
+/// `baseline mark REASON TARGET` without a note, for findings of `rules`.
+fn mark(
+    project: &Project,
+    reason: options::Disposition,
+    target: String,
+    rules: &[&str],
+) -> anyhow::Result<usize> {
+    baseline::mark(
+        &project.0,
+        &baseline::Mark {
+            reason,
+            note: None,
+            targets: &[target],
+            rules,
+        },
+    )
+}
+
 /// Save a report as the last check, as `jevgate check` does.
 fn publish(project: &Project, report: &schema::Report) {
     storage::Store::open(&project.0)
@@ -240,25 +258,16 @@ fn baseline_reasons_are_marked_counted_and_kept_across_rewrites() {
         (counts[rule].later, counts[rule].wrong_rate),
         (2, Some(0.0))
     );
-    assert_eq!(
-        baseline::mark(&project.0, Wrong, &["b.rs:1".into()], &[]).unwrap(),
-        1
-    );
-    assert!(baseline::mark(&project.0, Wrong, &["c.rs".into()], &[]).is_err());
+    assert_eq!(mark(&project, Wrong, "b.rs:1".into(), &[]).unwrap(), 1);
+    assert!(mark(&project, Wrong, "c.rs".into(), &[]).is_err());
     for empty in ["", " ", "/"] {
         assert!(
-            baseline::mark(&project.0, Wrong, &[empty.into()], &[]).is_err(),
+            mark(&project, Wrong, empty.into(), &[]).is_err(),
             "{empty:?} names no finding"
         );
     }
     assert!(
-        baseline::mark(
-            &project.0,
-            Wrong,
-            &["a.rs".into()],
-            &[crate::catalog::INJECTION]
-        )
-        .is_err(),
+        mark(&project, Wrong, "a.rs".into(), &[crate::catalog::INJECTION]).is_err(),
         "the rule filter excludes it"
     );
     let counts = baseline::stats(&project.0).unwrap();
@@ -268,6 +277,65 @@ fn baseline_reasons_are_marked_counted_and_kept_across_rewrites() {
     baseline::write(&project.0, false, None).unwrap();
     assert_eq!(baseline::stats(&project.0).unwrap()[rule].wrong, 1);
     assert!(baseline::stats_table(&counts).contains("50%"));
+}
+
+#[test]
+fn a_mark_note_survives_rewrites_merges_and_marking_again() {
+    use options::Disposition::{Later, Wrong};
+    let project = two_files();
+    let mut options = args();
+    let mut review = Mock {
+        level: 2,
+        ..Default::default()
+    };
+    publish(&project, &run(&project, &options, &mut review));
+    let noted = |note: Option<Option<String>>, reason| {
+        baseline::mark(
+            &project.0,
+            &baseline::Mark {
+                reason,
+                note,
+                targets: &["b.rs:1".into()],
+                rules: &[],
+            },
+        )
+        .unwrap()
+    };
+    let note_of_b = || {
+        let listed = baseline::list(&project.0, &[], &[]).unwrap();
+        let b = listed.iter().find(|l| l.path.ends_with("b.rs")).unwrap();
+        (b.reason, b.note.clone())
+    };
+    // Dismissed from the last check with a note, before any baseline.
+    assert_eq!(noted(Some(Some("#192".into())), Later), 1);
+    assert_eq!(note_of_b(), (Some(Later), Some("#192".into())));
+    // Rewriting the baseline from the whole check keeps it.
+    baseline::write(&project.0, false, None).unwrap();
+    assert_eq!(note_of_b(), (Some(Later), Some("#192".into())));
+    // So does a merge after a check of `a.rs` alone, and one of `b.rs`.
+    for checked in ["a.rs", "b.rs"] {
+        options.paths = vec![checked.into()];
+        publish(&project, &run(&project, &options, &mut review));
+        baseline::write(&project.0, true, None).unwrap();
+        assert_eq!(note_of_b(), (Some(Later), Some("#192".into())), "{checked}");
+    }
+    // Marked again without a note, it keeps the note; an empty one clears it.
+    assert_eq!(noted(None, Wrong), 1);
+    assert_eq!(note_of_b(), (Some(Wrong), Some("#192".into())));
+    assert_eq!(noted(Some(baseline::note(" ").unwrap()), Wrong), 1);
+    assert_eq!(note_of_b(), (Some(Wrong), None));
+}
+
+#[test]
+fn a_mark_note_is_one_short_line() {
+    assert_eq!(
+        baseline::note("  see #192 ").unwrap(),
+        Some("see #192".into())
+    );
+    assert_eq!(baseline::note("").unwrap(), None);
+    assert!(baseline::note("two\nlines").is_err());
+    assert!(baseline::note(&"x".repeat(baseline::NOTE_CHARS)).is_ok());
+    assert!(baseline::note(&"x".repeat(baseline::NOTE_CHARS + 1)).is_err());
 }
 
 #[test]
@@ -283,13 +351,10 @@ fn a_finding_of_the_last_check_is_dismissed_by_its_line_or_fingerprint() {
     publish(&project, &report);
     assert!(!project.0.join(baseline::BASELINE_FILE).exists());
     assert!(
-        baseline::mark(&project.0, Wrong, &["b.rs".into()], &[]).is_err(),
+        mark(&project, Wrong, "b.rs".into(), &[]).is_err(),
         "a path dismisses no finding nobody read"
     );
-    assert_eq!(
-        baseline::mark(&project.0, Wrong, &["b.rs:1".into()], &[]).unwrap(),
-        1
-    );
+    assert_eq!(mark(&project, Wrong, "b.rs:1".into(), &[]).unwrap(), 1);
     let rule = "maintainability/function-simplification";
     assert_eq!(baseline::stats(&project.0).unwrap()[rule].wrong, 1);
     let fingerprint = report
@@ -301,7 +366,7 @@ fn a_finding_of_the_last_check_is_dismissed_by_its_line_or_fingerprint() {
         .fingerprint
         .clone();
     assert_eq!(
-        baseline::mark(&project.0, Wrong, &[fingerprint[..8].to_string()], &[]).unwrap(),
+        mark(&project, Wrong, fingerprint[..8].to_string(), &[]).unwrap(),
         1
     );
     let again = run(&project, &options, &mut review);

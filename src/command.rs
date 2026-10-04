@@ -153,6 +153,18 @@ fn rules(context: &ConfigContext, format: options::RulesFormat) -> Result<u8> {
     Ok(0)
 }
 
+/// The rule keys `--rule` names select: each a rule ID, name, key or group.
+fn rule_keys(context: &ConfigContext, names: &[String]) -> Result<Vec<&'static str>> {
+    let known = context.rules();
+    let mut keys = Vec::new();
+    for name in names {
+        keys.extend(catalog::select_in(&known, name).ok_or_else(|| {
+            anyhow::anyhow!("Unknown rule or group: {name}; `jevgate rules` lists the rules")
+        })?);
+    }
+    Ok(keys)
+}
+
 /// `baseline`: accept the last check's findings.
 fn accept(
     context: &ConfigContext,
@@ -176,29 +188,46 @@ fn accept(
     Ok(0)
 }
 
-/// `baseline mark` and `baseline stats`: offline edits and counts of the baseline.
+/// `baseline mark`, `baseline list` and `baseline stats`: offline edits,
+/// listings and counts of the baseline.
 fn baseline_action(context: &ConfigContext, action: options::BaselineAction) -> Result<u8> {
     match action {
         options::BaselineAction::Mark {
             reason,
             targets,
             rules,
+            note,
         } => {
-            let known = context.rules();
-            let mut keys = Vec::new();
-            for name in &rules {
-                keys.extend(catalog::select_in(&known, name).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Unknown rule or group: {name}; `jevgate rules` lists the rules"
-                    )
-                })?);
-            }
-            let marked = baseline::mark(&context.root, reason, &targets, &keys)?;
+            let note = note.as_deref().map(baseline::note).transpose()?;
+            let keys = rule_keys(context, &rules)?;
+            let marked = baseline::mark(
+                &context.root,
+                &baseline::Mark {
+                    reason,
+                    note,
+                    targets: &targets,
+                    rules: &keys,
+                },
+            )?;
             say!(
                 "Marked {} as {}",
                 output::count(marked, "finding"),
                 output::label(&reason)
             );
+        }
+        options::BaselineAction::List {
+            reasons,
+            rules,
+            format,
+        } => {
+            let keys = rule_keys(context, &rules)?;
+            let listed = baseline::list(&context.root, &reasons, &keys)?;
+            match format {
+                options::ListFormat::Json => say!("{}", serde_json::to_string_pretty(&listed)?),
+                _ if listed.is_empty() => say!("No accepted findings match."),
+                options::ListFormat::Text => say!("{}", baseline::list_text(&listed)),
+                options::ListFormat::Md => say!("{}", baseline::list_markdown(&listed)),
+            }
         }
         options::BaselineAction::Stats { format } => {
             let counts = baseline::stats(&context.root)?;
