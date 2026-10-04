@@ -4,6 +4,10 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-03
+
+A repeat found by a `--base` check or an agent's turn points at the change's own copy and names the copies it left untouched, so a change fixes its own copy without rewriting code it never touched. Fingerprints, and what fails the gate, are unchanged.
+
 - A shared-logic finding of a `--base` check or an agent's turn whose change left some copies untouched points at the change's own copy and names each untouched copy, saying whether its file is one the change edits. Its next step is to fix the change's copy, or mark the finding `later --note "#issue"` when sharing the logic would rewrite the untouched copies; the JSON report lists them under `untouched`. The agent hook holds a turn only for the change's copy. Fingerprints, and what fails the gate, are unchanged.
 
 ## [0.34.0] - 2026-10-03
@@ -501,7 +505,8 @@ These changes come from running 0.11.0 on six open-source repositories it had ne
 
 - First release: the maintainability CLI.
 
-[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/Tech-Byte-Frontier/jevgate/compare/v0.31.0...v0.32.0
