@@ -17,7 +17,7 @@ Every finding is a `review`: a place worth a look, flagged broadly so that you v
 
 1. Read the code at `path:line` before changing anything. The why says what the finding rests on, and the sentence after it how often findings of its rule were right on projects JevGate was never tuned on ("Not yet measured." for broad look-here findings and when fewer than 20 were labeled); `Next` is a suggested step, not the only fix.
 2. **Right**: fix it. A finding marked "(fails the gate)" also fails the person's CI.
-3. **Mistaken, intended or for later**: dismiss it with a reason, `jevgate baseline mark wrong PATH:LINE` (or `intended`, or `later`). The dismissal counts at once, holds while the code it names is unchanged, and the person audits dismissals with `jevgate baseline stats`. JevGate does not block again when nothing changed.
+3. **Mistaken, intended or for later**: dismiss it with a reason, `jevgate baseline mark wrong PATH:LINE` (or `intended`, or `later` with the issue that will fix it: `--note "#123"`). The dismissal counts at once, holds while the code it names is unchanged, and the person audits dismissals with `jevgate baseline stats`; `jevgate baseline list --reason later --format md` exports the `later` ones as a checklist. JevGate does not block again when nothing changed.
 
 ## Never, unless the person asks
 

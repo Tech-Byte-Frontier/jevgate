@@ -204,6 +204,8 @@ Examples:
   jevgate baseline --merge --reason later           Accept a partial check's findings as known debt
   jevgate baseline mark wrong src/api/search.ts:41  A mistaken finding
   jevgate baseline mark intended scripts --rule maintainability/hardcoded-values
+  jevgate baseline mark later --note \"#192\" src/api/search.ts:41
+  jevgate baseline list --reason later --format md  A checklist for a cleanup issue
   jevgate baseline stats                            Wrong findings per rule";
 
 /// Overview, workflow, exit codes and files, shown by `jevgate --help`.

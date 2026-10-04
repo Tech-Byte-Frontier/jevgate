@@ -134,6 +134,8 @@ pub(super) struct Dismissed {
     pub line: usize,
     pub rule: String,
     pub reason: Disposition,
+    /// The note given with the reason, such as the issue that will fix it.
+    pub note: Option<String>,
 }
 
 /// A changed file of code the check did not judge, and why: it reads as
@@ -376,18 +378,20 @@ fn run(
 /// The findings of `report` the agent dismissed with a reason since the
 /// turn began at `start`, which the report's gate already accepts.
 fn dismissed(root: &Path, report: &Report, start: &str) -> Vec<Dismissed> {
-    let reasons = crate::baseline::dismissed_since(root, start).unwrap_or_default();
+    let dismissals = crate::baseline::dismissed_since(root, start).unwrap_or_default();
     report
         .files
         .iter()
         .flat_map(|file| file.findings.iter().map(move |f| (file, f)))
         .filter(|(_, f)| f.baselined)
         .filter_map(|(file, f)| {
+            let dismissal = dismissals.get(&f.fingerprint)?;
             Some(Dismissed {
                 path: file.path.clone(),
                 line: f.line,
                 rule: f.rule.clone(),
-                reason: *reasons.get(&f.fingerprint)?,
+                reason: dismissal.reason,
+                note: dismissal.note.clone(),
             })
         })
         .collect()

@@ -5,7 +5,7 @@ mod baseline;
 mod commands;
 mod rules;
 
-pub use baseline::{BaselineAction, Disposition};
+pub use baseline::{BaselineAction, Disposition, ListFormat};
 pub use commands::{JevCommand, OVERVIEW, RulesFormat};
 pub use rules::{ProposeArgs, ProposeFormat, RulesAction, RulesTestArgs};
 

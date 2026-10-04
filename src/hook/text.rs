@@ -160,21 +160,13 @@ pub(super) fn unreviewed_user(files: &[Unreviewed]) -> Option<String> {
     if files.is_empty() {
         return None;
     }
-    let mut named: Vec<String> = files
-        .iter()
-        .take(NAMED_GUARDS)
-        .map(|file| {
-            let why = file.why.split(['.', ';', ',']).next().unwrap_or_default();
-            format!("{} ({})", file.path.display(), why.trim())
-        })
-        .collect();
-    if files.len() > NAMED_GUARDS {
-        named.push(format!("{} more", files.len() - NAMED_GUARDS));
-    }
+    let named = first_named(files, NAMED_GUARDS, |file| {
+        let why = file.why.split(['.', ';', ',']).next().unwrap_or_default();
+        format!("{} ({})", file.path.display(), why.trim())
+    });
     Some(format!(
-        "JevGate did not review {} this turn changed: {}.",
+        "JevGate did not review {} this turn changed: {named}.",
         output::count(files.len(), "file"),
-        named.join("; ")
     ))
 }
 
@@ -302,19 +294,8 @@ pub(super) fn guards_user(guards: &[Guard]) -> Option<String> {
     if guards.is_empty() {
         return None;
     }
-    let mut named: Vec<String> = guards
-        .iter()
-        .take(NAMED_GUARDS)
-        .map(|g| clip(&g.describe(), GUARD_CHARS))
-        .collect();
-    if guards.len() > NAMED_GUARDS {
-        named.push(format!("{} more", guards.len() - NAMED_GUARDS));
-    }
-    let mut text = format!(
-        "JevGate: this turn {} ({}).",
-        guards::summary(guards),
-        named.join("; ")
-    );
+    let named = first_named(guards, NAMED_GUARDS, |g| clip(&g.describe(), GUARD_CHARS));
+    let mut text = format!("JevGate: this turn {} ({named}).", guards::summary(guards));
     let edited = |g: &Guard| {
         matches!(
             g.kind,
@@ -408,26 +389,19 @@ pub(super) fn passed(
         });
     }
     if !dismissed.is_empty() {
-        let mut named: Vec<String> = dismissed
-            .iter()
-            .take(NAMED_DISMISSED)
-            .map(|d| {
-                format!(
-                    "{}:{} {} as {}",
-                    d.path.display(),
-                    d.line,
-                    d.rule,
-                    output::label(&d.reason)
-                )
-            })
-            .collect();
-        if dismissed.len() > NAMED_DISMISSED {
-            named.push(format!("{} more", dismissed.len() - NAMED_DISMISSED));
-        }
+        let named = first_named(dismissed, NAMED_DISMISSED, |d| {
+            let note = d.note.as_ref().map_or(String::new(), |n| format!(" ({n})"));
+            format!(
+                "{}:{} {} as {}{note}",
+                d.path.display(),
+                d.line,
+                d.rule,
+                output::label(&d.reason)
+            )
+        });
         notes.push(format!(
-            "JevGate: the agent dismissed {} in this turn's changes ({}); `jevgate baseline stats` counts dismissals by rule and reason.",
+            "JevGate: the agent dismissed {} in this turn's changes ({named}); `jevgate baseline list` lists them and `jevgate baseline stats` counts them by rule and reason.",
             output::count(dismissed.len(), "finding"),
-            named.join("; ")
         ));
     }
     if !optional.is_empty() {
@@ -512,6 +486,16 @@ pub(super) fn named(files: &[PathBuf]) -> String {
         [first, second] => format!("{} and {}", first.display(), second.display()),
         _ => output::count(files.len(), "file"),
     }
+}
+
+/// The first `most` of `items` as `name` writes them, and how many more
+/// there are, separated by semicolons.
+fn first_named<T>(items: &[T], most: usize, name: impl Fn(&T) -> String) -> String {
+    let mut named: Vec<String> = items.iter().take(most).map(name).collect();
+    if items.len() > most {
+        named.push(format!("{} more", items.len() - most));
+    }
+    named.join("; ")
 }
 
 /// "none fails", "1 fails", "2 fail".

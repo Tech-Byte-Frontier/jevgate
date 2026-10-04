@@ -4,6 +4,10 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- `jevgate baseline mark REASON --note TEXT TARGET…` keeps a short note with the reason, such as the issue that will fix a `later` finding. Notes survive rewrites, `--merge` and marking again without one; the hook names them in the person's list of dismissals. Baseline entries also record the unit a finding names. Baselines without notes or units load unchanged.
+- `jevgate baseline list [--reason …] [--rule …] [--format text|md|json]` lists accepted findings by path and line with their reason, rule, unit, fingerprint prefix and note; `--format md` prints a checklist to paste into a cleanup issue.
+- The instructions `jevgate init --agent` writes and the plugin's skill tell agents to give a `later` mark the issue that will fix it with `--note`, and to export `later` marks with `baseline list --reason later --format md`. Run `jevgate init --agent` again to update them.
+
 ## [0.33.0] - 2026-10-02
 
 Findings have one level, `review`, and the maintainability rules ask broad look-here questions whose flags the person or coding agent reading them verifies: fix the code, or dismiss the finding with a reason, and a dismissed finding is not raised again while its code is unchanged. On a 32-file sample of a game backend and its web client, the look-here questions flagged the three functions and six of the nine repeats a reviewer wanted changed, where 0.32's questions flagged none of them.

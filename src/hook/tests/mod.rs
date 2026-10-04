@@ -406,18 +406,22 @@ fn a_new_review_blocks_until_it_is_fixed_or_dismissed_with_a_reason() {
         checked.files[0].findings[0].gate,
         Some(crate::schema::Gating::Measuring)
     );
-    // Dismissed with a reason, it counts at once and never blocks again.
+    // Dismissed with a reason, it counts at once and never blocks again;
+    // the person reads the note given with it.
     let dismissed = crate::baseline::mark(
         &project.0,
-        crate::options::Disposition::Intended,
-        &["lib.rs:1".into()],
-        &[],
+        &crate::baseline::Mark {
+            reason: crate::options::Disposition::Intended,
+            note: Some(Some("the rates are the published tariff".into())),
+            targets: &["lib.rs:1".into()],
+            rules: &[],
+        },
     );
     assert_eq!(dismissed.unwrap(), 1);
     let stopped = send(&project, &host, stop(true));
     assert!(stopped.get("decision").is_none(), "{stopped}");
     assert!(
-        message(&stopped).starts_with("JevGate: the findings that blocked this turn are fixed or dismissed. JevGate: the agent dismissed 1 finding in this turn's changes (lib.rs:1 maintainability/hardcoded-values as intended); `jevgate baseline stats` counts dismissals by rule and reason."),
+        message(&stopped).starts_with("JevGate: the findings that blocked this turn are fixed or dismissed. JevGate: the agent dismissed 1 finding in this turn's changes (lib.rs:1 maintainability/hardcoded-values as intended (the rates are the published tariff)); `jevgate baseline list` lists them and `jevgate baseline stats` counts them by rule and reason."),
         "{stopped}"
     );
     assert!(
