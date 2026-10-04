@@ -12,7 +12,7 @@ finding and fix it when it is right; when it is mistaken, intended or left for
 later, dismiss it with `jevgate baseline mark wrong|intended|later PATH:LINE`.
 ```
 
-`--base` limits the review to what changed since that revision, uncommitted and untracked changes included: the functions, tests and comments on changed lines, and copies where either copy changed. A check asks about and reports only what the change touches, and cached answers make reruns free. The exit code says what to do next:
+`--base` limits the review to what changed since that revision, uncommitted and untracked changes included: the functions, tests and comments on changed lines, and copies where either copy changed. A repeat points at the change's own copy and names the [copies it left untouched](rules/maintainability/shared-logic.md#copies-a-change-left-untouched), which never hold a turn: fix the change's copy, or mark the finding `later --note "#issue"`. A check asks about and reports only what the change touches, and cached answers make reruns free. The exit code says what to do next:
 
 | Exit code | Meaning for the agent |
 |---|---|

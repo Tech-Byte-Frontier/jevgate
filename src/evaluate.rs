@@ -343,7 +343,7 @@ impl Session<'_> {
             }
         }
         crate::progress::phase("composing findings");
-        compose_files(&plan, report);
+        compose_files(&plan, (inputs, self.args), report);
         self.guard(&plan, report);
         self.calibrate()?;
         self.progress(report)
@@ -696,8 +696,13 @@ fn add_metrics(stage: &mut crate::schema::StageMetrics, m: &crate::schema::Stage
 }
 
 /// Compose each planned file's recorded judgments into dimensions and
-/// findings, with the requests its units were first asked in.
-fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
+/// findings, with the requests its units were first asked in. With a
+/// change, a repeat whose copies it did not all touch points at its own.
+fn compose_files(
+    plan: &crate::units::Plan,
+    (inputs, args): (&[Input], &CheckArgs),
+    report: &mut Report,
+) {
     let mut first = BTreeMap::<usize, Vec<&crate::units::Planned>>::new();
     for planned in &plan.requests {
         first.entry(planned.owner).or_default().push(planned);
@@ -716,6 +721,10 @@ fn compose_files(plan: &crate::units::Plan, report: &mut Report) {
     }
     crate::units::grouping::group_repeats(&mut report.files);
     crate::units::compose::one_level(&mut report.files);
+    if args.changed_lines() {
+        let changed = crate::units::untouched::Changed::of(inputs);
+        crate::units::untouched::anchor(&changed, &mut report.files);
+    }
 }
 
 fn apply_classification(file: &mut FileResult, class: crate::file_kind::Classification) {

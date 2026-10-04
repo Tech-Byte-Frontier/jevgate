@@ -710,13 +710,25 @@
       "reason": "later"
     },
     {
+      "fingerprint": "7be216d324b25af08a32ae15ef77369d0bff302b27ea61aa8b48ddb0d7923986",
+      "rule": "maintainability/function-simplification",
+      "path": "src/evaluate.rs",
+      "line": 297,
+      "unit": "Session::evaluate",
+      "strength": "review",
+      "message": "`Session::evaluate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR only changes the compose_files call"
+    },
+    {
       "fingerprint": "eb77e4f652658c21a450d81c491bebefa62143f89a1776ec4871d369f950a70a",
       "rule": "maintainability/function-simplification",
       "path": "src/evaluate.rs",
       "line": 297,
       "strength": "review",
       "message": "`Session::evaluate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
-      "reason": "intended"
+      "reason": "intended",
+      "note": "as on main; this PR only changes the compose_files call"
     },
     {
       "fingerprint": "f9f7ae0fc216c908682f9d8e1924d78e1bd15579a8ab2063b4f1c6c703c89493",
@@ -816,6 +828,17 @@
       "strength": "review",
       "message": "This test file may test several separate subjects.",
       "reason": "later"
+    },
+    {
+      "fingerprint": "dae22b41c22054543983b0b7b16491335b908b0f6771909f4fa2f2598469ad57",
+      "rule": "maintainability/shared-logic",
+      "path": "src/hook/tests/mod.rs",
+      "line": 371,
+      "unit": "`a_copy_the_turn_left_untouched_never_holds_it_but_its_own_copy_does` (src/hook/tests/mod.rs:371) and `loader` (tests/cli/changes.rs:212)",
+      "strength": "review",
+      "message": "`a_copy_the_turn_left_untouched_never_holds_it_but_its_own_copy_does` (src/hook/tests/mod.rs:371) and `loader` (tests/cli/changes.rs:212) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended",
+      "note": "the binary's unit tests and the CLI test crate cannot share a fixture"
     },
     {
       "fingerprint": "deb9de5dfe24d73e82b3e26115ff16eaf9c982aa964adf7ffd0edda5aec4000d",
@@ -1198,7 +1221,19 @@
       "line": 44,
       "strength": "review",
       "message": "`comment_findings` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
-      "reason": "intended"
+      "reason": "intended",
+      "note": "as on main; this PR only adds the new empty untouched field"
+    },
+    {
+      "fingerprint": "0c5401505451733a846b4ef8cb1d253875e5638b656350ce74fdf1e843570218",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/comments.rs",
+      "line": 44,
+      "unit": "comment_findings",
+      "strength": "review",
+      "message": "`comment_findings` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR only adds the new empty untouched field"
     },
     {
       "fingerprint": "0426cf29bc82927d5ba0d17e12226e080d2c849266ad2a8909303cd6fc633099",
@@ -1228,6 +1263,17 @@
       "reason": "intended"
     },
     {
+      "fingerprint": "c6aa055e22c707ebef59cf4a80880610aa6ca65847bfc395313b52f878a8e1c1",
+      "rule": "maintainability/function-simplification",
+      "path": "src/units/compose/mod.rs",
+      "line": 672,
+      "unit": "finding",
+      "strength": "review",
+      "message": "`finding` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended",
+      "note": "as on main; this PR only adds the new empty untouched field"
+    },
+    {
       "fingerprint": "7b9c45a11bf97f35d12cf672422f6bb47560176fa5a5a91cd0618f98fed57922",
       "rule": "maintainability/shared-logic",
       "path": "src/units/custom/items.rs",
@@ -1253,6 +1299,17 @@
       "strength": "review",
       "message": "`locates` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
       "reason": "intended"
+    },
+    {
+      "fingerprint": "32deda72f86d2190a95c4e251f268c89eacb26f4ee32ab2e0cf7910d52af0487",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/grouping.rs",
+      "line": 30,
+      "unit": "`group_repeats` (src/units/grouping.rs:30) and `move_findings` (src/units/untouched.rs:119)",
+      "strength": "review",
+      "message": "`group_repeats` (src/units/grouping.rs:30) and `move_findings` (src/units/untouched.rs:119) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong",
+      "note": "a two-line loop calling the shared reorder helper"
     },
     {
       "fingerprint": "368fb85e44e3230070b584f9350b9ab7288309c69c105e3b3e37d6064c3b5235",
@@ -1388,6 +1445,17 @@
       "strength": "review",
       "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
       "reason": "later"
+    },
+    {
+      "fingerprint": "0fda0298cc8e2a6e108ca53c0f79d940f40c64d562ee309b132146e9b05fcb6e",
+      "rule": "maintainability/shared-logic",
+      "path": "src/units/plan/mod.rs",
+      "line": 196,
+      "unit": "`keep_changed` (src/units/plan/mod.rs:196) and `Changed::touches` (src/units/untouched.rs:35)",
+      "strength": "review",
+      "message": "`keep_changed` (src/units/plan/mod.rs:196) and `Changed::touches` (src/units/untouched.rs:35) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "wrong",
+      "note": "one lines.touch call on different spans: left-out code and a copy's location"
     },
     {
       "fingerprint": "c5a9f017983841bd20189be39ba271545b3a7735726e4c7c6f31eb1f06be5621",
@@ -1552,6 +1620,16 @@
       "reason": "wrong"
     },
     {
+      "fingerprint": "9d9627483b789c6a5777deb22e3d782551b8f364c26d9c14de4d3449ca88a3a5",
+      "rule": "maintainability/file-organization",
+      "path": "src/units/tests/changed.rs",
+      "line": 7,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "wrong",
+      "note": "every test checks what a --base check judges; the copy tests are about that too"
+    },
+    {
       "fingerprint": "4eab3103044d7bfdeff38c62232428c8badd13b0db6ebfe106f74f49346b1b3a",
       "rule": "maintainability/file-organization",
       "path": "src/units/tests/custom.rs",
@@ -1693,7 +1771,18 @@
       "line": 5,
       "strength": "review",
       "message": "This test file may test several separate subjects.",
-      "reason": "later"
+      "reason": "later",
+      "note": "as on main: the file mixes --base, --config and GitHub format tests; split by subject in a cleanup"
+    },
+    {
+      "fingerprint": "85a1fccf6670fd22ce4311acc7161f7fc94448188e5ef2180b68f13c042dd3e7",
+      "rule": "maintainability/file-organization",
+      "path": "tests/cli/changes.rs",
+      "line": 5,
+      "strength": "review",
+      "message": "This test file may test several separate subjects.",
+      "reason": "later",
+      "note": "as on main: the file mixes --base, --config and GitHub format tests; split by subject in a cleanup"
     },
     {
       "fingerprint": "28ca0d566f63b03b435c74be6ae470766cc42b7c0c9cc1047e2bf48ca47e56ec",

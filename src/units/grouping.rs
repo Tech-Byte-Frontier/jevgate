@@ -4,7 +4,7 @@
 //! being added or removed. A section repeated in several documents: the
 //! repetition findings that share a section are one finding at the section
 //! most of them name, identified by it, and the others point at it.
-use super::compose::{counted_status, file_status};
+use super::compose::{counted_status, reorder};
 use crate::{
     catalog,
     schema::{FileResult, Finding, Location, Strength},
@@ -28,10 +28,7 @@ pub fn group_repeats(files: &mut [FileResult]) {
     let mut changed = group_finished_plans(files);
     changed.extend(group_repeated_sections(files));
     for g in changed {
-        let file = &mut files[g];
-        file.findings
-            .sort_by(|a, b| b.strength.cmp(&a.strength).then(b.rank.total_cmp(&a.rank)));
-        file.status = file_status(&file.dimensions, &file.findings);
+        reorder(&mut files[g]);
     }
 }
 

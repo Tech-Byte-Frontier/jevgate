@@ -96,6 +96,7 @@ pub(super) fn comment_findings(
                 gate: None,
                 precision: None,
                 preview: None,
+                untouched: Vec::new(),
             }
         })
         .collect()

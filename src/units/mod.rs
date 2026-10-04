@@ -30,6 +30,7 @@ mod security;
 mod spacetimedb;
 mod sveltekit;
 mod test_units;
+pub mod untouched;
 mod wording;
 mod workflows;
 

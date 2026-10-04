@@ -166,6 +166,7 @@ mod tests {
             gate: None,
             precision: None,
             preview: None,
+            untouched: Vec::new(),
         }
     }
 

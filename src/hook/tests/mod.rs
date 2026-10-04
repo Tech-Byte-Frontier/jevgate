@@ -364,6 +364,64 @@ fn a_turn_is_judged_on_what_it_changed_not_on_the_rest_of_its_files() {
 }
 
 #[test]
+fn a_copy_the_turn_left_untouched_never_holds_it_but_its_own_copy_does() {
+    // Two files repeat one loader; the turn edits `b.rs`'s copy and only
+    // the tail of `a.rs`, whose copy it leaves alone.
+    let load = |name: &str, field: &str, default: &str| {
+        format!(
+            "fn {name}(path: &str) -> Result<User> {{\n    let text = std::fs::read_to_string(path)?;\n    let value: Value = serde_json::from_str(&text)?;\n    let name = value[\"{field}\"].as_str().unwrap_or(\"{default}\").trim().to_string();\n    Ok(User {{ name }})\n}}\n"
+        )
+    };
+    let project = repository();
+    project.write("jevgate.toml", "rules = [\"shared-logic\"]\n");
+    project.write(
+        "a.rs",
+        &format!(
+            "{}\n{}",
+            load("load_user", "name", "anonymous"),
+            function("tail_a")
+        ),
+    );
+    project.write("b.rs", &load("load_team", "title", "anonymous"));
+    project.commit_all();
+    let host = reviewing();
+    send(&project, &host, prompt("load teams"));
+    let tail = function("tail_a").replace("doubled + 1", "doubled + 2");
+    project.write(
+        "a.rs",
+        &format!("{}\n{tail}", load("load_user", "name", "anonymous")),
+    );
+    project.write("b.rs", &load("load_team", "title", "nobody"));
+    let blocked = send(&project, &host, stop(false));
+    let reason = blocked["reason"].as_str().unwrap_or_default();
+    assert!(
+        reason.contains("\n- b.rs:2 review maintainability/shared-logic: `load_team` (b.rs:2), which this change touched, may repeat logic that copies it left untouched also hold: `load_user` (a.rs:2, in a file this change edits)."),
+        "{blocked}"
+    );
+    assert!(
+        reason.contains("mark the finding `later --note"),
+        "{reason}"
+    );
+    // Marked for later, the change's own copy no longer holds the turn.
+    let marked = crate::baseline::mark(
+        &project.0,
+        &crate::baseline::Mark {
+            reason: crate::options::Disposition::Later,
+            note: Some(Some("#192".into())),
+            targets: &["b.rs:2".into()],
+            rules: &[],
+        },
+    );
+    assert_eq!(marked.unwrap(), 1);
+    let stopped = send(&project, &host, stop(true));
+    assert!(stopped.get("decision").is_none(), "{stopped}");
+    assert!(
+        message(&stopped).contains("b.rs:2 maintainability/shared-logic as later (#192)"),
+        "{stopped}"
+    );
+}
+
+#[test]
 fn a_new_review_blocks_until_it_is_fixed_or_dismissed_with_a_reason() {
     // The default gate still measures hardcoded values: their reviews do
     // not fail it, and each blocks the end of the turn once until the agent

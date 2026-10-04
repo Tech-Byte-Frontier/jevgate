@@ -148,5 +148,6 @@ pub(super) fn group_finding(plan: &FilePlan, cluster: Cluster<'_>) -> Finding {
         gate: None,
         precision: None,
         preview: None,
+        untouched: Vec::new(),
     }
 }

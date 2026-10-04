@@ -206,3 +206,80 @@ fn github_format_writes_a_job_summary_and_the_agent_text() {
     let text = std::fs::read_to_string(summary).unwrap();
     assert!(text.starts_with("### JevGate: "), "{text}");
 }
+
+/// A loader repeated in each file, named `name`, reading `field`.
+fn loader(name: &str, field: &str, default: &str) -> String {
+    format!(
+        "fn {name}(path: &str) -> Result<User> {{\n    let text = std::fs::read_to_string(path)?;\n    let value: Value = serde_json::from_str(&text)?;\n    let name = value[\"{field}\"].as_str().unwrap_or(\"{default}\").trim().to_string();\n    Ok(User {{ name }})\n}}\n"
+    )
+}
+
+#[test]
+fn base_points_a_repeat_at_the_copy_the_change_touched() {
+    use mock_provider::{MockProvider, Reply, answer};
+    let provider = MockProvider::start(|received| Reply::json(200, &answer(&received.json(), 2)));
+    let tail = "\nfn tail(values: &[i32]) -> i32 {\n    let mut total = 0;\n    for value in values {\n        total += value;\n    }\n    total + 1\n}\n";
+    let project = Project::committed_with(&[
+        (
+            "a.rs",
+            &format!("{}{tail}", loader("load_user", "name", "anonymous")),
+        ),
+        ("b.rs", &loader("load_team", "title", "anonymous")),
+    ]);
+    let check = |project: &Project| -> serde_json::Value {
+        let output = project
+            .asking(&provider, "key")
+            .args(["check", "--base", "HEAD", "--format", "json"])
+            .args(["--rule", "maintainability/shared-logic"])
+            .output()
+            .unwrap();
+        serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)))
+    };
+    let repeats = |report: &serde_json::Value| -> Vec<(String, serde_json::Value)> {
+        report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|file| {
+                file["findings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(move |f| (file["path"].as_str().unwrap().to_string(), f.clone()))
+            })
+            .collect()
+    };
+    // The change edits `a.rs` beside its copy and `b.rs`'s copy.
+    let write = |a_default: &str, b_default: &str, tail_end: &str| {
+        let a = format!(
+            "{}{}",
+            loader("load_user", "name", a_default),
+            tail.replace("total + 1", tail_end)
+        );
+        std::fs::write(project.0.join("a.rs"), a).unwrap();
+        std::fs::write(
+            project.0.join("b.rs"),
+            loader("load_team", "title", b_default),
+        )
+        .unwrap();
+    };
+    write("anonymous", "nobody", "total + 2");
+    let found = repeats(&check(&project));
+    assert_eq!(found.len(), 1, "{found:?}");
+    let (path, finding) = &found[0];
+    assert_eq!(
+        (path.as_str(), &finding["line"]),
+        ("b.rs", &serde_json::json!(2))
+    );
+    assert_eq!(
+        finding["untouched"],
+        serde_json::json!([{"path": "a.rs", "start_line": 2, "end_line": 5, "symbol": "load_user", "file_changed": true}])
+    );
+    // A change to both copies keeps the repeat as it was found.
+    write("nobody", "nobody", "total + 1");
+    let found = repeats(&check(&project));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "a.rs");
+    assert!(found[0].1.get("untouched").is_none(), "{:?}", found[0].1);
+}

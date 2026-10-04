@@ -1,6 +1,7 @@
 //! `--base` judging what a change touched: which units are asked and
 //! reported, and that `--whole-files` asks what a check of the files asks.
 use super::*;
+use std::path::Path;
 
 /// A check of what changed since `base`, for `rules`.
 fn since(base: &str, rules: &[&str]) -> CheckArgs {
@@ -221,6 +222,143 @@ fn a_copy_pair_is_asked_when_either_copy_changed() {
     let (_, plan) = planned(&project, &options);
     assert_eq!(stages(&plan), ["duplicate-pair"]);
     assert_eq!(file_plan(&plan, "a.rs").units.len(), 1);
+}
+
+/// `LOAD` loading `what` from `field`, then a tail that is no copy,
+/// edited beside the copy when `tail_edited`, and with the copy's default
+/// changed when `copy_edited`: a literal, so the copies still match.
+fn load_copy(
+    what: &str,
+    field: &str,
+    tail: String,
+    (copy_edited, tail_edited): (bool, bool),
+) -> String {
+    let mut copy = super::duplicates::LOAD
+        .replace("load_user", what)
+        .replace("\"name\"", field);
+    if copy_edited {
+        copy = copy.replace("anonymous", "nobody");
+    }
+    let mut tail = tail;
+    if tail_edited {
+        tail = tail
+            .replace("doubled + 1", "doubled + 2")
+            .replace("positive += 1", "positive += 2");
+    }
+    format!("{copy}\n{tail}")
+}
+
+/// The shared-logic findings of `report`, by the file each is in.
+fn copies_found(report: &Report) -> Vec<(&Path, &crate::schema::Finding)> {
+    report
+        .files
+        .iter()
+        .flat_map(|file| file.findings.iter().map(move |f| (file.path.as_path(), f)))
+        .filter(|(_, f)| f.rule == catalog::id(catalog::SHARED_LOGIC))
+        .collect()
+}
+
+#[test]
+fn a_change_to_one_copy_points_at_it_and_names_the_copies_it_left_untouched() {
+    let other = crate::tests::other_function;
+    let write = |project: &Project, edited: [(bool, bool); 3]| {
+        project.write(
+            "a.rs",
+            &load_copy("load_user", "\"name\"", function("tail_a"), edited[0]),
+        );
+        project.write(
+            "b.rs",
+            &load_copy("load_team", "\"title\"", other("tail_b"), edited[1]),
+        );
+        project.write(
+            "c.rs",
+            &load_copy("load_org", "\"label\"", String::new(), edited[2]),
+        );
+    };
+    let project = Project::new();
+    write(&project, [(false, false); 3]);
+    project.commit_all();
+    // `a.rs` and `b.rs` change beside their copies, `c.rs` its copy.
+    write(&project, [(false, true), (false, true), (true, false)]);
+    let options = since("HEAD", &[catalog::SHARED_LOGIC]);
+    let report = run(&project, &options, &mut scripted(2));
+    let found = copies_found(&report);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let (path, finding) = found[0];
+    assert_eq!(path, Path::new("c.rs"), "the change's own copy");
+    assert_eq!(
+        (finding.locations[0].path.as_path(), finding.line),
+        (Path::new("c.rs"), 2)
+    );
+    let untouched: Vec<(&Path, bool)> = finding
+        .untouched
+        .iter()
+        .map(|u| (u.location.path.as_path(), u.file_changed))
+        .collect();
+    assert_eq!(
+        untouched,
+        [(Path::new("a.rs"), true), (Path::new("b.rs"), true)]
+    );
+    assert_eq!(
+        finding.message,
+        "`load_org` (c.rs:2), which this change touched, may repeat logic that copies it left untouched also hold: `load_user` (a.rs:2, in a file this change edits); `load_team` (b.rs:2, in a file this change edits)."
+    );
+    assert!(
+        finding.action.contains("later --note"),
+        "{}",
+        finding.action
+    );
+    // A check of the whole files finds the same group, by the same
+    // fingerprint, at its first copy: a baseline accepts both.
+    let mut whole = since("HEAD", &[catalog::SHARED_LOGIC]);
+    whole.base = None;
+    let all = run(&project, &whole, &mut scripted(2));
+    let found_whole = copies_found(&all);
+    assert_eq!(found_whole.len(), 1);
+    assert_eq!(found_whole[0].0, Path::new("a.rs"));
+    assert!(found_whole[0].1.untouched.is_empty());
+    assert_eq!(found_whole[0].1.fingerprint, finding.fingerprint);
+
+    // With every copy changed, the finding is the group's, worded as before.
+    write(&project, [(true, false), (true, false), (true, false)]);
+    let report = run(&project, &options, &mut scripted(2));
+    let found = copies_found(&report);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].1.locations.len(), 3);
+    assert_eq!(found[0].0, found[0].1.locations[0].path.as_path());
+    assert!(found[0].1.untouched.is_empty());
+    assert!(found[0].1.message.contains("may repeat one piece of logic"));
+}
+
+#[test]
+fn a_copy_outside_the_changed_files_is_named_as_outside_the_change() {
+    let project = Project::new();
+    project.write("a.rs", super::duplicates::LOAD);
+    project.write(
+        "c.rs",
+        &load_copy("load_org", "\"label\"", String::new(), (false, false)),
+    );
+    project.commit_all();
+    project.write(
+        "c.rs",
+        &load_copy("load_org", "\"label\"", String::new(), (true, false)),
+    );
+    let mut options = since("HEAD", &[catalog::SHARED_LOGIC]);
+    options.context = vec!["a.rs".into()];
+    let report = run(&project, &options, &mut scripted(2));
+    let found = copies_found(&report);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, Path::new("c.rs"));
+    assert_eq!(found[0].1.untouched.len(), 1);
+    assert!(!found[0].1.untouched[0].file_changed);
+    assert!(
+        found[0]
+            .1
+            .message
+            .ends_with("`load_user` (a.rs:2, in a file outside this change)."),
+        "{}",
+        found[0].1.message
+    );
 }
 
 #[test]

@@ -183,15 +183,8 @@ pub fn plan(
 /// the parser could not read where the change touched it: a grammar gap in
 /// a function the change left alone was named on every change to its file.
 fn keep_changed(inputs: &[Input], plan: &mut Plan) {
-    let changes: BTreeMap<&Path, Option<&crate::revision::FileChange>> = inputs
-        .iter()
-        .map(|input| (input.result.path.as_path(), input.changed.as_ref()))
-        .collect();
-    let touched = |location: &crate::schema::Location| match changes.get(location.path.as_path()) {
-        Some(Some(change)) => change.lines.touch(location.start_line, location.end_line),
-        Some(None) => true,
-        None => false,
-    };
+    let changed = super::untouched::Changed::of(inputs);
+    let touched = |location: &crate::schema::Location| changed.touches(location);
     let mut kept = BTreeMap::<usize, std::collections::BTreeSet<String>>::new();
     for (&owner, file) in &mut plan.files {
         let Some(change) = &inputs[owner].changed else {
