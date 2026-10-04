@@ -53,6 +53,28 @@ fn a_file_the_look_question_flags_is_one_review_for_an_agent_to_verify() {
     }
 }
 
+/// An outline is identified by its file's path, and an accepted one
+/// accepts the file while most of its members are the ones accepted.
+#[test]
+fn an_accepted_outline_stays_accepted_while_its_members_stay_similar() {
+    let (project, options) = organized("lib.rs", &two_concerns());
+    let first = run(&project, &options, &mut scripted(2));
+    accept_all(&project, &first);
+    let grown = format!("{}{}", two_concerns(), function("warm16"));
+    project.write("lib.rs", &grown);
+    let report = run(&project, &options, &mut scripted(2));
+    let finding = &report.files[0].findings[0];
+    assert!(finding.baselined, "34 of its 35 members accepted");
+    assert_eq!(finding.fingerprint, first.files[0].findings[0].fingerprint);
+    let more: String = (17..27).map(|i| function(&format!("warm{i}"))).collect();
+    project.write("lib.rs", &format!("{grown}{more}"));
+    let report = run(&project, &options, &mut scripted(2));
+    assert!(
+        !report.files[0].findings[0].baselined,
+        "34 of its 45 members accepted: asked about again"
+    );
+}
+
 #[test]
 fn a_function_another_file_passes_by_path_names_that_file_as_its_user() {
     let project = Project::new();

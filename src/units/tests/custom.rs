@@ -3,8 +3,8 @@ use super::*;
 use crate::config::ConfigContext;
 
 /// Answers every custom question `yes` and every built-in one clear.
-struct Custom {
-    yes: f64,
+pub(super) struct Custom {
+    pub yes: f64,
 }
 
 impl crate::transport::Evaluator for Custom {
@@ -56,12 +56,12 @@ fn custom_units<'p>(plan: &'p Plan, name: &str) -> Vec<&'p UnitPlan> {
     file_plan(plan, name)
         .units
         .iter()
-        .filter(|u| matches!(u.detail, Detail::Custom(_)))
+        .filter(|u| matches!(u.detail, Detail::Custom(..)))
         .collect()
 }
 
 /// The findings of a custom rule across a report.
-fn findings_of<'r>(report: &'r Report, rule: &str) -> Vec<&'r crate::schema::Finding> {
+pub(super) fn findings_of<'r>(report: &'r Report, rule: &str) -> Vec<&'r crate::schema::Finding> {
     report
         .files
         .iter()
@@ -461,6 +461,38 @@ unit = "file"
         before,
         "an accepted finding does not cover what the file came to hold"
     );
+}
+
+/// A whole file's finding is identified by its path and text, and a check
+/// of a change that renamed the file finds it under the old path too.
+#[test]
+fn a_renamed_files_finding_stays_accepted_through_its_old_path() {
+    let toml = r#"
+[[question]]
+id = "no-secrets"
+question = "Does this file hold a hardcoded secret?"
+unit = "file"
+"#;
+    let project = Project::new();
+    project.write("lib.rs", &function("charge"));
+    project.commit_all();
+    let report = run(
+        &project,
+        &configured(toml, &["custom"]),
+        &mut Custom { yes: 0.95 },
+    );
+    accept_all(&project, &report);
+    project.git(&["mv", "lib.rs", "billing.rs"]);
+    let mut moved = configured(toml, &["custom"]);
+    moved.base = Some("HEAD".into());
+    let report = run(&project, &moved, &mut Custom { yes: 0.95 });
+    let finding = findings_of(&report, "custom/no-secrets")[0];
+    assert_eq!(
+        finding.locations[0].path,
+        std::path::Path::new("billing.rs")
+    );
+    assert_eq!(finding.identity.aliases.len(), 1);
+    assert!(finding.baselined, "accepted under lib.rs");
 }
 
 #[test]

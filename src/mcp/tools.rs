@@ -145,7 +145,7 @@ fn finding_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "id": {"type": "string", "description": "The finding's fingerprint (rule, path and unit identity), as the baseline and SARIF record it; stable across unrelated edits"},
+            "id": {"type": "string", "description": "The finding's fingerprint (rule, unit identity and, except for shared logic, path), as the baseline and SARIF record it; stable across unrelated edits and merges"},
             "path": {"type": "string"},
             "line": {"type": "integer"},
             "end_line": {"type": "integer"},
@@ -176,7 +176,7 @@ fn verify_schema() -> Value {
         "type": "object",
         "description": "A unit whose answers stayed undecided: never a finding, and failing the gate only where jevgate.toml puts `uncertain` among its rule's levels",
         "properties": {
-            "id": {"type": "string", "description": "The unit's fingerprint (rule, path and unit identity), made as a finding's is; stable across unrelated edits"},
+            "id": {"type": "string", "description": "The unit's fingerprint (rule, unit identity and, except for shared logic, path), made as a finding's is; stable across unrelated edits and merges"},
             "path": {"type": "string"},
             "line": {"type": "integer"},
             "end_line": {"type": "integer"},

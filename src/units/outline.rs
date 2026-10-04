@@ -6,8 +6,7 @@
 //! findings; on files labeled for splitting, the look-here question flagged
 //! 6 of 9 against 5 of 54 kept.
 use super::{
-    Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, identity, outcome::LOOK,
-    questions,
+    Detail, FileContext, FilePlan, Planned, Presence, Questions, UnitPlan, outcome::LOOK, questions,
 };
 use crate::{
     analysis::{
@@ -174,8 +173,13 @@ fn plan_outline(
         locations: vec![file.location(first, last, None)],
         quote: None,
         lines: file.source.lines().count(),
-        identity: identity(&names),
-        detail: Detail::Outline { tests },
+        // A file has one outline, so its path identifies it, and a
+        // baseline matches its members by similarity.
+        identity: String::new(),
+        detail: Detail::Outline {
+            tests,
+            members: names.iter().map(|name| name.to_string()).collect(),
+        },
         recheck: None,
     });
     if fits && !small {

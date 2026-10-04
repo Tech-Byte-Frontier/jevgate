@@ -107,6 +107,7 @@ pub(super) fn finding(strength: crate::schema::Strength) -> crate::schema::Findi
         precision: None,
         preview: None,
         untouched: Vec::new(),
+        identity: Default::default(),
     }
 }
 

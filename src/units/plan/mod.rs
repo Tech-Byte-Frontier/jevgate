@@ -159,6 +159,7 @@ pub fn plan(
         custom.text(&context, source, &mut file, &mut result.requests);
         result.files.insert(owner, file);
     }
+    note_renames(inputs, &mut result);
     keep_changed(inputs, &mut result);
     // Text addressed to a reviewer is asked about once the requests that
     // send it are known: with `--base`, those the change touched.
@@ -220,7 +221,7 @@ fn chosen_when_planned(unit: &UnitPlan) -> bool {
             | Detail::Document { .. }
             | Detail::Stale { .. }
             | Detail::Plan { .. }
-            | Detail::Custom(_)
+            | Detail::Custom(..)
     )
 }
 
@@ -236,6 +237,19 @@ fn skip_left_out(scope: &Scope<'_>, result: &mut Plan) {
                 .skipped
                 .insert(*owner, crate::syntax::SYNTAX_ERRORS.into());
         }
+    }
+}
+
+/// The path each file a change renamed had before, which its findings are
+/// also known by.
+fn note_renames(inputs: &[Input], result: &mut Plan) {
+    for (&owner, file) in &mut result.files {
+        file.previous = inputs[owner]
+            .changed
+            .as_ref()
+            .and_then(|change| change.previous())
+            .filter(|before| *before != file.path)
+            .map(Path::to_path_buf);
     }
 }
 

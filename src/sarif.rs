@@ -155,7 +155,12 @@ fn result(path: &Path, finding: &Finding, rule_index: Option<usize>) -> Value {
             "artifactLocation": artifact(path),
             "region": {"startLine": finding.line.max(1), "endLine": end.max(1)},
         }}],
-        "partialFingerprints": {"jevgateFingerprint/v1": finding.fingerprint},
+        // Both for a release, so an alert raised under the fingerprint
+        // JevGate 0.35 gave a finding stays the same alert.
+        "partialFingerprints": {
+            "jevgateFingerprint/v1": finding.identity.v1.as_ref().unwrap_or(&finding.fingerprint),
+            "jevgateFingerprint/v2": finding.fingerprint,
+        },
         "properties": {
             "strength": output::label(&finding.strength),
             "probability": finding.concern_probability,
@@ -208,7 +213,8 @@ mod tests {
     #[test]
     fn results_name_their_rule_level_location_and_fingerprint() {
         let args = crate::tests::args();
-        let review = counted(Strength::Review, Gating::Fails);
+        let mut review = counted(Strength::Review, Gating::Fails);
+        review.identity.v1 = Some("v1-fingerprint".into());
         let measuring = counted(Strength::Review, Gating::Measuring);
         let path = Path::new("src/a,b.rs");
         let log = document(&report(&args), &[(path, &review), (path, &measuring)], &[]);
@@ -248,7 +254,16 @@ mod tests {
                 .unwrap()
                 .ends_with("Not yet measured.\n\nNext step: Share one | implementation")
         );
-        assert!(first["partialFingerprints"]["jevgateFingerprint/v1"].is_string());
+        assert_eq!(
+            first["partialFingerprints"],
+            json!({"jevgateFingerprint/v1": "v1-fingerprint", "jevgateFingerprint/v2": review.fingerprint}),
+            "an alert raised under the earlier fingerprint stays the same alert"
+        );
+        let unchanged = &results[1]["partialFingerprints"];
+        assert_eq!(
+            unchanged["jevgateFingerprint/v1"],
+            unchanged["jevgateFingerprint/v2"]
+        );
     }
 
     /// The reporting descriptor of rule `id` in a log without results.

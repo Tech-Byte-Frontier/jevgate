@@ -90,7 +90,7 @@ pub(in crate::units) fn look_wording(unit: &crate::units::UnitPlan) -> Wording {
             "This file may do several separate kinds of work, such as separate features, layers or integrations.".into(),
             "Move each separate part to its own module, or dismiss this finding with a reason",
         ),
-        Detail::Pair => (
+        Detail::Pair { .. } => (
             format!("{name} may repeat one piece of logic, so a change to it would have to be made in each place."),
             "Keep the logic in one shared function, or dismiss this finding with a reason if the copies must stay separate",
         ),

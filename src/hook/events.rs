@@ -313,10 +313,11 @@ impl<'a> Hook<'a> {
             turn.as_ref()
                 .is_some_and(|t| t.reported.iter().any(|r| r == id))
         };
+        // Told under a fingerprint it had before its file was renamed, too.
         let (known, new): (Vec<_>, Vec<_>) = checked
             .flagged
             .into_iter()
-            .partition(|f| reported(&f.finding.fingerprint));
+            .partition(|f| f.finding.fingerprints().any(|id| reported(id)));
         let undecided: Vec<_> = checked
             .undecided
             .iter()

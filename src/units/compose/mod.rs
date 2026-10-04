@@ -21,15 +21,20 @@ use super::{
 use crate::{
     catalog,
     schema::{
-        Answer, Dimension, Finding, Judgment, Pass, Status, Strength, Undecided, UnitCounts, hash,
+        Answer, Dimension, Finding, Identity, Judgment, Pass, Status, Strength, Undecided,
+        UnitCounts, hash,
     },
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 mod answers;
 mod caps;
 mod comments;
 mod due;
+mod identity;
 mod located;
 mod open;
 mod redundant;
@@ -40,6 +45,7 @@ pub use due::{
     finished_plans, uncertain_units, unconfirmed_units, unkinded_units, unlocated_units,
     unqueried_units, unsettled, untraced_units,
 };
+use identity::*;
 use located::*;
 use open::Quotes;
 use redundant::*;
@@ -342,7 +348,7 @@ fn undecided_unit(
     let mut questions: Vec<String> = open
         .iter()
         .map(|q| match &unit.detail {
-            Detail::Custom(question) => question.question.clone(),
+            Detail::Custom(question, _) => question.question.clone(),
             _ => question_label(q).to_string(),
         })
         .collect();
@@ -367,7 +373,7 @@ fn undecided_unit(
         values,
         line: unit.locations.first().map_or(1, |l| l.start_line),
         questions,
-        fingerprint: fingerprint(unit.rule, plan, &unit.identity),
+        fingerprint: known(plan, unit).0,
         locations: unit.locations.clone(),
         open: quotes.open(unit, &open, answers),
     }
@@ -376,7 +382,7 @@ fn undecided_unit(
 /// The questions whose answers left a unit undecided: a custom unit is
 /// asked its one question.
 fn open_questions(unit: &UnitPlan, answers: &Answers<'_>) -> Vec<&'static str> {
-    if let Detail::Custom(_) = unit.detail {
+    if let Detail::Custom(..) = unit.detail {
         return answers
             .get(super::answers::CUSTOM)
             .map(|_| super::answers::CUSTOM)
@@ -628,17 +634,6 @@ fn basis(noun: &str, count: &UnitCounts) -> String {
     parts.join(" ")
 }
 
-fn fingerprint(rule: &str, plan: &FilePlan, identity: &str) -> String {
-    let separator = crate::schema::HASH_SEPARATOR;
-    hash(
-        format!(
-            "{rule}{separator}{}{separator}{identity}",
-            plan.path.display()
-        )
-        .as_bytes(),
-    )
-}
-
 fn rank(probability: f64, lines: usize) -> f64 {
     probability * (1.0 + lines as f64).ln()
 }
@@ -698,7 +693,7 @@ fn finding(
             symbol = None;
             look_wording(unit)
         }
-        Detail::Function { .. } | Detail::Pair | Detail::Values { .. } => look_wording(unit),
+        Detail::Function { .. } | Detail::Pair { .. } | Detail::Values { .. } => look_wording(unit),
         Detail::Security {
             sites, messages, ..
         } => {
@@ -756,7 +751,7 @@ fn finding(
             comment_wording(name, &[(&unit.locations[0], reason)], strength)
         }
         Detail::Test { .. } => test_wording(name, strength, answers),
-        Detail::Custom(question) => {
+        Detail::Custom(question, _) => {
             if matches!(
                 question.unit,
                 crate::custom::Kind::File | crate::custom::Kind::Hunk
@@ -780,6 +775,7 @@ fn finding(
     if let Some(block) = block {
         locations.insert(0, block.location.clone());
     }
+    let (fingerprint, identity) = known(plan, unit);
     Finding {
         rule: catalog::id(unit.rule).into(),
         strength,
@@ -789,14 +785,14 @@ fn finding(
         action: action.into(),
         symbol,
         rule_version: match &unit.detail {
-            Detail::Custom(question) => question.version.clone(),
+            Detail::Custom(question, _) => question.version.clone(),
             _ => catalog::rule_version(unit.rule).into(),
         },
         concern_probability: p,
         locations,
         quote: unit.quote.clone(),
         category,
-        fingerprint: fingerprint(unit.rule, plan, &unit.identity),
+        fingerprint,
         rank: rank(p, lines),
         baselined: false,
         suppressed: None,
@@ -804,5 +800,6 @@ fn finding(
         precision: None,
         preview: None,
         untouched: Vec::new(),
+        identity,
     }
 }

@@ -213,7 +213,11 @@ impl Planner {
             (Kind::File, _) => Some(vec![items::whole(file)]),
             (Kind::Hunk, _) => {
                 let hunks = self.changes.as_ref()?.hunks(file.path, file.source);
-                Some(items::changed(file, &hunks))
+                let units = match offered {
+                    Offered::Code(code) => &code.parsed.units[..],
+                    _ => &[],
+                };
+                Some(items::changed(file, &hunks, units))
             }
             _ => None,
         }
@@ -301,7 +305,7 @@ fn unit(question: &'static Question, item: &Item) -> UnitPlan {
         quote: item.quote.clone(),
         lines: item.lines,
         identity: item.identity.clone(),
-        detail: Detail::Custom(question),
+        detail: Detail::Custom(question, item.v1.clone()),
         recheck: None,
     }
 }

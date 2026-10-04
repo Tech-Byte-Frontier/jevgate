@@ -257,7 +257,7 @@ pub(super) fn unit_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Outcome {
 /// The outcome of a unit's answers under its rule's policy.
 fn rule_outcome(unit: &UnitPlan, answers: &Answers<'_>) -> Option<Outcome> {
     let get = |q: &str| answers.get(q).copied();
-    if let Detail::Custom(question) = &unit.detail {
+    if let Detail::Custom(question, _) = &unit.detail {
         return get(super::answers::CUSTOM).map(|answer| custom_outcome(question, answer));
     }
     match unit.rule {
@@ -356,7 +356,7 @@ fn in_examples(unit: &UnitPlan, outcome: Outcome) -> Outcome {
         .iter()
         .all(|l| crate::analysis::clones::example_code(&l.path))
         && !unit.locations.is_empty()
-        && !matches!(unit.detail, Detail::Custom(_));
+        && !matches!(unit.detail, Detail::Custom(..));
     match outcome {
         Outcome::Review(p) | Outcome::Consider(p)
             if example

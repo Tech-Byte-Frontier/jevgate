@@ -1,6 +1,8 @@
 //! The changed hunks of a file since `--base`, read from Git, for custom
 //! questions about what a change adds or alters. A hunk works in any
-//! language: it needs a diff, not a parser.
+//! language: it needs a diff, not a parser. Each run of changed lines is
+//! its own hunk, as a diff without context lines has it, so a change
+//! nearby, such as a parent branch's, never joins it.
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -9,6 +11,10 @@ use std::{
 /// Diff lines one hunk unit holds at most: a longer hunk, such as a new
 /// file, is asked about in parts, each well inside one request.
 const MAX_LINES: usize = 80;
+
+/// Unchanged lines a hunk shows on each side of its changes, as Git's own
+/// diff does.
+const CONTEXT: usize = 3;
 
 /// One changed hunk, or part of one.
 #[derive(Clone, Debug, PartialEq)]
@@ -23,6 +29,10 @@ pub(super) struct Hunk {
     pub context: Option<String>,
     /// Only its added and removed lines, which identify it wherever it moves.
     pub changed: String,
+    /// The added and removed lines of the part of Git's hunk it was found
+    /// in, which identified it in JevGate 0.35 and earlier, when the runs
+    /// of changed lines within a few lines of each other were one hunk.
+    pub joined: String,
 }
 
 impl Hunk {
@@ -93,7 +103,11 @@ impl Changes {
         let Ok(diff) = crate::revision::git(&self.root, &args) else {
             return added(source);
         };
-        let hunks = parse(&String::from_utf8_lossy(&diff), source.lines().count());
+        let hunks = parse(
+            &String::from_utf8_lossy(&diff),
+            source.lines().count(),
+            true,
+        );
         if hunks.is_empty() && previous.is_none() {
             added(source)
         } else {
@@ -103,16 +117,17 @@ impl Changes {
 }
 
 /// The hunks of one file's unified diff, parts of at most `MAX_LINES`
-/// lines each; `lines` is how many lines the file has now. An empty line
+/// lines each; `lines` is how many lines the file has now, and with
+/// `apart`, each run of changed lines is a hunk of its own. An empty line
 /// inside a hunk is a blank line of context, as Git prints one when
 /// `diff.suppressBlankEmpty` is set.
-pub(super) fn parse(diff: &str, lines: usize) -> Vec<Hunk> {
+pub(super) fn parse(diff: &str, lines: usize, apart: bool) -> Vec<Hunk> {
     let mut hunks = Vec::new();
     let mut open: Option<(usize, Option<String>, Vec<&str>)> = None;
     for line in diff.lines() {
         if let Some(header) = line.strip_prefix("@@ ") {
             if let Some(hunk) = open.take() {
-                split(hunk, lines, &mut hunks);
+                split(hunk, (lines, apart), &mut hunks);
             }
             open = header_start(header).map(|(start, context)| (start, context, Vec::new()));
         } else if let Some((_, _, body)) = open.as_mut() {
@@ -121,24 +136,25 @@ pub(super) fn parse(diff: &str, lines: usize) -> Vec<Hunk> {
                 None => body.push(" "),
                 // "\ No newline at end of file"
                 Some(b'\\') => {}
-                _ => split(open.take().unwrap(), lines, &mut hunks),
+                _ => split(open.take().unwrap(), (lines, apart), &mut hunks),
             }
         }
     }
     if let Some(hunk) = open {
-        split(hunk, lines, &mut hunks);
+        split(hunk, (lines, apart), &mut hunks);
     }
     hunks
 }
 
 /// The hunks of an example change written by hand: diff lines under `@@`
-/// headers, or with none, one change from line 1. An empty line is an
-/// unchanged blank line, since editors strip the space a diff gives it.
+/// headers, or with none, one change from line 1, each hunk whole as its
+/// author wrote it. An empty line is an unchanged blank line, since
+/// editors strip the space a diff gives it.
 pub(super) fn example(diff: &str) -> Vec<Hunk> {
     let headed = diff.lines().any(|line| line.starts_with("@@ "));
     let header = if headed { "" } else { "@@ -1 +1 @@\n" };
     // No line count to keep within: the example is all the file there is.
-    parse(&format!("{header}{diff}"), usize::MAX)
+    parse(&format!("{header}{diff}"), usize::MAX, false)
 }
 
 /// A new file's text as hunks that add every line.
@@ -146,7 +162,7 @@ fn added(source: &str) -> Vec<Hunk> {
     let body: Vec<String> = source.lines().map(|line| format!("+{line}")).collect();
     let body: Vec<&str> = body.iter().map(String::as_str).collect();
     let mut hunks = Vec::new();
-    split((1, None, body), source.lines().count(), &mut hunks);
+    split((1, None, body), (source.lines().count(), true), &mut hunks);
     hunks
 }
 
@@ -167,40 +183,110 @@ fn header_start(header: &str) -> Option<(usize, Option<String>)> {
 }
 
 /// A hunk's body in parts of at most `MAX_LINES` lines, each with the lines
-/// it changes; a part holding only context is left out.
+/// it changes; a part holding only context is left out. With `apart`, each
+/// run of changed lines is a part, with up to `CONTEXT` unchanged lines on
+/// each side; without, the body is cut into parts in order.
 fn split(
     (start, context, body): (usize, Option<String>, Vec<&str>),
-    lines: usize,
+    (lines, apart): (usize, bool),
     hunks: &mut Vec<Hunk>,
 ) {
     let last_line = lines.max(1);
-    // The line of the file as it is now that the next context or added line
-    // is, and where a removed line was.
-    let mut next = start.max(1);
-    for part in body.chunks(MAX_LINES) {
-        let mut changed = Vec::new();
-        let mut range: Option<(usize, usize)> = None;
-        for line in part {
-            let kind = line.as_bytes()[0];
-            if kind == b'+' || kind == b'-' {
-                range = Some(range.map_or((next, next), |(first, last)| (first, last.max(next))));
-                changed.push(*line);
-            }
-            if kind != b'-' {
-                next += 1;
-            }
-        }
-        let Some((first, last)) = range else {
+    let at = lines_now(start, &body);
+    // The parts JevGate 0.35 cut a body into, whose changes identified them.
+    let joined: Vec<String> = body.chunks(MAX_LINES).map(changes).collect();
+    let parts = if apart {
+        runs(&body)
+    } else {
+        in_order(body.len())
+    };
+    for (from, first, last, to) in parts {
+        let changed: Vec<usize> = (first..last).filter(|&i| changes_line(body[i])).collect();
+        let (Some(&a), Some(&b)) = (changed.first(), changed.last()) else {
             continue;
         };
         hunks.push(Hunk {
-            start: first.min(last_line),
-            end: last.min(last_line),
-            diff: part.join("\n"),
+            start: at[a].min(last_line),
+            end: at[b].min(last_line),
+            diff: body[from..to].join("\n"),
             context: context.clone(),
-            changed: changed.join("\n"),
+            changed: changes(&body[first..last]),
+            joined: joined[a / MAX_LINES].clone(),
         });
     }
+}
+
+/// The line of the file as it is now that each line of a hunk's body
+/// starting at line `start` is, and where a removed line was.
+fn lines_now(start: usize, body: &[&str]) -> Vec<usize> {
+    let mut next = start.max(1);
+    body.iter()
+        .map(|line| {
+            let at = next;
+            if !line.starts_with('-') {
+                next += 1;
+            }
+            at
+        })
+        .collect()
+}
+
+/// The added and removed lines of `part`.
+fn changes(part: &[&str]) -> String {
+    part.iter()
+        .filter(|line| changes_line(line))
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A body of `len` lines in parts of at most `MAX_LINES`, in order, as
+/// [`runs`] gives them.
+fn in_order(len: usize) -> Vec<(usize, usize, usize, usize)> {
+    (0..len)
+        .step_by(MAX_LINES)
+        .map(|first| {
+            let last = (first + MAX_LINES).min(len);
+            (first, first, last, last)
+        })
+        .collect()
+}
+
+/// Whether a diff body line is added or removed.
+fn changes_line(line: &str) -> bool {
+    line.starts_with('+') || line.starts_with('-')
+}
+
+/// Each run of changed lines in a hunk's body, in parts of at most
+/// `MAX_LINES`, as indexes `(from, first, last, to)`: the part is
+/// `first..last`, and its diff `from..to` adds the unchanged lines around it,
+/// up to `CONTEXT` on each side and never another run's.
+fn runs(body: &[&str]) -> Vec<(usize, usize, usize, usize)> {
+    let unchanged = |i: &usize| !changes_line(body[*i]);
+    let mut parts = Vec::new();
+    let mut i = 0;
+    while i < body.len() {
+        if !changes_line(body[i]) {
+            i += 1;
+            continue;
+        }
+        let end = (i..body.len()).find(|j| unchanged(j)).unwrap_or(body.len());
+        for first in (i..end).step_by(MAX_LINES) {
+            let last = (first + MAX_LINES).min(end);
+            let before = (first.saturating_sub(CONTEXT)..first)
+                .rev()
+                .take_while(unchanged)
+                .last()
+                .unwrap_or(first);
+            let after = (last..(last + CONTEXT).min(body.len()))
+                .take_while(unchanged)
+                .last()
+                .map_or(last, |j| j + 1);
+            parts.push((before, first, last, after));
+        }
+        i = end;
+    }
+    parts
 }
 
 #[cfg(test)]
@@ -210,7 +296,7 @@ mod tests {
     #[test]
     fn a_diff_splits_into_hunks_at_the_lines_they_change() {
         let diff = "diff --git a/src/a.rs b/src/a.rs\nindex 1..2 100644\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -10,4 +10,5 @@ fn charge(order: &Order) {\n     let total = order.total();\n-    log(total);\n+    log(order.body());\n+    audit(total);\n     send(total);\n@@ -40,2 +41,1 @@\n keep();\n-drop();\n\\ No newline at end of file\n";
-        let hunks = parse(diff, 60);
+        let hunks = parse(diff, 60, true);
         assert_eq!(hunks.len(), 2);
         assert_eq!((hunks[0].start, hunks[0].end), (11, 12));
         assert_eq!(
@@ -227,19 +313,61 @@ mod tests {
             (42, 42, "42".to_string()),
             "a removal counts at the line that now follows it"
         );
-        assert_eq!(parse(diff, 41)[1].start, 41, "at most the file's last line");
-        assert!(parse("Binary files a/x.png and b/x.png differ\n", 1).is_empty());
+        assert_eq!(
+            parse(diff, 41, true)[1].start,
+            41,
+            "at most the file's last line"
+        );
+        assert!(parse("Binary files a/x.png and b/x.png differ\n", 1, true).is_empty());
     }
 
     #[test]
     fn a_blank_line_of_context_printed_empty_stays_in_its_hunk() {
         // As Git prints it with `diff.suppressBlankEmpty` set.
         let diff = "@@ -1,5 +1,5 @@ def charge(order):\n def charge(order):\n-    x = 1\n+    x = 2\n\n-    y = 2\n+    y = log(order.body)\n     return x + y\n";
-        let hunks = parse(diff, 5);
+        let hunks = parse(diff, 5, false);
         assert_eq!(hunks.len(), 1);
         assert_eq!((hunks[0].start, hunks[0].end), (2, 4));
         assert!(hunks[0].changed.ends_with("+    y = log(order.body)"));
         assert!(hunks[0].diff.contains("+    x = 2\n \n-    y = 2"));
+    }
+
+    /// A change a line away from another, such as a parent branch's, is a
+    /// hunk of its own, so its identity is the same whether or not the
+    /// other is in the diff.
+    #[test]
+    fn each_run_of_changed_lines_is_a_hunk_with_the_unchanged_lines_around_it() {
+        let diff = "@@ -1,7 +1,7 @@ def charge(order):\n def charge(order):\n-    x = 1\n+    x = 2\n     z = 0\n-    y = 2\n+    y = log(order.body)\n     return x + y\n     pass\n";
+        let hunks = parse(diff, 7, true);
+        let found: Vec<_> = hunks
+            .iter()
+            .map(|h| (h.start, h.end, h.changed.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (2, 2, "-    x = 1\n+    x = 2"),
+                (4, 4, "-    y = 2\n+    y = log(order.body)")
+            ]
+        );
+        assert_eq!(
+            hunks[0].diff,
+            " def charge(order):\n-    x = 1\n+    x = 2\n     z = 0"
+        );
+        assert_eq!(
+            hunks[1].diff,
+            "     z = 0\n-    y = 2\n+    y = log(order.body)\n     return x + y\n     pass"
+        );
+        let alone = parse(
+            "@@ -3,3 +3,3 @@\n     z = 0\n-    y = 2\n+    y = log(order.body)\n     return x + y\n",
+            7,
+            true,
+        );
+        assert_eq!(alone[0].changed, hunks[1].changed);
+        assert_eq!(
+            hunks[0].joined, hunks[1].joined,
+            "both were one hunk before"
+        );
     }
 
     #[test]
@@ -255,7 +383,7 @@ mod tests {
         let mut body = vec!["+new"];
         body.extend(std::iter::repeat_n(" same", MAX_LINES));
         let mut hunks = Vec::new();
-        split((5, None, body), 200, &mut hunks);
+        split((5, None, body), (200, true), &mut hunks);
         assert_eq!(hunks.len(), 1, "the part of context alone is left out");
         assert_eq!((hunks[0].start, hunks[0].end), (5, 5));
     }
