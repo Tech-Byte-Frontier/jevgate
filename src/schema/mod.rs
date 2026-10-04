@@ -9,7 +9,7 @@ pub use report::*;
 pub const RUBRIC: &str = "jevgate-units-v1";
 /// Changes how saved answers become a status. Included in the report identity
 /// and not in the judgment cache, so unchanged questions are not sent again.
-pub const COMPOSITION: &str = "unit-composition-v13";
+pub const COMPOSITION: &str = "unit-composition-v14";
 pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

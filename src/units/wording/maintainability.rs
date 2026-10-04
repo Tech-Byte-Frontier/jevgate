@@ -108,3 +108,43 @@ pub(in crate::units) fn look_wording(unit: &crate::units::UnitPlan) -> Wording {
         ),
     }
 }
+
+/// A shared-logic finding whose change touched only some copies: the
+/// change's copies first, then each untouched copy and whether its file is
+/// one the change edits. The change fixes its own copy and leaves the others.
+pub(in crate::units) fn untouched_wording(
+    touched: &[crate::schema::Location],
+    untouched: &[crate::schema::Untouched],
+) -> Wording {
+    let own: Vec<String> = touched.iter().map(|l| copy(l, None)).collect();
+    let others: Vec<String> = untouched
+        .iter()
+        .map(|u| {
+            let file = if u.file_changed {
+                "in a file this change edits"
+            } else {
+                "in a file outside this change"
+            };
+            copy(&u.location, Some(file))
+        })
+        .collect();
+    (
+        format!(
+            "{}, which this change touched, may repeat logic that copies it left untouched also hold: {}.",
+            crate::output::join(&own),
+            others.join("; ")
+        ),
+        "Fix this change's copy, such as by reusing an untouched one; if sharing the logic would rewrite the untouched copies, mark the finding `later --note \"#issue\"`",
+    )
+}
+
+/// A copy by its function and place, with what else there is to say of it.
+fn copy(location: &crate::schema::Location, more: Option<&str>) -> String {
+    let at = format!("{}:{}", location.path.display(), location.start_line);
+    match (&location.symbol, more) {
+        (Some(symbol), Some(more)) => format!("`{symbol}` ({at}, {more})"),
+        (Some(symbol), None) => format!("`{symbol}` ({at})"),
+        (None, Some(more)) => format!("{at} ({more})"),
+        (None, None) => at,
+    }
+}

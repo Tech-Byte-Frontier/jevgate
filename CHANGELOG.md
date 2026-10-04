@@ -4,6 +4,8 @@ Notable changes to JevGate. Versions follow [Semantic Versioning](https://semver
 
 ## [Unreleased]
 
+- A shared-logic finding of a `--base` check or an agent's turn whose change left some copies untouched points at the change's own copy and names each untouched copy, saying whether its file is one the change edits. Its next step is to fix the change's copy, or mark the finding `later --note "#issue"` when sharing the logic would rewrite the untouched copies; the JSON report lists them under `untouched`. The agent hook holds a turn only for the change's copy. Fingerprints, and what fails the gate, are unchanged.
+
 ## [0.34.0] - 2026-10-03
 
 A dismissal can say where it will be fixed: `baseline mark` takes a short `--note`, such as the issue that will fix a `later` finding, and `baseline list` prints the accepted findings by reason, as text, JSON or a Markdown checklist to paste into a cleanup issue. Findings, rules and fingerprints are unchanged.

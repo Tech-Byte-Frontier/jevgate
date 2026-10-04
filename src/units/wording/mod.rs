@@ -22,7 +22,7 @@ pub(super) use documentation::{
     comment_reason, comment_wording, doc_pair_wording, document_wording, plan_wording,
     section_wording, stale_wording,
 };
-pub(super) use maintainability::{function_wording, look_wording};
+pub(super) use maintainability::{function_wording, look_wording, untouched_wording};
 pub(super) use security::{handler_wording, module_wording, privilege_wording, security_wording};
 pub(super) use test_rules::{law_wording, test_pair_wording, test_wording};
 

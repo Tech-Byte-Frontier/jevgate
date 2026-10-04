@@ -194,6 +194,20 @@ pub struct Finding {
     /// gate never fails on it. None elsewhere and for custom questions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    /// For a shared-logic finding of a check of changed lines, the copies
+    /// the change did not touch; the finding points at a copy it did.
+    /// Empty when the change touched every copy, or judged whole files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub untouched: Vec<Untouched>,
+}
+
+/// A copy of a shared-logic finding that its change did not touch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Untouched {
+    #[serde(flatten)]
+    pub location: Location,
+    /// Whether its file is one the change edits, elsewhere.
+    pub file_changed: bool,
 }
 
 impl Finding {

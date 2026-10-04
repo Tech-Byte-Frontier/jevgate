@@ -98,8 +98,7 @@ pub fn compose(plan: &FilePlan, judgments: &[Judgment], first: &[&Planned]) -> C
             (rule.to_string(), dimension)
         })
         .collect();
-    // Strongest first, so a note never sits above a review or consider.
-    findings.sort_by(|a, b| b.strength.cmp(&a.strength).then(b.rank.total_cmp(&a.rank)));
+    strongest_first(&mut findings);
     let status = file_status(&dimensions, &findings);
     Composed {
         dimensions,
@@ -509,6 +508,19 @@ fn one_level_counts(rule: &str, count: &mut UnitCounts) {
     }
 }
 
+/// Strongest first, so a note never sits above a review or consider, then
+/// by rank.
+fn strongest_first(findings: &mut [Finding]) {
+    findings.sort_by(|a, b| b.strength.cmp(&a.strength).then(b.rank.total_cmp(&a.rank)));
+}
+
+/// A file's findings in order and its status again, after findings were
+/// grouped or moved between files.
+pub(super) fn reorder(file: &mut crate::schema::FileResult) {
+    strongest_first(&mut file.findings);
+    file.status = file_status(&file.dimensions, &file.findings);
+}
+
 pub(super) fn file_status(
     dimensions: &BTreeMap<String, Dimension>,
     findings: &[Finding],
@@ -791,5 +803,6 @@ fn finding(
         gate: None,
         precision: None,
         preview: None,
+        untouched: Vec::new(),
     }
 }
